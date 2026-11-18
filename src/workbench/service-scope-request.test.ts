@@ -28,6 +28,7 @@ import { projectOperations } from "../project/contract.ts";
 import {
   ActionOutcome,
   AuthorKind,
+  ScopeRequestState,
   WORKBENCH_SERVICE_NAME,
   WorkbenchErrorCode,
   workbenchOperations,
@@ -52,6 +53,7 @@ const P1 = createIdentity("project");
 const P2 = createIdentity("project");
 const OWN_NODE = createIdentity("node");
 const PAUSE = missionOperations["node.pause"];
+const FULFILLED = "fulfilled";
 const SETTLED_LINE = "workbench.scope_request.settled";
 const STALE_CODE = "mission.node.stale";
 const EXPECTED = {
@@ -176,8 +178,9 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
   const logged: { fields: Record<string, unknown>; message: string }[] = [];
   const behaviour = {
     projectName: PROJECT_NAME,
-    pause: (): ReturnType<typeof completed> | ReturnType<typeof failed> =>
-      completed({}),
+    pause: (): Promise<
+      Awaited<ReturnType<typeof completed>> | Awaited<ReturnType<typeof failed>>
+    > => completed({}),
   };
   const service = new WorkbenchService({
     store,
@@ -231,6 +234,20 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     };
     session.members.push(session);
     internals.sessions.set(id, session);
+    return session;
+  };
+  const persisted = (session: HeldSession) => {
+    const timestamp = Date.now();
+    session.manager.appendMessage({
+      role: "user",
+      content: [{ type: "text", text: "hello" }],
+      timestamp,
+    });
+    session.manager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "hi" }],
+      timestamp,
+    } as never);
     return session;
   };
   const participant = (hostSession: HeldSession): HeldSession => {
@@ -304,6 +321,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     logged,
     behaviour,
     host,
+    persisted,
     participant,
     invite,
     raise,
@@ -342,7 +360,7 @@ test("(security) a typed name that differs by a space, the case or the id answer
     );
     const [open] = f.internals.scopeRequests.open(host.id);
     assert.equal(open?.id, request.id);
-    assert.equal(open?.state, "open");
+    assert.equal(open?.state, ScopeRequestState.Open);
   }
   assert.deepEqual(actCalls(f.calls), []);
 });
@@ -351,11 +369,12 @@ test("(security) a key set unequal to expected_keys answers 400 expected_invalid
   const f = await fixture(t);
   const host = await f.host();
   const request = await f.raise(host, f.invite(host));
-  for (const expected of [
+  const wrongKeys: Record<string, number | string>[] = [
     {},
     { expected_attempt: 1 },
     { ...EXPECTED, expected_extra: 1 },
-  ])
+  ];
+  for (const expected of wrongKeys)
     await refusedWith(
       f.approve(host, request.id, { project_name: PROJECT_NAME, expected }),
       HttpStatus.BadRequest,
@@ -383,7 +402,7 @@ test("(invariant) a second approve answers 404 and two parallel approves give on
     f.approve(host, request.id, body),
   ]);
   assert.equal(
-    outcomes.filter(({ status }) => status === "fulfilled").length,
+    outcomes.filter(({ status }) => status === FULFILLED).length,
     SINGLE,
   );
   assert.equal(actCalls(f.calls).length, SINGLE);
@@ -436,7 +455,7 @@ test("(invariant) a stale expected value gives the owning error and outcome fail
     error_code: STALE_CODE,
   });
   const [open] = f.internals.scopeRequests.open(host.id);
-  assert.equal(open?.state, "open");
+  assert.equal(open?.state, ScopeRequestState.Open);
   assert.equal(open?.error, STALE_CODE);
   f.behaviour.pause = () => completed({});
   const retried = await f.approve(host, request.id, {
@@ -519,7 +538,7 @@ test("(security) both operations are human-only and no agent tool list holds the
 
 test("(security) the guest read holds no request, and the owner snapshot and the list show none after the invite expiry", async (t) => {
   const f = await fixture(t);
-  const host = await f.host();
+  const host = f.persisted(await f.host());
   const created = f.invite(host);
   const request = await f.raise(host, created);
   const guest = testGuestIdentity({
@@ -558,7 +577,7 @@ test("(security) the guest read holds no request, and the owner snapshot and the
 
 test("(security) the tool result of workbench--session--list drops scope_requests and the service answer keeps it", async (t) => {
   const f = await fixture(t);
-  const host = await f.host();
+  const host = f.persisted(await f.host());
   await f.raise(host, f.invite(host));
   const listOperation = workbenchOperations["session.list"];
   const tool = operationTool(

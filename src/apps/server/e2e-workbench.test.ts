@@ -218,7 +218,7 @@ test("a workbench session is created with its configuration in pi entries", asyn
       fixture.options,
     ),
   );
-  assert.deepEqual(read, session);
+  assert.deepEqual(read, { ...session, scope_requests: [] });
 });
 
 test("a configuration change appends the custom entry only when the agent provider changes", async (t) => {

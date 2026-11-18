@@ -14,27 +14,31 @@ The [operation contracts](../../src/workbench/contract.ts) and the generated Ope
 
 Every operation has `human` access, except `workbench.invite.join` (`public`) and the three `workbench.guest.*` operations (`guest`).
 
-| Operation ID                      | Route                                                                 | Lifetime |
-| --------------------------------- | --------------------------------------------------------------------- | -------- |
-| `workbench.session.list`          | `GET /api/workbench/session`                                          | `unary`  |
-| `workbench.session.create`        | `POST /api/workbench/session`                                         | `unary`  |
-| `workbench.session.get`           | `GET /api/workbench/session/:session_id`                              | `unary`  |
-| `workbench.session.configure`     | `PUT /api/workbench/session/:session_id/configuration`                | `unary`  |
-| `workbench.session.message`       | `POST /api/workbench/session/:session_id/message`                     | `unary`  |
-| `workbench.session.fork`          | `POST /api/workbench/session/:session_id/fork`                        | `unary`  |
-| `workbench.session.approve`       | `POST /api/workbench/session/:session_id/approve`                     | `unary`  |
-| `workbench.session.action.report` | `POST /api/workbench/session/:session_id/action/:tool_call_id/report` | `unary`  |
-| `workbench.session.autoMode.set`  | `POST /api/workbench/session/:session_id/auto-mode`                   | `unary`  |
-| `workbench.session.abort`         | `POST /api/workbench/session/:session_id/abort`                       | `unary`  |
-| `workbench.session.queue.remove`  | `DELETE /api/workbench/session/:session_id/queue/:queued_message_id`  | `unary`  |
-| `workbench.session.events`        | `GET /api/workbench/session/:session_id/events`                       | `wait`   |
-| `workbench.invite.create`         | `POST /api/workbench/session/:session_id/invite`                      | `unary`  |
-| `workbench.invite.list`           | `GET /api/workbench/session/:session_id/invite`                       | `unary`  |
-| `workbench.invite.revoke`         | `DELETE /api/workbench/invite/:invite_id`                             | `unary`  |
-| `workbench.invite.join`           | `POST /api/workbench/invite/join`                                     | `unary`  |
-| `workbench.guest.get`             | `GET /api/workbench/guest/session`                                    | `unary`  |
-| `workbench.guest.stream`          | `GET /api/workbench/guest/session/stream`                             | `stream` |
-| `workbench.guest.message`         | `POST /api/workbench/guest/session/message`                           | `unary`  |
+| Operation ID                             | Route                                                                       | Lifetime |
+| ---------------------------------------- | --------------------------------------------------------------------------- | -------- |
+| `workbench.session.list`                 | `GET /api/workbench/session`                                                | `unary`  |
+| `workbench.session.create`               | `POST /api/workbench/session`                                               | `unary`  |
+| `workbench.session.get`                  | `GET /api/workbench/session/:session_id`                                    | `unary`  |
+| `workbench.session.configure`            | `PUT /api/workbench/session/:session_id/configuration`                      | `unary`  |
+| `workbench.session.message`              | `POST /api/workbench/session/:session_id/message`                           | `unary`  |
+| `workbench.session.fork`                 | `POST /api/workbench/session/:session_id/fork`                              | `unary`  |
+| `workbench.session.approve`              | `POST /api/workbench/session/:session_id/approve`                           | `unary`  |
+| `workbench.session.action.report`        | `POST /api/workbench/session/:session_id/action/:tool_call_id/report`       | `unary`  |
+| `workbench.session.autoMode.set`         | `POST /api/workbench/session/:session_id/auto-mode`                         | `unary`  |
+| `workbench.session.abort`                | `POST /api/workbench/session/:session_id/abort`                             | `unary`  |
+| `workbench.session.queue.remove`         | `DELETE /api/workbench/session/:session_id/queue/:queued_message_id`        | `unary`  |
+| `workbench.session.scopeRequest.approve` | `POST /api/workbench/session/:session_id/scope-request/:request_id/approve` | `unary`  |
+| `workbench.session.scopeRequest.reject`  | `POST /api/workbench/session/:session_id/scope-request/:request_id/reject`  | `unary`  |
+| `workbench.session.events`               | `GET /api/workbench/session/:session_id/events`                             | `wait`   |
+| `workbench.invite.create`                | `POST /api/workbench/session/:session_id/invite`                            | `unary`  |
+| `workbench.invite.list`                  | `GET /api/workbench/session/:session_id/invite`                             | `unary`  |
+| `workbench.invite.revoke`                | `DELETE /api/workbench/invite/:invite_id`                                   | `unary`  |
+| `workbench.invite.join`                  | `POST /api/workbench/invite/join`                                           | `unary`  |
+| `workbench.guest.get`                    | `GET /api/workbench/guest/session`                                          | `unary`  |
+| `workbench.guest.stream`                 | `GET /api/workbench/guest/session/stream`                                   | `stream` |
+| `workbench.guest.message`                | `POST /api/workbench/guest/session/message`                                 | `unary`  |
+
+`workbench.session.scopeRequest.approve` and `reject` are human-only acts of the owner. No agent tool list holds them. A delegate identity, a read-only identity and a guest token answer `401 gateway.authentication.unauthorized`.
 
 `workbench.session.autoMode.set` takes the body `{ enabled }` and answers `{ session_id, enabled }`. It is a human-only act of the owner. The run snapshot of `workbench.session.events` answers `auto_mode`.
 
@@ -63,7 +67,7 @@ The run snapshot reads the running member. `pending_approval` carries `session_i
 
 ## Guests and project scope
 
-`workbench.invite.create` takes the body `{ invitee_name, project_ids }`. `project_ids` names 1 to 50 existing projects, each once. The set never changes. Revoke the invite and create a new one to change it.
+`workbench.invite.create` takes the body `{ invitee_name, project_ids, granted_operations }`. `project_ids` names 1 to 50 existing projects, each once. The set never changes. Revoke the invite and create a new one to change it. `granted_operations` lists the project-scoped operations that the guest-started runs of the invite run with no card. The list is fixed at create. A refused or repeated id answers 400 `workbench.invite.grant_invalid`.
 
 `workbench.invite.list` answers `{ items, project_ids }`. Each item adds `projects`: `{ id, name }` of each project of the invite, with `name` `null` for an id with no project. `project_ids` holds the set of the live invites, or `null` when no invite is live.
 
@@ -75,6 +79,16 @@ A run that a guest started reads and acts only on the projects of the invite. It
 
 - `workbench.guard.guest_scope: <operation_id> is not available in a run that a guest started.` The run called a `workbench.*` operation or `evidence_read`.
 - `workbench.guard.project_scope: The record is not available in this conversation.` The call names a record outside the projects of the invite, an absent record, or a global record.
+
+## Out-of-scope requests
+
+A guest-started run that calls `request_owner_act` for an act outside the projects of the invite ends. The server keeps one request in memory. No session entry, frame or guest read holds it. A restart, an invite revoke or the invite expiry deletes it.
+
+The owner reads the requests in `scope_requests` of `workbench.session.get` and `workbench.session.events`. A host item of `workbench.session.list` adds `scope_requests`, the count of the requests. The tool result of `workbench--session--list` drops that key.
+
+`workbench.session.scopeRequest.approve` takes the body `{ project_name, expected }` and answers `{ request_id, outcome, error_code }`. `project_name` is the exact name of the project of the act, byte for byte. `expected` holds one value for each key of `expected_keys` of the request. The act runs once under the identity of the owner. `outcome` is `done` or `failed`. A failed act leaves the request open with its `error_code`. `workbench.session.scopeRequest.reject` takes the body `{}`, deletes the request and answers `{ request_id }`.
+
+Each approve and reject writes one info log line `workbench.scope_request.settled`.
 
 ## Error codes
 
@@ -93,6 +107,11 @@ Every operation can also answer the shared codes of [other.md](other.md#error-co
 | 400   | `workbench.invite.name_invalid`              | A blank or 65-character join name or invitee name.                                                                                                                                                                                                     |
 | 400   | `workbench.invite.project_invalid`           | `project_ids` holds no id, more than 50 ids, a repeated id, a malformed id or an unknown id. `details` lists each refused id.                                                                                                                          |
 | 409   | `workbench.invite.scope_mismatch`            | The `project_ids` of `invite.create` differ from the set of a live invite of the conversation.                                                                                                                                                         |
+| 400   | `workbench.invite.grant_invalid`             | A `granted_operations` id of `invite.create` is repeated or is not a project-scoped operation that the host agent lists and a grant can hold. `details` lists each refused id.                                                                         |
+| 404   | `workbench.scope_request.not_found`          | The request id names no open request of the conversation: unknown, expired, settled, running or revoked.                                                                                                                                               |
+| 409   | `workbench.scope_request.name_mismatch`      | The `project_name` of an approve differs from the project name. The request stays open.                                                                                                                                                                |
+| 400   | `workbench.scope_request.expected_invalid`   | The `expected` keys of an approve differ from `expected_keys`, or the merged input fails the input of the act. The request stays open.                                                                                                                 |
+| 409   | `workbench.scope_request.refused`            | The act no longer qualifies at approve: the grant, the ids or the project scope changed. The request is deleted.                                                                                                                                       |
 | 409   | `workbench.guest.agent_refused`              | A guest message mentions an agent with a built-in tool; details `{ agent_name }`.                                                                                                                                                                      |
 | 403   | `gateway.scope.refused`                      | A call under the read-only identity of a guest-started run names a global record or an operation with no project.                                                                                                                                      |
 | 404   | `gateway.scope.not_found`                    | A call under the read-only identity of a guest-started run names a record of another project or an absent record.                                                                                                                                      |

@@ -14,6 +14,7 @@ import {
   OperationResultType,
 } from "../../kernel/operation.ts";
 import {
+  testDelegateIdentity,
   testGuestIdentity,
   testHumanIdentity,
   testReadOnlyIdentity,
@@ -53,6 +54,7 @@ import {
 const identity = testHumanIdentity("kanthord", "Ulrich", "workbench-scope");
 const APPROVER = testHumanIdentity("kanthord", "Grace", "workbench-scope-2");
 const { workbenchFixture } = workbenchHarness(identity);
+const P2_NAME = "shop-v2";
 const OPS = "ops@1";
 const PLAN = "plan@1";
 const COVERED_AGENTS = [AGENT, "re@1"];
@@ -241,7 +243,7 @@ async function scopeWorld(
     agents,
   );
   const first = await seeded(fixture, "scope-one");
-  const second = await seeded(fixture, "scope-two");
+  const second = await seeded(fixture, P2_NAME);
   const host = await createHost(fixture, OPS);
   const invited = await inviteGuest(fixture, host.id, [first.projectId]);
   return Object.assign(world, {
@@ -1022,5 +1024,213 @@ test(
     assert.ok(
       !world.fixture.provider.tools[SINGLE]!.includes(REQUEST_OWNER_ACT),
     );
+  },
+);
+
+const APPROVE = "session.scopeRequest.approve";
+const REJECT = "session.scopeRequest.reject";
+const UNAUTHORIZED = "gateway.authentication.unauthorized";
+const NAME_MISMATCH = "workbench.scope_request.name_mismatch";
+const NOT_FOUND = "workbench.scope_request.not_found";
+const NODE_STATE_PAUSED = "Paused";
+
+function pauseRequest(target: World) {
+  return toolCall(REQUEST_OWNER_ACT, {
+    operation_id: NODE_PAUSE_ID,
+    input: {
+      params: { node_id: target.second.nodeId },
+      body: { reason: "hold" },
+    },
+  });
+}
+
+async function raised(world: World, signal: AbortSignal) {
+  await guestMention(world, GUEST_RUN_MENTION);
+  await untilIdle(world.fixture, world.hostId, signal);
+  await setImmediate();
+  const snapshot = completed(
+    await world.fixture.workbench["session.get"](
+      { params: { session_id: world.hostId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+  assert.equal(snapshot.scope_requests.length, SINGLE);
+  return snapshot.scope_requests[NO_ITEMS]!;
+}
+
+async function approveBody(world: World, name: string) {
+  const node = completed(
+    await world.fixture.missions["node.get"](
+      { params: { node_id: world.second.nodeId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+  return {
+    project_name: name,
+    expected: {
+      expected_attempt: node.attempt,
+      expected_mission_version: world.second.missionVersion,
+      expected_state: node.state,
+    },
+  };
+}
+
+async function approveRequest(
+  world: World,
+  requestId: string,
+  name: string,
+  options: { identity: unknown } = world.fixture.options,
+) {
+  return world.fixture.workbench[APPROVE](
+    {
+      params: { session_id: world.hostId, request_id: requestId },
+      query: {},
+      body: await approveBody(world, name),
+    },
+    options as never,
+  );
+}
+
+async function ownerState(world: World) {
+  const snapshot = completed(
+    await world.fixture.workbench["session.events"](
+      { params: { session_id: world.hostId }, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+  const listed = completed(
+    await world.fixture.workbench["session.list"](
+      { params: {}, query: {}, body: null },
+      world.fixture.options,
+    ),
+  );
+  return {
+    requests: snapshot.scope_requests,
+    counted: listed.items.find(({ id }) => id === world.hostId)!.scope_requests,
+  };
+}
+
+test(
+  "(happy path) approve mode: the owner approves a request on a P2 node with the typed name and the click-time values",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const world = await scopeWorld(t, (target) => [
+      () => pauseRequest(target),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const request = await raised(world, t.signal);
+    assert.equal(request.project_id, world.second.projectId);
+    assert.equal(request.operation_id, NODE_PAUSE_ID);
+    const before = await ownerState(world);
+    assert.deepEqual(
+      before.requests.map(({ id }) => id),
+      [request.id],
+    );
+    assert.equal(before.counted, SINGLE);
+    failed(
+      await approveRequest(world, request.id, "Shop-v2"),
+      HttpStatus.Conflict,
+      NAME_MISMATCH,
+    );
+    const entriesBefore = await ownerEntries(world.fixture, world.hostId);
+    const answer = completed(await approveRequest(world, request.id, P2_NAME));
+    assert.deepEqual(answer, {
+      request_id: request.id,
+      outcome: "done",
+      error_code: null,
+    });
+    const node = completed(
+      await world.fixture.missions["node.get"](
+        { params: { node_id: world.second.nodeId }, query: {}, body: null },
+        world.fixture.options,
+      ),
+    );
+    assert.equal(node.state, NODE_STATE_PAUSED);
+    const after = await ownerState(world);
+    assert.deepEqual(after.requests, []);
+    assert.equal(after.counted, NO_ITEMS);
+    assert.equal(
+      (await ownerEntries(world.fixture, world.hostId)).length,
+      entriesBefore.length,
+    );
+    failed(
+      await approveRequest(world, request.id, P2_NAME),
+      HttpStatus.NotFound,
+      NOT_FOUND,
+    );
+  },
+);
+
+test(
+  "(happy path) reject mode: the owner rejects a request and the answer holds its request_id",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const world = await scopeWorld(t, (target) => [
+      () => pauseRequest(target),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const request = await raised(world, t.signal);
+    const answer = completed(
+      await world.fixture.workbench[REJECT](
+        {
+          params: { session_id: world.hostId, request_id: request.id },
+          query: {},
+          body: {},
+        },
+        world.fixture.options,
+      ),
+    );
+    assert.deepEqual(answer, { request_id: request.id });
+    const state = await ownerState(world);
+    assert.deepEqual(state.requests, []);
+    assert.equal(state.counted, NO_ITEMS);
+    failed(
+      await approveRequest(world, request.id, P2_NAME),
+      HttpStatus.NotFound,
+      NOT_FOUND,
+    );
+  },
+);
+
+test(
+  "(security) a guest JWT, a read-only identity and a delegate identity answer 401 on approve and the request stays open",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const world = await scopeWorld(t, (target) => [
+      () => pauseRequest(target),
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const request = await raised(world, t.signal);
+    const response = await asGuest(
+      world,
+      `/api/workbench/session/${world.hostId}/scope-request/${request.id}/approve`,
+      {
+        method: "POST",
+        body: JSON.stringify(await approveBody(world, P2_NAME)),
+      },
+    );
+    assert.equal(response.status, HttpStatus.Unauthorized);
+    assert.equal(
+      ((await response.json()) as { error: { code: string } }).error.code,
+      UNAUTHORIZED,
+    );
+    const projectIds = [world.first.projectId];
+    const readOnly = testReadOnlyIdentity(identity.accountId, {
+      inviteId: world.inviteId,
+      projectIds,
+      guestName: GUEST_NAME,
+    });
+    const delegate = testDelegateIdentity(identity.accountId, {
+      guestName: GUEST_NAME,
+      toolCallId: "call_delegate",
+      projectIds,
+    });
+    for (const caller of [readOnly, delegate])
+      failed(
+        await approveRequest(world, request.id, P2_NAME, { identity: caller }),
+        HttpStatus.Unauthorized,
+        UNAUTHORIZED,
+      );
+    assert.equal((await ownerState(world)).requests.length, SINGLE);
   },
 );
