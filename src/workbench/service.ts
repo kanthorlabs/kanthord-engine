@@ -1384,10 +1384,10 @@ export class WorkbenchService implements Service {
     if (host === null) return null;
     if (this.watchOpen(host)) await this.runWatch(host, caller);
     const record = pendingNotice(
-      this.memberEntries(host, false).flatMap((member) =>
-        member.entries.map((entry) => ({
+      host.members.flatMap((member) =>
+        member.manager.getEntries().map((entry) => ({
           ...entry,
-          session_id: member.sessionId,
+          session_id: member.id,
           agent_name: member.agentName,
         })),
       ),

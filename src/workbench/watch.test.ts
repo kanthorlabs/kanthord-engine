@@ -4,7 +4,14 @@ import { CancellationContext } from "../kernel/context.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { type Operation, OperationResultType } from "../kernel/operation.ts";
-import { missionOperations, NodeState } from "../mission/contract.ts";
+import {
+  ActorKind,
+  importResultSchema,
+  Intent,
+  missionOperations,
+  NodeState,
+  RevisionWrite,
+} from "../mission/contract.ts";
 import {
   type NoticeRecord,
   type SessionEntry,
@@ -14,7 +21,11 @@ import {
   WorkbenchRecordKind,
 } from "./contract.ts";
 import { recordOf } from "./sessions.ts";
-import { WatchChecker, type WatchConversation } from "./watch.ts";
+import {
+  createdNodeIds,
+  WatchChecker,
+  type WatchConversation,
+} from "./watch.ts";
 
 const CONVERSATION_ID = "workbench_session_A";
 const PROJECT_NAME = "shop";
@@ -197,3 +208,58 @@ test(
     assert.equal(h.notices().length, NO_ITEMS);
   },
 );
+
+test("createdNodeIds answers no node id for an import of updated nodes and for another operation", () => {
+  const nodeId = createIdentity("node");
+  const changes = {
+    mission_version: SINGLE + SINGLE,
+    revisions: [
+      {
+        node_id: nodeId,
+        filename: "existing.md",
+        revision: PAIR,
+        reason: "plan",
+        actor: { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
+        created_at: START_MS,
+        content: {
+          name: "Name",
+          requirement: "Requirement",
+          criterion: "Criterion",
+          verifications: ["true"],
+          bindings: [],
+          intent: Intent.Examine,
+          tags: [],
+          external_links: [],
+        },
+        tasks: [],
+        change: {
+          write: RevisionWrite.Import,
+          previous_revision: SINGLE,
+          changed_fields: ["requirement"],
+        },
+        pinned_by_attempts: [],
+      },
+    ],
+    retired_node_ids: [],
+    added_edges: [],
+    removed_edges: [],
+    open_attempts_unchanged: [],
+  };
+  const imported = {
+    mission_id: createIdentity("mission"),
+    mission_version: SINGLE + SINGLE,
+    assigned_ids: [],
+    changes,
+    actor: { kind: ActorKind.Human, account: "ulrich", name: "Ulrich" },
+    accepted_at: START_MS,
+  };
+  assert.equal(importResultSchema.safeParse(imported).success, true);
+  assert.deepEqual(
+    createdNodeIds(missionOperations["import.apply"].id, imported),
+    [],
+  );
+  assert.deepEqual(
+    createdNodeIds(missionOperations["node.update"].id, changes),
+    [],
+  );
+});
