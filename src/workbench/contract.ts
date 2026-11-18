@@ -32,6 +32,7 @@ export interface GrantedInvite {
 
 export const WORKBENCH_SERVICE_NAME = "workbench";
 export const WORKBENCH_SESSION_PREFIX = "workbench_session";
+export const WORKBENCH_SCOPE_REQUEST_PREFIX = "workbench_scope_request";
 export const WORKBENCH_DIRECTORY_NAME = "workbench";
 export const WORKBENCH_CONFIGURATION_ENTRY = "kanthord.workbench.configuration";
 export const WORKBENCH_RECORD_ENTRY = "kanthord.workbench.record";
