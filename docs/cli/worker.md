@@ -969,12 +969,12 @@ Before a run, disable core dumps with `ulimit -c 0`. Use a credential that the d
 The credential rules:
 
 1. The command refuses a live run without `--credential-stdin`. It has no option, no environment variable and no file for a credential.
-2. The command reads standard input before it makes the output folder or starts a child process. A terminal on standard input is refused. The command checks the options, the seed, the `--replay` file and the output folder first. A failed check thus reads no standard input.
+2. The order is: check the options, the seed, the `--replay` file and the output folder; read standard input; make the output folder; start the child processes. A failed check thus reads no standard input. A terminal on standard input is refused.
 3. The command parses the object and then fills the input buffer with zeros.
 4. `provider_id` must equal the pi provider id of the working agent platform: the platform name, or `anthropic` for the Anthropic subscription platform. An oauth token must stay valid until the wall deadline plus 5 minutes. The wall deadline is the earlier of the claim start plus the wall budget and the claim expiry.
 5. `metadata` holds the routing metadata of the provider, such as `base_url` or `region`, and follows the metadata schema of the platform. Only standard input gives the routing metadata. A seed or a shell variable could otherwise send the credential to an endpoint that the credential owner did not choose. Only standard input therefore decides the endpoint. A provider with a metadata schema requires `metadata`. A provider with no metadata schema refuses it. The `metadata` of the working agent in the seed must equal it, or the command refuses the run with `cli.worker.tasks.credential_invalid`, field `metadata`.
 6. Before the run, the command removes these names from its own environment and sets the names below. The routing values come only from the `metadata` key.
-   - Provider credential variables of each pi-ai built-in provider, and `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_OAUTH_TOKEN`.
+   - Provider credential variables of each pi-ai built-in provider, for example `OPENAI_API_KEY` and `GEMINI_API_KEY`, and `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_OAUTH_TOKEN`.
    - SSH agent variables: `SSH_AUTH_SOCK` and `SSH_AGENT_PID`.
    - Kanthord variables: `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` and `KANTHORD_ENDPOINT`.
    - AWS credential chain variables: `AWS_PROFILE`, `AWS_DEFAULT_PROFILE`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ROLE_ARN`, `AWS_ROLE_SESSION_NAME`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`, `AWS_CONTAINER_CREDENTIALS_FULL_URI`, `AWS_CONTAINER_AUTHORIZATION_TOKEN`, `AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE` and `AWS_SDK_LOAD_CONFIG`.
