@@ -147,6 +147,17 @@ export function variantSessionPlace(
   return place;
 }
 
+export function variantHasSessionFile(
+  stateDirectory: string,
+  variant: VariantPlace,
+): boolean {
+  const directory = variantSessionDirectory(stateDirectory, variant);
+  return (
+    existsSync(directory) &&
+    readdirSync(directory).some((name) => name.endsWith(SESSION_FILE_EXTENSION))
+  );
+}
+
 export function removeEmptyVariantDirectory(
   stateDirectory: string,
   variant: VariantPlace,

@@ -127,6 +127,7 @@ const fakeCollaborations: Omit<Dependencies, "store" | "credentialHolds"> = {
   approvedModels: () => null,
   entriesOfAgent: () => [],
   variantInUse: () => false,
+  variantDeleted: () => {},
   repositoryPromptsOf: () => null,
   promptBase: {
     baseCommitOf: () => {

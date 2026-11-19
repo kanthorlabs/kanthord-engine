@@ -73,9 +73,9 @@ The run snapshot reads the running member. `pending_approval` carries `session_i
 ## Variant sessions
 
 `workbench.session.create` takes the optional body field `variant_id`, an `agent_variant` identity. The session is then a single-agent session of that variant. The agent of the session is the base agent `agent_name` of the variant, and its tools, guard floor and classifier input stay those of the base agent.
-A variant of another agent than the body `agent_name`, or an unknown variant, answers `404 agent.variant.not_found`. The create creates no directory in that case. A refused configuration or a refused runtime also leaves no variant directory.
+A variant of another agent than the body `agent_name`, or an unknown variant, answers `404 agent.variant.not_found`. The create creates no directory in that case. A refused configuration leaves no variant directory. A refused runtime can leave an empty variant directory.
 The session file lives in the variant session directory `<state>/pi/sessions/workbench/<agent_name>/<variant_id>/`. The header `cwd` is the base workbench directory `<state>/workbench/<agent_name>`. The base session directory never holds a variant file, and the variant directory never holds a base file.
-The directory marks the variant as in use: `agent.variant.delete` answers `409 agent.variant.in_use` while it exists.
+`agent.variant.delete` answers `409 agent.variant.in_use` while an open session holds the variant, or while the variant directory `<state>/pi/sessions/workbench/<agent_name>/<variant_id>/` holds a session file. A delete removes an empty variant directory after it deletes the row.
 The session answer, every item of `workbench.session.list` and the answer of `workbench.session.get` carry `variant_id: string | null`. A base session answers `null`.
 `display_name` of a list item, and `display_name` of the host item of `members`, answer the current variant name for a variant session. The greeting of the opening names the variant.
 The agent open composes the system prompt with the current variant row, so a new name or a new instruction applies at the next agent open, also after `workbench.session.configure`.
