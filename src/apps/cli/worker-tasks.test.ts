@@ -964,6 +964,27 @@ suite("worker tasks run credentials", () => {
     assert.equal(refusal.code, TasksErrorCode.OptionInvalid);
   });
 
+  test("--pass-env refuses each ambient cloud credential variable", async (t) => {
+    const fixture = await seedFixture(t);
+    for (const name of [
+      "AWS_PROFILE",
+      "AWS_SECRET_ACCESS_KEY",
+      "AZURE_OPENAI_BASE_URL",
+    ]) {
+      const run = commandRun(fixture, scriptedProvider([]), {
+        shellEnv: { ...hostEnvironment(), [name]: CREDENTIAL_CANARY },
+      });
+      const refusal = await diagnosticOf(
+        tasksRun(
+          fixture.seedFolder,
+          runOptions(fixture, { passEnv: [name] }),
+          run.io,
+        ),
+      );
+      assert.equal(refusal.code, TasksErrorCode.OptionInvalid, name);
+    }
+  });
+
   test(
     "pi reads the standard input credential from a frozen store, with an environment key and no auth.json",
     { timeout: TEST_TIMEOUT_MS },

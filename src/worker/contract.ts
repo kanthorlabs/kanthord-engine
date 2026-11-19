@@ -2009,7 +2009,7 @@ export const workerOperations = {
     }),
     output: executionSeedSchema,
     description:
-      "Read the seed of an execution of a node that is not closed: the claim, the setup without containerEnv and remoteEnv, the pinned revision and the head of each binding. The answer holds no credential, no SSH identity and no handover key.",
+      "Read the seed of an execution of a node that is not closed: the claim, the setup without containerEnv, remoteEnv and build.args, the pinned revision and the head of each binding. The answer holds no credential, no SSH identity and no handover key.",
   },
   "action.request": {
     service: WORKER_SERVICE_NAME,
