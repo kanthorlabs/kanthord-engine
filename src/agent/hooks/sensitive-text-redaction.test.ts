@@ -145,7 +145,7 @@ async function markerOf(
   return found[0]!;
 }
 
-test("message_end redacts every role and the system sections", async () => {
+test("message_end redacts every role other than assistant and the system sections", async () => {
   const { end } = redactionOf();
   const value = an(16);
   const line = j(PASS, ' = "', value, '"');
@@ -156,24 +156,6 @@ test("message_end redacts every role and the system sections", async () => {
       content: line,
       sections: { project: line },
       toolsAdded: [{ name: "tool", description: line, parameters: {} }],
-    },
-    {
-      role: "assistant",
-      content: [
-        { type: "text", text: line },
-        {
-          type: "toolCall",
-          id: "c1",
-          name: "write",
-          arguments: { content: line },
-        },
-      ],
-      api: "anthropic-messages",
-      provider: "anthropic",
-      model: "m",
-      errorMessage: line,
-      stopReason: "stop",
-      timestamp: 1,
     },
     toolResult(line),
     {
@@ -209,28 +191,57 @@ test("a value of a later line or string also masks an earlier one", async () => 
   );
   assert.equal(markers(copy).length, PAIR_OF_FINDINGS);
   assert.ok(!JSON.stringify(copy).includes(userinfo));
+});
+
+test("assistant content keeps a pattern value and masks a known secret, and errorMessage keeps every rule", async () => {
+  const secret = providerKey();
+  const { end, redaction } = redactionOf([secret]);
   const value = an(16);
-  const assistant = await end({
+  const line = j(PASS, ' = "', value, '"');
+  const failure = an(16);
+  const message = {
     role: "assistant",
     content: [
+      { type: "text", text: line },
+      { type: "thinking", thinking: line },
       {
         type: "toolCall",
-        id: "a",
+        id: "c1",
         name: "write",
-        arguments: { content: value },
-      },
-      {
-        type: "toolCall",
-        id: "b",
-        name: "write",
-        arguments: { content: j(PASS, '="', value, '"') },
+        arguments: { content: j(line, "\nkey ", secret) },
       },
     ],
     api: "anthropic-messages",
+    provider: "anthropic",
+    model: "m",
+    errorMessage: j(PASS, ' = "', failure, '" ', secret),
+    stopReason: "stop",
+    timestamp: 1,
+  };
+  const copy = (await end(message))!;
+  const blocks = copy.content as Record<string, unknown>[];
+  assert.equal(blocks[0]!.text, line);
+  assert.equal(blocks[1]!.thinking, line);
+  const written = String(
+    (blocks[2]!.arguments as Record<string, unknown>).content,
+  );
+  assert.ok(written.startsWith(line));
+  assert.ok(!written.includes(secret));
+  assert.ok(!String(copy.errorMessage).includes(failure));
+  assert.ok(!String(copy.errorMessage).includes(secret));
+  assert.deepEqual(redaction.counts().redacted, {
+    [SensitiveRule.LlmCredential]: PAIR_OF_FINDINGS,
+    [SensitiveRule.QuotedAssignment]: SINGLE_FINDING,
+  });
+  const own = await end({
+    role: "assistant",
+    content: [{ type: "text", text: line }],
+    api: "anthropic-messages",
     timestamp: 1,
   });
-  assert.equal(markers(assistant).length, PAIR_OF_FINDINGS);
-  assert.ok(!JSON.stringify(assistant).includes(value));
+  assert.equal(own, undefined);
+  const echo = await end(toolResult(j("value ", value)));
+  assert.equal(echo, undefined);
 });
 
 test("a toolResult key outside content and details is redacted", async () => {
@@ -245,10 +256,10 @@ test("a toolResult key outside content and details is redacted", async () => {
   assert.equal(markers(copy).length, SINGLE_FINDING);
 });
 
-test("a signed thinking block stays whole and its finding masks later text", async () => {
-  const { end, redaction } = redactionOf();
-  const value = an(16);
-  const line = j(PASS, ' = "', value, '"');
+test("a signed thinking block stays whole and counts each known secret", async () => {
+  const secret = providerKey();
+  const { end, redaction } = redactionOf([secret]);
+  const line = j("key ", secret);
   const thinking = (api: string, signature: string | undefined) => ({
     role: "assistant",
     content: [
@@ -272,8 +283,6 @@ test("a signed thinking block stays whole and its finding masks later text", asy
     assert.equal(copy, undefined, api);
   }
   assert.equal(redaction.counts().thinking_kept, SIGNED_APIS);
-  const later = await end(toolResult(j("value ", value)));
-  assert.ok(!JSON.stringify(later).includes(value));
   for (const [api, signature] of [
     ["google-generative-ai", undefined],
     ["bedrock-converse-stream", ""],
@@ -282,7 +291,7 @@ test("a signed thinking block stays whole and its finding masks later text", asy
     const copy = await end(thinking(api, signature));
     assert.ok(copy, api);
     const block = (copy.content as Record<string, unknown>[])[0]!;
-    assert.ok(!String(block.thinking).includes(value), api);
+    assert.ok(!String(block.thinking).includes(secret), api);
     assert.equal(block.thinkingSignature, signature, api);
   }
   const otherApi = await end({
@@ -292,9 +301,9 @@ test("a signed thinking block stays whole and its finding masks later text", asy
 });
 
 test("structural keys stay and a key of the same name inside arguments is redacted", async () => {
-  const { end } = redactionOf();
-  const value = an(16);
-  const line = j(PASS, ' = "', value, '"');
+  const secret = providerKey();
+  const { end } = redactionOf([secret]);
+  const line = j("key ", secret);
   const copy = await end({
     role: "assistant",
     content: [
@@ -313,7 +322,7 @@ test("structural keys stay and a key of the same name inside arguments is redact
   const block = (copy!.content as Record<string, unknown>[])[0]!;
   assert.equal(block.thoughtSignature, line);
   assert.equal(copy!.model, line);
-  assert.ok(!JSON.stringify(block.arguments).includes(value));
+  assert.ok(!JSON.stringify(block.arguments).includes(secret));
 });
 
 test("restore puts the value into write and edit and keeps other tools unchanged", async () => {
