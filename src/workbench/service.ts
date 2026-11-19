@@ -722,6 +722,7 @@ function variantNotFound(variantId: string): OperationError {
 }
 
 type VariantOwned = { variant_id: string | null };
+type ListedSession = VariantOwned & { agent_name: string };
 
 function displayNameOf(agentName: string): string {
   const declaration = getAgentDeclaration(agentName);
@@ -1345,19 +1346,35 @@ export class WorkbenchService implements Service {
     });
   }
 
+  private async storedSessions() {
+    const stored = [];
+    for (const agentName of workbenchAgentNames()) {
+      stored.push(
+        ...(await listSessions(
+          sessionPlace(this.dependencies.stateDirectory, agentName),
+          { agentName, variantId: null },
+        )),
+      );
+      for (const { variantId, place } of existingVariantPlaces(
+        this.dependencies.stateDirectory,
+        agentName,
+      ))
+        stored.push(...(await listSessions(place, { agentName, variantId })));
+    }
+    return stored;
+  }
+
   private async participantsOf(host: OpenSession): Promise<OpenSession[]> {
     const participants: { created: number; session: OpenSession }[] = [];
-    for (const agentName of workbenchAgentNames()) {
-      const listed = await listSessions(
-        sessionPlace(this.dependencies.stateDirectory, agentName),
-        { agentName, variantId: null },
-      );
-      for (const { id, created, host_session_id } of listed) {
-        if (host_session_id !== host.id) continue;
-        const found = await findSession(this.dependencies.stateDirectory, id);
-        assert.ok(found);
-        participants.push({ created, session: this.stored(found, host.id) });
-      }
+    for (const {
+      id,
+      created,
+      host_session_id,
+    } of await this.storedSessions()) {
+      if (host_session_id !== host.id) continue;
+      const found = await findSession(this.dependencies.stateDirectory, id);
+      assert.ok(found);
+      participants.push({ created, session: this.stored(found, host.id) });
     }
     return participants
       .sort((left, right) => left.created - right.created)
@@ -2761,9 +2778,10 @@ export class WorkbenchService implements Service {
     );
     if (mention === null) return this.answeredLast(host);
     const existing = host.members.find(
-      ({ agentName }) => agentName === mention.agent_name,
+      ({ agentName, variantId }) =>
+        agentName === mention.agent_name && variantId === mention.variant_id,
     );
-    return existing ?? this.createParticipant(host, mention.agent_name, item);
+    return existing ?? this.createParticipant(host, mention, item);
   }
 
   private answeredLast(host: OpenSession): OpenSession {
@@ -2776,13 +2794,40 @@ export class WorkbenchService implements Service {
     return host.members.find((member) => member.id === id) ?? host;
   }
 
+  private participantPlace(
+    tx: Transaction,
+    agentName: string,
+    variantId: string | null,
+  ): SessionPlace {
+    if (variantId === null)
+      return sessionPlace(this.dependencies.stateDirectory, agentName);
+    const row = this.dependencies.agentVariant(tx, variantId);
+    if (row?.agent_name !== agentName) throw variantNotFound(variantId);
+    return variantSessionPlace(this.dependencies.stateDirectory, {
+      agentName,
+      variantId,
+    });
+  }
+
+  private releaseVariantDirectory(agentName: string, variantId: string): void {
+    if (
+      [...this.sessions.values()].some((open) => open.variantId === variantId)
+    )
+      return;
+    removeEmptyVariantDirectory(this.dependencies.stateDirectory, {
+      agentName,
+      variantId,
+    });
+  }
+
   private async createParticipant(
     host: OpenSession,
-    agentName: string,
+    mention: MentionMatch,
     item: LaunchItem,
   ): Promise<OpenSession> {
-    const { configuration, resolved } = this.dependencies.store.transaction(
-      (tx) => {
+    const { agent_name: agentName, variant_id: variantId } = mention;
+    const { configuration, resolved, place } =
+      this.dependencies.store.transaction((tx) => {
         const view = this.dependencies.agentConfiguration.agentView(
           tx,
           agentName,
@@ -2792,38 +2837,42 @@ export class WorkbenchService implements Service {
         return {
           configuration: defaults,
           resolved: this.resolve(tx, agentName, defaults),
+          place: this.participantPlace(tx, agentName, variantId),
         };
-      },
-    );
+      });
     const parentSession = host.manager.getSessionFile();
     assert.ok(parentSession);
     const id = createIdentity(WORKBENCH_SESSION_PREFIX);
-    const place = sessionPlace(this.dependencies.stateDirectory, agentName);
-    const participant = newOpenSession({
-      id,
-      hostId: host.id,
-      agentName,
-      variantId: null,
-      place,
-      manager: await createSession(place, id, { parentSession }),
-      configuration,
-      requester: item.requester,
-      autoMode: true,
-    });
-    this.sessions.set(id, participant);
-    host.members.push(participant);
+    let participant: OpenSession | undefined;
     let built: BuiltRuntime | undefined;
     try {
+      participant = newOpenSession({
+        id,
+        hostId: host.id,
+        agentName,
+        variantId,
+        place,
+        manager: await createSession(place, id, { parentSession }),
+        configuration,
+        requester: item.requester,
+        autoMode: true,
+      });
+      this.sessions.set(id, participant);
+      host.members.push(participant);
       built = await this.buildRuntime(participant, resolved, item.context);
       await this.openAgent(participant, built, item.context);
       this.syncEntries(participant, piProviderId(resolved.provider));
     } catch (error) {
       built?.lifetime.cancel();
-      this.closeAgent(participant);
-      this.sessions.delete(id);
-      host.members.splice(host.members.indexOf(participant), 1);
-      const file = participant.manager.getSessionFile();
-      if (file) rmSync(file, { force: true });
+      if (participant) {
+        this.closeAgent(participant);
+        this.sessions.delete(id);
+        host.members.splice(host.members.indexOf(participant), 1);
+        const file = participant.manager.getSessionFile();
+        if (file) rmSync(file, { force: true });
+      }
+      if (variantId !== null)
+        this.releaseVariantDirectory(agentName, variantId);
       throw error;
     }
     return participant;
@@ -3382,24 +3431,20 @@ export class WorkbenchService implements Service {
     );
   }
 
+  private listedDisplayName(
+    item: ListedSession,
+    variantNames: ReadonlyMap<string, string>,
+  ): string {
+    return (
+      (item.variant_id === null
+        ? undefined
+        : variantNames.get(item.variant_id)) ?? displayNameOf(item.agent_name)
+    );
+  }
+
   async list(agentName: string | undefined, caller: CallerContext) {
     if (agentName !== undefined) requireAgent(agentName);
-    const stored = [];
-    for (const name of workbenchAgentNames()) {
-      stored.push(
-        ...(await listSessions(
-          sessionPlace(this.dependencies.stateDirectory, name),
-          { agentName: name, variantId: null },
-        )),
-      );
-      for (const { variantId, place } of existingVariantPlaces(
-        this.dependencies.stateDirectory,
-        name,
-      ))
-        stored.push(
-          ...(await listSessions(place, { agentName: name, variantId })),
-        );
-    }
+    const stored = await this.storedSessions();
     const variantNames = this.variantNamesOf(stored);
     const items = [];
     for (const host of stored) {
@@ -3411,7 +3456,7 @@ export class WorkbenchService implements Service {
         .map((participant) => ({
           ...participant,
           ...this.runState(participant.id),
-          display_name: displayNameOf(participant.agent_name),
+          display_name: this.listedDisplayName(participant, variantNames),
           notice: null,
           participants: [] as [],
         }));
@@ -3420,11 +3465,7 @@ export class WorkbenchService implements Service {
         ...this.runState(host.id),
         scope_requests: this.scopeRequests.count(host.id),
         notice: await this.noticeOf(host.id, caller),
-        display_name:
-          (host.variant_id === null
-            ? undefined
-            : variantNames.get(host.variant_id)) ??
-          displayNameOf(host.agent_name),
+        display_name: this.listedDisplayName(host, variantNames),
         modified: Math.max(
           host.modified,
           ...participants.map(({ modified }) => modified),
@@ -3496,16 +3537,8 @@ export class WorkbenchService implements Service {
         const file = session.manager.getSessionFile();
         if (file) rmSync(file, { force: true });
       }
-      if (
-        variantId !== undefined &&
-        ![...this.sessions.values()].some(
-          (open) => open.variantId === variantId,
-        )
-      )
-        removeEmptyVariantDirectory(this.dependencies.stateDirectory, {
-          agentName,
-          variantId,
-        });
+      if (variantId !== undefined)
+        this.releaseVariantDirectory(agentName, variantId);
       throw error;
     }
     return this.view(session);
