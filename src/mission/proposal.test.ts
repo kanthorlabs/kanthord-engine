@@ -218,6 +218,7 @@ async function fixture(t: TestContext) {
     assessmentId: string,
     approvedProposalIds: string[],
     version = FIRST_REVISION,
+    edits?: unknown[],
   ) =>
     h.invoke("proposal.decide", {
       params: { assessment_id: assessmentId },
@@ -225,6 +226,7 @@ async function fixture(t: TestContext) {
       body: {
         expected_mission_version: version,
         approved_proposal_ids: approvedProposalIds,
+        ...(edits === undefined ? {} : { edits }),
       },
     });
   return {
@@ -345,6 +347,88 @@ test("a decision adds a dependency of the proposer on the created node and route
       SINGLE_PROPOSAL,
     );
   });
+});
+
+const EDITED_REQUIREMENT = "Repair the defect in the form";
+const EDITED_VERIFICATIONS = ["pnpm run check"];
+const EDITED_TASK = {
+  name: "Repair",
+  requirement: "Change the code",
+  criterion: "The test passes",
+  verifications: EDITED_VERIFICATIONS,
+};
+
+test("a decision with an edit creates the node and the task with the edited values and keeps the stored proposal", async (t) => {
+  const h = await fixture(t);
+  const submitted = await h.submit([h.proposal()]);
+  const proposed = (await h.list()).items[0]!;
+  const result = await h.decide(
+    submitted.assessment.id,
+    [proposed.id],
+    FIRST_REVISION,
+    [
+      {
+        proposal_id: proposed.id,
+        requirement: EDITED_REQUIREMENT,
+        task: EDITED_TASK,
+      },
+    ],
+  );
+  const createdId = result.created[0]!.revisions[0]!.node_id;
+  const revision = h.store.transaction((tx) =>
+    readCurrentRevision(tx, createdId)!,
+  );
+  assert.equal(revision.requirement, EDITED_REQUIREMENT);
+  assert.equal(revision.name, h.proposal().name);
+  assert.equal(revision.criterion, h.proposal().criterion);
+  assert.deepEqual(JSON.parse(revision.verifications), EDITED_VERIFICATIONS);
+  const tasks = JSON.parse(revision.tasks) as {
+    content: { verifications: string[] };
+  }[];
+  assert.deepEqual(tasks[0]!.content.verifications, EDITED_VERIFICATIONS);
+  const stored = (await h.list()).items[0]!;
+  assert.deepEqual(stored.content, proposed.content);
+  assert.equal(stored.created_node_id, createdId);
+});
+
+test("a decision refuses an edit of a proposal that is not approved, a repeated edit, an empty edit and a key that is not editable, and writes nothing", async (t) => {
+  const h = await fixture(t);
+  const submitted = await h.submit([
+    h.proposal(),
+    h.proposal(h.childId, "Other"),
+  ]);
+  const [first, second] = (await h.list()).items;
+  const before = databaseSnapshot(h.store);
+  const invalidEdits = (issuePath: (string | number)[]) => (error: unknown) => {
+    assert.ok(error instanceof ZodError);
+    assert.deepEqual(
+      error.issues.map((issue) => issue.path),
+      [["body", ...issuePath]],
+    );
+    return true;
+  };
+  const refused = (edits: unknown[], issuePath: (string | number)[]) =>
+    assert.rejects(
+      h.decide(submitted.assessment.id, [first!.id], FIRST_REVISION, edits),
+      invalidEdits(issuePath),
+    );
+  await refused(
+    [{ proposal_id: second!.id, requirement: EDITED_REQUIREMENT }],
+    ["edits"],
+  );
+  await refused(
+    [
+      { proposal_id: first!.id, requirement: EDITED_REQUIREMENT },
+      { proposal_id: first!.id, name: "Again" },
+    ],
+    ["edits"],
+  );
+  await refused([{ proposal_id: first!.id }], ["edits", 0]);
+  await refused(
+    [{ proposal_id: first!.id, dependency_id: h.childId }],
+    ["edits", 0],
+  );
+  assert.deepEqual(databaseSnapshot(h.store), before);
 });
 
 test("a decision approves two of three proposals, rejects the third and unblocks the proposer once", async (t) => {

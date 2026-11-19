@@ -1721,15 +1721,43 @@ export const proposalSchema = z.union([
   followupProposalSchema,
 ]);
 export type Proposal = z.infer<typeof proposalSchema>;
-export const proposalDecideSchema = z.strictObject({
-  expected_mission_version: z.number().int().positive(),
-  approved_proposal_ids: z
-    .array(identitySchema(PROPOSAL_IDENTITY_PREFIX))
-    .min(1)
-    .max(PROPOSAL_MAX)
-    .refine((items) => new Set(items).size === items.length),
-  reason: textSchema.optional(),
-});
+export const proposalEditSchema = z
+  .strictObject({
+    proposal_id: identitySchema(PROPOSAL_IDENTITY_PREFIX),
+    ...proposalContentSchema
+      .pick({ name: true, requirement: true, criterion: true })
+      .partial().shape,
+    task: proposalTaskSchema.optional(),
+  })
+  .refine(
+    (edit) =>
+      edit.name !== undefined ||
+      edit.requirement !== undefined ||
+      edit.criterion !== undefined ||
+      edit.task !== undefined,
+  );
+export type ProposalEdit = z.infer<typeof proposalEditSchema>;
+export const proposalDecideSchema = z
+  .strictObject({
+    expected_mission_version: z.number().int().positive(),
+    approved_proposal_ids: z
+      .array(identitySchema(PROPOSAL_IDENTITY_PREFIX))
+      .min(1)
+      .max(PROPOSAL_MAX)
+      .refine((items) => new Set(items).size === items.length),
+    edits: z.array(proposalEditSchema).max(PROPOSAL_MAX).optional(),
+    reason: textSchema.optional(),
+  })
+  .refine(
+    (body) => {
+      const edited = (body.edits ?? []).map((edit) => edit.proposal_id);
+      return (
+        new Set(edited).size === edited.length &&
+        edited.every((id) => body.approved_proposal_ids.includes(id))
+      );
+    },
+    { path: ["edits"] },
+  );
 export type ProposalDecide = z.infer<typeof proposalDecideSchema>;
 export const proposalDecideResultSchema = z.strictObject({
   created: z.array(nodeChangeSchema),

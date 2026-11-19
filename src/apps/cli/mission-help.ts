@@ -19,6 +19,13 @@ Notes:
   "start_point" takes "node_branch" (default) or "base_branch".
 `;
 
+export const PROPOSAL_DECIDE_HELP = `
+Notes:
+  "approved_proposal_ids" holds 1 to 10 proposals. Every other open proposal of the assessment is rejected.
+  To reject every proposal, run "node unblock" on the examine node.
+  "edits" changes name, requirement, criterion and task of an approved proposal.
+`;
+
 export const OVERRIDE_HELP = `
 Notes:
   An override from a Paused node with an open pull request does not merge it.
