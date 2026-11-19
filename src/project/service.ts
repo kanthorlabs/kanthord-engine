@@ -103,6 +103,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_VARIABLE,
   ENVIRONMENT_SECRETS_MAX,
+  EnvironmentStatus,
   GITHUB_ACTOR_ID_PATTERN,
   GitHubAction,
   INBOX_HANDLE_PATTERN,
@@ -1071,6 +1072,7 @@ export class ProjectService implements Service, ProjectBindings {
       ),
     );
     registry.register(projectOperations.resume, ({ params }, caller) => {
+      this.requireProvenEnvironments(params.project_id);
       const record = caller.commit((tx) =>
         this.projectRecord(resumeProject(tx, params.project_id)),
       );
@@ -2177,6 +2179,44 @@ export class ProjectService implements Service, ProjectBindings {
     assert.ok(group, "A readable binding belongs to the current binding set.");
     return targetOf(group, facts);
   }
+  private requireProvenEnvironments(projectId: string): void {
+    const paused = this.operationalStore.transaction(
+      (tx) => requireProject(tx, projectId).paused_at !== null,
+    );
+    if (!paused) return;
+    const { repositories } = this.bindingFactsOf(projectId);
+    const identities = repositories.map((group) => group.resource_identity);
+    if (this.onboarding.environmentsClaimable(projectId, identities)) return;
+    const states = this.onboarding.states(projectId);
+    const environments = repositories.flatMap((group) => {
+      const state = states.find(
+        (candidate) => candidate.resource_identity === group.resource_identity,
+      );
+      const status = state?.status ?? EnvironmentStatus.Pending;
+      if (
+        status === EnvironmentStatus.None ||
+        status === EnvironmentStatus.Ready
+      )
+        return [];
+      return [
+        {
+          binding_name: group.binding_name,
+          status,
+          class:
+            status === EnvironmentStatus.Failed
+              ? (state?.failure?.class ?? null)
+              : null,
+        },
+      ];
+    });
+    throw new OperationError(
+      HttpStatus.Conflict,
+      ProjectErrorCode.EnvironmentNotReady,
+      "A repository binding holds an environment that is not proven.",
+      { environments },
+    );
+  }
+
   private bindingFactsOf(projectId: string): BindingFacts {
     return this.operationalStore.transaction((tx) => {
       const bindings = Array.from(

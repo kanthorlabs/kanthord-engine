@@ -7882,3 +7882,148 @@ for (const [key, body] of [
     });
     assert.deepEqual(answer, { removed: 0, absent: 1, refused: [] });
   });
+
+const NOT_READY_STATUSES = [
+  EnvironmentStatus.Pending,
+  EnvironmentStatus.Building,
+  EnvironmentStatus.Proving,
+  EnvironmentStatus.Failed,
+] as const;
+const RESUME_PARAMS = (projectId: string) => ({ project_id: projectId });
+
+function refusedNotReady(
+  f: ReturnType<typeof fixture>,
+  projectId: string,
+  environments: Array<{
+    binding_name: string;
+    status: EnvironmentStatus;
+    class: string | null;
+  }>,
+) {
+  refuses(
+    () => f.invoke("resume", null, RESUME_PARAMS(projectId)),
+    HttpStatus.Conflict,
+    ProjectErrorCode.EnvironmentNotReady,
+    { environments },
+  );
+  assert.notEqual(
+    f.invoke("get", null, RESUME_PARAMS(projectId)).paused_at,
+    null,
+  );
+}
+
+function environmentIn(
+  t: TestContext,
+  status: (typeof NOT_READY_STATUSES)[number],
+) {
+  if (status === EnvironmentStatus.Building) return imageGroupFixture(t, false);
+  if (status === EnvironmentStatus.Proving)
+    return environmentReadFixture(
+      t,
+      { texts: [DEVCONTAINER_TEXT] },
+      {
+        ...WRITABLE,
+        environmentRuntime: loggedRuntime({
+          proveOnHost: async (_input, signal) => untilAborted(signal),
+        }).runtime,
+      },
+    );
+  return environmentReadFixture(
+    t,
+    status === EnvironmentStatus.Pending ? { resolveFails: true } : {},
+    WRITABLE,
+  );
+}
+
+test("a paused project whose environments are none resumes and clears paused_at", async (t) => {
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  const params = RESUME_PARAMS(saved.project_id);
+  f.invoke("pause", null, params);
+  await untilTrue(() =>
+    f.project.environmentsClaimable(saved.project_id, [identityOf(f, saved)]),
+  );
+  assert.equal(
+    f.project.environmentStates(saved.project_id)[0]?.status,
+    EnvironmentStatus.None,
+  );
+  assert.equal(f.invoke("resume", null, params).paused_at, null);
+});
+
+test("a paused project whose environments are ready resumes and clears paused_at", async (t) => {
+  const { f, params } = imageGroupFixture(t, true);
+  await untilTrue(
+    () =>
+      f.project.environmentStates(params.project_id)[NO_ITEMS]?.status ===
+      EnvironmentStatus.Ready,
+  );
+  f.invoke("pause", null, RESUME_PARAMS(params.project_id));
+  assert.equal(
+    f.invoke("resume", null, RESUME_PARAMS(params.project_id)).paused_at,
+    null,
+  );
+});
+
+for (const status of NOT_READY_STATUSES) {
+  test(`a paused project with a ${status} environment answers 409 environment not_ready and stays paused`, async (t) => {
+    const { f, saved } = environmentIn(t, status);
+    const identity = identityOf(f, saved);
+    f.invoke("pause", null, RESUME_PARAMS(saved.project_id));
+    f.project.environmentClaimed(saved.project_id, identity);
+    if (status === EnvironmentStatus.Failed) {
+      await untilTrue(() =>
+        f.project.environmentsClaimable(saved.project_id, [identity]),
+      );
+      const digest = f.project.environmentDigestOf(saved.project_id, identity);
+      assert.ok(digest);
+      f.project.environmentFailed({
+        project_id: saved.project_id,
+        execution_id: "execution_1",
+        resource_identities: [identity],
+        stop: { code: EnvironmentFailureClass.SetupFailed, detail: "failed" },
+        digests: { [identity]: digest },
+      });
+    } else
+      await untilTrue(
+        () =>
+          f.project.environmentStates(saved.project_id)[NO_ITEMS]?.status ===
+            status ||
+          (status === EnvironmentStatus.Pending &&
+            f.project.environmentStates(saved.project_id).length === ONE_CALL),
+      );
+    refusedNotReady(f, saved.project_id, [
+      {
+        binding_name: REPOSITORY_NAME,
+        status,
+        class:
+          status === EnvironmentStatus.Failed
+            ? EnvironmentFailureClass.SetupFailed
+            : null,
+      },
+    ]);
+  });
+}
+
+test("a repository binding with no record yet answers pending and the refusal triggers the record", async (t) => {
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
+  const params = RESUME_PARAMS(saved.project_id);
+  f.invoke("pause", null, params);
+  assert.deepEqual(f.project.environmentStates(saved.project_id), []);
+  refusedNotReady(f, saved.project_id, [
+    {
+      binding_name: REPOSITORY_NAME,
+      status: EnvironmentStatus.Pending,
+      class: null,
+    },
+  ]);
+  await untilTrue(() => resolveCalls.length > NO_CALLS);
+  assert.equal(f.project.environmentStates(saved.project_id).length, ONE_CALL);
+});
+
+test("an active project answers resume with no environment check", (t) => {
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  assert.equal(
+    f.invoke("resume", null, RESUME_PARAMS(saved.project_id)).paused_at,
+    null,
+  );
+  assert.deepEqual(f.project.environmentStates(saved.project_id), []);
+});
