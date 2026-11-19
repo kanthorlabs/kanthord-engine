@@ -6,6 +6,7 @@ import {
   FlowGrain,
   FlowMeasure,
   FlowStage,
+  type StageWindow,
 } from "./contract.ts";
 import { BIN_COUNT, binOf, percentilesOf } from "./flow-bins.ts";
 import {
@@ -199,30 +200,103 @@ const FUNNEL_ROWS = [
   row({ stage: FlowStage.Outcome, exit: FlowExit.Rework }),
 ];
 
-test("the exits of each stage are at most entered plus unobserved", () => {
-  const stages = stagesOf(
-    FUNNEL_ROWS,
-    NO_HISTOGRAMS,
-    windows(COUNT_TWO),
-    isHosted,
-  );
-  for (const { stage, current } of stages) {
-    const exits = Object.values(current.exits).reduce(
-      (total, exit) => total + (exit?.count ?? NO_COUNT),
-      NO_COUNT,
-    );
-    assert.ok(
-      exits <= current.entered + current.unobserved,
-      `${stage}: ${exits} > ${current.entered} + ${current.unobserved}`,
-    );
-  }
-});
+const F5_ROWS = [
+  row({ stage: FlowStage.Verification, exit: FlowExit.Open }),
+  row({
+    stage: FlowStage.ReleaseGate,
+    exit: FlowExit.HandedOn,
+    executions: COUNT_SIXTEEN,
+    unobserved: COUNT_ONE,
+  }),
+  row({
+    bucket_start: SECOND,
+    stage: FlowStage.ReleaseGate,
+    exit: FlowExit.HandedOn,
+    executions: COUNT_TWO,
+    unobserved: COUNT_TWO,
+  }),
+];
 
-test("release_gate hands on the unobserved execution beyond entered", () => {
+const LAST_STAGE_OF_KIND: readonly FlowStage[] = [
+  FlowStage.ReleaseGate,
+  FlowStage.Outcome,
+];
+
+const STAGE_KIND_OF: Record<FlowStage, string> = {
+  [FlowStage.Queued]: "steps",
+  [FlowStage.Executing]: "steps",
+  [FlowStage.Verification]: "steps",
+  [FlowStage.ReleaseGate]: "steps",
+  [FlowStage.Evaluation]: "evaluation",
+  [FlowStage.Outcome]: "evaluation",
+};
+
+function exitSum(window: StageWindow): number {
+  return Object.values(window.exits).reduce(
+    (total, exit) => total + (exit?.count ?? NO_COUNT),
+    NO_COUNT,
+  );
+}
+
+function bucketWindows(rows: readonly FlowRow[], bucket: number) {
+  const bucketRows = rows
+    .filter((candidate) => candidate.bucket_start === bucket)
+    .map((candidate) => ({ ...candidate, bucket_start: FIRST }));
+  return stagesOf(bucketRows, NO_HISTOGRAMS, windows(COUNT_ONE), isHosted).map(
+    ({ stage, current }) => ({ stage, current }),
+  );
+}
+
+function assertConserved(
+  label: string,
+  stages: { stage: FlowStage; current: StageWindow }[],
+): void {
+  stages.forEach(({ stage, current }, index) => {
+    const exits = exitSum(current);
+    assert.ok(
+      exits <= current.entered,
+      `${label} ${stage}: exits ${exits} > entered ${current.entered}`,
+    );
+    if (LAST_STAGE_OF_KIND.includes(stage))
+      assert.equal(exits, current.entered, `${label} ${stage}`);
+    const next = stages[index + COUNT_ONE];
+    if (
+      next === undefined ||
+      STAGE_KIND_OF[next.stage] !== STAGE_KIND_OF[stage]
+    )
+      return;
+    assert.ok(
+      current.entered + current.unobserved >=
+        next.current.entered + next.current.unobserved,
+      `${label} ${stage} to ${next.stage}`,
+    );
+  });
+}
+
+for (const [name, rows] of [
+  ["FUNNEL_ROWS", FUNNEL_ROWS],
+  ["COUNT_ROWS", COUNT_ROWS],
+  ["F5_ROWS", F5_ROWS],
+] as const) {
+  test(`the stage counts of ${name} are conserved for current and every series bucket`, () => {
+    const stages = stagesOf(rows, NO_HISTOGRAMS, windows(COUNT_TWO), isHosted);
+    assertConserved(`${name} current`, stages);
+    [FIRST, SECOND].forEach((bucket, index) => {
+      const bucketStages = bucketWindows(rows, bucket);
+      assertConserved(`${name} bucket ${index}`, bucketStages);
+      bucketStages.forEach(({ stage, current }) => {
+        const series = stages.find((result) => result.stage === stage)?.series;
+        assert.equal(series?.entered[index], current.entered, stage);
+      });
+    });
+  });
+}
+
+test("release_gate hands on only the executions of entered and keeps the unobserved execution apart", () => {
   const { current } = stageOf(FUNNEL_ROWS, FlowStage.ReleaseGate);
   assert.equal(current.entered, COUNT_FIFTEEN);
   assert.equal(current.unobserved, COUNT_ONE);
-  assert.equal(current.exits.handed_on?.count, COUNT_SIXTEEN);
+  assert.equal(current.exits.handed_on?.count, COUNT_FIFTEEN);
 });
 
 test("evaluation and outcome read the rows of the kind evaluation", () => {

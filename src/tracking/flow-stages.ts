@@ -198,10 +198,12 @@ function reachedRows(
 function exitsOf(stage: FlowStage, rows: readonly FlowRow[]): Exits {
   const exits: Exits = {};
   if (stage === FlowStage.Queued) return exits;
+  const unobservedOf = (row: FlowRow) =>
+    UNOBSERVED_STAGES.has(stage) ? row.unobserved : NO_COUNT;
   for (const row of rows) {
     const previous = exits[row.exit] ?? { count: 0, cost_usd: 0 };
     exits[row.exit] = {
-      count: previous.count + row.executions,
+      count: previous.count + row.executions - unobservedOf(row),
       cost_usd: previous.cost_usd + row.cost_usd,
     };
   }
