@@ -46,6 +46,7 @@ function fixture(t: TestContext) {
 }
 
 const FILE_TOOLS = ["read", "grep", "find", "ls"];
+const WRITE_TOOLS = ["edit", "write"];
 
 test("a path that leaves the checkout is blocked with a reason that names the path", (t) => {
   const f = fixture(t);
@@ -82,8 +83,32 @@ test("a relative path inside the checkout, no path and an absent path pass", (t)
       assert.equal(f.call(tool, input), undefined);
 });
 
+test("(security) an edit and a write with an absolute path, a parent path or a symlink out of the root are blocked", (t) => {
+  const f = fixture(t);
+  for (const tool of WRITE_TOOLS)
+    for (const path of [
+      join(f.outside, "secret.txt"),
+      "../outside/secret.txt",
+      "src/../../outside/new.txt",
+      "link/secret.txt",
+      "link/new.txt",
+      "secret-link",
+    ])
+      assert.deepEqual(f.call(tool, { path }), {
+        block: true,
+        reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
+      });
+});
+
+test("(happy path) an edit and a write with a relative path inside the root pass", (t) => {
+  const f = fixture(t);
+  for (const tool of WRITE_TOOLS)
+    for (const path of ["package.json", "src/new.ts", "absent/deep/file.ts"])
+      assert.equal(f.call(tool, { path }), undefined);
+});
+
 test("every other tool name passes unchanged", (t) => {
   const f = fixture(t);
-  for (const tool of ["bash", "probe", "environment_write", "edit"])
+  for (const tool of ["bash", "probe", "environment_write"])
     assert.equal(f.call(tool, { path: "/etc/passwd" }), undefined);
 });

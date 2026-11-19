@@ -150,6 +150,7 @@ const INVALID_OVERRIDE_TEXT = "bell\u0007";
 const OVERRIDE_TEXT = "Answer in one sentence.";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
+const READ_TOOL = "read";
 const FIRST_MESSAGE = "List the open objectives.";
 
 function failed<T>(
@@ -1058,6 +1059,35 @@ const NO_DESCRIPTION = "";
 const OPS_OPERATION_COUNT = 36;
 const NODE_REVIEW_READ_COUNT = 6;
 const FAST_POLL_MS = 2000;
+
+test("(security) a read of a session file by absolute path is blocked and reaches no guard", async (t) => {
+  const content = "other session transcript";
+  const target = { path: "" };
+  const fixture = await workbenchFixture(t, [
+    () => toolCall(READ_TOOL, { path: target.path }),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  const sessionFile = join(
+    fixture.stateDirectory,
+    "pi",
+    "sessions",
+    "workbench",
+    AGENT,
+    "other-session.jsonl",
+  );
+  writeFileSync(sessionFile, content);
+  target.path = sessionFile;
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const [result, ...rest] = toolResults(entries);
+  assert.deepEqual(rest, []);
+  assert.equal(result?.toolName, READ_TOOL);
+  assert.equal(result?.isError, true);
+  assert.ok(result?.text.includes(sessionFile));
+  assert.equal(JSON.stringify(entries).includes(content), false);
+  assert.deepEqual(callsOf(fixture, GUARD_PROMPT), []);
+});
 
 function toolCall(name: string, args: Parameters<typeof fauxToolCall>[1]) {
   return fauxAssistantMessage(fauxToolCall(name, args), {
@@ -2415,13 +2445,14 @@ function redactionRecords(fixture: Fixture): Record<string, unknown>[] {
 }
 
 test("a fake key of a workbench message reaches no model request, and its marker restores into write after configure", async (t) => {
-  const path = join(temporary(t), KEY_FILE);
   const fixture = await workbenchFixture(t, [
     fauxAssistantMessage(ANSWER),
-    (context) => toolCall("write", { path, content: contextMarker(context) }),
+    (context) =>
+      toolCall("write", { path: KEY_FILE, content: contextMarker(context) }),
     fauxAssistantMessage(ANSWER),
   ]);
   const session = await createSession(fixture);
+  const path = join(fixture.stateDirectory, "workbench", AGENT, KEY_FILE);
   completed(await message(fixture, session.id, `key ${FAKE_KEY}`));
   await untilIdle(fixture, session.id, t.signal);
   await configureBackup(fixture, session.id);

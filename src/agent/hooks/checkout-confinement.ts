@@ -4,7 +4,14 @@ import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { isString } from "../../kernel/values.ts";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
-const FILE_TOOLS: ReadonlySet<string> = new Set(["read", "grep", "find", "ls"]);
+const FILE_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+  "edit",
+  "write",
+]);
 const HOME_PREFIX = "~";
 const PARENT_SEGMENT = "..";
 const SEGMENT_SEPARATOR = /[\\/]/;
