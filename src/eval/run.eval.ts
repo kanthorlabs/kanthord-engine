@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { credentialSourceOf } from "./credential.ts";
-import { SuiteRun } from "./run.ts";
+import { SuiteRun, variantOf } from "./run.ts";
 
 const DEFAULT_REPEAT = 3;
 const MIN_REPEAT = 1;
@@ -36,6 +36,7 @@ const suite = new SuiteRun({
   history: required("EVAL_HISTORY"),
   rerun: process.env.EVAL_RERUN === RERUN_ENABLED,
   credential: credentialSourceOf(process.env),
+  variant: variantOf(process.env) ?? undefined,
 });
 
 for (const job of suite.jobs) test(job.title, (t) => suite.play(t, job));

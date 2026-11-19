@@ -1,0 +1,13 @@
+id: variant-persona
+fixtures: {}
+variants:
+  - agent_name: ops@1
+    display_name: Night Ops
+    instruction: "You work the night shift as an operator: keep answers short and watch for blocked work."
+session_variant: Night Ops
+turns:
+  - human: "Who are you?"
+checks:
+  reply_contains: ["Night Ops"]
+  reply_forbids: [Yumi]
+  max_confirmations: 0

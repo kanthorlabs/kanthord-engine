@@ -52,12 +52,14 @@ import {
   ApprovalAnswer,
   AutoMode,
   type Case,
+  type CaseVariant,
   EVAL_DIRECTORY,
   type FixtureEntry,
   type FixtureIds,
   type LoadedCase,
   type NativePlaceholders,
   type PlaceholderIds,
+  resolveDisplayName,
   resolvePlaceholders,
   SeedStep,
   type SeedStepValue,
@@ -84,6 +86,7 @@ export const CheckKind = {
   Seed: "seed",
   Turn: "turn",
   Fork: "fork",
+  Variant: "variant",
 } as const;
 
 const FIXTURE_REASON = "eval fixture";
@@ -118,8 +121,11 @@ const GUEST_NAME = "Anna";
 
 type GatewayFixture = Awaited<ReturnType<typeof gatewayFixture>>;
 
+export type RunVariant = Pick<CaseVariant, "display_name" | "instruction">;
+
 export interface SandboxOptions {
   subject: string;
+  variant?: RunVariant | undefined;
   credential: CredentialSource;
   configuration: WorkbenchConfiguration;
   agents?: readonly string[];
@@ -136,6 +142,7 @@ export interface SummarizerMeter {
 
 export interface Sandbox {
   subject: string;
+  variantId: string | null;
   summarizer: SummarizerMeter;
   evalDirectory: string;
   configuration: WorkbenchConfiguration;
@@ -196,8 +203,17 @@ export async function openSandbox(
   );
   await enableGuard(fixture, credential.platform);
   await connectEvalInstances(t, fixture);
+  const variant =
+    options.variant === undefined
+      ? null
+      : await humanCaller(fixture)(agentOperations["variant.create"], {
+          params: {},
+          query: {},
+          body: { agent_name: options.subject, ...options.variant },
+        });
   return {
     subject: options.subject,
+    variantId: variant?.id ?? null,
     summarizer,
     evalDirectory: options.evalDirectory ?? EVAL_DIRECTORY,
     configuration: options.configuration,
@@ -773,6 +789,7 @@ function usageOf(session: WorkbenchSession, meter: SummarizerMeter) {
 export interface TurnsRun extends Pick<Case, "turns" | "checks" | "auto_mode"> {
   project_ids: readonly string[];
   grant: readonly string[];
+  variant_id: string | null;
 }
 
 export async function runTurns(
@@ -782,15 +799,23 @@ export async function runTurns(
   const created = await sandbox.call(workbenchOperations["session.create"], {
     params: {},
     query: {},
-    body: { agent_name: sandbox.subject, ...sandbox.configuration },
+    body: {
+      agent_name: sandbox.subject,
+      ...sandbox.configuration,
+      ...(run.variant_id === null ? {} : { variant_id: run.variant_id }),
+    },
   });
+  const { turns, checks } = resolveDisplayName(
+    { turns: run.turns, checks: run.checks },
+    created.members[0]!.display_name,
+  );
   if (run.auto_mode === AutoMode.Off)
     await sandbox.call(workbenchOperations["session.autoMode.set"], {
       params: { session_id: created.id },
       query: {},
       body: { enabled: false },
     });
-  const guest = run.turns.some(isGuestTurn)
+  const guest = turns.some(isGuestTurn)
     ? await joinGuest(sandbox, created.id, run.project_ids, run.grant)
     : null;
   const tally: Tally = {
@@ -800,7 +825,7 @@ export async function runTurns(
   };
   let sessionId = created.id;
   let timedOut = false;
-  for (const turn of run.turns) {
+  for (const turn of turns) {
     let started: TurnStart;
     try {
       started = await startTurn(sandbox, sessionId, turn, guest);
@@ -840,7 +865,7 @@ export async function runTurns(
     scope_requests: openRequestsOf(final),
   };
   const score = await scoreRun(
-    run.checks,
+    checks,
     observation,
     (id, input) => sandbox.call(sandbox.operation(id), input),
     sandbox.find,
@@ -880,7 +905,33 @@ function failedPlay(kind: string, detail: string): PlayedCase {
 
 export interface PreparedCase {
   ids: PlaceholderIds;
+  variant_id: string | null;
   failed: PlayedCase | null;
+}
+
+async function createCaseVariants(
+  sandbox: Sandbox,
+  variants: readonly CaseVariant[],
+): Promise<Map<string, string>> {
+  const created = new Map<string, string>();
+  for (const variant of variants) {
+    const row = await sandbox.call(agentOperations["variant.create"], {
+      params: {},
+      query: {},
+      body: variant,
+    });
+    created.set(variant.display_name, row.id);
+  }
+  return created;
+}
+
+function sessionVariantOf(
+  sandbox: Sandbox,
+  loaded: LoadedCase,
+  created: ReadonlyMap<string, string>,
+): string | null {
+  if (loaded.session_variant === undefined) return sandbox.variantId;
+  return created.get(loaded.session_variant) ?? null;
 }
 
 export async function prepareCase(
@@ -888,6 +939,17 @@ export async function prepareCase(
   loaded: LoadedCase,
 ): Promise<PreparedCase> {
   const ids: PlaceholderIds = {};
+  let created: Map<string, string>;
+  try {
+    created = await createCaseVariants(sandbox, loaded.variants);
+  } catch (error) {
+    return {
+      ids,
+      variant_id: null,
+      failed: failedPlay(CheckKind.Variant, failureDetail(error)),
+    };
+  }
+  const variantId = sessionVariantOf(sandbox, loaded, created);
   for (const key of Object.keys(loaded.fixtures).sort())
     ids[key] = await provisionFixture(
       sandbox,
@@ -898,7 +960,12 @@ export async function prepareCase(
     sandbox,
     resolvePlaceholders(loaded.setup, ids, sandbox.native),
   );
-  if (setup) return { ids, failed: failedPlay(CheckKind.Setup, setup) };
+  if (setup)
+    return {
+      ids,
+      variant_id: variantId,
+      failed: failedPlay(CheckKind.Setup, setup),
+    };
   for (const step of loaded.seed)
     try {
       await seedStep(
@@ -907,16 +974,20 @@ export async function prepareCase(
         ids,
       );
     } catch (error) {
-      return { ids, failed: failedPlay(CheckKind.Seed, failureDetail(error)) };
+      return {
+        ids,
+        variant_id: variantId,
+        failed: failedPlay(CheckKind.Seed, failureDetail(error)),
+      };
     }
-  return { ids, failed: null };
+  return { ids, variant_id: variantId, failed: null };
 }
 
 export async function playCase(
   sandbox: Sandbox,
   loaded: LoadedCase,
 ): Promise<PlayedCase> {
-  const { ids, failed } = await prepareCase(sandbox, loaded);
+  const { ids, variant_id, failed } = await prepareCase(sandbox, loaded);
   if (failed) return failed;
   return runTurns(sandbox, {
     ...resolvePlaceholders(
@@ -930,5 +1001,6 @@ export async function playCase(
     ),
     project_ids: loaded.project_ids.map((key) => ids[key]!.project_id),
     grant: loaded.grant,
+    variant_id,
   });
 }
