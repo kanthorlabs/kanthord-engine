@@ -24,6 +24,7 @@ import {
 } from "../scheduler/contract.ts";
 
 export const AGENT_COMPONENT_NAME = "agent";
+export const AGENT_VARIANT_PREFIX = "agent_variant";
 export const AGENT_NAMES = [
   "swe@1",
   "re@1",
@@ -182,6 +183,12 @@ export const AgentErrorCode = {
   PromptTemplateInvalid: "agent.prompt.template_invalid",
   PromptSourceInvalid: "agent.prompt.source_invalid",
   PromptRecordAbsent: "agent.prompt.record_absent",
+  VariantNotFound: "agent.variant.not_found",
+  VariantNameInvalid: "agent.variant.name_invalid",
+  VariantNameTaken: "agent.variant.name_taken",
+  VariantBaseRefused: "agent.variant.base_refused",
+  VariantRevisionConflict: "agent.variant.revision_conflict",
+  VariantInUse: "agent.variant.in_use",
 } as const;
 
 export type AgentProviderItem = {

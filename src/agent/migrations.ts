@@ -14,6 +14,14 @@ const createAgentTables: Migration = (database) => {
       fallback_configurations TEXT NOT NULL DEFAULT '[]'
     );
     CREATE UNIQUE INDEX agent_enablement_agent_name_revision ON agent_enablement (agent_name, revision);
+    CREATE TABLE agent_variant (
+      id TEXT NOT NULL PRIMARY KEY,
+      agent_name TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      instruction TEXT NOT NULL,
+      revision INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX agent_variant_display_name ON agent_variant (display_name COLLATE NOCASE);
   `);
 };
 
