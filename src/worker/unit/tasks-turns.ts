@@ -10,6 +10,8 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
+import { isObject, ValueType } from "../../kernel/values.ts";
+import { BuiltinTool } from "../../agent/catalog.ts";
 import type { TasksOutput } from "./tasks-output.ts";
 import { tasksDiagnostic, TasksErrorCode } from "./tasks-seed.ts";
 import {
@@ -35,6 +37,18 @@ export interface Divergence {
   step: string | null;
 }
 
+export interface Drift {
+  turn: number;
+  step: string | null;
+  message_index: number;
+  tool_call_id: string;
+  tool_name: string;
+}
+
+interface SentRequest {
+  messages: readonly Record<string, unknown>[];
+}
+
 const OUTPUT_TOKEN = "<kanthord:output>";
 const BASH_LOG_TOKEN = "<kanthord:pi-bash-log>";
 const BASH_LOG_PATTERN = /[^\s"\]]*pi-bash-[0-9a-f]+\.log/g;
@@ -43,6 +57,7 @@ const STOP_FAILURES: readonly string[] = ["error", "aborted"];
 const DIVERGED = "The replay diverged from the recorded turns.";
 const NEXT_TURN = 1;
 const NO_TOOLS = 0;
+const TOOL_RESULT_ROLE = "toolResult";
 
 class OutputPaths {
   private readonly forms: readonly string[];
@@ -78,6 +93,38 @@ function sentPart(message: object): object {
   return Object.fromEntries(
     Object.entries(message).filter(([key]) => !UNSENT_KEYS.includes(key)),
   );
+}
+
+const HOST_OUTPUT_TOOLS: readonly unknown[] = Object.values(BuiltinTool);
+const TEXT_PART = "text";
+
+function isHostOutput(message: Record<string, unknown>): boolean {
+  return (
+    message.role === TOOL_RESULT_ROLE &&
+    HOST_OUTPUT_TOOLS.includes(message.toolName) &&
+    typeof message.toolCallId === ValueType.String &&
+    Array.isArray(message.content)
+  );
+}
+
+function shapeOfPart(part: unknown): unknown {
+  if (!isObject(part) || (part as { type?: unknown }).type !== TEXT_PART)
+    return part;
+  return { ...part, text: null };
+}
+
+function structureOf(request: SentRequest): string {
+  return canonicalJSON({
+    ...request,
+    messages: request.messages.map((message) =>
+      isHostOutput(message)
+        ? {
+            ...message,
+            content: (message.content as unknown[]).map(shapeOfPart),
+          }
+        : message,
+    ),
+  });
 }
 
 function ruleMarker(_whole: string, rule: string): string {
@@ -139,6 +186,7 @@ export class Turns {
   private readonly paths: OutputPaths;
   private position = 0;
   private divergence: Divergence | null = null;
+  private readonly drifted = new Map<string, Drift>();
   private writeError: unknown = null;
 
   constructor(input: TurnsInput) {
@@ -155,6 +203,10 @@ export class Turns {
 
   get diverged(): Divergence | null {
     return this.divergence;
+  }
+
+  get drifts(): Drift[] {
+    return [...this.drifted.values()];
   }
 
   get failure(): unknown {
@@ -202,6 +254,22 @@ export class Turns {
     throw new Error(DIVERGED);
   }
 
+  private drift(recorded: SentRequest, sent: SentRequest, turn: number): void {
+    recorded.messages.forEach((message, index) => {
+      if (canonicalJSON(message) === canonicalJSON(sent.messages[index]))
+        return;
+      const callId = message.toolCallId as string;
+      if (this.drifted.has(callId)) return;
+      this.drifted.set(callId, {
+        turn,
+        step: this.output.currentStep,
+        message_index: index,
+        tool_call_id: callId,
+        tool_name: message.toolName as string,
+      });
+    });
+  }
+
   private requestOf(model: Model<Api>, messages: readonly object[]): unknown {
     const text = JSON.stringify({
       kind: TurnKind.Request,
@@ -223,8 +291,13 @@ export class Turns {
     const number = this.position + NEXT_TURN;
     if (turn === undefined)
       return this.diverge(DivergeReason.RequestExtra, number);
-    if (turn.request !== canonicalJSON(request))
-      return this.diverge(DivergeReason.RequestDiffers, number);
+    if (turn.request !== canonicalJSON(request)) {
+      const recorded = JSON.parse(turn.request) as SentRequest;
+      const sent = request as SentRequest;
+      if (structureOf(recorded) !== structureOf(sent))
+        return this.diverge(DivergeReason.RequestDiffers, number);
+      this.drift(recorded, sent, number);
+    }
     if (turn.redacted)
       return this.diverge(DivergeReason.RedactedRecord, number);
     this.position += NEXT_TURN;

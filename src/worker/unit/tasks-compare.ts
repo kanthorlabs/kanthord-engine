@@ -55,6 +55,7 @@ const resultFileSchema = z.strictObject({
   overrides: z.unknown(),
   seed_digest: z.string().min(1),
   checks: z.unknown(),
+  drift: z.unknown().optional(),
   code: z.string().optional(),
   fields: z.unknown().optional(),
 });

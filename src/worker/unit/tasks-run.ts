@@ -424,6 +424,7 @@ function resultRecord(target: RunTarget, written: Written) {
     overrides: plan.overrides,
     seed_digest: plan.digest,
     checks,
+    drift: replay === null ? null : (target.turns?.drifts ?? []),
   };
 }
 
@@ -664,6 +665,7 @@ interface RunTarget {
   plan: TasksPlan;
   output: TasksOutput;
   replay: LocalReplay | null;
+  turns?: Turns;
 }
 
 function endOf(kind: RunEndKind): RunEnd {
