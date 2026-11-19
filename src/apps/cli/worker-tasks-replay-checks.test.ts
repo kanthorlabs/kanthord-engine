@@ -305,4 +305,34 @@ suite("worker tasks run replay checks", () => {
       assert.ok(!existsSync(join(out, "nested")));
     },
   );
+
+  test(
+    "an --output with --force that names the recorded folder in another case fails with option_invalid and keeps the folder",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const turns = await liveRun(
+        fixture,
+        scriptedProvider([writeGood(), fauxAssistantMessage("done")]),
+      );
+      const output = join(fixture.root, "OUT");
+      if (!existsSync(output)) {
+        t.skip("The temporary file system is case sensitive.");
+        return;
+      }
+      const replay = commandRun(fixture, scriptedProvider([]));
+      const failed = await diagnosticOf(
+        tasksRun(
+          fixture.seedFolder,
+          replayOptions(fixture, turns, { output, force: true }),
+          replay.io,
+        ),
+      );
+      assert.deepEqual(
+        [failed.code, failed.fields],
+        [TasksErrorCode.OptionInvalid, [["option", "--output"]]],
+      );
+      assert.ok(existsSync(turns));
+    },
+  );
 });

@@ -170,7 +170,7 @@ function replayPathOf(options: TasksRunOptions, cwd: string): string | null {
 
 function realPathOf(path: string): string {
   const parent = dirname(path);
-  if (existsSync(path) || parent === path) return realpathSync(path);
+  if (existsSync(path) || parent === path) return realpathSync.native(path);
   return join(realPathOf(parent), basename(path));
 }
 
