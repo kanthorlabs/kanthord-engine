@@ -13,6 +13,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { shippedAsset } from "../kernel/assets.ts";
+import { freeDiskOf } from "../kernel/disk.ts";
 import type { NodeBodyOf } from "../mission/contract.ts";
 import {
   background,
@@ -802,6 +803,7 @@ export interface Dependencies {
   config: ProjectConfig;
   operationalStore: Store;
   stateDirectory: string;
+  diskFreeRatio: number;
   hostHome?: string;
   createMission: CreateMission;
   nodeBodyOf: NodeBodyOf;
@@ -964,6 +966,9 @@ export class ProjectService implements Service, ProjectBindings {
         this.environments.resolveGroup(bindingId, target, context),
       baseCommitOf: (bindingId, context) =>
         this.environments.baseCommitOf(bindingId, context),
+      probePush: (...input) => this.environments.probePush(...input),
+      freeDisk: () => freeDiskOf(this.stateDirectory),
+      diskFreeRatio: dependencies.diskFreeRatio,
       runtime: dependencies.environmentRuntime,
       proofs,
       secrets: new EnvironmentSecrets({

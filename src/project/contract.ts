@@ -725,6 +725,14 @@ export type RepositoryFiles = {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<string>;
+  probePush(
+    address: string,
+    baseCommit: string,
+    branch: string,
+    context: Context,
+    deadlineMs: number,
+    ssh: SshAccess,
+  ): Promise<void>;
 };
 export type RepositoryBindingIdsOf = (
   tx: Transaction,
@@ -969,6 +977,8 @@ export const EnvironmentFailureClass = {
   CommandAbsent: "command_absent",
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
+  PushRefused: "push_refused",
+  DiskLow: "disk_low",
 } as const;
 export type EnvironmentFailureClass =
   (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];

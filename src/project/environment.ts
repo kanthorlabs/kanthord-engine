@@ -61,6 +61,7 @@ import {
 } from "./instruction-file.ts";
 
 export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
+const PREFLIGHT_BRANCH_PREFIX = "kanthord/preflight-";
 export const EnvironmentErrorCode = {
   Invalid: "project.environment.invalid",
   KeyRefused: "project.environment.key_refused",
@@ -596,6 +597,28 @@ export class ProjectEnvironments {
       address,
       commit,
       directory,
+      context,
+      ENVIRONMENT_CLONE_TIMEOUT_MS,
+      ssh,
+    );
+  }
+
+  async probePush(
+    bindingId: string,
+    commit: string,
+    runId: string,
+    context: Context,
+  ): Promise<void> {
+    const config = this.dependencies.store.transaction((tx) => {
+      const binding = readBindingRevision(tx, bindingId);
+      assert.ok(binding);
+      return repositoryConfigSchema.parse(binding.config);
+    });
+    const { address, ssh } = this.access(bindingId, config);
+    await this.dependencies.repositoryFiles.probePush(
+      address,
+      commit,
+      `${PREFLIGHT_BRANCH_PREFIX}${runId}`,
       context,
       ENVIRONMENT_CLONE_TIMEOUT_MS,
       ssh,

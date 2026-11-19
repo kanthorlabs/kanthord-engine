@@ -41,6 +41,7 @@ import {
   pushRefusalOf,
   type SshAccess,
   type SshKeyAccess,
+  workflowScopeMessage,
 } from "../repository/index.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
@@ -107,6 +108,13 @@ function pushFailure(error: GitWriteError): CallAnswer {
       class: ResultClass.FinalRefusal,
       code: GIT_PUSH_REFUSED,
       message: refusal.detail,
+    };
+  if (refusal?.kind === PushRefusalKind.WorkflowScope)
+    return {
+      ok: false,
+      class: ResultClass.FinalRefusal,
+      code: GIT_PUSH_REFUSED,
+      message: workflowScopeMessage(refusal.detail),
     };
   return {
     ok: false,

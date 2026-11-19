@@ -161,6 +161,8 @@ components:
                               - command_absent
                               - affected_invalid
                               - affected_timeout
+                              - push_refused
+                              - disk_low
                           - type: "null"
                       origin:
                         type: string

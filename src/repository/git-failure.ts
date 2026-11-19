@@ -9,6 +9,7 @@ export const GIT_DEADLINE_EXCEEDED = "Git deadline exceeded";
 export const PushRefusalKind = {
   NonFastForward: "non_fast_forward",
   Rule: "rule",
+  WorkflowScope: "workflow_scope",
 } as const;
 export type PushRefusalKind =
   (typeof PushRefusalKind)[keyof typeof PushRefusalKind];
@@ -19,6 +20,8 @@ export interface PushRefusal {
 
 const NON_FAST_FORWARD_STDERR =
   /! \[rejected\][^\n]*(fetch first|non-fast-forward)/;
+const WORKFLOW_SCOPE_STDERR =
+  /^.*refusing to allow .* to create or update workflow .* without `workflow` scope.*$/m;
 const RULE_REFUSAL_STDERR = /GH006|GH013|protected branch/;
 const GIT_EXIT_PREFIX = /^.*?git exited with \d+: /;
 const MAX_CAUSE_DEPTH = 8;
@@ -96,8 +99,18 @@ function firstLineOf(stderr: string): string {
   );
 }
 
+export function workflowScopeMessage(detail: string): string {
+  return `The binding credential has no \`workflow\` scope: ${detail}`;
+}
+
 export function pushRefusalOf(error: unknown): PushRefusal | null {
   const stderr = stderrOf(error);
+  const workflow = WORKFLOW_SCOPE_STDERR.exec(stderr)?.[0];
+  if (workflow !== undefined)
+    return {
+      kind: PushRefusalKind.WorkflowScope,
+      detail: workflow.replace(GIT_EXIT_PREFIX, "").trim(),
+    };
   if (RULE_REFUSAL_STDERR.test(stderr))
     return { kind: PushRefusalKind.Rule, detail: firstLineOf(stderr) };
   if (NON_FAST_FORWARD_STDERR.test(stderr))
@@ -106,4 +119,13 @@ export function pushRefusalOf(error: unknown): PushRefusal | null {
       detail: firstLineOf(stderr),
     };
   return null;
+}
+
+export function pushTailOf(error: unknown): string {
+  const refusal = pushRefusalOf(error);
+  if (refusal?.kind === PushRefusalKind.WorkflowScope)
+    return workflowScopeMessage(refusal.detail);
+  const stderr = stderrOf(error);
+  if (stderr.length > NO_CHARACTERS) return stderr;
+  return error instanceof Error ? error.message : String(error);
 }

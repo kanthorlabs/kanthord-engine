@@ -22,6 +22,7 @@ import {
   gitLsRemote,
   landedOn,
   listFilesAtCommit,
+  probePush,
   pushNodeBranch,
   pushSnapshotFresh,
   readFilesAtCommit,
@@ -30,7 +31,11 @@ import {
   resolveBranchCommit,
   squashPushFresh,
 } from "./connector.ts";
-export { pushRefusalOf, PushRefusalKind } from "./git-failure.ts";
+export {
+  pushRefusalOf,
+  PushRefusalKind,
+  workflowScopeMessage,
+} from "./git-failure.ts";
 import { RepositoryErrorCode } from "./contract.ts";
 import { GitHubPlatform } from "./github.ts";
 import { knownHostsLine } from "./host-key.ts";
@@ -102,6 +107,7 @@ export const repositoryFiles = {
   listFilesAtCommit,
   readObjectIds,
   cloneSnapshot,
+  probePush,
 };
 
 export type KnownHostsOf = (tx: Transaction, address: string) => string;

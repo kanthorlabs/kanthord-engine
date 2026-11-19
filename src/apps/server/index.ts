@@ -1312,6 +1312,7 @@ export function composeServices(options: ComposeServicesOptions) {
     config: options.config.project,
     operationalStore: options.store,
     stateDirectory: options.stateDirectory,
+    diskFreeRatio: options.config.footprint.disk_free_ratio,
     wakeup: { wake: (projectId) => scheduler.wake(projectId) },
     endRegistrations: (tx, projectId, resourceIdentity, now) =>
       worker.endRegistrations(tx, projectId, resourceIdentity, now),

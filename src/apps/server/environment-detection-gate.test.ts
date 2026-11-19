@@ -73,6 +73,7 @@ appendFileSync(${JSON.stringify(log)}, readFileSync(config, "utf8") + "\\n");
 async function memoryRepository(
   t: TestContext,
   files: Record<string, string>,
+  probes: string[],
 ): Promise<RepositoryFiles> {
   const seed = join(temporary(t), "seed");
   mkdirSync(seed);
@@ -94,6 +95,9 @@ async function memoryRepository(
       ),
     listFilesAtCommit: async () => [],
     readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
+    probePush: async (_address, _commit, branch) => {
+      probes.push(branch);
+    },
     cloneSnapshot: async (_address, revision, directory) => {
       cpSync(seed, directory, { recursive: true });
       return revision;
@@ -154,12 +158,13 @@ async function detectionFixture(
     },
   };
   const starts: SlotStart[] = [];
+  const probes: string[] = [];
   const fixture = await gateFixture(t, {
     containerImage: CONTAINER_IMAGE,
     containerRuntimeHost: host,
     environmentDevcontainerCli: () => devcontainer.cli,
     containerSlotDriver: recordingSlotDriver(podman, starts),
-    repositoryFiles: await memoryRepository(t, files),
+    repositoryFiles: await memoryRepository(t, files, probes),
   });
   if (placement === WorkerPlacement.Container) {
     fixture.worker.startPool();
@@ -176,7 +181,7 @@ async function detectionFixture(
       ? { workerEnvironment: REPOSITORY_BINDING }
       : {}),
   });
-  return { fixture, podman, devcontainer, starts, project };
+  return { fixture, podman, devcontainer, starts, project, probes };
 }
 
 type Detection = Awaited<ReturnType<typeof detectionFixture>>;
@@ -331,6 +336,9 @@ test(
     const none = await settled(t, detection);
     assert.equal(none.status, EnvironmentStatus.None);
     assert.equal(none.target, EnvironmentTarget.Host);
+    assert.equal(detection.probes.length, SINGLE_SLOT);
+    assert.match(detection.probes[0]!, /^kanthord\/preflight-.+/);
+    assert.deepEqual(proofCommands(detection), []);
     assert.deepEqual(detection.devcontainer.builds(), []);
     assert.deepEqual(detection.podman.commands(), []);
     assert.deepEqual(
@@ -372,5 +380,6 @@ test(
     assert.equal(ready.source, EnvironmentSource.Detected);
     assert.equal(ready.target, EnvironmentTarget.Host);
     assert.equal(existsSync(marker), true);
+    assert.equal(detection.probes.length, SINGLE_SLOT);
   },
 );

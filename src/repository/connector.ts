@@ -1042,6 +1042,44 @@ async function pushSnapshotWith(
   });
 }
 
+export async function probePush(
+  address: string,
+  baseCommit: string,
+  branch: string,
+  context: Context,
+  deadlineMs: number,
+  ssh: SshAccess,
+): Promise<void> {
+  assert.match(baseCommit, COMMIT_PATTERN);
+  assert.ok(!branch.startsWith(OPTION_PREFIX));
+  const deadlineAt = Date.now() + deadlineMs;
+  const ref = `refs/heads/${branch}`;
+  await beforePush(() =>
+    withAccess(ssh, context, deadlineMs, (agent) =>
+      inFreshDirectory(freshWriteDirectory, async (directory) => {
+        const git = gitIn(directory, context, deadlineAt, "probe push", agent);
+        await atStage(GitStage.BeforePush, async () => {
+          await cloneWith(
+            address,
+            directory,
+            context,
+            remainingMs(deadlineAt),
+            agent,
+          );
+          await git(["check-ref-format", "--branch", branch]);
+          await git(["fetch", "origin", baseCommit]);
+        });
+        await atStage(GitStage.Push, () =>
+          git(["push", "origin", `${baseCommit}:${ref}`]),
+        );
+        await atStage(GitStage.Push, () =>
+          git(["push", "origin", "--delete", ref]),
+        );
+      }),
+    ),
+  );
+}
+
 export async function landedOn(
   input: BranchCommitInput,
   context: Context,

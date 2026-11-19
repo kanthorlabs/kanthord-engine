@@ -140,6 +140,10 @@ const APP_NAME = "app";
 const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
 const SETUP_FAILED = "setup_failed";
+const PUSH_REFUSED = "push_refused";
+const DISK_LOW = "disk_low";
+const DISK_FREE_RATIO = 0.1;
+const DISK_LOW_TAIL = "free_bytes=9 total_bytes=100 ratio=0.1";
 const GO_DOWNLOAD = "go mod download";
 const PROOF_CRASHED = "proof crashed";
 const TWO_CALLS = 2;
@@ -268,6 +272,9 @@ class Harness {
   buildError: Error | null = null;
   proveResults: CommandResult[] = [];
   proveError: Error | null = null;
+  probeError: Error | null = null;
+  probeCalls: Array<{ bindingId: string; commit: string; runId: string }> = [];
+  disk = { free_bytes: 50, total_bytes: 100 };
   images = new Map<string, string>([
     [BASE, "sha256:base"],
     [SLOT_IMAGE, "sha256:slot"],
@@ -278,6 +285,7 @@ class Harness {
   removeTagsGate: Deferred | null = null;
   calls: string[] = [];
   events: string[] = [];
+  order: string[] = [];
   buildInputs: ImageBuildInput[] = [];
   proveInputs: ProofInput[] = [];
   woken: string[] = [];
@@ -353,6 +361,7 @@ class Harness {
         signal: AbortSignal,
       ) => {
         this.events.push("prove");
+        this.order.push("prove");
         this.proveInputs.push(input);
         await hold(this.proveGate, signal);
         if (this.proveError !== null) throw this.proveError;
@@ -360,6 +369,7 @@ class Harness {
       },
       proveOnHost: async (input: ProofInput, signal: AbortSignal) => {
         this.events.push("proveOnHost");
+        this.order.push("proveOnHost");
         this.proveInputs.push(input);
         await hold(this.proveGate, signal);
         if (this.proveError !== null) throw this.proveError;
@@ -418,6 +428,16 @@ class Harness {
         if (this.headCommit instanceof Error) throw this.headCommit;
         return this.headCommit;
       },
+      probePush: async (bindingId, commit, runId) => {
+        this.order.push("probePush");
+        this.probeCalls.push({ bindingId, commit, runId });
+        if (this.probeError !== null) throw this.probeError;
+      },
+      freeDisk: async () => {
+        this.order.push("freeDisk");
+        return this.disk;
+      },
+      diskFreeRatio: DISK_FREE_RATIO,
       runtime,
       proofs: this.proofs,
       secrets: {
@@ -919,7 +939,10 @@ test("at remote the status is failed by a failed proof file, or none", async (t)
   const sum = h.digest();
   await h.compute();
   assert.equal(h.state().target, EnvironmentTarget.Remote);
+  assert.equal(h.state().status, EnvironmentStatus.Proving);
+  await h.ended();
   assert.equal(h.state().status, EnvironmentStatus.None);
+  assert.deepEqual(h.order, ["probePush"]);
   assert.deepEqual(h.resolveCalls[0], {
     bindingId: APP.binding_id,
     target: EnvironmentTarget.Remote,
@@ -1111,6 +1134,7 @@ test("environmentsClaimable answers true for none and ready only", async (t) => 
 
   const none = new Harness(t);
   none.resolution = NOTHING;
+  none.writeProof(proofFile(none.digest()));
   await none.compute();
   assert.equal(claimableOf(none), true);
 
@@ -1168,6 +1192,7 @@ test(
 test("a group that becomes claimable by a compute wakes the project once", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
+  h.writeProof(proofFile(h.digest()));
   await h.compute();
   await h.compute();
   assert.deepEqual(h.woken, [PROJECT]);
@@ -1631,6 +1656,7 @@ test("rebuild answers 404 for an unknown, a foreign, a removed and a worker bind
 test("bindingsChanged sets a changed record to pending before it returns, computes again and drops a removed binding", async (t) => {
   const h = new Harness(t);
   h.resolution = NOTHING;
+  h.writeProof(proofFile(h.digest()));
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.None);
   h.bindings = facts(
@@ -1654,6 +1680,7 @@ test("a worker binding write that changes the target sets the record to pending"
   const h = new Harness(t);
   h.resolution = NOTHING;
   h.bindings = facts([APP], [server]);
+  h.writeProof(proofFile(h.digest()));
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.None);
   assert.equal(h.state().target, EnvironmentTarget.Host);
@@ -2229,6 +2256,7 @@ class FakeRepository {
           .slice(0, limit);
       },
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     };
   }
@@ -2383,13 +2411,155 @@ test(
   },
 );
 
-test("a remote target resolves the detected source and starts no run", async (t) => {
+function hostHarness(t: TestContext): Harness {
+  const h = new Harness(t);
+  h.open();
+  h.bindings = facts([APP], []);
+  h.resolution = STORED;
+  h.proveResults = PASSING_RESULTS;
+  return h;
+}
+
+test(
+  "a host run checks the disk, pushes the probe and proves on the host in this order",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk", "probePush", "proveOnHost"]);
+    assert.deepEqual(h.probeCalls, [
+      { bindingId: APP.binding_id, commit: BASE_COMMIT, runId: "run_1" },
+    ]);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "a refused probe fails the record with push_refused and runs no host proof",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = new Error("remote: pre-receive hook declined");
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk", "probePush"]);
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, PUSH_REFUSED);
+    assert.match(file.tail, /pre-receive hook declined/);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.state().failure?.class, PUSH_REFUSED);
+  },
+);
+
+test(
+  "a probe refused for the workflow scope names the workflow scope in the tail",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = new Error(
+      "refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PUSH_REFUSED);
+    assert.match(
+      file.tail,
+      /^The binding credential has no `workflow` scope: /,
+    );
+  },
+);
+
+test(
+  "a free disk below the ratio fails the record with disk_low and runs no probe and no host proof",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.disk = { free_bytes: 9, total_bytes: 100 };
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk"]);
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, DISK_LOW);
+    assert.equal(file.tail, DISK_LOW_TAIL);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+  },
+);
+
+test(
+  "a free disk equal to the limit passes the disk check",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.disk = { free_bytes: 10, total_bytes: 100 };
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk", "probePush", "proveOnHost"]);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+  },
+);
+
+test(
+  "an image run checks the disk and pushes the probe before it builds",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk", "probePush", "prove"]);
+    assert.equal(h.events[0], BUILD);
+  },
+);
+
+test(
+  "a remote target with a refused probe fails the record",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.bindings = facts([APP], [remoteWorker]);
+    h.resolution = STORED;
+    h.probeError = new Error(BOOM);
+    await h.compute();
+    await h.ended();
+    assert.deepEqual(h.order, ["probePush"]);
+    assert.equal(h.state().status, EnvironmentStatus.Failed);
+    assert.equal(h.state().failure?.class, PUSH_REFUSED);
+  },
+);
+
+test(
+  "a record with the source none at the host target runs the probe and no proof command",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.bindings = facts([APP], []);
+    h.resolution = NOTHING;
+    await h.compute();
+    assert.equal(h.state().status, EnvironmentStatus.Proving);
+    await h.ended();
+    assert.deepEqual(h.order, ["freeDisk", "probePush"]);
+    assert.equal(h.state().status, EnvironmentStatus.None);
+  },
+);
+
+test("a remote target resolves the detected source and runs only the push probe", async (t) => {
   const repository = new FakeRepository();
   repository.files.set("Cargo.toml", '[package]\nname = "app"\n');
   const { h, group } = resolvingHarness(t, repository, remoteWorkers);
   await h.compute(group);
   assert.equal(h.state(group).source, EnvironmentSource.Detected);
+  assert.equal(h.state(group).status, EnvironmentStatus.Proving);
+  await h.ended();
   assert.equal(h.state(group).status, EnvironmentStatus.None);
+  assert.deepEqual(h.order, ["probePush"]);
   assert.deepEqual(h.events, [`wake ${PROJECT}`]);
   const digest = h.state(group).digest;
   assert.ok(digest);

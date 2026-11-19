@@ -160,6 +160,7 @@ import {
   writeBindingSet,
 } from "./store.ts";
 
+const DISK_FREE_RATIO = 0.1;
 const ACCOUNT = "alice";
 const DISPLAY_NAME = "Alice";
 const PROJECT_NAME = "alpha";
@@ -416,6 +417,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     operationalStore: store,
     stateDirectory,
+    diskFreeRatio: DISK_FREE_RATIO,
     health,
     wakeup: {
       wake: (projectId) => {
@@ -436,6 +438,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     verifyRepositoryCredential: unexpected,
@@ -6150,6 +6153,7 @@ function environmentReadFixture(
         if (behavior.resolveFails) throw new Error("fetch failed");
         return paths.map((_path, index) => `${TREE_PREFIX}${index}`);
       },
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     ...overrides,
@@ -6307,6 +6311,7 @@ function instructionRepositoryFiles(
     },
     listFilesAtCommit: unexpected,
     readObjectIds: unexpected,
+    probePush: async () => {},
     cloneSnapshot: unexpected,
   };
   return { repositoryFiles, reads, heads };
@@ -6500,6 +6505,7 @@ test("a write reads the instruction files of two changed bindings in parallel un
       },
       listFilesAtCommit: unexpected,
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
   });
@@ -7602,7 +7608,7 @@ test("Project answers the environment methods through the onboarding component",
   );
   const rebuilt = await f.project.rebuildEnvironment(projectId, bindingId);
   assert.equal(rebuilt.binding_id, bindingId);
-  assert.equal(rebuilt.status, EnvironmentStatus.None);
+  assert.equal(rebuilt.status, EnvironmentStatus.Proving);
 });
 
 const ENVIRONMENT_LIST = projectOperations["environment.list"];
@@ -7630,6 +7636,7 @@ function loggedRuntime(overrides: Partial<EnvironmentRuntime> = {}): {
 }
 
 function untilAborted(signal: AbortSignal): Promise<never> {
+  signal.throwIfAborted();
   return new Promise((_resolve, reject) =>
     signal.addEventListener("abort", () => reject(signal.reason), {
       once: true,

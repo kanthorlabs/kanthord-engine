@@ -53,6 +53,7 @@ const PROJECT_IDENTITY: ServiceIdentity = {
   kind: IdentityKind.Service,
   service: PROJECT_SERVICE_NAME,
 };
+const DISK_FREE_RATIO = 0.1;
 const REPOSITORY_NAME = "repository";
 const STORAGE_NAME = "evidence";
 const ADDRESS = "git@github.com:owner/repo.git";
@@ -201,6 +202,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
     },
     operationalStore: store,
     stateDirectory: temporary(t),
+    diskFreeRatio: DISK_FREE_RATIO,
     createMission: unexpected,
     nodeBodyOf: unexpected,
     liveNodesPinning: unexpected,
@@ -214,6 +216,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     verifyRepositoryCredential: unexpected,
@@ -250,6 +253,7 @@ function storeFixture(t: TestContext, beforeWrite: () => void = () => {}) {
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     identity: PROJECT_IDENTITY,
