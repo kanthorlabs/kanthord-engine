@@ -106,6 +106,8 @@ test("execution attribution reads retained registration and tombstoned binding a
       client_id: attribution.client_id,
       name: attribution.name,
       worker_name: workerName,
+      trace_id: row.trace_id,
+      started_at: row.created_at,
     });
     assert.equal(
       h.service.executionAttribution(tx, createIdentity("execution")),
@@ -116,6 +118,8 @@ test("execution attribution reads retained registration and tombstoned binding a
       client_id: null,
       name: null,
       worker_name: workerName,
+      trace_id: row.trace_id,
+      started_at: row.created_at,
     });
   });
 });

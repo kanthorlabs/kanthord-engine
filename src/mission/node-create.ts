@@ -5,9 +5,11 @@ import { canonicalJSON } from "../kernel/json.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type BindingResolver,
   commitTypeField,
   CONTENT_FIELDS,
   ContentField,
+  invalidBindings,
   resolveNodeBindings,
   TASK_CONTENT_FIELDS,
   TASKS_FIELD,
@@ -74,6 +76,17 @@ function invalidTasks(): never {
   );
 }
 
+function bindingIdResolver(bindings: MissionBindings): BindingResolver {
+  return (tx, projectId, value) => {
+    const found = bindings.resolveBindingIdentity(tx, projectId, value);
+    if (found !== null) return found;
+    const named = bindings.resolveBinding(tx, projectId, value);
+    if (named !== null)
+      invalidBindings({ binding: value, binding_id: named.binding_id });
+    return null;
+  };
+}
+
 export function resolveContent(
   tx: Transaction,
   bindings: MissionBindings,
@@ -86,8 +99,7 @@ export function resolveContent(
   validateText(REASON_FIELD, body.reason, textMaxBytes);
   const resolved = resolveNodeBindings(
     tx,
-    (inner, project, bindingId) =>
-      bindings.resolveBindingIdentity(inner, project, bindingId),
+    bindingIdResolver(bindings),
     projectId,
     intent,
     body.content.bindings,

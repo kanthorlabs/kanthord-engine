@@ -32,7 +32,13 @@ const WORKER = "coder@1";
 function fixture(t: TestContext, intent: Intent = Intent.Implement) {
   const h = missionHarness(t, testHumanIdentity("ulrich", "Ulrich", "token"), {
     executionAttribution: {
-      of: () => ({ client_id: null, name: null, worker_name: WORKER }),
+      of: () => ({
+        client_id: null,
+        name: null,
+        worker_name: WORKER,
+        trace_id: "a".repeat(32),
+        started_at: NOW,
+      }),
     },
   });
   const nodeId = createIdentity("node");

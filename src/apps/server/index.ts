@@ -1,5 +1,4 @@
 import { addAbortListener } from "node:events";
-import { existsSync } from "node:fs";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -184,7 +183,8 @@ import {
 } from "../../agent/index.ts";
 import {
   operationToolDeclarations,
-  variantSessionDirectory,
+  removeEmptyVariantDirectory,
+  variantHasSessionFile,
   WorkbenchFootprint,
   WorkbenchInvites,
   workbenchMigrations,
@@ -835,12 +835,13 @@ export function composeServices(options: ComposeServicesOptions) {
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
     variantInUse: (agentName, variantId) =>
-      existsSync(
-        variantSessionDirectory(options.stateDirectory, {
-          agentName,
-          variantId,
-        }),
-      ),
+      workbench.variantOpen(variantId) ||
+      variantHasSessionFile(options.stateDirectory, { agentName, variantId }),
+    variantDeleted: (agentName, variantId) =>
+      removeEmptyVariantDirectory(options.stateDirectory, {
+        agentName,
+        variantId,
+      }),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     promptBase: {
       baseCommitOf: (bindingId, context) =>

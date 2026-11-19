@@ -1122,12 +1122,10 @@ export class MissionService
     );
     registry.register(missionOperations["node.get"], ({ params }, caller) =>
       caller.commit((tx) =>
-        getNode(
-          tx,
-          params.node_id,
-          this.dependencies.bindings,
-          this.dependencies,
-        ),
+        getNode(tx, params.node_id, this.dependencies.bindings, {
+          ...this.dependencies,
+          now: Date.now(),
+        }),
       ),
     );
     registry.register(

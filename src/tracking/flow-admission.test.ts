@@ -5,8 +5,10 @@ import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 import {
   type Attributes,
+  FlowCompare,
   FlowGrain,
   FlowMeasure,
+  FlowStage,
   RecordKind,
   ROOT_SPAN_OPERATION,
   type SpanContribution,
@@ -17,9 +19,13 @@ import {
   TRANSITION_SPAN_OPERATION,
 } from "./contract.ts";
 import { admitRecords, admitServerSpan } from "./admission.ts";
+import { runFlowBackfill } from "./flow-backfill.ts";
 import { decodeBins, percentilesOf } from "./flow-bins.ts";
 import { openFlow } from "./flow-admission.ts";
+import { assertConserved } from "./flow-conservation-test-support.ts";
 import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
+import { readFlow } from "./flow-read.ts";
+import { relabelFlow } from "./flow-relabel.ts";
 import { trackingMigrations } from "./migrations.ts";
 import { insertTrace, type TraceRow } from "./trace-store.ts";
 
@@ -410,6 +416,115 @@ test("the same execution with no gate span is unobserved at the stage release_ga
         },
       ],
     );
+});
+
+const GATED_EXECUTIONS = 15;
+const ALL_EXECUTIONS = 16;
+const RELABELED_TRACE = 2;
+const BACKFILLED_TRACE = 3;
+const UNOBSERVED_TRACE = 16;
+
+function gatedRecords(trace: TraceRow): TelemetryRecord[] {
+  return [
+    rootStart(trace, "steps"),
+    turn(trace, 1),
+    releaseGate(trace),
+    transition(trace, "Waiting"),
+    rootEnd(trace),
+  ];
+}
+
+function writeWithoutFlow(
+  store: Store,
+  trace: TraceRow,
+  records: readonly TelemetryRecord[],
+): void {
+  store.transaction((tx) => {
+    insertTrace(tx, trace, ANCHOR + 2000);
+    admitRecords(
+      tx,
+      {
+        trace,
+        producer: PRODUCER,
+        origin: SpanOrigin.Observed,
+        now: ANCHOR + 2000,
+        flow: null,
+      },
+      records,
+    );
+  });
+  store.database
+    .prepare("UPDATE tracking_trace SET kind = NULL WHERE trace_id = ?")
+    .run(trace.trace_id);
+}
+
+test("fifteen gated hand-ons and one unobserved hand-on conserve the counts of release_gate after a relabel and a backfill", async (t) => {
+  const store = memoryStore(t);
+  for (let sequence = 1; sequence <= GATED_EXECUTIONS; sequence += 1) {
+    const trace = traceOf(sequence);
+    if (sequence === BACKFILLED_TRACE)
+      writeWithoutFlow(store, trace, gatedRecords(trace));
+    else write(store, trace, gatedRecords(trace));
+  }
+  const unobserved = traceOf(UNOBSERVED_TRACE);
+  write(store, unobserved, [
+    rootStart(unobserved, "steps"),
+    turn(unobserved, 1),
+    transition(unobserved, "Waiting"),
+    rootEnd(unobserved),
+  ]);
+  store.transaction((tx) =>
+    relabelFlow(
+      tx,
+      traceOf(RELABELED_TRACE).trace_id,
+      { category: "prompt", subcategory: "context_missing", assigner: "human" },
+      isHosted,
+      ANCHOR + 3000,
+    ),
+  );
+  await runFlowBackfill(
+    store,
+    { isHostedWorker: isHosted, now: () => ANCHOR + 4000 },
+    new AbortController().signal,
+    () => undefined,
+  );
+  for (const grain of GRAINS) {
+    const total = store.database
+      .prepare(
+        "SELECT SUM(executions) AS total, SUM(unobserved) AS unobserved FROM tracking_flow_rollup WHERE grain = ?",
+      )
+      .get(grain);
+    assert.deepEqual(
+      [Number(total?.total), Number(total?.unobserved)],
+      [ALL_EXECUTIONS, 1],
+    );
+  }
+  const read = readFlow(
+    store,
+    {
+      from: HOUR_START,
+      to: HOUR_START + HOUR_MS,
+      bucket: FlowGrain.Hour,
+      compare: FlowCompare.Previous,
+    },
+    ANCHOR + 5000,
+    { isHostedWorker: isHosted, rebuild: null },
+  );
+  const gate = read.stages.find(
+    (stage) => stage.stage === FlowStage.ReleaseGate,
+  );
+  assert.ok(gate);
+  const exits = Object.values(gate.current.exits).reduce(
+    (total, exit) => total + (exit?.count ?? NO_ROWS),
+    NO_ROWS,
+  );
+  assert.deepEqual(
+    [gate.current.entered, exits, gate.current.unobserved],
+    [GATED_EXECUTIONS, GATED_EXECUTIONS, 1],
+  );
+  assertConserved("written rows current", read.stages);
+  for (const { stage, current, series } of read.stages)
+    assert.deepEqual(series.entered, [current.entered], stage);
 });
 
 test("an evaluation execution with an assessed end and a transition to Available is a rework", (t) => {

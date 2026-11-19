@@ -115,6 +115,8 @@ test("assessment and outcome reads filter attempt zero, evaluate currency, union
     client_id: createIdentity("client_identity"),
     name: "Runtime",
     worker_name: "reviewer@1",
+    trace_id: "a".repeat(32),
+    started_at: 1,
   });
   const records = h.store.transaction((tx) => {
     const human = writeHumanRecords(

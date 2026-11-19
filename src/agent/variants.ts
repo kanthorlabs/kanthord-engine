@@ -198,7 +198,7 @@ export function deleteVariant(
   tx: Transaction,
   id: string,
   input: VariantDelete,
-): void {
+): AgentVariant {
   const current = requireVariant(tx, id);
   requireRevision(current, input.expected_revision);
   if (input.inUse(current.agent_name, id))
@@ -208,4 +208,5 @@ export function deleteVariant(
       "The agent variant has a session.",
     );
   tx.database.prepare("DELETE FROM agent_variant WHERE id = ?").run(id);
+  return current;
 }
