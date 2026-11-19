@@ -95,17 +95,17 @@ function signatureOffEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function commitLog(
+export function commitLog(
   directory: string,
   range: string,
-  input: VerifyInput,
+  env: NodeJS.ProcessEnv,
 ): Promise<string> {
   return simpleGit({
     baseDir: directory,
     timeout: { block: VERIFY_DEADLINE_MS },
     unsafe: { ...GIT_UNSAFE_OPTIONS, allowUnsafeGpgProgram: true },
   })
-    .env(signatureOffEnvironment(input.env))
+    .env(signatureOffEnvironment(env))
     .raw(["log", "-z", COMMIT_FORMAT, range]);
 }
 const REQUESTED_STOPS: readonly string[] = [
@@ -219,7 +219,7 @@ async function commitsOf(
     const log = await commitLog(
       join(folder, relative(input.output, checkout.directory)),
       `${input.plan.seed.heads[checkout.binding_id]}..HEAD`,
-      input,
+      input.env,
     );
     const list = log
       .split(COMMIT_SEPARATOR)

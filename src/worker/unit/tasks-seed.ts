@@ -39,6 +39,7 @@ export const TasksErrorCode = {
   OutputExists: "cli.worker.tasks.output_exists",
   ReplayInvalid: "cli.worker.tasks.replay_invalid",
   ReplayDiverged: "cli.worker.tasks.replay_diverged",
+  SeedMismatch: "cli.worker.tasks.seed_mismatch",
   InternalError: "cli.worker.tasks.internal_error",
 } as const;
 export type TasksErrorCode =

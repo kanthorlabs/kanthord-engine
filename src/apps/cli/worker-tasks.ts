@@ -36,6 +36,7 @@ import {
   withoutAmbientCredentials,
 } from "../worker/index.ts";
 import { singleUse } from "./shared.ts";
+import { tasksCompare } from "./worker-tasks-compare.ts";
 import { tasksSeed } from "./worker-tasks-seed.ts";
 
 const STDIN_DESCRIPTOR = 0;
@@ -419,5 +420,19 @@ export function addWorkerTasksCommands(worker: Command): void {
     .option("--force", "Replace an empty folder or an earlier seed folder")
     .action((executionId: string, _options, command: Command) =>
       tasksSeed(executionId, command),
+    );
+  tasks
+    .command("compare")
+    .description(
+      "Compare two run folders of one seed: route, end, commits, unit results and metrics.json",
+    )
+    .argument("<output-a>", "First run folder")
+    .argument("<output-b>", "Second run folder")
+    .action((outputA: string, outputB: string) =>
+      tasksCompare([outputA, outputB], {
+        cwd: process.cwd(),
+        env: process.env,
+        stdout: (text) => void process.stdout.write(text),
+      }),
     );
 }

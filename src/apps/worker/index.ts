@@ -681,6 +681,7 @@ export {
 export {
   checkOutputFolder,
   checkSeedFolder,
+  compareRuns,
   writeSeed,
   credentialInvalid,
   credentialOf,
