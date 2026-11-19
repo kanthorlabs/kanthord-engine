@@ -14,6 +14,7 @@ import {
   pagination,
   printResult,
 } from "./mission-support.ts";
+import { PROPOSAL_DECIDE_HELP } from "./mission-help.ts";
 import { missionExamples } from "./mission-examples.ts";
 
 const MIN_ATTEMPT_FILTER = 0;
@@ -70,21 +71,23 @@ export function addProposalCommands(mission: Command): void {
       )
       .argument("<assessment-id>", "Assessment ID"),
     { schema: proposalDecideSchema, example: missionExamples.proposalDecide },
-  ).action(async (assessmentId: string, _options, command: Command) => {
-    if (!identitySchema("assessment").safeParse(assessmentId).success)
-      throw new Diagnostic(
-        DECIDE_INVALID_ASSESSMENT_ID,
-        "invalid assessment ID",
+  )
+    .addHelpText("after", PROPOSAL_DECIDE_HELP)
+    .action(async (assessmentId: string, _options, command: Command) => {
+      if (!identitySchema("assessment").safeParse(assessmentId).success)
+        throw new Diagnostic(
+          DECIDE_INVALID_ASSESSMENT_ID,
+          "invalid assessment ID",
+        );
+      await mutate(
+        command,
+        "proposal.decide",
+        proposalDecideSchema,
+        (api, body, key) =>
+          api["proposal.decide"](
+            { params: { assessment_id: assessmentId }, query: {}, body },
+            { idempotencyKey: key },
+          ),
       );
-    await mutate(
-      command,
-      "proposal.decide",
-      proposalDecideSchema,
-      (api, body, key) =>
-        api["proposal.decide"](
-          { params: { assessment_id: assessmentId }, query: {}, body },
-          { idempotencyKey: key },
-        ),
-    );
-  });
+    });
 }

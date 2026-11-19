@@ -16,6 +16,7 @@ import {
   survivingProcesses,
 } from "../agent/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
@@ -40,7 +41,7 @@ import {
   intakeOperations,
 } from "../intake/contract.ts";
 import { llmOperations } from "../llm/contract.ts";
-import { missionOperations } from "../mission/contract.ts";
+import { MissionErrorCode, missionOperations } from "../mission/contract.ts";
 import {
   environmentSecretOperations,
   projectOperations,
@@ -380,6 +381,64 @@ test("a tool call of a bodiless operation without body reaches the operation wit
     { params: { project_id: projectId }, query: {}, body: null },
   ]);
   assert.deepEqual(result.details, { ok: true });
+});
+
+const REFUSAL_CODE = MissionErrorCode.BindingsInvalid;
+const REFUSAL_MESSAGE = "Invalid node bindings.";
+const REFUSAL_TEXT = `${REFUSAL_CODE}: ${REFUSAL_MESSAGE}`;
+
+async function refusalText(details: Record<string, string> | null) {
+  const operation = missionOperations.get;
+  const invoke: InvokeOperation = () =>
+    Promise.resolve({
+      type: OperationResultType.Failure,
+      status: 400,
+      error: {
+        error: {
+          code: REFUSAL_CODE,
+          message: REFUSAL_MESSAGE,
+          details,
+        },
+        request_id: createIdentity("request"),
+      },
+    });
+  const tool = operationTool(operation, invoke, {
+    callerOf: () => ({
+      identity: testHumanIdentity("account", "Account", "token"),
+    }),
+    scopeOf: () => null,
+    projectScope: new ProjectScope({ projectOf: () => null }),
+    completed: () => undefined,
+  });
+  const failure = await tool
+    .execute(
+      "call_refused",
+      { params: { project_id: createIdentity("project") } },
+      undefined,
+      undefined,
+      undefined as never,
+    )
+    .then(
+      () => assert.fail("The refusal must throw."),
+      (error: unknown) => error,
+    );
+  assert.ok(failure instanceof Error);
+  return failure.message;
+}
+
+test("a tool call that the operation refuses with details throws the code, the message and the canonical JSON of the details", async () => {
+  const details = {
+    binding: "todoapp-repo",
+    binding_id: createIdentity("binding"),
+  };
+  assert.equal(
+    await refusalText(details),
+    `${REFUSAL_TEXT} ${canonicalJSON(details)}`,
+  );
+});
+
+test("a tool call that the operation refuses with null details throws the code and the message", async () => {
+  assert.equal(await refusalText(null), REFUSAL_TEXT);
 });
 
 function envelopeProperties(schema: unknown): object {

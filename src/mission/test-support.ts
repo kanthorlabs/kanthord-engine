@@ -185,6 +185,8 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
     client_id: actor.client_id,
     name: actor.name,
     worker_name: "claude-code@1",
+    trace_id: "a".repeat(32),
+    started_at: FIXTURE_TIME,
   });
   h.caller.execution = claim;
   h.store.transaction((tx) => {

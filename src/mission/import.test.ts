@@ -1204,12 +1204,107 @@ test("empty set retires every current node but excludes already retired nodes", 
   assert.ok(!result.current_nodes.has(retiredId));
 });
 
-test("same filename without identity creates a new node and retires the old node", (t) => {
+function withoutIds(entries: NormalizedEntry[]): NormalizedEntry[] {
+  return entries.map((value) => {
+    const copy = { ...value };
+    delete copy.id;
+    return copy;
+  });
+}
+
+test("same filename without identity matches the current node and is a no-op", (t) => {
   const { entries, resolve } = fixture(t);
+  const id = entries[FIRST_ENTRY_INDEX]!.id;
   const result = resolve([entry()]);
-  assert.deepEqual(result.creates, ["a.md"]);
-  assert.deepEqual(result.retirements, [entries[FIRST_ENTRY_INDEX]!.id]);
+  assert.deepEqual(result.creates, []);
+  assert.deepEqual(result.retirements, []);
   assert.deepEqual(result.updates, []);
+  assert.deepEqual(result.no_ops, [id]);
+  assert.equal(result.resolved_entries[FIRST_ENTRY_INDEX]?.key, id);
+  assert.equal(result.resolved_entries[FIRST_ENTRY_INDEX]?.current?.id, id);
+});
+
+test("a changed file with no id of a current Available node updates that node", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  const id = item(entries, "a.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Available, id);
+  const result = resolve(
+    change(withoutIds(entries), "a.md", { name: "Changed" }),
+  );
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.updates, [id]);
+  assert.deepEqual(result.content_updates, [id]);
+  assert.deepEqual(result.creates, []);
+  assert.deepEqual(result.retirements, []);
+});
+
+test("a file with no id of a terminal node with unchanged content is a no-op, not a terminal change", (t) => {
+  const { store, entries, resolve } = fixture(t, hierarchy());
+  const id = item(entries, "o.md").id!;
+  store.database
+    .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+    .run(NodeState.Completed, id);
+  const result = resolve(withoutIds(entries));
+  assert.deepEqual(result.violations, []);
+  assert.ok(result.no_ops.includes(id));
+  assert.deepEqual(result.creates, []);
+  assert.deepEqual(result.retirements, []);
+  assert.deepEqual(
+    store
+      .transaction((tx) => checkImportCondition(tx, result))
+      .filter(({ code }) => code === MissionErrorCode.TerminalChange),
+    [],
+  );
+});
+
+test("a task file with no id matches the current task of the same file name", (t) => {
+  const { entries, resolve } = fixture(t, hierarchy());
+  const taskId = item(entries, TASK_FILENAME).id!;
+  const result = resolve(withoutIds(entries));
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.creates, []);
+  const matched = result.resolved_entries.find(
+    (value) => value.entry.filename === TASK_FILENAME,
+  );
+  assert.equal(matched?.task?.id, taskId);
+  assert.equal(matched?.key, taskId);
+  assert.equal(matched?.owner_id, item(entries, IMPLEMENT_FILENAME).id);
+});
+
+test("an entry with the id of node A and the file name of node B resolves to node A", (t) => {
+  const { entries, resolve } = fixture(t, [entry("a.md"), entry("b.md")]);
+  const first = item(entries, "a.md");
+  const second = item(entries, "b.md");
+  const result = resolve([{ ...first, filename: "b.md" }]);
+  assert.deepEqual(result.violations, []);
+  assert.equal(result.resolved_entries[FIRST_ENTRY_INDEX]?.key, first.id);
+  assert.equal(
+    result.resolved_entries[FIRST_ENTRY_INDEX]?.current?.id,
+    first.id,
+  );
+  assert.deepEqual(result.retirements, [second.id]);
+});
+
+test("a node that an id entry claims is not matched again by file name", (t) => {
+  const { entries, resolve } = fixture(t, [entry("a.md")]);
+  const first = item(entries, "a.md");
+  const result = resolve([{ ...first, filename: "b.md" }, entry("a.md")]);
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.creates, ["a.md"]);
+  assert.equal(result.resolved_entries[1]?.key, TEMPORARY_A_KEY);
+  assert.equal(result.resolved_entries[1]?.current, null);
+});
+
+test("a file name of a retired node with no id is a create", (t) => {
+  const { store, resolve } = fixture(t);
+  store.database
+    .prepare("UPDATE mission_node SET retired_at = ?")
+    .run(RETIRED_AT);
+  const result = resolve([entry()]);
+  assert.deepEqual(result.violations, []);
+  assert.deepEqual(result.creates, ["a.md"]);
   assert.equal(
     result.resolved_entries[FIRST_ENTRY_INDEX]?.key,
     TEMPORARY_A_KEY,
@@ -2116,7 +2211,7 @@ test("export and import both formats unchanged for a node with a link and for a 
   }
 });
 
-test("a re-import matches a node by the id of its plan file, never by its file name", (t) => {
+test("a re-import matches a node by the id of its plan file and a file with no id by its file name", (t) => {
   const editedFile = "p.md";
   const { mission, store, apply, assigned } = importer(t);
   const first = apply(plan());
@@ -2161,11 +2256,48 @@ test("a re-import matches a node by the id of its plan file, never by its file n
       content: file.content.replace(/^id: .*\n/m, ""),
     })),
   );
-  assert.deepEqual(replacing.creates, ["a.md", "o.md", "p.md", "s.md", "t.md"]);
-  assert.deepEqual(
-    replacing.retirements,
-    ["a.md", "o.md", "p.md"].map((name) => assigned(first, name)).sort(),
+  assert.deepEqual(replacing.violations, []);
+  assert.deepEqual(replacing.creates, []);
+  assert.deepEqual(replacing.retirements, []);
+  assert.deepEqual(replacing.updates, [assigned(first, editedFile)]);
+});
+
+test("the export of a mission with every id line removed and one new plan file previews one create", (t) => {
+  const { mission, store, apply } = importer(t);
+  apply(plan());
+  const exported = store.transaction((tx) =>
+    exportMission(tx, mission.id, ImportFormat.Markdown, exportBindings),
   );
+  assert.ok("files" in exported);
+  const stripped = exported.files.map((file) => ({
+    ...file,
+    content: file.content.replace(/^id: .*\n/m, ""),
+  }));
+  const root = stripped.find((file) => file.filename === ROOT_FILENAME);
+  assert.ok(root);
+  const files = [...stripped, { ...root, filename: "n.md" }];
+  const preview = store.transaction((tx) => {
+    const current = readMission(tx, mission.id);
+    assert.ok(current);
+    return prepareImport(
+      tx,
+      current,
+      {
+        format: ImportFormat.Markdown,
+        mission_id: mission.id,
+        mission_version: current.version,
+        reason: REASON,
+        files,
+      },
+      mission.id,
+      bindings,
+      environments,
+      TEXT_MAX_BYTES,
+    ).preview;
+  });
+  assert.deepEqual(preview.violations, []);
+  assert.deepEqual(preview.creates, ["n.md"]);
+  assert.deepEqual(preview.retirements, []);
 });
 
 test("an import that moves a task revises both owners with moved-out and moved-in", (t) => {

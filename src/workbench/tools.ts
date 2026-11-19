@@ -4,6 +4,7 @@ import type { TSchema } from "@earendil-works/pi-ai";
 import type { PiCodingAgent } from "../agent/pi.ts";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { CancellationContext } from "../kernel/context.ts";
+import type { ErrorBody } from "../kernel/errors.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { isObject } from "../kernel/values.ts";
 import { type HumanIdentity, isReadOnlyIdentity } from "../kernel/caller.ts";
@@ -206,6 +207,13 @@ export function fullInput(operation: Operation, params: unknown): unknown {
 const SESSION_LIST_ID = workbenchOperations["session.list"].id;
 const SCOPE_REQUESTS_KEY = "scope_requests";
 
+function failureText(error: ErrorBody["error"]): string {
+  const text = `${error.code}: ${error.message}`;
+  return error.details === null
+    ? text
+    : `${text} ${canonicalJSON(error.details)}`;
+}
+
 function toolData(operation: Operation, data: unknown): unknown {
   if (operation.id !== SESSION_LIST_ID) return data;
   const { items } = data as { items: Record<string, unknown>[] };
@@ -295,9 +303,7 @@ export function operationTool(
           };
         }
         if (result.type === OperationResultType.Failure)
-          throw new Error(
-            `${result.error.error.code}: ${result.error.error.message}`,
-          );
+          throw new Error(failureText(result.error.error));
         throw new Error(
           `${operation.id}: the result of the operation is indeterminate.`,
         );

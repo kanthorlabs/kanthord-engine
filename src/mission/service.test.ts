@@ -53,6 +53,7 @@ import {
   type NodeChange,
   nodeChangeSchema,
   type NodeCreate,
+  nodeGetSchema,
   nodeSchema,
   NodeState,
   type NodeUpdate,
@@ -104,6 +105,7 @@ import {
 } from "./link-update-test-support.ts";
 import {
   codedAs,
+  controlHarness,
   databaseSnapshot,
   executionHarness,
   keptClaimHarness,
@@ -1021,7 +1023,7 @@ function nodeFixture(
       query: {},
       body: null,
     });
-    return nodeSchema.parse(
+    return nodeGetSchema.parse(
       f.registry.get(operation.id).handler(input, f.caller),
     );
   }
@@ -1298,6 +1300,40 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
 });
 
+test("node.create names the binding ID of a binding name in the bindings error", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [REPOSITORY_NAME];
+  f.refuses(
+    body,
+    MissionErrorCode.BindingsInvalid,
+    { binding: REPOSITORY_NAME, binding_id: BINDING_ID },
+    HttpStatus.BadRequest,
+  );
+});
+
+test("node.create gives only the value of a binding that is no ID and no name", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [UNKNOWN_NAME];
+  f.refuses(
+    body,
+    MissionErrorCode.BindingsInvalid,
+    { binding: UNKNOWN_NAME },
+    HttpStatus.BadRequest,
+  );
+});
+
+test("node.create with the binding ID creates the node", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [BINDING_ID];
+  assert.deepEqual(
+    f.create(body).revisions[FIRST_ELEMENT_INDEX]!.content.bindings,
+    [BINDING_ID],
+  );
+});
+
 test("node.create validates mission existence and version before content", (t) => {
   const f = nodeFixture(t);
   f.refuses(
@@ -1550,7 +1586,7 @@ test("node get answers the tasks of the visible revision", (t) => {
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const taskId = addTask(f, implement);
-  const implementNode = nodeSchema.parse(
+  const implementNode = nodeGetSchema.parse(
     invoke("node.get", { node_id: implement }),
   );
   assert.equal(implementNode.intent, Intent.Implement);
@@ -1560,7 +1596,7 @@ test("node get answers the tasks of the visible revision", (t) => {
   assert.equal(implementNode.priority, LOWEST_PRIORITY);
   assert.deepEqual(implementNode.content.bindings, [BINDING_ID]);
   assert.deepEqual(
-    nodeSchema.parse(invoke("node.get", { node_id: examine })).tasks,
+    nodeGetSchema.parse(invoke("node.get", { node_id: examine })).tasks,
     [],
   );
   assert.throws(
@@ -2478,7 +2514,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
     query: {},
     body: null,
   });
-  const initial = nodeSchema.parse(
+  const initial = nodeGetSchema.parse(
     f.registry.get(get.id).handler(input, f.caller),
   );
   assert.equal(initial.intent, Intent.Implement);
@@ -2622,7 +2658,10 @@ test("node.update accepts the binding identities of a node read and refuses a bi
       assert.ok(error instanceof OperationError);
       assert.equal(error.status, HttpStatus.BadRequest);
       assert.equal(error.code, MissionErrorCode.BindingsInvalid);
-      assert.deepEqual(error.details, { binding: REPOSITORY_NAME });
+      assert.deepEqual(error.details, {
+        binding: REPOSITORY_NAME,
+        binding_id: BINDING_ID,
+      });
       return true;
     },
   );
@@ -3943,6 +3982,7 @@ const IMPORT_UPDATED_NAME = "Updated imported content";
 const IMPORT_EXTRA_TASK = "extra-task.md";
 const IMPORT_OTHER_TASK = "other-task.md";
 const IMPORT_NEW_TASK = "new-task.md";
+const IMPORT_LATE_TASK = "late-task.md";
 const IMPORT_NEW_DEPENDENT = "new-dependent.md";
 const IMPORT_NODE_COUNT = 5;
 
@@ -4878,14 +4918,14 @@ test("import.apply retains stored task order, appends creates in set order and c
           ? { ...item, filename: NEW_FILENAME, name: IMPORT_UPDATED_NAME }
           : item,
       ),
-    f.taskEntry(IMPORT_EXTRA_TASK, IMPLEMENT_FILENAME),
+    f.taskEntry(IMPORT_LATE_TASK, IMPLEMENT_FILENAME),
   ];
   const result = f.apply(f.request(f.importSnapshot(next)));
   assert.equal(result.changes.revisions.length, SINGLE_ITEM);
   const revision = result.changes.revisions[FIRST_ELEMENT_INDEX]!;
   assert.deepEqual(
     revision.tasks?.map((item) => item.filename),
-    [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_EXTRA_TASK],
+    [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_LATE_TASK],
   );
   assert.deepEqual(revision.change.changed_fields, [TASKS_FIELD]);
   assert.deepEqual(
@@ -4910,7 +4950,7 @@ test("import.apply retains stored task order, appends creates in set order and c
   );
 });
 
-test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked", (t) => {
+test("import.apply same filename without identity keeps the current node", (t) => {
   const f = importApplyFixture(t);
   const first = f.apply(f.request());
   const entries = f.identified(first);
@@ -4919,15 +4959,13 @@ test("import.apply same filename without identity retires and replaces the old n
     item.id === old ? { ...item, id: undefined } : item,
   );
   const result = f.apply(f.request(f.importSnapshot(next)));
-  const replacement = assignedId(result, IMPLEMENT_FILENAME);
-  assert.notEqual(replacement, old);
-  assert.equal(f.node(old)?.retired_at, result.accepted_at);
-  assert.equal(f.node(replacement)?.retired_at, null);
+  assert.equal(assignedId(result, IMPLEMENT_FILENAME), old);
+  assert.equal(f.node(old)?.retired_at, null);
+  assert.deepEqual(result.changes.retired_node_ids, []);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [replacement],
+    [old],
   );
-  assert.deepEqual(result.changes.retired_node_ids, [old]);
   assert.deepEqual(
     f.store.database.prepare("PRAGMA foreign_key_check").all(),
     [],
@@ -4939,19 +4977,20 @@ test("import.apply rolls back every row including jobs after a late queue insert
   const first = f.apply(f.request());
   const entries = f.identified(first);
   const old = entries.find((item) => item.filename === IMPLEMENT_FILENAME)!.id!;
-  const next = entries.map((item) => {
-    if (item.id === old)
-      return { ...item, id: undefined, name: IMPORT_UPDATED_NAME };
-    if (item.filename === TASK_FILENAME)
-      return { ...item, filename: IMPORT_NEW_TASK };
-    return item;
-  });
+  const next = [
+    ...entries.map((item) => {
+      if (item.id === old) return { ...item, name: IMPORT_UPDATED_NAME };
+      if (item.filename === TASK_FILENAME)
+        return { ...item, filename: IMPORT_NEW_TASK };
+      return item;
+    }),
+    f.entry(IMPORT_NEW_DEPENDENT, Intent.Examine),
+  ];
   const body = f.request(f.importSnapshot(next));
   const before = f.state();
   const insert = f.queue.insert;
   f.queue.insert = (tx, id, projectId, priority) => {
     insert(tx, id, projectId, priority);
-    assert.equal(readNode(tx, old)?.retired_at !== null, true);
     assert.ok(f.state().revisions.length > before.revisions.length);
     assert.ok(f.state().nodes.length > before.nodes.length);
     throw new Error(IMPORT_QUEUE_FAILURE);
@@ -6170,4 +6209,117 @@ test("the executionReleased hook of an execution with no pending close does noth
   k.h.service.executionReleased(createIdentity("execution"), null);
   assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
   assert.deepEqual(k.logs, []);
+});
+
+const PROGRESS_TRACE_ID = "b".repeat(32);
+const PROGRESS_STARTED_AT = 1234;
+const PROGRESS_ATTEMPT = 1;
+const NO_ATTEMPT_NUMBER = 0;
+const PROGRESS_PIN = 1;
+const PROGRESS_IDENTITY = testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID);
+
+function progressHarness(t: TestContext) {
+  const h = controlHarness(t, PROGRESS_IDENTITY);
+  const get = () =>
+    h.invoke("node.get", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: null,
+    });
+  return { ...h, get };
+}
+
+test("node get of a node with a live execution answers live_execution", async (t) => {
+  const h = progressHarness(t);
+  const executionId = createIdentity("execution");
+  const runtimeIdentity = createIdentity("client_identity");
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, PROGRESS_PIN, h.actor, PROGRESS_STARTED_AT);
+    tx.database
+      .prepare("UPDATE mission_node SET state = ?, attempt = ? WHERE id = ?")
+      .run(NodeState.Executing, PROGRESS_ATTEMPT, h.node_id);
+  });
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: executionId,
+    runtime_identity: runtimeIdentity,
+    attempt: PROGRESS_ATTEMPT,
+    pinned_revision: PROGRESS_PIN,
+  });
+  h.dependencies.executionAttribution.of = () => ({
+    client_id: null,
+    name: "coder-instance",
+    worker_name: "coder@1",
+    trace_id: PROGRESS_TRACE_ID,
+    started_at: PROGRESS_STARTED_AT,
+  });
+  const node = await h.get();
+  assert.deepEqual(node.live_execution, {
+    execution_id: executionId,
+    attempt: PROGRESS_ATTEMPT,
+    pinned_revision: PROGRESS_PIN,
+    runtime_identity: runtimeIdentity,
+    instance_name: "coder-instance",
+    worker_name: "coder@1",
+    trace_id: PROGRESS_TRACE_ID,
+    started_at: PROGRESS_STARTED_AT,
+  });
+  assert.equal(node.last_stop, null);
+});
+
+test("node get of an Available node whose last execution stopped answers last_stop and no live_execution", async (t) => {
+  const h = progressHarness(t);
+  const executionId = createIdentity("execution");
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, PROGRESS_PIN, h.actor, PROGRESS_STARTED_AT);
+    tx.database
+      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+      .run(PROGRESS_ATTEMPT, h.node_id);
+  });
+  const lastStop = {
+    execution_id: executionId,
+    reason: "no_progress",
+    code: null,
+    detail: "The worker made no progress.",
+    trace_id: PROGRESS_TRACE_ID,
+  };
+  h.dependencies.pauseFacts.of = (_tx, nodeId, attempt) => {
+    assert.equal(nodeId, h.node_id);
+    assert.equal(attempt, PROGRESS_ATTEMPT);
+    return {
+      consecutive_failures: 1,
+      consecutive_stalls: 0,
+      last_stop: lastStop,
+    };
+  };
+  const node = await h.get();
+  assert.equal(node.state, NodeState.Available);
+  assert.equal(node.live_execution, null);
+  assert.deepEqual(node.last_stop, lastStop);
+});
+
+test("node get of a node at attempt 0 answers live_execution null and last_stop null", async (t) => {
+  const h = progressHarness(t);
+  const node = await h.get();
+  assert.equal(node.attempt, NO_ATTEMPT_NUMBER);
+  assert.equal(node.live_execution, null);
+  assert.equal(node.last_stop, null);
+});
+
+test("node list and the control answers hold no live_execution and no last_stop", async (t) => {
+  const h = progressHarness(t);
+  const page = await h.invoke("node.list", {
+    params: { mission_id: h.mission_id },
+    query: {},
+    body: null,
+  });
+  assert.equal(page.items.length, PROGRESS_ATTEMPT);
+  const paused = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(),
+  });
+  for (const node of [...page.items, paused.node]) {
+    assert.equal("live_execution" in node, false);
+    assert.equal("last_stop" in node, false);
+  }
 });
