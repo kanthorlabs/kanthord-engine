@@ -60,6 +60,7 @@ const REPLAY_CHECK = 8;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
+const TOOL_RESULT_INDEX = 3;
 const NEWLINE = "\n";
 const REPLAY_MODE = "replay";
 const BASH_OUTPUT = "ran";
@@ -182,6 +183,42 @@ suite("worker tasks run replay", () => {
         readFileSync(join(checkoutOf(folder), "ran.txt"), "utf8"),
         BASH_OUTPUT,
       );
+    },
+  );
+
+  test(
+    "a replay continues past a bash result text that differs and records the drift in result.json",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const turns = await liveRun(fixture, {
+        provider: scriptedProvider([
+          toolUse("bash", {
+            command: "node -e 'console.log(process.hrtime.bigint())'",
+          }),
+          writeGood(),
+          fauxAssistantMessage("done"),
+        ]),
+      });
+      assert.equal(
+        readJson(join(fixture.root, "out"), "result.json").drift,
+        null,
+      );
+      const code = await replayed(fixture, turns);
+      assert.equal(code, TasksExit.Success);
+      const folder = join(fixture.root, "replay");
+      assert.deepEqual(readJson(folder, "result.json").drift, [
+        {
+          turn: TWO_CALLS,
+          step: "unit.turn",
+          message_index: TOOL_RESULT_INDEX,
+        },
+      ]);
+      assert.deepEqual(checkOf(folder, REPLAY_CHECK), {
+        check: REPLAY_CHECK,
+        applies: true,
+        passed: true,
+      });
     },
   );
 

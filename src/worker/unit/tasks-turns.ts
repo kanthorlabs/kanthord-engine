@@ -10,6 +10,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
+import { isObject } from "../../kernel/values.ts";
 import type { TasksOutput } from "./tasks-output.ts";
 import { tasksDiagnostic, TasksErrorCode } from "./tasks-seed.ts";
 import {
@@ -35,6 +36,16 @@ export interface Divergence {
   step: string | null;
 }
 
+export interface Drift {
+  turn: number;
+  step: string | null;
+  message_index: number;
+}
+
+interface SentRequest {
+  messages: readonly Record<string, unknown>[];
+}
+
 const OUTPUT_TOKEN = "<kanthord:output>";
 const BASH_LOG_TOKEN = "<kanthord:pi-bash-log>";
 const BASH_LOG_PATTERN = /[^\s"\]]*pi-bash-[0-9a-f]+\.log/g;
@@ -43,6 +54,7 @@ const STOP_FAILURES: readonly string[] = ["error", "aborted"];
 const DIVERGED = "The replay diverged from the recorded turns.";
 const NEXT_TURN = 1;
 const NO_TOOLS = 0;
+const TOOL_RESULT_ROLE = "toolResult";
 
 class OutputPaths {
   private readonly forms: readonly string[];
@@ -78,6 +90,22 @@ function sentPart(message: object): object {
   return Object.fromEntries(
     Object.entries(message).filter(([key]) => !UNSENT_KEYS.includes(key)),
   );
+}
+
+function shapeOfPart(part: unknown): unknown {
+  if (!isObject(part)) return part;
+  return { type: (part as { type?: unknown }).type };
+}
+
+function structureOf(request: SentRequest): string {
+  return canonicalJSON({
+    ...request,
+    messages: request.messages.map((message) =>
+      message.role === TOOL_RESULT_ROLE && Array.isArray(message.content)
+        ? { ...message, content: message.content.map(shapeOfPart) }
+        : message,
+    ),
+  });
 }
 
 function ruleMarker(_whole: string, rule: string): string {
@@ -139,6 +167,7 @@ export class Turns {
   private readonly paths: OutputPaths;
   private position = 0;
   private divergence: Divergence | null = null;
+  private readonly drifted = new Map<number, Drift>();
   private writeError: unknown = null;
 
   constructor(input: TurnsInput) {
@@ -155,6 +184,10 @@ export class Turns {
 
   get diverged(): Divergence | null {
     return this.divergence;
+  }
+
+  get drifts(): Drift[] {
+    return [...this.drifted.values()];
   }
 
   get failure(): unknown {
@@ -202,6 +235,19 @@ export class Turns {
     throw new Error(DIVERGED);
   }
 
+  private drift(recorded: SentRequest, sent: SentRequest, turn: number): void {
+    recorded.messages.forEach((message, index) => {
+      if (this.drifted.has(index)) return;
+      if (canonicalJSON(message) === canonicalJSON(sent.messages[index]))
+        return;
+      this.drifted.set(index, {
+        turn,
+        step: this.output.currentStep,
+        message_index: index,
+      });
+    });
+  }
+
   private requestOf(model: Model<Api>, messages: readonly object[]): unknown {
     const text = JSON.stringify({
       kind: TurnKind.Request,
@@ -223,8 +269,13 @@ export class Turns {
     const number = this.position + NEXT_TURN;
     if (turn === undefined)
       return this.diverge(DivergeReason.RequestExtra, number);
-    if (turn.request !== canonicalJSON(request))
-      return this.diverge(DivergeReason.RequestDiffers, number);
+    if (turn.request !== canonicalJSON(request)) {
+      const recorded = JSON.parse(turn.request) as SentRequest;
+      const sent = request as SentRequest;
+      if (structureOf(recorded) !== structureOf(sent))
+        return this.diverge(DivergeReason.RequestDiffers, number);
+      this.drift(recorded, sent, number);
+    }
     if (turn.redacted)
       return this.diverge(DivergeReason.RedactedRecord, number);
     this.position += NEXT_TURN;
