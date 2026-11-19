@@ -252,7 +252,14 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   const clients = {
     mission: {
       "execution.review_round.get": async () =>
-        complete({ round: 1, final: false, review_base: null, findings: [] }),
+        complete({
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+        }),
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
@@ -294,6 +301,10 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
         assessments++;
         return complete({ outcome: { id: "outcome" } });
       },
+    },
+    worker: {
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
     },
   } as unknown as MethodClients;
   const store = new InMemoryCredentialStore();

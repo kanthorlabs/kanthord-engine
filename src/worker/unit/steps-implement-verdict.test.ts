@@ -149,6 +149,8 @@ function reworkAssessment(h: Harness, result: string) {
         final: false,
         review_base: null,
         findings: [],
+        unblock_reason: null,
+        earlier_verdicts: [],
       }),
   } as unknown as MethodClients["mission"];
   h.run.clients.worker = {
@@ -682,6 +684,30 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(node);
     assert.ok(node.text.includes(LINK_BODY));
     assert.ok(node.text.includes(linkUpdatesText(read)!));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
+  });
+
+  test("an unblock reason alone plans the node unit with the reason when every task is done", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
+    h.unblockReason = "Keep the legacy route.";
+    h.earlierVerdicts = [
+      {
+        attempt: 1,
+        round: 1,
+        result: "criterion-not-met",
+        rationale: "The route misses a test.",
+        findings: [],
+      },
+    ];
+    const { node, pending } = await startCheck(h);
+    assert.deepEqual(pending, []);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.ok(
+      node.text.includes("answer the unblock reason with FIXED or OPEN"),
+    );
+    assert.ok(node.text.includes("Attempt 1, round 1: criterion-not-met."));
     assert.deepEqual(node.judged, []);
     assert.equal(node.round, null);
   });

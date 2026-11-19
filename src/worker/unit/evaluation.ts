@@ -30,6 +30,7 @@ import {
 import {
   readAttemptEvidence,
   readDependencies,
+  readHumanRequests,
   readPinnedRevision,
   readReviewRound,
 } from "./node-reads.ts";
@@ -242,6 +243,9 @@ async function askJudgement(context: JudgeContext, agent: NativeAgent) {
       affected: context.affected?.document ?? null,
       round: { number: round.round, review_base: round.review_base },
       priorFindings: round.findings,
+      earlierVerdicts: round.earlier_verdicts,
+      unblockReason: round.unblock_reason,
+      humanRequests: await readHumanRequests(run, input.setup.repositories),
     }),
     PromptTemplate.Evaluation,
   );

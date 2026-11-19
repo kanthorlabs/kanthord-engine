@@ -36,6 +36,7 @@ export interface AttemptRow {
   opened_at: number;
   closed_at: number | null;
   prompt_commits: string | null;
+  unblock_reason: string | null;
 }
 export interface EvidenceRow {
   id: string;
@@ -124,6 +125,7 @@ export function openAttempt(
   openedBy: Actor,
   now: number,
   startPoint: StartPoint = StartPoint.NodeBranch,
+  unblockReason: string | null = null,
 ): AttemptRow {
   const node = readNode(tx, nodeId);
   assert.ok(node);
@@ -141,10 +143,11 @@ export function openAttempt(
     opened_at: now,
     closed_at: null,
     prompt_commits: null,
+    unblock_reason: unblockReason,
   };
   tx.database
     .prepare(
-      "INSERT INTO mission_attempt (node_id, attempt, node_revision, start_point, opened_by, opened_at) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO mission_attempt (node_id, attempt, node_revision, start_point, opened_by, opened_at, unblock_reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .run(
       nodeId,
@@ -153,6 +156,7 @@ export function openAttempt(
       row.start_point,
       row.opened_by,
       now,
+      unblockReason,
     );
   const result = tx.database
     .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
@@ -600,6 +604,18 @@ export function readExecutionAssessmentsOfAttempt(
       "SELECT * FROM mission_assessment WHERE node_id = ? AND attempt = ? AND result = ? AND execution_id IS NOT NULL ORDER BY sequence",
     )
     .all(nodeId, attempt, result) as unknown as AssessmentRow[];
+}
+
+export function readExecutionAssessmentsBeforeAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): AssessmentRow[] {
+  return tx.database
+    .prepare(
+      "SELECT * FROM mission_assessment WHERE node_id = ? AND attempt < ? AND execution_id IS NOT NULL ORDER BY sequence",
+    )
+    .all(nodeId, attempt) as unknown as AssessmentRow[];
 }
 
 export function readAssessmentRound(

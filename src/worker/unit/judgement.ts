@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
 import {
+  type EarlierVerdict,
   type Finding,
   FINDING_MAX,
   FINDING_TEXT_MAX_BYTES,
@@ -575,16 +576,49 @@ export interface RevisionFinding {
   why: string;
 }
 
+export interface RevisionContext {
+  findings: readonly RevisionFinding[];
+  unblockReason: string | null;
+  earlierVerdicts: readonly EarlierVerdict[];
+}
+
+const NO_REVISION_CONTEXT: RevisionContext = {
+  findings: [],
+  unblockReason: null,
+  earlierVerdicts: [],
+};
+
+export function earlierVerdictsText(
+  verdicts: readonly EarlierVerdict[],
+): string | null {
+  if (verdicts.length === NO_ITEMS) return null;
+  return verdicts
+    .map((verdict) =>
+      cutAtLimit(
+        [
+          `Attempt ${verdict.attempt}, round ${verdict.round}: ${verdict.result}. ${verdict.rationale}`,
+          ...verdict.findings.map(
+            (finding) =>
+              `- ${finding.label} (${finding.kind}, ${finding.action}, ${finding.status}) ${finding.name}: ${finding.description} fix: ${finding.fix} why: ${finding.why}`,
+          ),
+        ].join("\n"),
+        "earlier verdict",
+      ),
+    )
+    .join(RATIONALE_SEPARATOR);
+}
+
 export function criterionRevisionInstruction(
   templates: PromptTemplates,
-  rationale: string,
-  findings: readonly RevisionFinding[] = [],
+  rationale: string | null,
+  context: RevisionContext = NO_REVISION_CONTEXT,
 ): string {
-  assert.ok(rationale.trim());
-  assert.ok(rationale.length);
+  assert.ok(rationale === null || rationale.trim());
   return renderTemplate(templates, PromptTemplate.CriterionRevision, {
     rationale,
-    findings: findings.map((finding) => ({
+    unblock_reason: context.unblockReason,
+    earlier_verdicts: earlierVerdictsText(context.earlierVerdicts),
+    findings: context.findings.map((finding) => ({
       id: finding.id,
       label: finding.label,
       round: finding.round,
@@ -608,6 +642,9 @@ export function evaluationInstruction(
     affected: unknown;
     round: { number: number; review_base: unknown };
     priorFindings: readonly Finding[];
+    earlierVerdicts: readonly EarlierVerdict[];
+    unblockReason: string | null;
+    humanRequests: string | null;
   },
 ): string {
   return renderTemplate(templates, PromptTemplate.Evaluation, {
@@ -624,6 +661,12 @@ export function evaluationInstruction(
     affected: input.affected,
     marker: JUDGEMENT_MARKER,
     round: input.round,
+    human_requests:
+      input.humanRequests === null
+        ? null
+        : cutAtLimit(input.humanRequests, "human requests"),
+    unblock_reason: input.unblockReason,
+    earlier_verdicts: earlierVerdictsText(input.earlierVerdicts),
     prior_findings: input.priorFindings.map((finding) => ({
       id: finding.id,
       label: finding.label,

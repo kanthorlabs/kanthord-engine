@@ -11,6 +11,7 @@ import {
   AssetKind,
   EndState,
   NodeState,
+  StartPoint,
 } from "./contract.ts";
 import { insertMission, insertNode, readNode, setNodeState } from "./store.ts";
 import { missionHarness } from "./test-support.ts";
@@ -143,6 +144,35 @@ test("attempts stay contiguous across rollback and never reopen a closed attempt
         { attempt: FIRST_ATTEMPT, node_revision: FIRST_ATTEMPT },
         { attempt: SECOND_ATTEMPT, node_revision: SECOND_ATTEMPT },
       ],
+    );
+  });
+});
+
+const UNBLOCK_REASON = "Keep the legacy route.";
+
+test("openAttempt writes the unblock reason, or null without one", (t) => {
+  const h = fixture(t);
+  h.store.transaction((tx) => {
+    const first = openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
+    assert.equal(first.unblock_reason, null);
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER);
+    const second = openAttempt(
+      tx,
+      h.node_id,
+      SECOND_ATTEMPT,
+      ACTOR,
+      LATER,
+      StartPoint.NodeBranch,
+      UNBLOCK_REASON,
+    );
+    assert.equal(second.unblock_reason, UNBLOCK_REASON);
+    assert.equal(
+      readAttempt(tx, h.node_id, FIRST_ATTEMPT)?.unblock_reason,
+      null,
+    );
+    assert.equal(
+      readAttempt(tx, h.node_id, SECOND_ATTEMPT)?.unblock_reason,
+      UNBLOCK_REASON,
     );
   });
 });

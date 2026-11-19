@@ -22,7 +22,7 @@ import { insertProposal } from "./proposal-store.ts";
 import { ContentField } from "./content.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
-import { insertAssessment, openAttempt } from "./record-store.ts";
+import { insertAssessment, openAttempt, readAttempt } from "./record-store.ts";
 import {
   insertDependency,
   insertNode,
@@ -1116,4 +1116,59 @@ test("an unblock that rejects an open proposal moves its linked findings to repo
     },
   });
   assert.equal(route(), FindingRoute.Report);
+});
+
+test("an unblock stores its reason on the attempt that it opens, else the change reason", async (t) => {
+  for (const [body, expected] of [
+    [
+      { reason: "Retry on the current base branch." },
+      "Retry on the current base branch.",
+    ],
+    [{}, null],
+    [{ change: "same", reason: "Redirect" }, "Redirect"],
+    [{ change: "same", reason: "Redirect", requestReason: "Keep" }, "Keep"],
+  ] as const) {
+    const h = controlHarness(t, IDENTITY);
+    h.store.transaction((tx) => {
+      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+      setNodeState(tx, h.node_id, NodeState.Paused);
+    });
+    const blocked = await h.invoke("node.block", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+    });
+    await h.invoke("node.unblock", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: {
+        blocked_attempt: FIRST_ATTEMPT,
+        expected_revision: FIRST_ATTEMPT,
+        expected_mission_version: FIRST_ATTEMPT,
+        ...("reason" in body && !("change" in body)
+          ? { reason: body.reason }
+          : {}),
+        ...("change" in body
+          ? {
+              change: {
+                content: blocked.node.content,
+                reason: body.reason,
+                tasks: [],
+              },
+              ...("requestReason" in body
+                ? { reason: body.requestReason }
+                : {}),
+            }
+          : {}),
+      },
+    });
+    const opened = h.store.transaction((tx) =>
+      readAttempt(tx, h.node_id, SECOND_ATTEMPT),
+    );
+    assert.equal(opened?.unblock_reason, expected);
+    const first = h.store.transaction((tx) =>
+      readAttempt(tx, h.node_id, FIRST_ATTEMPT),
+    );
+    assert.equal(first?.unblock_reason, null);
+  }
 });

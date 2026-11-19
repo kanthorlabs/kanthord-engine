@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import {
   AssetKind,
+  type EarlierVerdict,
   type Revision,
   type TaskContent,
 } from "../../mission/contract.ts";
@@ -64,6 +65,7 @@ import { BudgetLimit } from "../../scheduler/contract.ts";
 import { setupScriptsOf } from "../../kernel/devcontainer.ts";
 import {
   criterionRevisionInstruction,
+  type RevisionContext,
   taskRevisionInstruction,
 } from "./judgement.ts";
 import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
@@ -652,6 +654,8 @@ export interface StepsState {
   nodeBranch: string;
   verdict: Verdict | null;
   cleared: string | null;
+  unblockReason: string | null;
+  earlierVerdicts: EarlierVerdict[];
   unchangedTurns: number;
   refreshed: RefreshResult | null;
   lastVerification: VerificationFacts;
@@ -960,13 +964,37 @@ export interface StartCheck {
   budgetEnd: { task: TaskContent | null } | null;
 }
 
-async function nodeInstructionOf(
+function revisionContextOf(
   state: StepsState,
-): Promise<NodeInstruction | null> {
-  if (state.verdict === null)
+  findings: RevisionContext["findings"],
+): RevisionContext {
+  return {
+    findings,
+    unblockReason: state.unblockReason,
+    earlierVerdicts: state.earlierVerdicts,
+  };
+}
+
+function unrecordedNodeInstruction(state: StepsState): NodeInstruction | null {
+  if (state.unblockReason === null)
     return state.cleared === null
       ? null
       : { text: state.cleared, judged: [], round: null };
+  return {
+    text: criterionRevisionInstruction(
+      state.input.setup.templates,
+      state.cleared,
+      revisionContextOf(state, []),
+    ),
+    judged: [],
+    round: null,
+  };
+}
+
+async function nodeInstructionOf(
+  state: StepsState,
+): Promise<NodeInstruction | null> {
+  if (state.verdict === null) return unrecordedNodeInstruction(state);
   const judged = await judgedCheckouts(state, state.verdict.judged);
   if (
     state.verdict.source === VerdictSource.FailedChecks &&
@@ -993,7 +1021,7 @@ async function nodeInstructionOf(
     text: criterionRevisionInstruction(
       state.input.setup.templates,
       state.verdict.text,
-      state.verdict.findings,
+      revisionContextOf(state, state.verdict.findings),
     ),
     judged,
     round: state.verdict.round,
