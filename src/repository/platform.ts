@@ -1,13 +1,17 @@
+import {
+  PLATFORM_HOSTS,
+  type PlatformHosts,
+} from "../kernel/platform-hosts.ts";
 import { RepositoryPlatform } from "../project/contract.ts";
 
-const SSH_HOST_SETS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-  [RepositoryPlatform.GitHub, new Set(["github.com", "ssh.github.com"])],
-  [RepositoryPlatform.GitLab, new Set(["gitlab.com", "altssh.gitlab.com"])],
-  [
-    RepositoryPlatform.Bitbucket,
-    new Set(["bitbucket.org", "altssh.bitbucket.org"]),
-  ],
-]);
+const PLATFORM_HOST_TABLE: Readonly<Record<RepositoryPlatform, PlatformHosts>> =
+  PLATFORM_HOSTS;
+const SSH_HOST_SETS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  Object.entries(PLATFORM_HOST_TABLE).map(([platform, hosts]) => [
+    platform,
+    new Set(hosts.ssh),
+  ]),
+);
 const SSH_DEFAULT_PORT = 22;
 const SSH_ALTERNATIVE_PORT = 443;
 const SSH_HOST_PORTS: ReadonlyMap<string, number> = new Map([

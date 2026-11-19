@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { z } from "zod";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
+import { bashSandbox } from "../agent/bash-sandbox.ts";
 import { agentOperations } from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
@@ -75,6 +77,7 @@ const ONE_CHILD = 1;
 const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
   const [bash] = builtinTools(
     await loadPi(),
     "swe@1",
@@ -104,6 +107,7 @@ test("a workbench bash call that times out leaves no process of its tree", async
 });
 
 test("a background child of a Workbench bash call lives after the call", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
   const [bash] = builtinTools(
     await loadPi(),
     "swe@1",
@@ -120,6 +124,63 @@ test("a background child of a Workbench bash call lives after the call", async (
   const spawned = spawnedPids(t, result.content);
   assert.equal(spawned.length, ONE_CHILD);
   assert.deepEqual(await survivingProcesses(spawned), spawned);
+});
+
+test("the swe@1 bash runs the wrapped command with the child environment", async (t) => {
+  const directory = temporary(t);
+  const name = "ANTHROPIC_OAUTH_TOKEN";
+  const previous = process.env[name];
+  process.env[name] = "sentinel";
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string) => `echo wrapped; ${command}`,
+  );
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  const command = `echo "seen=\${${name}-unset}"`;
+  const result = await bash.execute(
+    "call_bash",
+    { command },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const [call] = wrap.mock.calls;
+  assert.ok(call);
+  assert.equal(call.arguments[0], command);
+  assert.equal(call.arguments[1], directory);
+  assert.equal(call.arguments[2]?.[name], undefined);
+  const text = result.content
+    .map((item) => ("text" in item ? item.text : ""))
+    .join("");
+  assert.match(text, /^wrapped\nseen=unset\n/);
+});
+
+test("a workbench bash call fails and spawns no process when the wrap rejects", async (t) => {
+  const directory = temporary(t);
+  const marker = join(directory, "marker");
+  const wrap = t.mock.method(bashSandbox, "wrap", async () => {
+    throw new Error("the bash sandbox is not available: probe");
+  });
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  await assert.rejects(
+    bash.execute(
+      "call_bash",
+      { command: `touch ${marker}` },
+      undefined,
+      undefined,
+      undefined as never,
+    ),
+    /the bash sandbox is not available: probe/,
+  );
+  assert.equal(wrap.mock.callCount(), ONE_OPERATION);
+  assert.equal(existsSync(marker), false);
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [
