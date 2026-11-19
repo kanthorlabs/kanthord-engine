@@ -9,9 +9,11 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
+  type EarlierVerdict,
   type Finding,
   MissionErrorCode,
   type Outcome,
+  type ReviewRound,
   type TestedInput,
 } from "../../mission/contract.ts";
 import type { ChangeRequest, ChangeRequestRead } from "../contract.ts";
@@ -27,6 +29,7 @@ export const READ_PAGE_LIMIT = 1000;
 const FIRST_ATTEMPT = 1;
 const NO_TIME = "";
 const VERDICT_SEPARATOR = "\n\n";
+const NO_TEXTS = 0;
 export const VERDICT_LINK_UPDATE_LIMIT = 20;
 
 export async function readAllPages<T>(
@@ -301,9 +304,13 @@ export interface Verdict {
 export interface Prior {
   verdict: Verdict | null;
   cleared: string | null;
+  unblockReason: string | null;
+  earlierVerdicts: EarlierVerdict[];
 }
 
-async function readLinkUpdates(
+type PriorVerdicts = Pick<Prior, "verdict" | "cleared">;
+
+export async function readLinkUpdates(
   run: ExecutionRun,
 ): Promise<{ text: string; count: number } | null> {
   const read = await run.call((options) =>
@@ -320,11 +327,38 @@ async function readLinkUpdates(
   return text === null ? null : { text, count: read.total };
 }
 
+export async function readHumanRequests(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+): Promise<string | null> {
+  const requested = await readRequestedChanges(run, repositories);
+  const updates = await readLinkUpdates(run);
+  const texts = [requested?.text ?? null, updates?.text ?? null].filter(
+    (text) => text !== null,
+  );
+  return texts.length === NO_TEXTS ? null : texts.join(VERDICT_SEPARATOR);
+}
+
 export async function readPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
-  const prior = await readUnblockPrior(run, repositories);
+  const round =
+    run.claim.attempt > FIRST_ATTEMPT ? await readReviewRound(run) : null;
+  const verdicts = await readVerdictsPrior(run, repositories, round);
+  return {
+    ...verdicts,
+    unblockReason: round?.unblock_reason ?? null,
+    earlierVerdicts: round?.earlier_verdicts ?? [],
+  };
+}
+
+async function readVerdictsPrior(
+  run: ExecutionRun,
+  repositories: readonly RepositoryName[],
+  round: ReviewRound | null,
+): Promise<PriorVerdicts> {
+  const prior = await readUnblockPrior(run, repositories, round);
   const updates = await readLinkUpdates(run);
   if (updates === null) return prior;
   if (prior.verdict === null)
@@ -352,7 +386,7 @@ export async function readPrior(
 async function readRequestedOrClearedPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
-): Promise<Prior> {
+): Promise<PriorVerdicts> {
   const requested = await readRequestedChanges(run, repositories);
   if (requested !== null) return { verdict: requested, cleared: null };
   const cleared = await readClearedAssessment(run);
@@ -368,10 +402,13 @@ async function readRequestedOrClearedPrior(
 async function readUnblockPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
-): Promise<Prior> {
+  reviewRound: ReviewRound | null,
+): Promise<PriorVerdicts> {
   const failed = await readFailedChecks(run, repositories);
   const rework = await readReworkAssessment(run);
-  const findings = rework ? (await readReviewRound(run)).findings : [];
+  const findings = rework
+    ? (reviewRound ?? (await readReviewRound(run))).findings
+    : [];
   const round = rework?.round ?? null;
   if (failed !== null)
     return {

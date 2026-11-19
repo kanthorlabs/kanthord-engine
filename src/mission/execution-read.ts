@@ -7,6 +7,7 @@ import {
   ActorKind,
   actorSchema,
   AssessmentResult,
+  type EarlierVerdict,
   type ExecutionDependency,
   Intent,
   MissionErrorCode,
@@ -15,7 +16,7 @@ import {
   reviewRoundSchema,
 } from "./contract.ts";
 import { findingRecord } from "./finding-read.ts";
-import { readOpenFixFindings } from "./finding-store.ts";
+import { listFindings, readOpenFixFindings } from "./finding-store.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import { evidencePage } from "./evidence-read.ts";
 import { recordNotFound } from "./record-list.ts";
@@ -27,8 +28,11 @@ import {
 import {
   countExecutionAssessmentsOfAttempt,
   readAssessment,
+  readAssessmentRound,
+  readAttempt,
   readCurrentOutcome,
   readEvidence,
+  readExecutionAssessmentsBeforeAttempt,
   readExecutionAssessmentsOfAttempt,
   readOutcomesOfAttempt,
   readRequests,
@@ -263,12 +267,45 @@ export function reworkAssessment(
   return assessmentRecord(tx, dependencies, assessment);
 }
 
+function earlierVerdictsOf(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): EarlierVerdict[] {
+  const findings = listFindings(tx, nodeId, {
+    attempt: null,
+    round: null,
+    route: null,
+    open: false,
+    after: null,
+    count: null,
+  });
+  return readExecutionAssessmentsBeforeAttempt(tx, nodeId, attempt).map(
+    (assessment) => {
+      const round = readAssessmentRound(tx, assessment);
+      assert.ok(round !== null);
+      return {
+        attempt: assessment.attempt,
+        round,
+        result: assessment.result,
+        rationale: assessment.rationale,
+        findings: findings
+          .filter((finding) => finding.assessment_id === assessment.id)
+          .map(findingRecord),
+      };
+    },
+  );
+}
+
 export function reviewRound(
   tx: Transaction,
   dependencies: Dependencies,
   claim: ExecutionClaim,
 ): ReviewRound {
   const { revision } = executionRead(tx, dependencies, claim);
+  const unblockReason =
+    readAttempt(tx, claim.nodeId, claim.attempt)?.unblock_reason ?? null;
+  const earlierVerdicts = earlierVerdictsOf(tx, claim.nodeId, claim.attempt);
   const round =
     countExecutionAssessmentsOfAttempt(tx, claim.nodeId, claim.attempt) +
     FIRST_ROUND;
@@ -281,6 +318,8 @@ export function reviewRound(
       final,
       review_base: null,
       findings: [],
+      unblock_reason: unblockReason,
+      earlier_verdicts: earlierVerdicts,
     });
   const base = readReviewBase(
     tx,
@@ -298,6 +337,8 @@ export function reviewRound(
     findings: readOpenFixFindings(tx, claim.nodeId, claim.attempt).map(
       findingRecord,
     ),
+    unblock_reason: unblockReason,
+    earlier_verdicts: earlierVerdicts,
   });
 }
 

@@ -22,7 +22,7 @@ import { insertProposal } from "./proposal-store.ts";
 import { ContentField } from "./content.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
-import { insertAssessment, openAttempt } from "./record-store.ts";
+import { insertAssessment, openAttempt, readAttempt } from "./record-store.ts";
 import {
   insertDependency,
   insertNode,
@@ -1116,4 +1116,71 @@ test("an unblock that rejects an open proposal moves its linked findings to repo
     },
   });
   assert.equal(route(), FindingRoute.Report);
+});
+
+const RETRY_REASON = "Retry on the current base branch.";
+const CHANGE_REASON = "Redirect";
+const REQUEST_REASON = "Keep";
+
+async function unblockReasonStored(
+  t: Parameters<typeof controlHarness>[0],
+  requestOf: (content: unknown) => Record<string, unknown>,
+) {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      ...requestOf(blocked.node.content),
+    },
+  });
+  const reasonOf = (attempt: number) =>
+    h.store.transaction((tx) => readAttempt(tx, h.node_id, attempt))
+      ?.unblock_reason;
+  assert.equal(reasonOf(FIRST_ATTEMPT), null);
+  return reasonOf(SECOND_ATTEMPT);
+}
+
+test("an unblock stores its reason on the attempt that it opens", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, () => ({
+      reason: RETRY_REASON,
+    })),
+    RETRY_REASON,
+  );
+});
+
+test("an unblock with no reason stores null on the attempt that it opens", async (t) => {
+  assert.equal(await unblockReasonStored(t, () => ({})), null);
+});
+
+test("an unblock with a change and no reason stores the change reason", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, (content) => ({
+      change: { content, reason: CHANGE_REASON, tasks: [] },
+    })),
+    CHANGE_REASON,
+  );
+});
+
+test("an unblock with a change and a reason stores the request reason", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, (content) => ({
+      change: { content, reason: CHANGE_REASON, tasks: [] },
+      reason: REQUEST_REASON,
+    })),
+    REQUEST_REASON,
+  );
 });

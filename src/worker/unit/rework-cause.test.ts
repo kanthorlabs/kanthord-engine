@@ -26,6 +26,7 @@ function facts(overrides: Partial<EvaluationFacts>): EvaluationFacts {
     round: 1,
     final_round: false,
     action_labels: [],
+    person_labels: [],
     fixed_count: 0,
     ...overrides,
   };
@@ -89,6 +90,37 @@ test("a judgement decides by its first unmet ground", () => {
       reworkCauseOf(facts({ unmet_ids: ["a"], unmet_grounds: [ground] })),
       { category, subcategory, assigner: CauseAssigner.Reviewer },
     );
+});
+
+test("a judgement whose every blocker holds person is a human intervention", () => {
+  assert.deepEqual(
+    reworkCauseOf(
+      facts({
+        unmet_ids: ["a", "b"],
+        unmet_grounds: [UnmetGround.Unstated, UnmetGround.Stated],
+        person_labels: ["B1", "B2", "S1"],
+      }),
+    ),
+    {
+      category: CauseCategory.Human,
+      subcategory: CauseSubcategory.Intervention,
+      assigner: CauseAssigner.Reviewer,
+    },
+  );
+  assert.deepEqual(
+    reworkCauseOf(
+      facts({
+        unmet_ids: ["a", "b"],
+        unmet_grounds: [UnmetGround.Stated, UnmetGround.Stated],
+        person_labels: ["B1"],
+      }),
+    ),
+    {
+      category: CauseCategory.Model,
+      subcategory: CauseSubcategory.WorkDefect,
+      assigner: CauseAssigner.Reviewer,
+    },
+  );
 });
 
 test("the first unmet ground decides over a later one", () => {

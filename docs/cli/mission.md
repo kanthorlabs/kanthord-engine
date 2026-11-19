@@ -469,8 +469,12 @@ tasks.
   It checks the blocked attempt and current expected revision, optionally
   writes a content change, then opens exactly one next attempt pinned to the
   revision left current, with the human as `opened_by`. When the attempt reads 0, the unblock opens none and returns `attempt: null`. It routes to `Available` or
-  `Pending`, never `Waiting`. Directions belong in the content change, not a
-  side-channel note on the attempt. The optional `start_point` says where the
+  `Pending`, never `Waiting`. A content change stays the path for a criterion.
+  The attempt that the unblock opens stores the reason (`reason` of the request,
+  else `reason` of `change`, else null). The coder of that attempt gets a node
+  instruction that holds the reason, also when every task is done, and the
+  reviewer of each round of that attempt reads it in the review round. The
+  reason reaches the coder and the reviewer as a direction. The optional `start_point` says where the
   next attempt starts: `node_branch`, the default, continues the node branch;
   `base_branch` starts the new node branch `kanthord/<node id>-a<attempt>` from
   the base branch. No branch is deleted, renamed or force-pushed, and an open
@@ -714,6 +718,9 @@ The key `inbox` of the conversation binding names the developer.
 
 - A review finding is the record of one blocker or one suggestion of a review round, under [the review finding](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/mission-service.impl.md#the-review-finding).
   The reviewer submits its findings in `findings` of `mission.assessment.submit`, and the service records each finding in the transaction of the assessment.
+  A finding holds the action `yes`, `no` or `person`. `person` marks an item that only a person can close, for example a live model run, a paid eval, a merge, a pull request description or a browser check.
+  A `person` finding gets the route `report` and waits for `finding decide`. It is no action item.
+  A blocker holds the action `yes` or `person`.
   The submit refuses with 400 `gateway.request.validation_failed` and an issue at `findings` a bad label, a duplicate label, a blocker with `action: no` or with no ground, a suggestion with a ground, an unknown `task_id`, a blank or oversized text, more than 100 items, and a `success` with a blocker.
   It refuses with an issue at `fixed_finding_ids` a duplicate identity, an identity that names no open finding of the attempt with the route `fix`, and a `success` that leaves out an open blocker of the attempt.
   Only a current assessment writes `fixed_assessment_id` and changes the route of an earlier finding. A non-current assessment stores each of its findings with the route `record`.
@@ -850,7 +857,12 @@ A task record or a task attempt is not manufactured for convenience.
   finding of the attempt with the route `fix` out of `fixed_finding_ids`. A
   `plan` cause, for example `requirement_conflict` or `criterion_unstated`,
   causes no rework: the attempt closes into `Blocked` with the transition rule
-  `plan_defect`, and the transition holds no count and no limit. A rework ends the claim, writes no outcome and keeps the
+  `plan_defect`, and the transition holds no count and no limit. A `person` finding is no action item. A current
+  `criterion-not-met` round whose only action items are `person` blockers causes no rework: the attempt closes into `Blocked`
+  with the transition rule `none`. A current `success` round whose tested commits equal the tested commits of the latest
+  earlier `success` execution assessment of the attempt causes no rework, and its open `fix` findings get the route `report`.
+  The worker runs no verification, no affected test and no reviewer agent for such a round, and submits `success` with no
+  finding. A rework ends the claim, writes no outcome and keeps the
   attempt open. A rework of a `success` assessment carries no failure cause. It moves the node from `Evaluating` to `Available` with a job
   when the node is claimable. Every other current assessment that does not pass
   closes into `Blocked`, whether its result is `criterion-not-met` of the final round with the rule `rework_limit`,
@@ -976,7 +988,9 @@ The read answers 404 `mission.record.not_found` when no unblock opened the claim
 The rework assessment returns the existing `Assessment` schema.
 It is the execution assessment with the greatest `sequence` among the assessments of the claimed attempt whose result is `criterion-not-met`, or `success` while the attempt holds an open finding with the route `fix`.
 The read answers 404 `mission.record.not_found` when the claimed attempt holds no such assessment.
-The review round returns `ReviewRound`: the round of the next assessment of the claimed attempt, whether that round is final, the review base and the open findings of the attempt with the route `fix`.
+The review round returns `ReviewRound`: the round of the next assessment of the claimed attempt, whether that round is final, the review base, the open findings of the attempt with the route `fix`, `unblock_reason` and `earlier_verdicts`.
+`unblock_reason` is the reason that the unblock stored on the claimed attempt, or null.
+`earlier_verdicts` holds one item per execution assessment of each attempt before the claimed attempt, in sequence order. An item holds `attempt`, `round`, `result`, `rationale` and `findings`, the findings of that assessment.
 The `examine`-only dependency reads return `Page<Node | { id, state }>`, `Page<Outcome>` and `Page<Evidence>` for its direct dependencies that are not retired.
 Each dependency resolves to the `node_revision` of its current outcome.
 A dependency without an outcome carries its identity and its state only.

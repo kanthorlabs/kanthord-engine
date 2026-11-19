@@ -47,6 +47,8 @@ const FIRST_ROUND = {
   final: false,
   review_base: null,
   findings: [],
+  unblock_reason: null,
+  earlier_verdicts: [],
 };
 
 test("B3 review bundle places all supporting assets in the evidence directory outside the checkouts and removes partial object failures", async (t) => {
@@ -726,13 +728,22 @@ async function roundEvaluation(
   );
   const round =
     base === null
-      ? { round: 1, final: false, review_base: null, findings: [] }
+      ? {
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+        }
       : {
           round: 2,
           final: false,
           review_base:
             reviewBase.length === SINGLE_BINDING ? reviewBase[0]! : reviewBase,
           findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
         };
   const prepared = await prepareEvaluation(
     {

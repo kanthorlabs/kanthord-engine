@@ -112,6 +112,7 @@ const EVIDENCE_FRAGMENT_EXCEPTIONS = [
 const FINDING_FRAGMENT_EXCEPTIONS = [
   ["finding.create", "mission.finding.list", true],
   ["finding.get", "mission.finding.get", false],
+  ["execution.review_round.get", "mission.execution.review_round.get", false],
 ] as const;
 const LEGACY_FRAGMENT_EXCEPTIONS = [
   "openapi/mission/dependency.add.yaml",

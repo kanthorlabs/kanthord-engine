@@ -116,3 +116,26 @@ test("a submit admits FINDING_MAX findings, the text bound and a task of the pin
   assert.equal(stored[0]?.task_id, taskId);
   assert.equal(stored[0]?.description, bound);
 });
+
+test("a person blocker with its ground is admitted and a blocker with the action no is refused", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await assert.rejects(
+    h.submit({
+      ...h.notMet,
+      findings: [reviewerFinding("B1", { action: FindingAction.No })],
+    }),
+    refusedAt(FINDINGS),
+  );
+  await h.submit({
+    ...h.notMet,
+    findings: [
+      reviewerFinding("B1", {
+        action: FindingAction.Person,
+        ground: FindingGround.Standard,
+      }),
+    ],
+  });
+  const stored = await h.byLabel("B1");
+  assert.equal(stored.action, FindingAction.Person);
+  assert.equal(stored.ground, FindingGround.Standard);
+});

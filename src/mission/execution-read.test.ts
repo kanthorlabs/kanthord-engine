@@ -10,6 +10,7 @@ import {
   FindingStatus,
   MissionErrorCode,
   NodeState,
+  StartPoint,
 } from "./contract.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
@@ -44,6 +45,9 @@ const SINGLE_ITEM = 1;
 const SECOND_REVISION = 2;
 const CLOSE_AT = 2;
 const SECOND_ATTEMPT = 2;
+const ONE_VERDICT = 1;
+const VERDICT_RATIONALE = "The route misses a test.";
+const LATER_TIME = 2000;
 const LATER_TS = 3;
 const THIRD_REVISION = 3;
 const PINNED = "Pinned";
@@ -353,6 +357,8 @@ test("the review round answers its number, its review base and the open findings
     final: false,
     review_base: null,
     findings: [],
+    unblock_reason: null,
+    earlier_verdicts: [],
   });
   await h.submit({
     ...h.notMet,
@@ -480,4 +486,41 @@ test("a request evidence makes round 1 final", async (t) => {
   const round = await h.reviewRound();
   assert.equal(round.round, FIRST_ATTEMPT);
   assert.equal(round.final, true);
+});
+
+test("the review round of a later attempt returns the unblock reason and the earlier verdicts with their findings", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const reason = "Keep the legacy route.";
+  await h.submit({
+    ...h.notMet,
+    rationale: VERDICT_RATIONALE,
+    findings: [reviewerFinding("B1"), reviewerFinding("S1")],
+  });
+  h.store.transaction((tx) => {
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER_TIME);
+    openAttempt(
+      tx,
+      h.node_id,
+      FIRST_REVISION,
+      h.executionActor,
+      LATER_TIME,
+      StartPoint.NodeBranch,
+      reason,
+    );
+  });
+  h.claim.attempt = SECOND_ATTEMPT;
+  h.evaluate();
+  const round = await h.reviewRound();
+  assert.equal(round.unblock_reason, reason);
+  assert.equal(round.earlier_verdicts.length, ONE_VERDICT);
+  const [verdict] = round.earlier_verdicts;
+  assert.equal(verdict?.attempt, FIRST_ATTEMPT);
+  assert.equal(verdict?.round, FIRST_ATTEMPT);
+  assert.equal(verdict?.result, AssessmentResult.CriterionNotMet);
+  assert.equal(verdict?.rationale, VERDICT_RATIONALE);
+  assert.deepEqual(
+    verdict?.findings.map((finding) => finding.label),
+    ["B1", "S1"],
+  );
+  assert.equal(round.round, FIRST_ATTEMPT);
 });
