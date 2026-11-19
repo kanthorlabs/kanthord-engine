@@ -9,7 +9,6 @@ import { piAgentDirectory } from "./pi.ts";
 
 const TWICE = 2;
 const ONCE = 1;
-const NO_RESETS = 0;
 const COMMAND = "echo hi";
 
 function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
@@ -30,11 +29,9 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
     };
   }[] = [];
   const initialized: unknown[] = [];
-  let resets = 0;
   return {
     calls,
     initialized,
-    resets: () => resets,
     runtime: {
       initialize: async (config: unknown) => {
         initialized.push(config);
@@ -47,9 +44,6 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
       ) => {
         calls.push({ command, binShell, customConfig });
         return `sandboxed ${command}`;
-      },
-      reset: async () => {
-        resets += ONCE;
       },
     },
   };
@@ -139,7 +133,6 @@ test("a rejected initialize makes every wrap reject and never retries", async (t
     );
   assert.equal(fake.initialized.length, ONCE);
   assert.deepEqual(fake.calls, []);
-  assert.equal(fake.resets(), NO_RESETS);
 });
 
 test("a platform other than darwin and linux makes the wrap reject", async (t) => {
@@ -218,6 +211,5 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
       "api.bitbucket.org",
     ],
     deniedDomains: [],
-    allowLocalBinding: true,
   });
 });

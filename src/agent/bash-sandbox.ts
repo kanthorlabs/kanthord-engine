@@ -16,10 +16,9 @@ const WORKERS_DIRECTORY = "workers";
 const LOG_FILE = "kanthord.log";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 
-export const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
+const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
   allowedDomains: [NPM_REGISTRY_HOST, ...platformNetworkHosts()],
   deniedDomains: [],
-  allowLocalBinding: true,
 };
 
 const DEFAULT_CONFIG: SandboxRuntimeConfig = {
@@ -31,10 +30,7 @@ const DEFAULT_CONFIG: SandboxRuntimeConfig = {
   },
 };
 
-type Runtime = Pick<
-  typeof SandboxManager,
-  "initialize" | "wrapWithSandbox" | "reset"
->;
+type Runtime = Pick<typeof SandboxManager, "initialize" | "wrapWithSandbox">;
 
 function configurationOf(
   allowWrite: string[],
@@ -77,7 +73,6 @@ export function createBashSandbox(
         { cause },
       );
     }
-    process.once("exit", () => void runtime.reset());
   };
   return {
     async wrap(
