@@ -56,11 +56,10 @@ function executionEnvironment(
     assert.ok(digest, "A claimed environment must hold a computed digest.");
     return { source: EnvironmentSource.Stored, document: stored, digest };
   }
+  if (recorded?.source === EnvironmentSource.Detected)
+    return { source: recorded.source, document: recorded.document };
   if (placement !== InstancePlacement.Container) return null;
-  if (
-    recorded?.source === EnvironmentSource.Detected ||
-    recorded?.source === EnvironmentSource.Universal
-  )
+  if (recorded?.source === EnvironmentSource.Universal)
     return { source: recorded.source, document: recorded.document };
   if (!repositoryEnvironment) return null;
   assert.ok(digest, "A claimed environment must hold a computed digest.");

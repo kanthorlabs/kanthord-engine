@@ -1325,13 +1325,10 @@ export class Onboarding {
       resource_identity: record.resource_identity,
       commit,
     };
-    const checksOnly =
-      record.target !== EnvironmentTarget.Image &&
-      record.source === EnvironmentSource.Detected;
     const proof = {
       ...base,
       project_id: record.project_id,
-      setup: checksOnly ? [] : setupScriptsOf(document),
+      setup: setupScriptsOf(document),
       checks: checksOf(document),
     };
     if (record.target !== EnvironmentTarget.Image) {

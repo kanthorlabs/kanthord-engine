@@ -140,6 +140,7 @@ const APP_NAME = "app";
 const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
 const SETUP_FAILED = "setup_failed";
+const GO_DOWNLOAD = "go mod download";
 const PROOF_CRASHED = "proof crashed";
 const TWO_CALLS = 2;
 const THREE_CALLS = 3;
@@ -2346,7 +2347,7 @@ test("an image target keeps the repository source and the reason of a devcontain
   assert.equal(repository.lists.length, NO_CALLS);
 });
 
-test("a host target proves only the checks of a detected source", async (t) => {
+test("a host target proves the setup and the checks of a detected source", async (t) => {
   const repository = new FakeRepository();
   repository.files.set("go.mod", "module example.com/app\n\ngo 1.25\n");
   const { h, group } = resolvingHarness(t, repository, hostWorkers);
@@ -2354,9 +2355,33 @@ test("a host target proves only the checks of a detected source", async (t) => {
   assert.equal(h.state(group).source, EnvironmentSource.Detected);
   await h.until(() => h.proveInputs.length === ONE_CALL);
   assert.deepEqual(h.proveInputs[0]?.checks, ["go version"]);
-  assert.deepEqual(h.proveInputs[0]?.setup, []);
+  assert.deepEqual(h.proveInputs[0]?.setup, [GO_DOWNLOAD]);
   assert.deepEqual(h.events, ["proveOnHost"]);
 });
+
+test(
+  "a failing detected setup command at the host target writes setup_failed and fails the record",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const repository = new FakeRepository();
+    repository.files.set("go.mod", "module example.com/app\n\ngo 1.25\n");
+    const { h, group } = resolvingHarness(t, repository, hostWorkers);
+    h.open();
+    h.proveResults = [
+      result("setup", GO_DOWNLOAD, 3, { output: BOOM }),
+      result("check", "go version", 0),
+    ];
+    await h.compute(group);
+    const sum = h.state(group).digest ?? "";
+    await h.until(() => h.proofOf(sum, group) !== null);
+    const file = h.proofOf(sum, group);
+    assert.ok(file);
+    assert.equal(file.outcome, FAILED);
+    assert.equal(file.class, SETUP_FAILED);
+    assert.equal(file.command, GO_DOWNLOAD);
+    await h.until(() => h.state(group).status === EnvironmentStatus.Failed);
+  },
+);
 
 test("a remote target resolves the detected source and starts no run", async (t) => {
   const repository = new FakeRepository();

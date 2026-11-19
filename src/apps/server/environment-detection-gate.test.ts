@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -333,5 +339,38 @@ test(
       ),
       [],
     );
+  },
+);
+
+test(
+  "a node repository at the host target reaches ready only after its detected setup ran on the fresh clone",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const marker = join(temporary(t), "setup-ran");
+    const detection = await detectionFixture(
+      t,
+      {
+        "package.json": JSON.stringify({
+          name: "gate",
+          version: "1.0.0",
+          scripts: {
+            preinstall: `node -e "require('node:fs').writeFileSync(process.argv[1], '')" ${JSON.stringify(marker)}`,
+          },
+        }),
+        "package-lock.json": JSON.stringify({
+          name: "gate",
+          version: "1.0.0",
+          lockfileVersion: 3,
+          requires: true,
+          packages: { "": { name: "gate", version: "1.0.0" } },
+        }),
+      },
+      WorkerPlacement.Server,
+    );
+    const ready = await settled(t, detection);
+    assert.equal(ready.status, EnvironmentStatus.Ready);
+    assert.equal(ready.source, EnvironmentSource.Detected);
+    assert.equal(ready.target, EnvironmentTarget.Host);
+    assert.equal(existsSync(marker), true);
   },
 );

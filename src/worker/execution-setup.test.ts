@@ -480,24 +480,40 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.equal(await environmentOf(null, InstancePlacement.Server), null);
   assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
   const detected = { image: "debian", updateContentCommand: "npm ci" };
-  for (const source of [
-    EnvironmentSource.Detected,
-    EnvironmentSource.Universal,
-  ])
+  for (const placement of Object.values(InstancePlacement))
     assert.deepEqual(
-      await environmentOf(null, InstancePlacement.Container, true, {
-        source,
-        document: detected,
-      }),
-      { source, document: detected },
-    );
-  for (const placement of [InstancePlacement.Server, InstancePlacement.Worker])
-    assert.equal(
       await environmentOf(null, placement, true, {
         source: EnvironmentSource.Detected,
         document: detected,
       }),
+      { source: EnvironmentSource.Detected, document: detected },
+    );
+  assert.deepEqual(
+    await environmentOf(null, InstancePlacement.Container, true, {
+      source: EnvironmentSource.Universal,
+      document: detected,
+    }),
+    { source: EnvironmentSource.Universal, document: detected },
+  );
+  for (const placement of [InstancePlacement.Server, InstancePlacement.Worker])
+    assert.equal(
+      await environmentOf(null, placement, true, {
+        source: EnvironmentSource.Universal,
+        document: detected,
+      }),
       null,
+    );
+  for (const placement of Object.values(InstancePlacement))
+    assert.deepEqual(
+      await environmentOf(stored, placement, true, {
+        source: EnvironmentSource.Detected,
+        document: detected,
+      }),
+      {
+        source: EnvironmentSource.Stored,
+        document: stored,
+        digest: ENVIRONMENT_DIGEST,
+      },
     );
   const claimedBy = async (placement: InstancePlacement) => {
     claimed.length = NO_REQUESTS;
