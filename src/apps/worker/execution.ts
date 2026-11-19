@@ -42,6 +42,7 @@ export interface HostExecutionInput {
   context: Context;
   stop?: Context;
   sessionRoot?: string;
+  capture?: NativeExecutionInput["capture"];
   log(record: Record<string, unknown>): void;
 }
 

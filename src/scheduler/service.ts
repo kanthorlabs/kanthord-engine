@@ -277,6 +277,25 @@ export class SchedulerService implements Service, WorkQueue {
       };
     });
   }
+  seedExecutionOf(tx: Transaction, executionId: string) {
+    const row = readExecution(tx, executionId);
+    if (row === null) return null;
+    return {
+      execution_id: row.execution_id,
+      project_id: row.project_id,
+      node_id: row.node_id,
+      attempt: row.attempt,
+      pinned_revision: row.pinned_revision,
+      node_branch: nodeBranchOfExecution(tx, this.dependencies.branches, row),
+      runtime_identity: row.runtime_identity,
+      worker_binding_id: row.worker_binding_id,
+      credentials: row.credentials,
+      created_at: row.created_at,
+      expired_at: row.expired_at,
+      trace_id: row.trace_id,
+      root_span_id: row.root_span_id,
+    };
+  }
   revoke(
     tx: Transaction,
     nodeId: string,

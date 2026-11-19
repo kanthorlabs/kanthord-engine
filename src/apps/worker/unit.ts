@@ -39,6 +39,7 @@ import {
   startHeartbeat,
 } from "./registration.ts";
 import {
+  captureOf,
   defaultModelRuntimeFactory,
   EndReason,
   executionSessionRoot,
@@ -698,6 +699,7 @@ export class WorkerUnit {
       context,
       stop,
       sessionRoot: executionSessionRoot(this.options.directories.data),
+      capture: captureOf(this.options.env, this.options.directories.data),
       log: (record) => this.logRecord(record),
     });
   }

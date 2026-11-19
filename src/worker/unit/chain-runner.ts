@@ -35,10 +35,12 @@ import {
   ExecutionStop,
 } from "./execution-stop.ts";
 import type { StepWatch } from "./foundry.ts";
+import type { TasksCapture } from "./tasks-capture.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import { Phase } from "./telemetry.ts";
 
 const CHECKPOINT_FAILED = "checkpoint failed";
+const CAPTURE_FAILED = "tasks capture failed";
 const FIRST_PHASE = 0;
 const UNKNOWN_PHASE = -1;
 
@@ -50,6 +52,7 @@ export interface ChainIo<P extends CommonPorts = CommonPorts> {
   host: StepHost;
   ports: P;
   steps?: StepWatch;
+  capture?: TasksCapture;
 }
 
 interface Walk<P extends CommonPorts = CommonPorts> {
@@ -253,6 +256,16 @@ async function budgetEnd(
   );
 }
 
+async function captureStart(walk: Walk, capture: TasksCapture): Promise<void> {
+  const { run } = walk.io;
+  try {
+    await capture(walk.ctx);
+  } catch (error) {
+    const reason = await run.reasonOf(error);
+    run.log(CAPTURE_FAILED, reason === null ? {} : { reason });
+  }
+}
+
 async function walkPhases<P extends CommonPorts>(
   built: Chain<P>,
   walk: Walk<P>,
@@ -267,6 +280,8 @@ async function walkPhases<P extends CommonPorts>(
       return budgetEnd(built, walk, progress.prepared);
     if (kind === StepKind.Closed) return closedEnd(walk.ctx, kind);
     if (phase === Phase.Prepare) progress.prepared = true;
+    if (phase === Phase.Start && walk.io.capture !== undefined)
+      await captureStart(walk, walk.io.capture);
   }
   return assert.fail("A chain ends with a final step.");
 }

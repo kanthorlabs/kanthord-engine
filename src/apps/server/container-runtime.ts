@@ -42,6 +42,7 @@ export const FORWARDED_VARIABLES = [
   "GIT_AUTHOR_EMAIL",
   "GIT_COMMITTER_NAME",
   "GIT_COMMITTER_EMAIL",
+  "KANTHORD_CAPTURE_TASKS",
 ] as const;
 export const SERVER_IN_CONTAINER_MARKERS = [
   "/run/.containerenv",

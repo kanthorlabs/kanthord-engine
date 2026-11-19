@@ -63,6 +63,7 @@ const EXITED: ExecutionEnd = {
 const FRAMES = 2;
 const STOP_CODE = "test.stop";
 const CHECKPOINT_FAILED = "checkpoint failed";
+const CAPTURE_FAILED = "tasks capture failed";
 const DISPOSALS = 2;
 const UNWRITTEN_KEY: Key = "agent";
 
@@ -266,6 +267,31 @@ test("a chain runs each phase, each frame of a loop and the final step, then dis
     "dispose second",
     "dispose first",
   ]);
+});
+
+test("a capture that throws after start logs tasks capture failed, and the chain reaches its final step", async (t) => {
+  const h = harness(t);
+  h.io.capture = async () => {
+    h.trace.push("capture");
+    throw new Error("capture disk full");
+  };
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .phase(Phase.Start)
+    .step(stepOf(h, "start"))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(h.trace.slice(0, 4), [
+    "prepare",
+    "start",
+    "capture",
+    "release",
+  ]);
+  assert.ok(h.logs.includes(CAPTURE_FAILED));
 });
 
 test("a build rejects a step that reads a key with no earlier writer", (t) => {

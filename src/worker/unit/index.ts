@@ -61,6 +61,14 @@ export {
   type LocalCredential,
 } from "./tasks-credential.ts";
 export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
+export { checkSeedFolder, writeSeed } from "./tasks-seed-file.ts";
+export { compareRuns } from "./tasks-compare.ts";
+export {
+  CAPTURE_VARIABLE,
+  CAPTURES_DIRECTORY,
+  captureOf,
+  type TasksCapture,
+} from "./tasks-capture.ts";
 export {
   checkFileOptions,
   checkHeader,

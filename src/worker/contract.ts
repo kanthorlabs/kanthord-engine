@@ -61,6 +61,7 @@ import {
   promptReferenceSchema,
   promptTemplatesSchema,
 } from "../agent/contract.ts";
+import { type Revision, revisionSchema } from "../mission/contract.ts";
 export const WorkerHost = {
   Kanthord: "kanthord",
   ExternalHarness: "external-harness",
@@ -1045,6 +1046,7 @@ export const WorkerErrorCode = {
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   ExecutionPromptNotPinned: "worker.execution.prompt_not_pinned",
   ExecutionPromptRecordFailed: "worker.execution.prompt_record_failed",
+  ExecutionSeedUnavailable: "worker.execution.seed_unavailable",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -1352,6 +1354,77 @@ export const executionSetupSchema = z.strictObject({
     }),
   ),
 });
+export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+const seedCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+export const seedClaimSchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  node_id: identitySchema("node"),
+  attempt: z.number().int().positive(),
+  pinned_revision: z.number().int().positive(),
+  node_branch: z.string().min(1),
+  created_at: timestamp,
+  expired_at: timestamp,
+  trace_id: z.string().min(1),
+  root_span_id: z.string().min(1),
+});
+export const executionSeedSchema = z.strictObject({
+  claim: seedClaimSchema,
+  setup: executionSetupSchema,
+  revision: revisionSchema,
+  heads: z.record(identitySchema("binding"), seedCommitSchema),
+});
+export type ExecutionSeed = z.infer<typeof executionSeedSchema>;
+export function withoutEnvironmentMaps<
+  S extends Pick<ExecutionSetup, "repositories">,
+>(setup: S): S {
+  const repositories = setup.repositories.map((repository) => {
+    const environment = repository.environment;
+    if (environment === null || !("document" in environment)) return repository;
+    const document = { ...environment.document };
+    delete document.containerEnv;
+    delete document.remoteEnv;
+    if (document.build !== undefined) {
+      const build = { ...document.build };
+      delete build.args;
+      document.build = build;
+    }
+    return { ...repository, environment: { ...environment, document } };
+  });
+  return { ...setup, repositories };
+}
+export interface SeedExecution {
+  execution_id: string;
+  project_id: string;
+  node_id: string;
+  attempt: number;
+  pinned_revision: number;
+  node_branch: string;
+  runtime_identity: string;
+  worker_binding_id: string;
+  credentials: string[];
+  created_at: number;
+  expired_at: number;
+  trace_id: string;
+  root_span_id: string;
+}
+export interface SeedNode {
+  revision: Revision;
+  heads: Record<string, string>;
+}
+export interface SeedSources {
+  executionOf(tx: Transaction, executionId: string): SeedExecution | null;
+  nodeOf(tx: Transaction, execution: SeedExecution): SeedNode | null;
+  credentialMetadataOf(
+    tx: Transaction,
+    pinned: readonly string[],
+    credentialName: string,
+  ): CredentialMetadataRecord | null;
+  sshPublicKeyOf(
+    tx: Transaction,
+    pinned: readonly string[],
+    credentialName: string,
+  ): string | null;
+}
 export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({
     host: z.literal(WorkerHost.Kanthord),
@@ -1921,6 +1994,22 @@ export const workerOperations = {
     output: executionSetupSchema,
     description:
       "Read native execution setup from the proven claim and its pinned binding and credential revisions, without secret material or creating a pin.",
+  },
+  "execution.seed.get": {
+    ...humanOperation,
+    id: "worker.execution.seed.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:execution_id/seed",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: executionSeedSchema,
+    description:
+      "Read the seed of an execution of a node that is not closed: the claim, the setup without containerEnv and remoteEnv, the pinned revision and the head of each binding. The answer holds no credential, no SSH identity and no handover key.",
   },
   "action.request": {
     service: WORKER_SERVICE_NAME,

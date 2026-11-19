@@ -762,6 +762,7 @@ receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` or
 `KANTHORD_ENDPOINT`.
 
 The data directory of the instance is `<XDG data directory>/kanthord/workers/<name>`.
+With `KANTHORD_CAPTURE_TASKS=1` in the environment of the worker process, each implement execution writes a seed to `captures/<execution_id>/seed.json` of the data directory. [Seed capture](./worker.md#seed-capture) states the rules.
 The log directory is `<XDG state directory>/kanthord/workers/<name>`.
 The bindings, the worker, the agent configuration and the client secret of each
 binding come from the server through the bindings that list the instance.

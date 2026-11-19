@@ -35,6 +35,9 @@ import {
   tasksPlanOf,
   withoutAmbientCredentials,
 } from "../worker/index.ts";
+import { singleUse } from "./shared.ts";
+import { tasksCompare } from "./worker-tasks-compare.ts";
+import { tasksSeed } from "./worker-tasks-seed.ts";
 
 const STDIN_DESCRIPTOR = 0;
 const SIGINT = "SIGINT";
@@ -352,7 +355,9 @@ function collect(value: string, previous: string[]): string[] {
 export function addWorkerTasksCommands(worker: Command): void {
   const tasks = worker
     .command("tasks")
-    .description("Local runs of the tasks phase of an implement execution");
+    .description(
+      "Seeds, local runs and run comparisons of the tasks phase of an implement execution",
+    );
   tasks.action(() => tasks.help());
   tasks
     .command("run")
@@ -400,5 +405,34 @@ export function addWorkerTasksCommands(worker: Command): void {
     )
     .action((seedFolder: string, _options, command: Command) =>
       runAction(seedFolder, command),
+    );
+  tasks
+    .command("seed")
+    .description(
+      "Export the seed of an execution of a node that is not closed from the server into <output>/seed.json",
+    )
+    .argument("<execution_id>", "Execution identity")
+    .requiredOption(
+      "--output <folder>",
+      "Folder that receives seed.json",
+      singleUse("--output"),
+    )
+    .option("--force", "Replace an empty folder or an earlier seed folder")
+    .action((executionId: string, _options, command: Command) =>
+      tasksSeed(executionId, command),
+    );
+  tasks
+    .command("compare")
+    .description(
+      "Compare two run folders of one seed: route, end, commits, unit results and metrics.json",
+    )
+    .argument("<output-a>", "First run folder")
+    .argument("<output-b>", "Second run folder")
+    .action((outputA: string, outputB: string) =>
+      tasksCompare([outputA, outputB], {
+        cwd: process.cwd(),
+        env: process.env,
+        stdout: (text) => void process.stdout.write(text),
+      }),
     );
 }

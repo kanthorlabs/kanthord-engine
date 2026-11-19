@@ -680,6 +680,9 @@ export {
 } from "./machine-config.ts";
 export {
   checkOutputFolder,
+  checkSeedFolder,
+  compareRuns,
+  writeSeed,
   credentialInvalid,
   credentialOf,
   credentialValues,

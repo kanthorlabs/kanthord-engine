@@ -95,18 +95,37 @@ function signatureOffEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function commitLog(
+export const COMMIT_ID_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+export const CHECKOUT_HEAD = "HEAD";
+
+export interface CommitRange {
+  from: string;
+  to: string;
+}
+
+export function commitLog(
   directory: string,
-  range: string,
-  input: VerifyInput,
+  range: CommitRange,
+  env: NodeJS.ProcessEnv,
 ): Promise<string> {
+  if (
+    !COMMIT_ID_PATTERN.test(range.from) ||
+    (range.to !== CHECKOUT_HEAD && !COMMIT_ID_PATTERN.test(range.to))
+  )
+    return Promise.reject(new Error("The commit range holds no commit id."));
   return simpleGit({
     baseDir: directory,
     timeout: { block: VERIFY_DEADLINE_MS },
     unsafe: { ...GIT_UNSAFE_OPTIONS, allowUnsafeGpgProgram: true },
   })
-    .env(signatureOffEnvironment(input.env))
-    .raw(["log", "-z", COMMIT_FORMAT, range]);
+    .env(signatureOffEnvironment(env))
+    .raw([
+      "log",
+      "-z",
+      COMMIT_FORMAT,
+      "--end-of-options",
+      `${range.from}..${range.to}`,
+    ]);
 }
 const REQUESTED_STOPS: readonly string[] = [
   EndReason.WorkerStopped,
@@ -218,8 +237,11 @@ async function commitsOf(
   for (const checkout of input.trees.workspace.checkouts) {
     const log = await commitLog(
       join(folder, relative(input.output, checkout.directory)),
-      `${input.plan.seed.heads[checkout.binding_id]}..HEAD`,
-      input,
+      {
+        from: input.plan.seed.heads[checkout.binding_id] ?? "",
+        to: CHECKOUT_HEAD,
+      },
+      input.env,
     );
     const list = log
       .split(COMMIT_SEPARATOR)
