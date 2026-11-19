@@ -55,6 +55,7 @@ const an = (n: number) =>
 const PASS = j("pass", "word");
 const providerKey = () => j("sk", "-ant-api03-", an(93));
 const SESSION_ID = "session-1";
+const NO_FINDING = 0;
 const SINGLE_FINDING = 1;
 const PAIR_OF_FINDINGS = 2;
 const SIGNED_APIS = 3;
@@ -242,6 +243,44 @@ test("assistant content keeps a pattern value and masks a known secret, and erro
   assert.equal(own, undefined);
   const echo = await end(toolResult(j("value ", value)));
   assert.equal(echo, undefined);
+});
+
+test("assistant content ignores the table values and a signed thinking block adds none", async () => {
+  const { end, redaction } = redactionOf();
+  const learned = an(16);
+  assert.ok(await end(toolResult(j(PASS, ' = "', learned, '"'))));
+  const own = await end({
+    role: "assistant",
+    content: [{ type: "text", text: j("value ", learned) }],
+    api: "anthropic-messages",
+    timestamp: 1,
+  });
+  assert.equal(own, undefined);
+  const thought = an(16);
+  const kept = await end({
+    role: "assistant",
+    content: [
+      {
+        type: "thinking",
+        thinking: j(PASS, ' = "', thought, '" ', learned),
+        thinkingSignature: "signature-bytes",
+      },
+    ],
+    api: "anthropic-messages",
+    timestamp: 1,
+  });
+  assert.equal(kept, undefined);
+  assert.equal(redaction.counts().thinking_kept, NO_FINDING);
+  assert.equal(await end(toolResult(j("value ", thought))), undefined);
+});
+
+test("modelOutput masks every rule and adds no value to the known set", async () => {
+  const { end, redaction } = redactionOf();
+  const value = an(16);
+  const output = redaction.modelOutput(j(PASS, ' = "', value, '"'));
+  assert.ok(!output.includes(value));
+  assert.equal(markers(output).length, SINGLE_FINDING);
+  assert.equal(await end(toolResult(j("value ", value))), undefined);
 });
 
 test("a toolResult key outside content and details is redacted", async () => {

@@ -41,6 +41,7 @@ export interface SensitiveTextRedaction {
   restore: InlineExtension;
   hook: InlineExtension;
   text(value: string): Promise<string>;
+  modelOutput(value: string): string;
   counts(): RedactionCounts;
 }
 
@@ -323,6 +324,7 @@ export function sensitiveTextRedaction(
     known: matcher,
   };
   const modelScan: Scan = { pattern: () => [], known: secretMatcher };
+  const outputScan: Scan = { pattern: findPatternText, known: matcher };
 
   const redactStrings = (
     strings: readonly string[],
@@ -585,6 +587,7 @@ export function sensitiveTextRedaction(
       await refresh();
       return redactStrings([value], []).get(value)!;
     },
+    modelOutput: (value) => redactStrings([value], [], outputScan).get(value)!,
     counts: () => structuredClone(counts),
   };
 }
