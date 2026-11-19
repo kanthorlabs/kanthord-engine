@@ -26,9 +26,15 @@ import type { CommonPorts } from "./foundry-ports.ts";
 
 const UNKNOWN_STEP = "unknown";
 
+export interface StepWatch {
+  started(step: string): void;
+  ended(step: string, scope: unknown): void;
+}
+
 export interface FoundryHost<P extends CommonPorts> {
   capabilities: readonly InlineExtension[];
   ports: P;
+  steps?: StepWatch;
 }
 
 export interface FoundryControl {
@@ -47,6 +53,7 @@ export interface TasksWalk<R> {
 interface TasksRun {
   control: FoundryControl;
   ports: CommonPorts;
+  steps: StepWatch | null;
   ctx: ExecutionCtx;
   stoppedAt: string | null;
 }
@@ -73,6 +80,7 @@ async function walkStep(
   assert.ok(step.foundry, "A tasks phase holds no host step.");
   const { budget, env } = run.control;
   const context = contextOf(run, step);
+  run.steps?.started(step.id);
   try {
     const result = await step.run(
       sliceOf(run.ctx, step.reads) as never,
@@ -93,6 +101,7 @@ async function walkStep(
     return walkedOf(run, result);
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
+    run.steps?.ended(step.id, holder.scope);
   }
 }
 
@@ -125,7 +134,13 @@ export async function runTasks<R>(
     result: walk.resultOf(ctx),
     verificationTimedOut: ctx.verificationTimedOut,
   });
-  const run: TasksRun = { control, ports: host.ports, ctx, stoppedAt: null };
+  const run: TasksRun = {
+    control,
+    ports: host.ports,
+    steps: host.steps ?? null,
+    ctx,
+    stoppedAt: null,
+  };
   let walked: Walked;
   try {
     walked = await walkNodes(walkerOf(run), walk.nodes, { scope: null });

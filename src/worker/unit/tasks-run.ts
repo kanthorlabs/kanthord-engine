@@ -32,6 +32,7 @@ import { tasksPrepareChain } from "./chain-tasks-prepare.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
+  type EvidenceDraft,
   type EvidencePort,
   type ImplementHostPorts,
   PortResultKind,
@@ -70,6 +71,7 @@ import {
   prepareTrees,
   unlockTree,
 } from "./tasks-trees.ts";
+import { StepRecord } from "./tasks-steps.ts";
 import {
   type CheckResult,
   type RunEnd,
@@ -135,6 +137,28 @@ function ok<T>(value: T) {
   return { kind: PortResultKind.Ok, value } as const;
 }
 
+function redactedDraft(
+  draft: EvidenceDraft,
+  output: TasksOutput,
+): EvidenceDraft {
+  return {
+    ...draft,
+    assets: draft.assets.map((asset) =>
+      asset.kind === AssetKind.Produced
+        ? {
+            ...asset,
+            content: {
+              ...asset.content,
+              data: output
+                .redactedBytes(Buffer.from(asset.content.data, BASE64))
+                .toString(BASE64),
+            },
+          }
+        : asset,
+    ),
+  };
+}
+
 export function localEvidencePort(
   run: ExecutionRun,
   output: TasksOutput,
@@ -147,8 +171,7 @@ export function localEvidencePort(
           output.upload(ids, Buffer.from(asset.content.data, BASE64));
       output.record({
         operation: "mission.evidence.submit",
-        body: { ...draft, ...run.context() },
-        step: null,
+        body: { ...redactedDraft(draft, output), ...run.context() },
       });
       return ok(ids.evidence_id);
     },
@@ -231,6 +254,7 @@ interface Composed {
   budget: ExecutionBudget;
   io: ChainIo<ImplementHostPorts>;
   env: Readonly<Record<string, string>>;
+  steps: StepRecord;
 }
 
 async function preparedPhase(
@@ -334,6 +358,7 @@ async function tasksEnd(
   const end = await foundryImplement(input, {
     capabilities: io.capabilities,
     ports: io.ports,
+    steps: composed.steps,
   });
   return foundryEndOf(composed, end, serializedInput(input));
 }
@@ -387,11 +412,15 @@ function writeOutputs(composed: Composed, written: Written): void {
     progress: end.result?.progress ?? null,
     current_unit: end.result?.currentUnit?.id ?? null,
     completed_units: end.result?.completedUnits ?? [],
+    units: composed.steps.unitScopes(),
   });
-  output.writeJson(OutputFile.Metrics, metricsOf(output));
+  output.writeJson(OutputFile.Metrics, {
+    ...metricsOf(output),
+    steps: composed.steps.stepTimes(),
+  });
 }
 
-function metricsOf(output: TasksOutput): unknown {
+function metricsOf(output: TasksOutput): object {
   const spans = new Map<
     string,
     {
@@ -521,6 +550,7 @@ function composedOf(input: LocalTasksInput): {
       run,
       budget,
       env,
+      steps: new StepRecord(output),
       io: {
         run,
         budget,

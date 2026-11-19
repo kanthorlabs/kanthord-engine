@@ -161,6 +161,7 @@ export class TasksOutput {
   private readonly records: TelemetryRecord[] = [];
   private readonly logLine: (line: string) => void;
   private evidenceCount = NO_POSITION;
+  private step: string | null = null;
 
   private constructor(
     folder: string,
@@ -210,7 +211,7 @@ export class TasksOutput {
     );
   }
 
-  private redactedBytes(bytes: Buffer): Buffer {
+  redactedBytes(bytes: Buffer): Buffer {
     const text = utf8Text(bytes);
     if (text === null) return redactBytes(bytes, this.secrets);
     return Buffer.from(this.redacted(text) as string, "utf8");
@@ -224,9 +225,13 @@ export class TasksOutput {
     );
   }
 
-  record(entry: Omit<OutboxEntry, "time">): void {
-    this.entries.push({ ...entry, time: Date.now() });
+  record(entry: Omit<OutboxEntry, "step" | "time">): void {
+    this.entries.push({ ...entry, step: this.step, time: Date.now() });
     this.writeJson(OutputFile.Outbox, this.entries);
+  }
+
+  enterStep(step: string | null): void {
+    this.step = step;
   }
 
   outbox(): readonly OutboxEntry[] {

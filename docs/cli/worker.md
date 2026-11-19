@@ -972,23 +972,23 @@ The credential rules:
 6. Before the run, the command removes the provider credential variables, the AWS, Google Cloud and Azure credential chain variables, and each endpoint and routing variable that pi-ai or the AWS SDK reads from its own environment. The endpoint and routing variables are `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_BEDROCK`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `AWS_BEDROCK_SKIP_AUTH`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_RESOURCE_NAME`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`, `GOOGLE_CLOUD_LOCATION`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID` and the `ANTHROPIC_*` federation variables. The routing values come only from the `metadata` key. It sets `HOME` to `state/home/`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` under `state/home/.aws/`, `AWS_EC2_METADATA_DISABLED=true` and `METADATA_SERVER_DETECTION=none`.
 7. A frozen credential store serves the credential to pi. The pi directory of the run is `state/pi/`. A pi directory that holds `auth.json`, or a pi directory of the process other than `state/pi/`, stops the run.
 8. Each child process gets `PATH`, `LANG`, `TMPDIR`, `HOME` (`state/home/`), `GIT_CONFIG_NOSYSTEM=1`, `GIT_SSH_COMMAND="ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none"` and the `--pass-env` variables only. Git reads no system configuration, so no host credential helper and no host SSH key reach git.
-9. Each output file, the run log on stderr and each upload replace the credential values and each `--pass-env` value of 12 or more characters. They use the known-value matcher of the session redaction, which also finds encoded forms such as base64. A shorter `--pass-env` value is not a known secret.
+9. Each output file, the run log on stderr and each upload replace the credential values and each `--pass-env` value of 12 or more characters. They use the known-value matcher of the session redaction, which also finds encoded forms such as base64. A shorter `--pass-env` value is not a known secret. The outbox decodes the base64 asset content of an `evidence.submit` draft, replaces the known values and encodes it again.
 
 `--tree` clones each source into the bare mirror `state/origin/<binding_id>.git` and clones the checkout from the mirror.
 The mirror has no remote, and its files are read-only during the run. The command restores the write bits at each end. A folder that a hard kill leaves has a read-only mirror: run `chmod -R u+w <folder>` before a manual delete. `--force` restores the write bits itself. The source repository stays unchanged. A push to `origin`, to the mirror path or from the mirror fails.
 
 The output folder has mode `0700`. Each file has mode `0600`.
 
-| File            | Content                                                                                                                           |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `result.json`   | `end`, `exit_code`, `stop`, `step`, `mode` (`live`), `provider_id`, `overrides`, `seed_digest` and `checks`.                      |
-| `context.json`  | The tasks input with environment variable names only, and the tasks result. It holds no `credentials` key and no `sshAccess` key. |
-| `progress.json` | `progress`, `current_unit` and `completed_units`.                                                                                 |
-| `metrics.json`  | The time of each phase span and each unit span.                                                                                   |
-| `outbox.json`   | Each operation that a port records in place of a route, with its body. Evidence and asset identities are synthetic ULIDs.         |
-| `spans.jsonl`   | Each telemetry record, one JSON object per line.                                                                                  |
-| `uploads/`      | The bytes of each evidence asset, at `uploads/<evidence_id>/<asset_id>`.                                                          |
-| `state/`        | The mirrors, the checkouts, the release and base trees, `pi/` and `home/`.                                                        |
+| File            | Content                                                                                                                                                              |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `result.json`   | `end`, `exit_code`, `stop`, `step`, `mode` (`live`), `provider_id`, `overrides`, `seed_digest` and `checks`.                                                         |
+| `context.json`  | The tasks input with environment variable names only, and the tasks result. It holds no `credentials` key and no `sshAccess` key.                                    |
+| `progress.json` | `progress`, `current_unit`, `completed_units`, and `units`: the last unit scope of each unit of the tasks phase, by unit id.                                         |
+| `metrics.json`  | The time of each phase span and each unit span, and `steps`: the run time of each step of the tasks phase, in run order.                                             |
+| `outbox.json`   | Each operation that a port or an agent tool records in place of a route, with its body, its step id and its time. Evidence and asset identities are synthetic ULIDs. |
+| `spans.jsonl`   | Each telemetry record, one JSON object per line.                                                                                                                     |
+| `uploads/`      | The bytes of each evidence asset, at `uploads/<evidence_id>/<asset_id>`.                                                                                             |
+| `state/`        | The mirrors, the checkouts, the release and base trees, `pi/` and `home/`.                                                                                           |
 
 `--verify` runs these checks: 3, each head of the result equals `HEAD` of its checkout; 5, each checkout is clean with no git operation in progress after `completed`; 6, the route is `passed`, or `null` with `--skip-release-gate`; 7, the stop is a requested stop, a listed stop of its step or `operation_failed` with a code.
 
