@@ -6,6 +6,9 @@ import {
   cancelled,
   type Context,
 } from "../kernel/context.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "./contract.ts";
+
+export { PROMPT_SOURCE_MAX_BYTES };
 
 export const SourceState = {
   Present: "present",
@@ -22,7 +25,6 @@ export const InvalidReason = {
 } as const;
 export type InvalidReason = (typeof InvalidReason)[keyof typeof InvalidReason];
 
-export const PROMPT_SOURCE_MAX_BYTES = 32768;
 export const PROMPT_READ_DEADLINE_MS = 10000;
 export type SourceRead =
   | { state: typeof SourceState.Present; path: string; text: string }

@@ -285,6 +285,11 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.catalog.get", AccessPolicy.Human],
   ["agent.get", AccessPolicy.Human],
   ["agent.prompt.resolve", AccessPolicy.Human],
+  ["agent.variant.list", AccessPolicy.Human],
+  ["agent.variant.get", AccessPolicy.Human],
+  ["agent.variant.create", AccessPolicy.Human],
+  ["agent.variant.update", AccessPolicy.Human],
+  ["agent.variant.delete", AccessPolicy.Human],
   ["worker.placement.list", AccessPolicy.Human],
   ["worker.registration.list", AccessPolicy.Human],
   ["worker.registration.get", AccessPolicy.Human],
@@ -517,8 +522,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 296;
-const ROUTED_OPERATION_COUNT = 281;
+const OPERATION_COUNT = 301;
+const ROUTED_OPERATION_COUNT = 286;
 const INTAKE_OPERATION_COUNT = 37;
 const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [
@@ -856,6 +861,11 @@ test("published OpenAPI validates, matches the registry exactly, and describes r
     "agent.cooldown.list",
     "agent.cooldown.clear",
     "agent.prompt.resolve",
+    "agent.variant.list",
+    "agent.variant.get",
+    "agent.variant.create",
+    "agent.variant.update",
+    "agent.variant.delete",
   ])
     assert.ok(emittedAgentIds.includes(id), id);
   for (const operation of [

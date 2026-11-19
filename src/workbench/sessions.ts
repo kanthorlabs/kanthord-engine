@@ -54,6 +54,7 @@ export interface SessionPlace {
   sessionDir: string;
 }
 
+export type VariantPlace = { agentName: string; variantId: string };
 export type CreateSessionOptions = { parentSession?: string };
 export type OpeningInput = { model: Model<Api>; greeting: string };
 export type ForkOpeningInput = {
@@ -103,6 +104,23 @@ export function sessionPlace(
   ensureDirectory(place.cwd);
   ensureDirectory(place.sessionDir);
   return place;
+}
+
+export function variantSessionDirectory(
+  stateDirectory: string,
+  variant: VariantPlace,
+): string {
+  assert.ok(stateDirectory);
+  assert.ok(variant.agentName);
+  assert.ok(variant.variantId);
+  return join(
+    stateDirectory,
+    PI_DIRECTORY_NAME,
+    SESSIONS_DIRECTORY_NAME,
+    WORKBENCH_DIRECTORY_NAME,
+    variant.agentName,
+    variant.variantId,
+  );
 }
 
 function messageCountOf(

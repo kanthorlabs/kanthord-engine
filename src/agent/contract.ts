@@ -12,6 +12,7 @@ import {
 import type { Transaction } from "../kernel/store.ts";
 import type { Context } from "../kernel/context.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
+import { identitySchema } from "../kernel/identity.ts";
 import {
   AdvancingProviderFailure,
   agentSelectionSchema,
@@ -44,6 +45,8 @@ export const BINDING_AGENT_NAMES = AGENT_NAMES.filter(
     !(INTERNAL_AGENT_NAMES as readonly string[]).includes(name),
 );
 export const ENABLEMENT_TIMEOUT_MS = 30000;
+export const PROMPT_SOURCE_MAX_BYTES = 32768;
+const BLANK_LENGTH = 0;
 export const LIST_LIMIT_DEFAULT = 100;
 export const LIST_LIMIT_MAX = 1000;
 export const AGENT_PROVIDER_TARGET_KIND = "agent-provider";
@@ -530,6 +533,27 @@ export const agentListItemSchema = z.strictObject({
 export type AgentListItem = z.infer<typeof agentListItemSchema>;
 
 const emptyFields = z.strictObject({});
+const variantParams = z.strictObject({
+  variant_id: identitySchema(AGENT_VARIANT_PREFIX),
+});
+const variantInstruction = z
+  .string()
+  .refine(
+    (text) => text.trim().length > BLANK_LENGTH,
+    "The instruction is blank.",
+  )
+  .refine(
+    (text) => Buffer.byteLength(text, "utf8") <= PROMPT_SOURCE_MAX_BYTES,
+    "The instruction exceeds the prompt source size limit.",
+  );
+const variantSchema = z.strictObject({
+  id: identitySchema(AGENT_VARIANT_PREFIX),
+  agent_name: z.string().min(1),
+  display_name: z.string().min(1),
+  instruction: z.string(),
+  revision: z.number().int().positive(),
+});
+const variantItemSchema = variantSchema.omit({ instruction: true });
 const agentParams = z.strictObject({ agent_name: z.string().min(1) });
 const revisionBody = z.strictObject({
   expected_revision: z.number().int().positive(),
@@ -838,5 +862,92 @@ export const agentOperations = {
     output: z.null(),
     description:
       "Clear the cooldown of one credential copy so that the next claim can select its chain entries again. The holder defaults to server.",
+  },
+  "variant.list": {
+    ...enablementOperation,
+    id: "agent.variant.list",
+    method: HttpMethod.Get,
+    path: "/api/agent/variant",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: z.strictObject({ items: z.array(variantItemSchema) }),
+    description:
+      "List the agent variants ordered by agent name and display name.",
+  },
+  "variant.get": {
+    ...enablementOperation,
+    id: "agent.variant.get",
+    method: HttpMethod.Get,
+    path: "/api/agent/variant/:variant_id",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: variantParams,
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: variantSchema,
+    description: "Get one agent variant with its instruction.",
+  },
+  "variant.create": {
+    ...enablementOperation,
+    id: "agent.variant.create",
+    method: HttpMethod.Post,
+    path: "/api/agent/variant",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: emptyFields,
+      query: emptyFields,
+      body: z.strictObject({
+        agent_name: z.string().min(1),
+        display_name: z.string(),
+        instruction: variantInstruction,
+      }),
+    }),
+    output: variantSchema,
+    description:
+      "Create a named role of one Workbench session agent: a display name and an instruction.",
+  },
+  "variant.update": {
+    ...enablementOperation,
+    id: "agent.variant.update",
+    method: HttpMethod.Put,
+    path: "/api/agent/variant/:variant_id",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: variantParams,
+      query: emptyFields,
+      body: z.strictObject({
+        display_name: z.string(),
+        instruction: variantInstruction,
+        expected_revision: z.number().int().positive(),
+      }),
+    }),
+    output: variantSchema,
+    description:
+      "Replace the display name and the instruction of an agent variant at the expected revision.",
+  },
+  "variant.delete": {
+    ...enablementOperation,
+    id: "agent.variant.delete",
+    method: HttpMethod.Delete,
+    path: "/api/agent/variant/:variant_id",
+    mutation: true,
+    body: true,
+    input: z.strictObject({
+      params: variantParams,
+      query: emptyFields,
+      body: revisionBody,
+    }),
+    output: z.strictObject({ id: identitySchema(AGENT_VARIANT_PREFIX) }),
+    description:
+      "Delete an agent variant at the expected revision when no session directory of it exists.",
   },
 } as const satisfies Record<string, Operation>;

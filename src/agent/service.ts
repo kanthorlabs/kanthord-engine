@@ -80,6 +80,13 @@ import {
 } from "./enablements.ts";
 import { cooldownDuration } from "./cooldowns.ts";
 import {
+  createVariant,
+  deleteVariant,
+  getVariant,
+  listVariants,
+  updateVariant,
+} from "./variants.ts";
+import {
   type CredentialHold,
   type CredentialHolds,
   SERVER_HOLDER,
@@ -336,6 +343,7 @@ export interface Dependencies {
   credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
+  variantInUse: (agentName: string, variantId: string) => boolean;
   repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
@@ -1428,6 +1436,39 @@ export class AgentComponent {
           next_cursor: page.next_cursor,
         };
       }),
+    );
+    registry.register(agentOperations["variant.list"], (_input, caller) =>
+      caller.commit((tx) => ({ items: listVariants(tx) })),
+    );
+    registry.register(agentOperations["variant.get"], ({ params }, caller) =>
+      caller.commit((tx) => {
+        const row = getVariant(tx, params.variant_id);
+        if (row) return row;
+        throw new OperationError(
+          HttpStatus.NotFound,
+          AgentErrorCode.VariantNotFound,
+          "The agent variant does not exist.",
+        );
+      }),
+    );
+    registry.register(agentOperations["variant.create"], ({ body }, caller) =>
+      caller.commit((tx) => createVariant(tx, body)),
+    );
+    registry.register(
+      agentOperations["variant.update"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => updateVariant(tx, params.variant_id, body)),
+    );
+    registry.register(
+      agentOperations["variant.delete"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => {
+          deleteVariant(tx, params.variant_id, {
+            expected_revision: body.expected_revision,
+            inUse: this.dependencies.variantInUse,
+          });
+          return { id: params.variant_id };
+        }),
     );
     registry.register(agentOperations["cooldown.list"], (_input, caller) =>
       caller.commit((tx) => ({
