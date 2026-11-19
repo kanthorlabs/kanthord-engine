@@ -26,6 +26,7 @@ const CaseErrorCode = {
 
 export const ReferenceKind = {
   NativePlatform: "native_platform",
+  DisplayName: "display_name",
   ProjectId: "project_id",
   MissionId: "mission_id",
   Node: "node",
@@ -57,11 +58,16 @@ const AGENT_NAME = /^[a-z][a-z0-9-]*@\d+$/;
 const caseIdSchema = z.string().regex(/^[a-z][a-z0-9_-]*$/);
 const NATIVE_KEY = "native";
 const NATIVE_REFERENCE = "native.platform";
+const DISPLAY_NAME_KEY = "display_name";
+const DISPLAY_NAME_PLACEHOLDER = /\{\{display_name\}\}/g;
 const fixtureKeySchema = z
   .string()
   .regex(/^[\w-]+$/)
   .refine((key) => key !== NATIVE_KEY, {
     message: `The fixture key ${NATIVE_KEY} is reserved.`,
+  })
+  .refine((key) => key !== DISPLAY_NAME_KEY, {
+    message: `The fixture key ${DISPLAY_NAME_KEY} is reserved.`,
   });
 const fileNameSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/);
 const referenceSchema = z.string().min(1);
@@ -123,6 +129,13 @@ const forkTurnSchema = z.strictObject({
   fork: z.strictObject({ text: z.string().min(1) }),
 });
 
+const variantSchema = z.strictObject({
+  agent_name: z.string().min(1),
+  display_name: z.string().min(1),
+  instruction: z.string().min(1),
+});
+export type CaseVariant = z.infer<typeof variantSchema>;
+
 const turnSchema = z.union([humanTurnSchema, forkTurnSchema]);
 export type Turn = z.infer<typeof turnSchema>;
 
@@ -131,6 +144,8 @@ export const caseSchema = z.strictObject({
   source: z.string().min(1).optional(),
   fixtures: z.record(fixtureKeySchema, fileNameSchema),
   agents: z.array(z.string().regex(AGENT_NAME)).default([]),
+  variants: z.array(variantSchema).default([]),
+  session_variant: z.string().min(1).optional(),
   setup: z.array(setupStepSchema).default([]),
   seed: z.array(seedStepSchema).default([]),
   auto_mode: z.enum([AutoMode.On, AutoMode.Off]).default(AutoMode.On),
@@ -185,6 +200,13 @@ interface Reference {
 }
 
 function parseReference(body: string): Reference {
+  if (body === DISPLAY_NAME_KEY)
+    return {
+      key: DISPLAY_NAME_KEY,
+      kind: ReferenceKind.DisplayName,
+      filename: "",
+      asset: undefined,
+    };
   if (body === NATIVE_REFERENCE)
     return {
       key: NATIVE_KEY,
@@ -242,8 +264,18 @@ function nodeFilenames(entries: readonly FixtureEntry[]): string[] {
 function checkReference(
   reference: Reference,
   entries: Record<string, FixtureEntry[]>,
+  displayName: boolean,
 ): string {
-  if (reference.kind === ReferenceKind.NativePlatform) return "";
+  if (reference.kind === ReferenceKind.DisplayName && !displayName)
+    throw new CodedError(
+      CaseErrorCode.PlaceholderUnknown,
+      "The placeholder display_name applies to turns and checks only.",
+    );
+  if (
+    reference.kind === ReferenceKind.NativePlatform ||
+    reference.kind === ReferenceKind.DisplayName
+  )
+    return "";
   const fixture = entries[reference.key];
   const known =
     fixture !== undefined &&
@@ -258,8 +290,12 @@ function checkReference(
   return "";
 }
 
-function placeholderScope(value: Case): unknown[] {
-  return [value.setup, value.seed, value.turns, value.checks];
+function sessionScope(value: Case): unknown[] {
+  return [value.turns, value.checks];
+}
+
+function preparationScope(value: Case): unknown[] {
+  return [value.setup, value.seed];
 }
 
 function resolved(value: string | undefined, reference: Reference): string {
@@ -277,6 +313,8 @@ function lookup(
   reference: Reference,
 ): string {
   if (reference.kind === ReferenceKind.NativePlatform) return native.platform;
+  if (reference.kind === ReferenceKind.DisplayName)
+    return `{{${DISPLAY_NAME_KEY}}}`;
   const fixture = ids[reference.key];
   if (reference.kind === ReferenceKind.ProjectId)
     return resolved(fixture?.project_id, reference);
@@ -300,6 +338,12 @@ export function resolvePlaceholders<T>(
 ): T {
   return mapStrings(value, (text) =>
     replacePlaceholders(text, (reference) => lookup(ids, native, reference)),
+  ) as T;
+}
+
+export function resolveDisplayName<T>(value: T, displayName: string): T {
+  return mapStrings(value, (text) =>
+    text.replace(DISPLAY_NAME_PLACEHOLDER, () => displayName),
   ) as T;
 }
 
@@ -346,6 +390,19 @@ function assertProjectScope(value: Case): void {
     );
 }
 
+function assertSessionVariant(value: Case): void {
+  if (value.session_variant === undefined) return;
+  if (
+    !value.variants.some(
+      (variant) => variant.display_name === value.session_variant,
+    )
+  )
+    throw new CodedError(
+      CaseErrorCode.Invalid,
+      `The session_variant names no item of variants: ${value.session_variant}.`,
+    );
+}
+
 export function parseCase(
   source: CaseSource,
   schema: z.ZodType<Case> = caseSchema,
@@ -353,6 +410,7 @@ export function parseCase(
   const raw: unknown = parse(source.text);
   const value = schema.parse(raw);
   assertProjectScope(value);
+  assertSessionVariant(value);
   if (value.id !== source.id)
     throw new CodedError(
       CaseErrorCode.Invalid,
@@ -371,10 +429,17 @@ export function parseCase(
   const assetTexts = textAssetFiles(value).map((file) =>
     source.readFile(file).toString("utf8"),
   );
-  for (const scope of [...placeholderScope(value), ...assetTexts])
+  const scopes = [
+    ...sessionScope(value).map((scope) => ({ scope, displayName: true })),
+    ...[...preparationScope(value), ...assetTexts].map((scope) => ({
+      scope,
+      displayName: false,
+    })),
+  ];
+  for (const { scope, displayName } of scopes)
     mapStrings(scope, (text) =>
       replacePlaceholders(text, (reference) =>
-        checkReference(reference, fixture_entries),
+        checkReference(reference, fixture_entries, displayName),
       ),
     );
   return {
@@ -382,6 +447,17 @@ export function parseCase(
     case_digest: digestOf(raw, [...fixtureBytes, ...assetBytes]),
     fixture_entries,
   };
+}
+
+function assertSessionVariantBase(value: LoadedCase, agent: string): void {
+  const item = value.variants.find(
+    (variant) => variant.display_name === value.session_variant,
+  );
+  if (item && item.agent_name !== agent)
+    throw new CodedError(
+      CaseErrorCode.Invalid,
+      `The session_variant item names another agent than the subject ${agent}: ${item.agent_name}.`,
+    );
 }
 
 export function loadSuite(
@@ -409,12 +485,14 @@ export function loadSuite(
     .filter(
       (name) => !ids.length || ids.includes(basename(name, CASE_EXTENSION)),
     )
-    .map((name) =>
-      parseCase({
+    .map((name) => {
+      const loaded = parseCase({
         id: basename(name, CASE_EXTENSION),
         text: readFileSync(join(directory, name), "utf8"),
         readFile: (file) =>
           readFileSync(join(directory, FIXTURES_DIRECTORY, file)),
-      }),
-    );
+      });
+      assertSessionVariantBase(loaded, agent);
+      return loaded;
+    });
 }

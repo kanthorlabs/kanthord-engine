@@ -22,7 +22,7 @@ import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
 import { type EvalRun, evalRunSchema, historyEntrySchema } from "./compare.ts";
 import { type CredentialSource, CredentialSourceKind } from "./credential.ts";
 import { loadSuite } from "./case.ts";
-import { EVAL_CONFIGURATION, runSuite } from "./run.ts";
+import { EVAL_CONFIGURATION, runSuite, variantOf } from "./run.ts";
 import { openSandbox, playCase } from "./sandbox.ts";
 
 const SUBJECT = "ops@1";
@@ -126,6 +126,44 @@ checks:
   max_confirmations: 0
 `;
 
+const PERSONA_CASE = `
+id: persona
+fixtures: {}
+turns:
+  - human: "Who are you?"
+checks:
+  reply_contains: ["{{display_name}}"]
+  reply_forbids: ["Night Ops"]
+  max_confirmations: 0
+`;
+
+const RUN_VARIANT_PERSONA_CASE = `
+id: persona
+fixtures: {}
+turns:
+  - human: "Who are you?"
+checks:
+  reply_contains: ["{{display_name}}", "Late Shift"]
+  reply_forbids: [Yumi]
+  max_confirmations: 0
+`;
+
+const SESSION_VARIANT_CASE = `
+id: own-variant
+fixtures: {}
+variants:
+  - agent_name: ops@1
+    display_name: Night Ops
+    instruction: Work the night shift.
+session_variant: Night Ops
+turns:
+  - human: "Who are you?"
+checks:
+  reply_contains: ["{{display_name}}", "Night Ops"]
+  reply_forbids: [Yumi, "Late Shift"]
+  max_confirmations: 0
+`;
+
 const UNNAMED_CASE = `
 id: unnamed
 auto_mode: off
@@ -168,9 +206,19 @@ function nodeOf(context: TranscriptContext): string {
   return found[0];
 }
 
+const NAME_PATTERN = /Your name is ([A-Za-z ]+)\./;
+
+function nameOf(context: TranscriptContext): string {
+  const found = NAME_PATTERN.exec(JSON.stringify(context.messages));
+  assert.ok(found);
+  return found[1]!;
+}
+
 function respond(context: TranscriptContext) {
   const text = task(context);
   const tool = lastTool(context);
+  if (text.includes("Who are you"))
+    return fauxAssistantMessage(`I am ${nameOf(context)}.`);
   if (text.includes("Unblock")) {
     if (tool === undefined)
       return fauxAssistantMessage([fauxToolCall(Tool.List, {})]);
@@ -279,6 +327,43 @@ test("happy path: run mode writes the run file and the entry file with a passing
   assert.equal(run.comparison.baseline_run, null);
   assert.deepEqual(run.comparison.new, ["unblock"]);
   assert.ok(lines.includes("PASS unblock 1/1"));
+});
+
+test("happy path: a base run resolves {{display_name}} to the catalog name", async (t) => {
+  const { options: suite } = options(t, { persona: PERSONA_CASE });
+  const run = await runSuite(t, suite);
+  const failed = run.cases[0]!.runs[0]!.checks.filter((check) => !check.passed);
+  assert.deepEqual(failed, []);
+  assert.equal(run.cases[0]!.pass_rate, EVERY_RUN_PASSED);
+});
+
+test("happy path: a variant run resolves {{display_name}} to the variant name and a case session_variant keeps its own variant", async (t) => {
+  const { options: suite } = options(
+    t,
+    { persona: RUN_VARIANT_PERSONA_CASE, "own-variant": SESSION_VARIANT_CASE },
+    { variant: { display_name: "Late Shift", instruction: "Work late." } },
+  );
+  const run = await runSuite(t, suite);
+  for (const value of run.cases)
+    assert.deepEqual(
+      value.runs[0]!.checks.filter((check) => !check.passed),
+      [],
+      value.case_id,
+    );
+  assert.deepEqual(
+    run.cases.map(({ pass_rate }) => pass_rate),
+    [EVERY_RUN_PASSED, EVERY_RUN_PASSED],
+  );
+});
+
+test("security: a variant run that sets only one of EVAL_VARIANT_FILE and EVAL_VARIANT_NAME fails at start", () => {
+  const message = "eval: VARIANT_FILE and VARIANT_NAME go together.";
+  assert.throws(() => variantOf({ EVAL_VARIANT_FILE: "variant.md" }), {
+    message,
+  });
+  assert.throws(() => variantOf({ EVAL_VARIANT_NAME: "Late Shift" }), {
+    message,
+  });
 });
 
 test("happy path: rerun mode keeps runs and pass_rate and writes the rerun of the named case only", async (t) => {

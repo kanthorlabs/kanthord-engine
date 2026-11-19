@@ -29,6 +29,7 @@ import {
   openSandbox,
   playCase,
   type PlayedCase,
+  type RunVariant,
   type Sandbox,
   type SummarizerMeter,
 } from "./sandbox.ts";
@@ -46,6 +47,9 @@ export const RunErrorCode = {
   Incomplete: "eval.run.incomplete",
 } as const;
 
+const VARIANT_FILE_VARIABLE = "EVAL_VARIANT_FILE";
+const VARIANT_NAME_VARIABLE = "EVAL_VARIANT_NAME";
+const VARIANT_PAIR_MESSAGE = "eval: VARIANT_FILE and VARIANT_NAME go together.";
 const ENGINE_ROOT = join(EVAL_DIRECTORY, "..");
 const RUN_EXTENSION = ".json";
 const ENTRY_EXTENSION = ".entry.json";
@@ -66,12 +70,21 @@ export interface SuiteOptions {
   credential: CredentialSource;
   runtimeFactory?: WorkbenchModelRuntimeFactory;
   directory?: string;
+  variant?: RunVariant | undefined;
   print?: (line: string) => void;
 }
 
 export interface Job {
   title: string;
   loaded: LoadedCase;
+}
+
+export function variantOf(env: NodeJS.ProcessEnv): RunVariant | null {
+  const file = env[VARIANT_FILE_VARIABLE];
+  const name = env[VARIANT_NAME_VARIABLE];
+  if (!file && !name) return null;
+  if (!file || !name) throw new Error(VARIANT_PAIR_MESSAGE);
+  return { display_name: name, instruction: readFileSync(file, "utf8") };
 }
 
 function printToStandardError(line: string): void {
@@ -199,6 +212,7 @@ export class SuiteRun {
       credential: this.options.credential,
       configuration: EVAL_CONFIGURATION,
       agents: job.loaded.agents,
+      variant: this.options.variant,
       runtimeFactory: this.options.runtimeFactory,
       evalDirectory: this.options.directory,
     });

@@ -104,6 +104,11 @@ const API_ONLY_OPERATIONS = [
   "worker.instance.session.delete",
   "worker.instance.workspace.delete",
   "worker.instance.tool_output.delete",
+  "agent.variant.list",
+  "agent.variant.get",
+  "agent.variant.create",
+  "agent.variant.update",
+  "agent.variant.delete",
 ];
 const TOP_LEVEL_NAMES = new Set([
   "config",
@@ -130,7 +135,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 231;
-const OPERATION_COUNT = 275;
+const OPERATION_COUNT = 280;
 const INTAKE_CREDENTIAL_LEAVES = [
   "intake credential archive",
   "intake credential check",

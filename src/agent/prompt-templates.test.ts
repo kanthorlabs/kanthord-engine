@@ -6,7 +6,8 @@ import { background } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { AgentErrorCode, PromptTemplate } from "./contract.ts";
-import { InvalidReason, PROMPT_SOURCE_MAX_BYTES } from "./prompt-source.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "./contract.ts";
+import { InvalidReason } from "./prompt-source.ts";
 import {
   renderTemplate,
   resolveTemplates,

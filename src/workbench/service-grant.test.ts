@@ -77,6 +77,7 @@ interface HeldSession {
   hostId: string | null;
   members: HeldSession[];
   agentName: string;
+  variantId: string | null;
   manager: SessionManager;
   requester: unknown;
   run: HeldRun | null;
@@ -162,6 +163,7 @@ async function fixture(t: TestContext) {
       hostId: null,
       members: [],
       agentName: HOST_AGENT,
+      variantId: null,
       manager: pi.SessionManager.inMemory(),
       requester: undefined,
       run: null,

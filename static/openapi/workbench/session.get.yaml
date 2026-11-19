@@ -87,6 +87,14 @@ components:
             ULID.
         agent_name:
           type: string
+        variant_id:
+          anyOf:
+            - type: string
+              minLength: 40
+              maxLength: 40
+              pattern: ^agent_variant_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: agent_variant_ followed by a canonical 26-character uppercase ULID.
+            - type: "null"
         configuration:
           type: object
           properties:
@@ -251,6 +259,7 @@ components:
       required:
         - id
         - agent_name
+        - variant_id
         - configuration
         - members
         - entries

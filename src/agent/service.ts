@@ -44,6 +44,7 @@ import {
   type AgentSelection,
   type AgentView,
   type ApprovedModelsFn,
+  type ComposeOptions,
   type CooldownChange,
   CooldownChangeKind,
   type CopyHeldFn,
@@ -61,6 +62,7 @@ import {
   PromptPartState,
   type PromptRecord,
   type PromptTemplates,
+  type PromptVariant,
   PromptView,
   type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
@@ -79,6 +81,13 @@ import {
   readEnablementRevision,
 } from "./enablements.ts";
 import { cooldownDuration } from "./cooldowns.ts";
+import {
+  createVariant,
+  deleteVariant,
+  getVariant,
+  listVariants,
+  updateVariant,
+} from "./variants.ts";
 import {
   type CredentialHold,
   type CredentialHolds,
@@ -336,6 +345,7 @@ export interface Dependencies {
   credentialHolds: CredentialHolds;
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
+  variantInUse: (agentName: string, variantId: string) => boolean;
   repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
@@ -1292,8 +1302,9 @@ export class AgentComponent {
   async composePrompt(
     agentName: string,
     consumer: PromptConsumer,
-    context: Context,
+    options: ComposeOptions,
   ): Promise<PromptPartAnswer[]> {
+    const { context, variant } = options;
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
     const directory = agent.internal ? null : this.agentDirectory();
@@ -1305,15 +1316,30 @@ export class AgentComponent {
       ),
       directory,
       workbench: consumer === PromptConsumer.Workbench,
+      variant,
       context,
     });
+  }
+
+  private variantOf(agentName: string, variantId: string): PromptVariant {
+    const row = this.dependencies.store.transaction((tx) =>
+      getVariant(tx, variantId),
+    );
+    if (row?.agent_name === agentName)
+      return { display_name: row.display_name, instruction: row.instruction };
+    throw new OperationError(
+      HttpStatus.NotFound,
+      AgentErrorCode.VariantNotFound,
+      "The agent variant does not exist.",
+    );
   }
 
   private async agentPromptOf(
     declaration: AgentDeclaration,
     query: (typeof agentOperations)["get"]["input"]["_output"]["query"],
-    context: Context,
+    options: ComposeOptions,
   ): Promise<{ parts: PromptPartAnswer[]; final: string | null }> {
+    const { context } = options;
     if (declaration.internal && query.task === GuardTask.Summary) {
       const parts = [guardSummaryPart()];
       return { parts, final: parts[0]!.text };
@@ -1322,7 +1348,7 @@ export class AgentComponent {
       const parts = await this.composePrompt(
         declaration.agent_name,
         PromptConsumer.Worker,
-        context,
+        { context, variant: null },
       );
       return { parts, final: parts[0]!.text };
     }
@@ -1333,7 +1359,7 @@ export class AgentComponent {
         : PromptConsumer.Worker;
     const files = await this.instructionFilesOf(stack?.targets ?? [], context);
     const parts = [
-      ...(await this.composePrompt(declaration.agent_name, consumer, context)),
+      ...(await this.composePrompt(declaration.agent_name, consumer, options)),
       ...bindingParts(stack?.repositories ?? [], declaration.agent_name, files),
       await this.promptFraming(consumer, context),
     ];
@@ -1429,6 +1455,39 @@ export class AgentComponent {
         };
       }),
     );
+    registry.register(agentOperations["variant.list"], (_input, caller) =>
+      caller.commit((tx) => ({ items: listVariants(tx) })),
+    );
+    registry.register(agentOperations["variant.get"], ({ params }, caller) =>
+      caller.commit((tx) => {
+        const row = getVariant(tx, params.variant_id);
+        if (row) return row;
+        throw new OperationError(
+          HttpStatus.NotFound,
+          AgentErrorCode.VariantNotFound,
+          "The agent variant does not exist.",
+        );
+      }),
+    );
+    registry.register(agentOperations["variant.create"], ({ body }, caller) =>
+      caller.commit((tx) => createVariant(tx, body)),
+    );
+    registry.register(
+      agentOperations["variant.update"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => updateVariant(tx, params.variant_id, body)),
+    );
+    registry.register(
+      agentOperations["variant.delete"],
+      ({ params, body }, caller) =>
+        caller.commit((tx) => {
+          deleteVariant(tx, params.variant_id, {
+            expected_revision: body.expected_revision,
+            inUse: this.dependencies.variantInUse,
+          });
+          return { id: params.variant_id };
+        }),
+    );
     registry.register(agentOperations["cooldown.list"], (_input, caller) =>
       caller.commit((tx) => ({
         items: this.dependencies.credentialHolds
@@ -1481,11 +1540,14 @@ export class AgentComponent {
           params.agent_name,
         );
         assert.equal(declaration.agent_name, params.agent_name);
-        const { parts, final } = await this.agentPromptOf(
-          declaration,
-          query,
-          caller.context,
-        );
+        const variant =
+          query.variant_id === undefined
+            ? null
+            : this.variantOf(params.agent_name, query.variant_id);
+        const { parts, final } = await this.agentPromptOf(declaration, query, {
+          context: caller.context,
+          variant,
+        });
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(

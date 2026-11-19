@@ -6,6 +6,8 @@ import { agentMigrations } from "./migrations.ts";
 
 const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const AGENT_ENABLEMENT_INDEX = "agent_enablement_agent_name_revision";
+const AGENT_VARIANT_TABLE = "agent_variant";
+const AGENT_VARIANT_INDEX = "agent_variant_display_name";
 const INTEGRITY_OK = "ok";
 const CREATED_INDEX_ORIGIN = "c";
 
@@ -94,6 +96,46 @@ test("agent migration creates no cooldown table and no cooldown index", () => {
         )
         .all(),
       [],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("agent migration creates the agent variant table and its unique index", () => {
+  const store = new Store(IN_MEMORY_DATABASE);
+  try {
+    store.migrate([
+      { service: AGENT_COMPONENT_NAME, migrations: agentMigrations },
+    ]);
+    assert.deepEqual(
+      store.database
+        .prepare(`PRAGMA table_info(${AGENT_VARIANT_TABLE})`)
+        .all()
+        .map(({ name, type, notnull, pk }) => ({ name, type, notnull, pk })),
+      [
+        { name: "id", type: "TEXT", notnull: 1, pk: 1 },
+        { name: "agent_name", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "display_name", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "instruction", type: "TEXT", notnull: 1, pk: 0 },
+        { name: "revision", type: "INTEGER", notnull: 1, pk: 0 },
+      ],
+    );
+    assert.deepEqual(
+      store.database
+        .prepare(`PRAGMA index_list(${AGENT_VARIANT_TABLE})`)
+        .all()
+        .filter((row) => row.origin === CREATED_INDEX_ORIGIN)
+        .map((row) => ({ name: row.name, unique: row.unique })),
+      [{ name: AGENT_VARIANT_INDEX, unique: 1 }],
+    );
+    assert.doesNotMatch(
+      String(
+        store.database
+          .prepare("SELECT sql FROM sqlite_master WHERE name = ?")
+          .get(AGENT_VARIANT_TABLE)?.sql,
+      ),
+      /\bCHECK\b/i,
     );
   } finally {
     store.close();

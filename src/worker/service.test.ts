@@ -298,6 +298,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   credentialHolds: memoryCredentialHolds(),
   approvedModels: () => null,
   entriesOfAgent: () => [],
+  variantInUse: () => false,
   repositoryPromptsOf: () => null,
   promptBase: {
     baseCommitOf: () => {

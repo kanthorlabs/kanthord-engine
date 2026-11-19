@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { z } from "zod";
@@ -11,10 +17,12 @@ import {
   parseCase,
   resolvePlaceholders,
 } from "./case.ts";
+import { temporary } from "../kernel/test-support.ts";
 import { GUARD_SUBJECT, loadGuardSuite } from "./guard-run.ts";
 
 const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
+const CASE_INVALID = "eval.case.invalid";
 const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
@@ -185,6 +193,28 @@ test("security: argument guard - every case file under eval parses with its fixt
   for (const agent of agents)
     assert.notEqual(loadSuite(agent, []).length, NO_ITEMS);
   assert.notEqual(loadGuardSuite([]).length, NO_ITEMS);
+});
+
+test("security: argument guard - a session_variant item of another agent than the subject fails the suite load", (t) => {
+  const root = temporary(t);
+  mkdirSync(join(root, "ops@1", "fixtures"), { recursive: true });
+  writeFileSync(
+    join(root, "ops@1", "sample.yaml"),
+    [
+      "id: sample",
+      "fixtures: {}",
+      "variants:",
+      "  - agent_name: re@1",
+      "    display_name: Night Ops",
+      "    instruction: Work the night shift.",
+      "session_variant: Night Ops",
+      "turns:",
+      '  - human: "Who are you?"',
+      "checks:",
+      "  max_tool_calls: 3",
+    ].join("\n"),
+  );
+  assert.throws(() => loadSuite("ops@1", [], root), { code: CASE_INVALID });
 });
 
 const SECRET_PATTERN_INDEX = 1;

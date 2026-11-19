@@ -16,6 +16,7 @@ import {
   PromptPartState,
   type PromptReference,
   PromptTemplate,
+  type PromptVariant,
 } from "./contract.ts";
 import {
   BASE_PROMPT,
@@ -55,6 +56,7 @@ export interface AgentPromptInput {
   templates: TemplateSet;
   directory: string | null;
   workbench: boolean;
+  variant: PromptVariant | null;
   context: Context;
 }
 
@@ -166,7 +168,7 @@ export function framingPart(
 
 export function identityPart(
   set: TemplateSet,
-  agent: AgentDeclaration,
+  displayName: string,
   directory: string | null,
 ): PromptPartAnswer {
   const templatesDirectory = templateDirectory(directory);
@@ -180,8 +182,24 @@ export function identityPart(
           `${PromptTemplate.Identity}${MARKDOWN_EXTENSION}`,
         ),
     renderTemplate(set.templates, PromptTemplate.Identity, {
-      display_name: agent.display_name,
+      display_name: displayName,
     }),
+  );
+}
+
+function variantPart(variant: PromptVariant): PromptPartAnswer {
+  return promptPart(
+    {
+      part: PromptPart.Variant,
+      name: variant.display_name,
+      origin: PromptOrigin.Database,
+      path: null,
+      binding_id: null,
+      commit: null,
+      digest: digest(variant.instruction),
+    },
+    PromptPartState.Resolved,
+    variant.instruction,
   );
 }
 
@@ -225,11 +243,15 @@ export async function resolveAgentPrompt(
   assert.ok(
     workbenchAgentNames().includes(input.agent.agent_name) || !input.workbench,
   );
+  assert.ok(input.variant === null || input.workbench);
   const parts: PromptPartAnswer[] = [];
   const identified = workbenchAgentNames().includes(input.agent.agent_name);
+  const displayName = input.variant?.display_name ?? input.agent.display_name;
   for (const file of promptFiles(input.agent, input.workbench)) {
     if (identified && file.part === PromptPart.Role)
-      parts.push(identityPart(input.templates, input.agent, input.directory));
+      parts.push(identityPart(input.templates, displayName, input.directory));
+    if (input.variant !== null && file.part === PromptPart.Workbench)
+      parts.push(variantPart(input.variant));
     parts.push(await resolveFile(file, input.directory, input.context));
   }
   return parts;

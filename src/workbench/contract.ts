@@ -9,7 +9,11 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
-import { GuardClass, reasoningEffortSchema } from "../agent/contract.ts";
+import {
+  AGENT_VARIANT_PREFIX,
+  GuardClass,
+  reasoningEffortSchema,
+} from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
 export interface ResolvedInvite {
@@ -334,6 +338,7 @@ const sessionListFields = z.strictObject({
   id: z.string(),
   agent_name: z.string(),
   display_name: z.string(),
+  variant_id: identitySchema(AGENT_VARIANT_PREFIX).nullable(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,
@@ -385,6 +390,7 @@ export type ScopeRequestView = z.infer<typeof scopeRequestViewSchema>;
 export const workbenchSessionSchema = z.strictObject({
   id: identitySchema(WORKBENCH_SESSION_PREFIX),
   agent_name: z.string(),
+  variant_id: identitySchema(AGENT_VARIANT_PREFIX).nullable(),
   configuration: workbenchConfigurationSchema,
   members: z.array(conversationMemberSchema),
   entries: z.array(memberEntrySchema),
@@ -627,10 +633,12 @@ export const workbenchOperations = {
       query: emptyFields,
       body: workbenchConfigurationSchema.extend({
         agent_name: z.string().min(1),
+        variant_id: identitySchema(AGENT_VARIANT_PREFIX).optional(),
       }),
     }),
     output: workbenchSessionSchema,
-    description: "Create a workbench session with one agent of the catalog.",
+    description:
+      "Create a workbench session with one agent of the catalog, or with one variant of that agent when variant_id is set.",
   },
   "session.get": {
     ...workbenchOperation,

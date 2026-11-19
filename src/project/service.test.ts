@@ -54,15 +54,13 @@ import {
   AgentErrorCode,
   type HolderScope,
   InstructionFileState,
+  PROMPT_SOURCE_MAX_BYTES,
 } from "../agent/contract.ts";
 import { SERVER_HOLDER } from "../custody/contract.ts";
 import { Intent, nodeCreateSchema } from "../mission/contract.ts";
 import { shippedAsset } from "../kernel/assets.ts";
 import { CommitType } from "../kernel/commit-message.ts";
-import {
-  InvalidReason,
-  PROMPT_SOURCE_MAX_BYTES,
-} from "../agent/prompt-source.ts";
+import { InvalidReason } from "../agent/prompt-source.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import {
   BINDING_CHECK_TIMEOUT_MS,

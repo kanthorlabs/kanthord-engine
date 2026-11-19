@@ -11,7 +11,12 @@ export {
   toolName,
   workbenchToolDeclarations,
 } from "./tools.ts";
-export { forkSummaryOf, recordOf } from "./sessions.ts";
+export {
+  forkSummaryOf,
+  recordOf,
+  variantSessionDirectory,
+  type VariantPlace,
+} from "./sessions.ts";
 export { visibleText } from "./fork-summary.ts";
 export { WorkbenchFootprint } from "./footprint.ts";
 export {

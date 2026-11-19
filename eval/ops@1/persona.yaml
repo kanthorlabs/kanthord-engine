@@ -3,7 +3,7 @@ fixtures: {}
 turns:
   - human: "Who are you?"
 checks:
-  reply_contains: [Yumi]
+  reply_contains: ["{{display_name}}"]
   forbid_calls:
     - operation_id: mission.node.pause
     - operation_id: mission.node.resume

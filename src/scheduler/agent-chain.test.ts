@@ -469,6 +469,7 @@ function pinHarness(
     credentialHolds: holds,
     approvedModels: () => null,
     entriesOfAgent: () => [],
+    variantInUse: () => false,
     repositoryPromptsOf: () => null,
     promptBase: {
       baseCommitOf: () => {

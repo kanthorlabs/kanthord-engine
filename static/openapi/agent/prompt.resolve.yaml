@@ -103,6 +103,7 @@ components:
                   - standard
                   - identity
                   - role
+                  - variant
                   - workbench
                   - instruction_file
                   - repository

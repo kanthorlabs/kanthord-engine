@@ -1,4 +1,5 @@
 import { addAbortListener } from "node:events";
+import { existsSync } from "node:fs";
 import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -178,9 +179,11 @@ import {
   AgentComponent,
   agentMigrations,
   getAgentDeclaration,
+  getVariant,
 } from "../../agent/index.ts";
 import {
   operationToolDeclarations,
+  variantSessionDirectory,
   WorkbenchFootprint,
   WorkbenchInvites,
   workbenchMigrations,
@@ -830,6 +833,13 @@ export function composeServices(options: ComposeServicesOptions) {
     providerHealthCheck: (tx, name) => llm.providerHealthCheck(tx, name),
     providerCapability: (tx, name) => llm.providerCapability(tx, name),
     entriesOfAgent: (tx, name) => project.entriesOfAgent(tx, name),
+    variantInUse: (agentName, variantId) =>
+      existsSync(
+        variantSessionDirectory(options.stateDirectory, {
+          agentName,
+          variantId,
+        }),
+      ),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     promptBase: {
       baseCommitOf: (bindingId, context) =>
@@ -980,7 +990,10 @@ export function composeServices(options: ComposeServicesOptions) {
     config: options.config.worker,
     agentPrompt: {
       compose: (name, context) =>
-        agent.composePrompt(name, PromptConsumer.Worker, context),
+        agent.composePrompt(name, PromptConsumer.Worker, {
+          context,
+          variant: null,
+        }),
       templates: (context) => agent.promptTemplates(context),
       framing: (context) => agent.promptFraming(PromptConsumer.Worker, context),
     },
@@ -1279,7 +1292,10 @@ export function composeServices(options: ComposeServicesOptions) {
       }),
     serverAgentCredentials: (input) => custody.serverAgentCredentials(input),
     composePrompt: (name, context) =>
-      agent.composePrompt(name, PromptConsumer.Worker, context),
+      agent.composePrompt(name, PromptConsumer.Worker, {
+        context,
+        variant: null,
+      }),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     instructionFileOf: (bindingId, commit, context) =>
       project.instructionFileOf(bindingId, commit, context),
@@ -1389,6 +1405,7 @@ export function composeServices(options: ComposeServicesOptions) {
   });
   const workbench = new WorkbenchService({
     store: options.store,
+    agentVariant: getVariant,
     invites,
     declarationOf: getAgentDeclaration,
     projectScope,
@@ -1404,8 +1421,8 @@ export function composeServices(options: ComposeServicesOptions) {
     logger: options.logger,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
-      compose: (name, context) =>
-        agent.composePrompt(name, PromptConsumer.Workbench, context),
+      compose: (name, composeOptions) =>
+        agent.composePrompt(name, PromptConsumer.Workbench, composeOptions),
       templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {
