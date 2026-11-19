@@ -10,7 +10,8 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
-import { isObject } from "../../kernel/values.ts";
+import { isObject, ValueType } from "../../kernel/values.ts";
+import { BuiltinTool } from "../../agent/catalog.ts";
 import type { TasksOutput } from "./tasks-output.ts";
 import { tasksDiagnostic, TasksErrorCode } from "./tasks-seed.ts";
 import {
@@ -40,6 +41,8 @@ export interface Drift {
   turn: number;
   step: string | null;
   message_index: number;
+  tool_call_id: string;
+  tool_name: string;
 }
 
 interface SentRequest {
@@ -92,17 +95,33 @@ function sentPart(message: object): object {
   );
 }
 
+const HOST_OUTPUT_TOOLS: readonly unknown[] = Object.values(BuiltinTool);
+const TEXT_PART = "text";
+
+function isHostOutput(message: Record<string, unknown>): boolean {
+  return (
+    message.role === TOOL_RESULT_ROLE &&
+    HOST_OUTPUT_TOOLS.includes(message.toolName) &&
+    typeof message.toolCallId === ValueType.String &&
+    Array.isArray(message.content)
+  );
+}
+
 function shapeOfPart(part: unknown): unknown {
-  if (!isObject(part)) return part;
-  return { type: (part as { type?: unknown }).type };
+  if (!isObject(part) || (part as { type?: unknown }).type !== TEXT_PART)
+    return part;
+  return { ...part, text: null };
 }
 
 function structureOf(request: SentRequest): string {
   return canonicalJSON({
     ...request,
     messages: request.messages.map((message) =>
-      message.role === TOOL_RESULT_ROLE && Array.isArray(message.content)
-        ? { ...message, content: message.content.map(shapeOfPart) }
+      isHostOutput(message)
+        ? {
+            ...message,
+            content: (message.content as unknown[]).map(shapeOfPart),
+          }
         : message,
     ),
   });
@@ -167,7 +186,7 @@ export class Turns {
   private readonly paths: OutputPaths;
   private position = 0;
   private divergence: Divergence | null = null;
-  private readonly drifted = new Map<number, Drift>();
+  private readonly drifted = new Map<string, Drift>();
   private writeError: unknown = null;
 
   constructor(input: TurnsInput) {
@@ -237,13 +256,16 @@ export class Turns {
 
   private drift(recorded: SentRequest, sent: SentRequest, turn: number): void {
     recorded.messages.forEach((message, index) => {
-      if (this.drifted.has(index)) return;
       if (canonicalJSON(message) === canonicalJSON(sent.messages[index]))
         return;
-      this.drifted.set(index, {
+      const callId = message.toolCallId as string;
+      if (this.drifted.has(callId)) return;
+      this.drifted.set(callId, {
         turn,
         step: this.output.currentStep,
         message_index: index,
+        tool_call_id: callId,
+        tool_name: message.toolName as string,
       });
     });
   }

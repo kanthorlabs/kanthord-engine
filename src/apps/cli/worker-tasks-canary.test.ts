@@ -52,8 +52,8 @@ const CANARY_TEXT = [
   ...CANARIES.map((canary) => Buffer.from(canary).toString("base64")),
 ].join(" ");
 const TOOL_KIND = "tool";
-const REDACTED_RECORD = "redacted_record";
-const MARKED_ANSWER_TURN = 6;
+const REQUEST_DIFFERS = "request_differs";
+const KNOWN_VALUE_TURN = 5;
 
 const canaryCapability: InlineExtension = (pi) => {
   let calls = 0;
@@ -203,8 +203,8 @@ test(
     );
     assert.equal(replayed.code, TasksErrorCode.ReplayDiverged);
     assert.deepEqual(replayed.fields, [
-      ["turn", String(MARKED_ANSWER_TURN)],
-      ["reason", REDACTED_RECORD],
+      ["turn", String(KNOWN_VALUE_TURN)],
+      ["reason", REQUEST_DIFFERS],
       ["step", "unit.turn"],
     ]);
     assertNoCanary(replayOutput, replay);

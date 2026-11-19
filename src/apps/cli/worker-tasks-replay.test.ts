@@ -60,7 +60,10 @@ const REPLAY_CHECK = 8;
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const TWO_CALLS = 2;
-const TOOL_RESULT_INDEX = 3;
+const THREE_CALLS = 3;
+const FIRST_TOOL_RESULT_INDEX = 3;
+const SECOND_TOOL_RESULT_INDEX = 5;
+const CLOCK_COMMAND = "node -e 'console.log(process.hrtime.bigint())'";
 const NEWLINE = "\n";
 const REPLAY_MODE = "replay";
 const BASH_OUTPUT = "ran";
@@ -187,15 +190,14 @@ suite("worker tasks run replay", () => {
   );
 
   test(
-    "a replay continues past a bash result text that differs and records the drift in result.json",
+    "a replay continues past bash result texts that differ and records one drift entry for each tool call in result.json",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
       const turns = await liveRun(fixture, {
         provider: scriptedProvider([
-          toolUse("bash", {
-            command: "node -e 'console.log(process.hrtime.bigint())'",
-          }),
+          toolUse("bash", { command: CLOCK_COMMAND }),
+          toolUse("bash", { command: CLOCK_COMMAND }),
           writeGood(),
           fauxAssistantMessage("done"),
         ]),
@@ -207,18 +209,68 @@ suite("worker tasks run replay", () => {
       const code = await replayed(fixture, turns);
       assert.equal(code, TasksExit.Success);
       const folder = join(fixture.root, "replay");
-      assert.deepEqual(readJson(folder, "result.json").drift, [
-        {
-          turn: TWO_CALLS,
-          step: "unit.turn",
-          message_index: TOOL_RESULT_INDEX,
-        },
-      ]);
+      const drift = readJson(folder, "result.json").drift as {
+        turn: number;
+        step: string;
+        message_index: number;
+        tool_call_id: string;
+        tool_name: string;
+      }[];
+      assert.deepEqual(
+        drift.map(({ turn, step, message_index, tool_name }) => ({
+          turn,
+          step,
+          message_index,
+          tool_name,
+        })),
+        [
+          {
+            turn: TWO_CALLS,
+            step: "unit.turn",
+            message_index: FIRST_TOOL_RESULT_INDEX,
+            tool_name: "bash",
+          },
+          {
+            turn: THREE_CALLS,
+            step: "unit.turn",
+            message_index: SECOND_TOOL_RESULT_INDEX,
+            tool_name: "bash",
+          },
+        ],
+      );
+      assert.notEqual(drift[0]!.tool_call_id, drift[1]!.tool_call_id);
       assert.deepEqual(checkOf(folder, REPLAY_CHECK), {
         check: REPLAY_CHECK,
         applies: true,
         passed: true,
       });
+    },
+  );
+
+  test(
+    "a replay whose bash result changes its error state stops with replay_diverged, reason request_differs",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const once = join(fixture.root, "once");
+      const turns = await liveRun(fixture, {
+        provider: scriptedProvider([
+          toolUse("bash", { command: `mkdir '${once}'` }),
+          writeGood(),
+          fauxAssistantMessage("done"),
+        ]),
+      });
+      const failed = await replayCode(fixture, turns);
+      assert.equal(failed.code, TasksErrorCode.ReplayDiverged);
+      assert.deepEqual(failed.fields, [
+        ["turn", String(TWO_CALLS)],
+        ["reason", "request_differs"],
+        ["step", "unit.turn"],
+      ]);
+      assert.deepEqual(
+        readJson(join(fixture.root, "replay"), "result.json").drift,
+        [],
+      );
     },
   );
 
