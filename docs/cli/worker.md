@@ -1086,6 +1086,16 @@ An unknown execution answers 404 `scheduler.execution.not_found`. A closed node 
 kanthord worker tasks seed execution_01ARZ3NDEKTSV4RRFFQ69G5FAA --output ./seed
 ```
 
+### Seed capture
+
+The operator sets `KANTHORD_CAPTURE_TASKS=1` in the environment of the worker process to capture seeds. A server instance reads the environment of the server process. Any other value captures no seed, and the worker behavior does not change.
+With the variable set, the chain runner calls the [capture hook](../../src/worker/unit/tasks-capture.ts) once for each implement execution, after the last node of the phase `start`. The hook is no chain node.
+The hook writes `captures/<execution_id>/seed.json` in the data directory of the instance. The folder has mode `0700`, and the file has mode `0600`.
+`seed.json` holds `claim`, `setup`, `revision`, `heads`, `prior`, `affectedTests`, `plan` and `elapsed_ms`, and it passes the seed schema of `tasks run`. `heads` holds the checkout heads at the end of `start`. `elapsed_ms` is the time since the claim start.
+The hook writes no credential, no SSH identity, no handover key and no value of the process environment. It removes `containerEnv` and `remoteEnv` from each `setup.repositories[].environment.document`.
+A capture failure logs `tasks capture failed` with a redacted reason, and the execution continues. The capture is part of the instance data, so the instance deletes it with that data.
+A head of `start` can be a local merge of the base refresh that no remote holds. Give `tasks run` a `--tree` that holds that commit.
+
 ## MCP and repository actions
 
 The target server owns one MCP v2 server. Every client, native agent or external

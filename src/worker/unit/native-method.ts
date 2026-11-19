@@ -31,6 +31,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
+import type { TasksCapture } from "./tasks-capture.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import type { Chain } from "./chain.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
@@ -72,6 +73,7 @@ export interface NativeExecutionInput {
   stop?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
+  capture?: TasksCapture;
 }
 
 export async function runNativeExecution(
@@ -228,7 +230,9 @@ function hostedChainOf(
     return hostedOf(evaluationChain(), evaluationPorts(agent));
   if (intent === ExecutionIntent.Examine)
     return hostedOf(examineChain(), examinePorts(agent));
-  return hostedOf(implementChain(), implementHostPorts(input, agent));
+  const hosted = hostedOf(implementChain(), implementHostPorts(input, agent));
+  return (walkInput, io) =>
+    hosted(walkInput, { ...io, capture: input.capture });
 }
 
 export function environmentDigestsOf(

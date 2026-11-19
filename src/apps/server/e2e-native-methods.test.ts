@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { unusedHostTools } from "../../worker/test-support.ts";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { suite, test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
@@ -39,15 +45,28 @@ import {
   WorkPullKind,
 } from "../../scheduler/contract.ts";
 import {
+  type ExecutionSetup,
   InstancePlacement,
   type RepositoryTransport,
   workerOperations,
 } from "../../worker/contract.ts";
 import {
+  CAPTURE_VARIABLE,
+  captureOf,
+  CAPTURES_DIRECTORY,
   handedSshAccess,
   runNativeExecution,
+  type TasksCapture,
   WorkspaceRoot,
 } from "../../worker/unit/index.ts";
+import { tasksRun } from "../cli/worker-tasks.ts";
+import { piAgentDirectory } from "../../agent/pi.ts";
+import {
+  readJson,
+  runOptions,
+  commandRun as tasksCommandRun,
+} from "../cli/tasks-test-support.ts";
+import { RunEndKind, TasksExit } from "../worker/index.ts";
 import {
   fauxAssistantMessage,
   fauxToolCall,
@@ -108,7 +127,13 @@ function completed<T>(result: OperationResult<T>): T {
   return result.data;
 }
 
-async function methodsFixture(t: TestContext) {
+interface MethodsRun {
+  capture?: TasksCapture;
+  setup?: (setup: ExecutionSetup) => ExecutionSetup;
+  env?: NodeJS.ProcessEnv;
+}
+
+async function methodsFixture(t: TestContext, run: MethodsRun = {}) {
   const gitHub = await fakeGitHub(t, { stopLast: true });
   const f = await gatewayFixture(t, {
     fakeSlots: true,
@@ -407,7 +432,7 @@ async function methodsFixture(t: TestContext) {
       await beforeRun(execution, holder.env);
       const result = await runNativeExecution({
         claim: execution,
-        setup,
+        setup: run.setup?.(setup) ?? setup,
         clients: {
           mission: httpClient(missionOperations, f.endpoint, holder.token),
           scheduler: httpClient(schedulerOperations, f.endpoint, holder.token),
@@ -427,10 +452,11 @@ async function methodsFixture(t: TestContext) {
         sshAccess: handedSshAccess(payload.ssh_identities, setup.repositories),
         workspaces,
         hostHome: temporary(t),
-        env: hostEnvironment(),
+        env: { ...hostEnvironment(), ...run.env },
         modelRuntimeFactory: scriptedModelRuntime(provider),
         hostTools: () => unusedHostTools,
         context: background,
+        capture: run.capture,
       });
       return { result, execution, provider, setup };
     } finally {
@@ -882,6 +908,108 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
               ),
           );
         },
+      );
+    },
+  );
+
+  const CAPTURE_ENV_NAME = "TASKS_CAPTURE_CANARY";
+  const CAPTURE_ENV_CANARY = "capture-process-canary-0123456789";
+  const CONTAINER_ENV_CANARY = "capture-container-canary-0123456789";
+  const REMOTE_ENV_CANARY = "capture-remote-canary-0123456789";
+  const CAPTURE_ON = "1";
+  const RELEASED = "released";
+  const PRIVATE_DIRECTORY_MODE = 0o700;
+  const MODE_BITS = 0o777;
+
+  test(
+    "KANTHORD_CAPTURE_TASKS=1 writes a seed with no secret after start, the seed runs locally to completed, and with the variable unset the worker writes no capture",
+    { timeout: JOURNEY_TIMEOUT_MS },
+    async (t) => {
+      const data = temporary(t);
+      const run: MethodsRun = {
+        capture: captureOf(
+          { ...hostEnvironment(), [CAPTURE_VARIABLE]: CAPTURE_ON },
+          data,
+        ),
+        env: { [CAPTURE_ENV_NAME]: CAPTURE_ENV_CANARY },
+        setup: (setup) => ({
+          ...setup,
+          repositories: setup.repositories.map((repository) => ({
+            ...repository,
+            environment: {
+              source: "detected",
+              document: {
+                image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+                containerEnv: { CANARY: CONTAINER_ENV_CANARY },
+                remoteEnv: { CANARY: REMOTE_ENV_CANARY },
+              },
+            },
+          })),
+        }),
+      };
+      const h = await methodsFixture(t, run);
+      const [A, , C] = h.nodes as [string, string, string];
+      const captured = await h.execute(h.general, A, hello());
+      assert.equal(captured.result.kind, RELEASED);
+      const folder = join(
+        data,
+        CAPTURES_DIRECTORY,
+        captured.execution.execution_id,
+      );
+      assert.equal(statSync(folder).mode & MODE_BITS, PRIVATE_DIRECTORY_MODE);
+      const seedFolder = join(temporary(t), "seed");
+      mkdirSync(seedFolder);
+      const text = readFileSync(join(folder, "seed.json"), "utf8");
+      writeFileSync(join(seedFolder, "seed.json"), text);
+      for (const canary of [
+        SECRET,
+        h.general.client_secret,
+        CAPTURE_ENV_CANARY,
+        CONTAINER_ENV_CANARY,
+        REMOTE_ENV_CANARY,
+        "PRIVATE KEY",
+        "ssh_identities",
+        "sshAccess",
+      ])
+        assert.equal(text.includes(canary), false, canary);
+      const seed = JSON.parse(text) as Record<string, unknown>;
+      assert.deepEqual(Object.keys(seed).sort(), [
+        "affectedTests",
+        "claim",
+        "elapsed_ms",
+        "heads",
+        "plan",
+        "prior",
+        "revision",
+        "setup",
+      ]);
+      const root = temporary(t);
+      const bindingId = captured.setup.repositories[0]!.binding_id;
+      const source = h.barePaths.get("git@github.com:owner/repo.git")!;
+      const fixture = {
+        root,
+        seedFolder,
+        source,
+        bindingId,
+        head: (seed.heads as Record<string, string>)[bindingId]!,
+        seed,
+      };
+      const local = tasksCommandRun(fixture, scriptedProvider(hello()), {
+        piDirectory: piAgentDirectory(),
+      });
+      const code = await tasksRun(seedFolder, runOptions(fixture), local.io);
+      assert.equal(code, TasksExit.Success, local.stderr.join(""));
+      assert.equal(
+        readJson(join(root, "out"), "result.json").end,
+        RunEndKind.Completed,
+      );
+      run.capture = captureOf(hostEnvironment(), data);
+      const unset = await h.execute(h.general, C, hello());
+      assert.equal(
+        existsSync(
+          join(data, CAPTURES_DIRECTORY, unset.execution.execution_id),
+        ),
+        false,
       );
     },
   );
