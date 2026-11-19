@@ -32,11 +32,13 @@ const FORBIDDEN_MODULES = [
   "src/worker/unit/chain-host.ts",
   "src/worker/unit/chain-runner.ts",
   "src/worker/unit/tasks-credential.ts",
+  "src/worker/unit/tasks-open-world.ts",
   "src/worker/unit/tasks-output.ts",
   "src/worker/unit/tasks-run.ts",
   "src/worker/unit/tasks-seed.ts",
   "src/worker/unit/tasks-steps.ts",
   "src/worker/unit/tasks-trees.ts",
+  "src/worker/unit/tasks-turns.ts",
   "src/worker/unit/tasks-verify.ts",
 ];
 const FORBIDDEN_NAMES = [

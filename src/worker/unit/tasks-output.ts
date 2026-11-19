@@ -25,6 +25,7 @@ export const OutputFile = {
   Metrics: "metrics.json",
   Outbox: "outbox.json",
   Spans: "spans.jsonl",
+  Turns: "turns.jsonl",
 } as const;
 export const UPLOADS_DIRECTORY = "uploads";
 export const STATE_DIRECTORY = "state";
@@ -192,9 +193,8 @@ export class TasksOutput {
     for (const directory of [UPLOADS_DIRECTORY, STATE_DIRECTORY])
       output.directory(directory);
     output.writeJson(OutputFile.Outbox, []);
-    writeFileSync(join(folder, OutputFile.Spans), "", {
-      mode: PRIVATE_FILE_MODE,
-    });
+    for (const name of [OutputFile.Spans, OutputFile.Turns])
+      writeFileSync(join(folder, name), "", { mode: PRIVATE_FILE_MODE });
     return output;
   }
 
@@ -232,6 +232,13 @@ export class TasksOutput {
 
   enterStep(step: string | null): void {
     this.step = step;
+  }
+
+  turn(record: unknown): void {
+    appendFileSync(
+      join(this.folder, OutputFile.Turns),
+      `${JSON.stringify(this.redacted(record))}${NEWLINE}`,
+    );
   }
 
   outbox(): readonly OutboxEntry[] {

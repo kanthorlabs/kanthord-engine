@@ -33,6 +33,7 @@ const AWS_DIRECTORY = ".aws";
 const AWS_CONFIG = "config";
 const AWS_CREDENTIALS = "credentials";
 const NO_METADATA = null;
+const REPLAY_KEY = "replay";
 
 const stdinCredentialSchema = z.strictObject({
   provider_id: z.string().min(1),
@@ -103,6 +104,15 @@ export function credentialOf(input: Buffer, plan: TasksPlan): LocalCredential {
     provider_id: parsed.data.provider_id,
     credential,
     metadata,
+  };
+}
+
+export function replayCredential(plan: TasksPlan): LocalCredential {
+  const agent = plan.setup.agents[WORKING_AGENT]!;
+  return {
+    provider_id: piProviderId(agent.effective_configuration.provider),
+    credential: { type: SecretShape.ApiKey, key: REPLAY_KEY },
+    metadata: agent.metadata,
   };
 }
 

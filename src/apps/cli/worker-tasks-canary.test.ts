@@ -12,6 +12,7 @@ import {
 } from "../../worker/unit/test-support.ts";
 import { TasksExit } from "../worker/index.ts";
 import {
+  type CommandRun,
   commandRun,
   CREDENTIAL_CANARY,
   filesOf,
@@ -37,8 +38,30 @@ function uploadOf(path: string) {
   });
 }
 
+function assertNoCanary(output: string, run: CommandRun): void {
+  const uploads = filesOf(join(output, "uploads"));
+  const passForms = [PASS_VALUE, Buffer.from(PASS_VALUE).toString("base64")];
+  const texts = [
+    ...[...OUTPUT_FILES.map((name) => join(output, name)), ...uploads].map(
+      (file) => [file, readFileSync(file, "utf8")],
+    ),
+    ["stdout", run.stdout.join("")],
+    ["stderr", run.stderr.join("")],
+  ];
+  for (const canary of [CREDENTIAL_CANARY, ...passForms])
+    for (const [name, text] of texts)
+      assert.ok(!text!.includes(canary), `${name}: ${canary}`);
+  for (const file of filesOf(join(output, "state")))
+    assert.ok(
+      !readFileSync(file).includes(Buffer.from(CREDENTIAL_CANARY)),
+      file,
+    );
+  for (const name of PI_FILES)
+    assert.ok(!existsSync(join(output, "state", "pi", name)), name);
+}
+
 test(
-  "the canary values of the credential and of --pass-env reach no output file, no state file and no standard stream",
+  "the canary values of the credential and of --pass-env reach no output file, no state file, no standard stream and no replay output",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const fixture = await seedFixture(t);
@@ -73,24 +96,25 @@ test(
       ).length,
       UPLOAD_COUNT,
     );
-    const uploads = filesOf(join(output, "uploads"));
-    assert.equal(uploads.length, UPLOAD_COUNT);
-    const passForms = [PASS_VALUE, Buffer.from(PASS_VALUE).toString("base64")];
-    const texts = [
-      ...[...OUTPUT_FILES.map((name) => join(output, name)), ...uploads].map(
-        (file) => [file, readFileSync(file, "utf8")],
-      ),
-      ["stdout", run.stdout.join("")],
-      ["stderr", run.stderr.join("")],
-    ];
-    for (const canary of [CREDENTIAL_CANARY, ...passForms])
-      for (const [name, text] of texts)
-        assert.ok(!text!.includes(canary), `${name}: ${canary}`);
-    for (const file of filesOf(join(output, "state")))
-      assert.ok(
-        !readFileSync(file).includes(Buffer.from(CREDENTIAL_CANARY)),
-        file,
-      );
+    assert.equal(filesOf(join(output, "uploads")).length, UPLOAD_COUNT);
+    assertNoCanary(output, run);
+    const replay = commandRun(fixture, scriptedProvider([]), {
+      shellEnv: { ...hostEnvironment(), [PASS_NAME]: PASS_VALUE },
+      piDirectory: join(output, "state", "pi"),
+    });
+    const replayOutput = join(fixture.root, "replay");
+    const replayed = await tasksRun(
+      fixture.seedFolder,
+      runOptions(fixture, {
+        credentialStdin: undefined,
+        replay: join(output, "turns.jsonl"),
+        passEnv: [PASS_NAME],
+        output: replayOutput,
+      }),
+      replay.io,
+    );
+    assert.equal(replayed, TasksExit.Success, replay.stderr.join(""));
+    assertNoCanary(replayOutput, replay);
     for (const name of PI_FILES)
       assert.ok(!existsSync(join(output, "state", "pi", name)), name);
     const keys = keysOf(readJson(output, "context.json"));

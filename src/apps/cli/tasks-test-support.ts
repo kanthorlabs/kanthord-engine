@@ -15,6 +15,7 @@ import {
   type ScriptedProvider,
   task,
 } from "../../worker/unit/test-support.ts";
+import { defaultCapabilities } from "../worker/index.ts";
 import type { TasksCommandIo, TasksRunOptions } from "./worker-tasks.ts";
 
 export const CREDENTIAL_CANARY = "canary-credential-value-0123456789";
@@ -28,6 +29,7 @@ export const OUTPUT_FILES = [
   "metrics.json",
   "outbox.json",
   "spans.jsonl",
+  "turns.jsonl",
 ];
 export const REFUSED_KEYS = ["credentials", "sshAccess"];
 const SEED_FILE = "seed.json";
@@ -162,6 +164,7 @@ export function commandRun(
       stdout: (text) => void stdout.push(text),
       stderr: (text) => void stderr.push(text),
       modelRuntimeFactory: scriptedModelRuntime(provider),
+      capabilities: defaultCapabilities,
       stop: new CancellationContext(),
       piDirectory: null,
       ...overrides,

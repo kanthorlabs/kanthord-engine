@@ -1,4 +1,5 @@
 import { readSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { isatty } from "node:tty";
 import { type Command, CommanderError } from "commander";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
@@ -8,14 +9,18 @@ import {
   credentialInvalid,
   credentialOf,
   credentialValues,
+  defaultCapabilities,
   defaultModelRuntimeFactory,
   EndReason,
   ExecutionStop,
   knownPassValues,
+  type LocalCredential,
   localHostTools,
   type LocalTasksEnd,
   type LocalTasksInput,
   type ModelRuntimeFactory,
+  readTurns,
+  replayCredential,
   RunEndKind,
   runTasksLocal,
   tasksDiagnostic,
@@ -23,6 +28,7 @@ import {
   TasksExit,
   type TasksOptions,
   TasksOutput,
+  type TasksPlan,
   tasksPlanOf,
   withoutAmbientCredentials,
 } from "../worker/index.ts";
@@ -41,12 +47,14 @@ export interface TasksCommandIo {
   stdout(text: string): void;
   stderr(text: string): void;
   modelRuntimeFactory: ModelRuntimeFactory;
+  capabilities: typeof defaultCapabilities;
   stop: Context;
   piDirectory: string | null;
 }
 
 export interface TasksRunOptions {
   credentialStdin?: boolean;
+  replay?: string;
   tree: string[];
   passEnv: string[];
   model?: string;
@@ -130,6 +138,61 @@ function printInternalError(io: TasksCommandIo): void {
   io.stderr(`${diagnostic(failed)}${NEWLINE}${diagnosticRows(failed)}`);
 }
 
+const OVERRIDE_OPTIONS: readonly (keyof TasksRunOptions)[] = [
+  "model",
+  "reasoning",
+  "systemPrompt",
+  "templates",
+  "budgetTurns",
+  "budgetWall",
+  "skipReleaseGate",
+];
+
+function modeInvalid(): Diagnostic {
+  return tasksDiagnostic(
+    TasksErrorCode.ModeInvalid,
+    "worker tasks run: pass exactly one of --replay and --credential-stdin, and no override with --replay.",
+  );
+}
+
+function replayPathOf(options: TasksRunOptions, cwd: string): string | null {
+  const live = !!options.credentialStdin;
+  if (live === (options.replay !== undefined)) throw modeInvalid();
+  if (live) return null;
+  if (
+    options.unit.length ||
+    OVERRIDE_OPTIONS.some((name) => options[name] !== undefined)
+  )
+    throw modeInvalid();
+  return resolve(cwd, options.replay!);
+}
+
+interface ModeInput {
+  replayPath: string | null;
+  plan: TasksPlan;
+  io: TasksCommandIo;
+}
+
+function modeOf(input: ModeInput): {
+  credential: LocalCredential;
+  replay: LocalTasksInput["replay"];
+} {
+  const { replayPath, plan, io } = input;
+  if (replayPath === null)
+    return { credential: credentialOf(stdinOf(io), plan), replay: null };
+  const folder = dirname(replayPath);
+  if (folder === plan.output)
+    throw tasksDiagnostic(
+      TasksErrorCode.OptionInvalid,
+      "worker tasks run: --output names the folder of the --replay file.",
+      [["option", "--output"]],
+    );
+  return {
+    credential: replayCredential(plan),
+    replay: { turns: readTurns(replayPath), folder },
+  };
+}
+
 async function localEnd(input: LocalTasksInput): Promise<LocalTasksEnd> {
   try {
     return await runTasksLocal(input);
@@ -148,11 +211,7 @@ export async function tasksRun(
   options: TasksRunOptions,
   io: TasksCommandIo,
 ): Promise<TasksExit> {
-  if (!options.credentialStdin)
-    throw tasksDiagnostic(
-      TasksErrorCode.ModeInvalid,
-      "worker tasks run: live mode requires --credential-stdin.",
-    );
+  const replayPath = replayPathOf(options, io.cwd);
   const plan = await tasksPlanOf(
     planOptions(seedFolder, options, io.cwd),
     Date.now(),
@@ -160,11 +219,15 @@ export async function tasksRun(
   checkOutputFolder(plan.output, plan.force);
   const passed = passedValues(plan.passEnv, io.shellEnv);
   const passValues = knownPassValues(Object.values(passed));
-  const credential = credentialOf(stdinOf(io), plan);
+  const { credential, replay } = modeOf({ replayPath, plan, io });
   const env = { ...shellOf(io.shellEnv), ...passed };
   const output = TasksOutput.create(
     plan.output,
-    { credential: credentialValues(credential.credential), passed: passValues },
+    {
+      credential:
+        replay === null ? credentialValues(credential.credential) : [],
+      passed: passValues,
+    },
     io.stderr,
   );
   withoutAmbientCredentials(io.shellEnv, output);
@@ -174,11 +237,14 @@ export async function tasksRun(
     output,
     env,
     passValues,
-    hostTools: localHostTools({
-      output,
-      claim: plan.claim,
-      linkUpdates: plan.seed.link_updates ?? [],
-    }),
+    capabilities: io.capabilities(
+      localHostTools({
+        output,
+        claim: plan.claim,
+        linkUpdates: plan.seed.link_updates ?? [],
+      }),
+    ),
+    replay,
     modelRuntimeFactory: io.modelRuntimeFactory,
     stop: io.stop,
     piDirectory: io.piDirectory,
@@ -243,6 +309,7 @@ async function runAction(seedFolder: string, command: Command): Promise<void> {
       stdout: (text) => void process.stdout.write(text),
       stderr: (text) => void process.stderr.write(text),
       modelRuntimeFactory: defaultModelRuntimeFactory,
+      capabilities: defaultCapabilities,
       stop,
       piDirectory: null,
     });
@@ -271,6 +338,10 @@ export function addWorkerTasksCommands(worker: Command): void {
     .option(
       "--credential-stdin",
       "Read the LLM credential as one JSON object from standard input",
+    )
+    .option(
+      "--replay <turns.jsonl>",
+      "Answer each model request from the turns of a recorded run; read no credential and call no provider",
     )
     .option("--tree <binding_id=path>", "Tree source of a binding", collect, [])
     .option(
