@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   affectedFailureReport,
+  earlierVerdictsText,
   evaluationJudgementSchemaOf,
   judgementBlockers,
   judgementRationale,
@@ -629,4 +630,19 @@ test("the judgement schema accepts a person blocker with a ground", () => {
     findings: [{ ...BLOCKER, action: "person" }],
   });
   assert.equal(parsed.success, true);
+});
+
+test("the earlier verdict text keeps the latest eight verdicts", () => {
+  const verdicts = Array.from({ length: 10 }, (_, index) => ({
+    attempt: index + 1,
+    round: 1,
+    result: "criterion-not-met" as const,
+    rationale: "r",
+    findings: [],
+  }));
+  const text = earlierVerdictsText(verdicts);
+  assert.ok(text?.includes("Attempt 10, round 1"));
+  assert.ok(text?.includes("Attempt 3, round 1"));
+  assert.equal(text?.includes("Attempt 2, round 1"), false);
+  assert.equal(earlierVerdictsText([]), null);
 });

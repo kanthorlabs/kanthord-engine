@@ -994,6 +994,14 @@ function unrecordedNodeInstruction(state: StepsState): NodeInstruction | null {
 async function nodeInstructionOf(
   state: StepsState,
 ): Promise<NodeInstruction | null> {
+  const node = await verdictNodeInstruction(state);
+  if (node !== null || state.unblockReason === null) return node;
+  return unrecordedNodeInstruction(state);
+}
+
+async function verdictNodeInstruction(
+  state: StepsState,
+): Promise<NodeInstruction | null> {
   if (state.verdict === null) return unrecordedNodeInstruction(state);
   const judged = await judgedCheckouts(state, state.verdict.judged);
   if (

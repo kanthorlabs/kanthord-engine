@@ -296,11 +296,8 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
   };
   const workspaces = WorkspaceRoot.open(temporary(t));
   const missionClient = httpClient(missionOperations, f.endpoint, f.token);
-  async function execute(
-    holder: typeof coder,
-    script: Parameters<typeof scriptedProvider>[0],
-  ) {
-    const pulled = await writeFile<{
+  const pull = (holder: typeof coder) =>
+    writeFile<{
       kind: string;
       execution: ExecutionRecord;
     }>(
@@ -311,6 +308,11 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
       },
       holder.env,
     );
+  async function execute(
+    holder: typeof coder,
+    script: Parameters<typeof scriptedProvider>[0],
+  ) {
+    const pulled = await pull(holder);
     assert.equal(pulled.kind, WorkPullKind.Claimed);
     assert.equal(pulled.execution.node_id, node);
     const execution = pulled.execution;
@@ -424,6 +426,7 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
     );
   return {
     execute,
+    pull,
     decide,
     coder,
     reviewer,
@@ -600,6 +603,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
       assert.equal(round.result.kind, CLOSED);
       assert.equal(await f.state(), NodeState.Blocked);
       assert.equal((await f.assessments()).length, SINGLE_ROUND.length);
+      assert.equal((await f.pull(f.coder)).kind, WorkPullKind.NoWork);
       const [finding] = await f.findings();
       assert.equal(finding!.route, FindingRoute.Report);
       const decided = await f.decide(finding!.id);

@@ -318,6 +318,19 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
   });
 
+  test("an unblock reason plans the node unit with the reason when the verdict has later work", async (t) => {
+    const { h } = await verdictHarness(t, []);
+    h.verdict = verdictAt(VERDICT, h.checkouts);
+    h.unblockReason = "Keep the legacy route.";
+    await commitOnNode(h.root, "addressed");
+    h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
+  });
+
   async function headOf(h: Harness): Promise<string> {
     const head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
     h.checkouts[0]!.head = head;

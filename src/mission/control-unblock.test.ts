@@ -1118,57 +1118,69 @@ test("an unblock that rejects an open proposal moves its linked findings to repo
   assert.equal(route(), FindingRoute.Report);
 });
 
-test("an unblock stores its reason on the attempt that it opens, else the change reason", async (t) => {
-  for (const [body, expected] of [
-    [
-      { reason: "Retry on the current base branch." },
-      "Retry on the current base branch.",
-    ],
-    [{}, null],
-    [{ change: "same", reason: "Redirect" }, "Redirect"],
-    [{ change: "same", reason: "Redirect", requestReason: "Keep" }, "Keep"],
-  ] as const) {
-    const h = controlHarness(t, IDENTITY);
-    h.store.transaction((tx) => {
-      openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
-      setNodeState(tx, h.node_id, NodeState.Paused);
-    });
-    const blocked = await h.invoke("node.block", {
-      params: { node_id: h.node_id },
-      query: {},
-      body: h.body(NodeState.Paused, FIRST_ATTEMPT),
-    });
-    await h.invoke("node.unblock", {
-      params: { node_id: h.node_id },
-      query: {},
-      body: {
-        blocked_attempt: FIRST_ATTEMPT,
-        expected_revision: FIRST_ATTEMPT,
-        expected_mission_version: FIRST_ATTEMPT,
-        ...("reason" in body && !("change" in body)
-          ? { reason: body.reason }
-          : {}),
-        ...("change" in body
-          ? {
-              change: {
-                content: blocked.node.content,
-                reason: body.reason,
-                tasks: [],
-              },
-              ...("requestReason" in body
-                ? { reason: body.requestReason }
-                : {}),
-            }
-          : {}),
-      },
-    });
-    const opened = h.store.transaction((tx) =>
-      readAttempt(tx, h.node_id, SECOND_ATTEMPT),
-    );
-    assert.equal(opened?.unblock_reason, expected);
-    const first = h.store.transaction((tx) =>
-      readAttempt(tx, h.node_id, FIRST_ATTEMPT),
-    );
-    assert.equal(first?.unblock_reason, null);
-  }
+const RETRY_REASON = "Retry on the current base branch.";
+const CHANGE_REASON = "Redirect";
+const REQUEST_REASON = "Keep";
+
+async function unblockReasonStored(
+  t: Parameters<typeof controlHarness>[0],
+  requestOf: (content: unknown) => Record<string, unknown>,
+) {
+  const h = controlHarness(t, IDENTITY);
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    setNodeState(tx, h.node_id, NodeState.Paused);
+  });
+  const blocked = await h.invoke("node.block", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Paused, FIRST_ATTEMPT),
+  });
+  await h.invoke("node.unblock", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      blocked_attempt: FIRST_ATTEMPT,
+      expected_revision: FIRST_ATTEMPT,
+      expected_mission_version: FIRST_ATTEMPT,
+      ...requestOf(blocked.node.content),
+    },
+  });
+  const reasonOf = (attempt: number) =>
+    h.store.transaction((tx) => readAttempt(tx, h.node_id, attempt))
+      ?.unblock_reason;
+  assert.equal(reasonOf(FIRST_ATTEMPT), null);
+  return reasonOf(SECOND_ATTEMPT);
+}
+
+test("an unblock stores its reason on the attempt that it opens", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, () => ({
+      reason: RETRY_REASON,
+    })),
+    RETRY_REASON,
+  );
+});
+
+test("an unblock with no reason stores null on the attempt that it opens", async (t) => {
+  assert.equal(await unblockReasonStored(t, () => ({})), null);
+});
+
+test("an unblock with a change and no reason stores the change reason", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, (content) => ({
+      change: { content, reason: CHANGE_REASON, tasks: [] },
+    })),
+    CHANGE_REASON,
+  );
+});
+
+test("an unblock with a change and a reason stores the request reason", async (t) => {
+  assert.equal(
+    await unblockReasonStored(t, (content) => ({
+      change: { content, reason: CHANGE_REASON, tasks: [] },
+      reason: REQUEST_REASON,
+    })),
+    REQUEST_REASON,
+  );
 });
