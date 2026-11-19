@@ -411,6 +411,12 @@ The answer holds these fields:
   or `null` with no value. A signal with a denominator of 0 has no key in a
   window and a `null` in a series. `series` holds one value for each bucket.
   `dimensions` holds one item for each project and worker, by `entered`.
+  The counts of a stage follow a conservation rule. The sum of the exit counts
+  of a stage is at most `entered`, and it equals `entered` for the last stage of
+  a kind: `release_gate` for the steps and `outcome` for the evaluation.
+  `entered` plus `unobserved` of a stage is at least `entered` plus `unobserved`
+  of the next stage of the same kind. An unobserved execution, which hands on
+  with no gate span, counts in `unobserved` only and not in `exits`.
 - `cost`: `current`, `previous`, `previous_same_hour` and `series`. A cost window
   holds `total_usd`, `success`, `per_success_usd`, `leaked_usd` and
   `rejected_review_usd`.
