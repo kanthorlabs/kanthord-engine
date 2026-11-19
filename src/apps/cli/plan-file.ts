@@ -60,7 +60,6 @@ interface PlanRead {
   node: Node;
   missionVersion: number;
   change: UnblockChange;
-  filename: string;
 }
 
 function refuse(filename: string, reason: string): never {
@@ -313,7 +312,6 @@ async function planRead(
     node,
     missionVersion: mission.version,
     change: changeOf(files, tasks, ids, options.reason),
-    filename: files.node.filename,
   };
 }
 
@@ -323,7 +321,7 @@ export async function nodeUpdateBody(
   paths: string[],
   connection: Connection,
 ): Promise<NodeUpdate> {
-  const { node, missionVersion, change, filename } = await planRead(
+  const { node, missionVersion, change } = await planRead(
     command,
     nodeId,
     paths,
@@ -332,7 +330,7 @@ export async function nodeUpdateBody(
   return {
     expected_revision: node.visible_revision,
     expected_mission_version: missionVersion,
-    filename,
+    filename: node.filename,
     content: change.content,
     tasks: change.tasks,
     reason: change.reason,
