@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
-import { rmSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
@@ -31,6 +37,29 @@ usePiDirectory(PI_DIRECTORY);
 
 const SECTIONS = ["route", "end", "commits", "units", "metrics"];
 const ONE_TURN = "1";
+const CONTEXT_FILE = "context.json";
+
+interface ContextFile {
+  input: {
+    checkouts: { binding_id: string; name: string }[];
+    heads: Record<string, string>;
+  };
+  result: { heads: Record<string, string> };
+}
+
+function copied(
+  folder: string,
+  name: string,
+  change: (context: ContextFile, copy: string) => void,
+): string {
+  const copy = join(folder, "..", name);
+  cpSync(folder, copy, { recursive: true });
+  const path = join(copy, CONTEXT_FILE);
+  const context = JSON.parse(readFileSync(path, "utf8")) as ContextFile;
+  change(context, copy);
+  writeFileSync(path, JSON.stringify(context));
+  return copy;
+}
 
 async function recorded(
   fixture: SeedFixture,
@@ -93,5 +122,38 @@ test(
     );
     const refused = await diagnosticOf(compared([completed, foreign]));
     assert.equal(refused.code, TasksErrorCode.SeedMismatch);
+  },
+);
+
+test(
+  "worker tasks compare refuses a head that is not a commit id and a run folder with no checkout, and git log writes no file",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await seedFixture(t);
+    const completed = await recorded(
+      fixture,
+      scriptedProvider([writeGood(), fauxAssistantMessage("done")]),
+      { output: join(fixture.root, "completed") },
+    );
+    const written = join(fixture.root, "written");
+    const injected = copied(completed, "injected", (context) => {
+      const [first] = context.input.checkouts;
+      context.input.heads[first!.binding_id] = `--output=${written}`;
+    });
+    const refused = await diagnosticOf(compared([completed, injected]));
+    assert.equal(refused.code, TasksErrorCode.OptionInvalid);
+    assert.deepEqual(refused.fields, [["option", "<output-b>"]]);
+    assert.equal(existsSync(written), false);
+    const absent = copied(completed, "absent", (context, copy) => {
+      rmSync(
+        join(copy, "state", "checkouts", context.input.checkouts[0]!.name),
+        {
+          recursive: true,
+        },
+      );
+    });
+    const missing = await diagnosticOf(compared([absent, completed]));
+    assert.equal(missing.code, TasksErrorCode.OptionInvalid);
+    assert.deepEqual(missing.fields, [["option", "<output-a>"]]);
   },
 );
