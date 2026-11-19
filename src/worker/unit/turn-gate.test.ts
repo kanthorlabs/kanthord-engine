@@ -48,6 +48,8 @@ import {
   TurnViolation,
 } from "./turn-gate.ts";
 import { operationsOf, readStatus, resolveGitPaths } from "./local-git.ts";
+import { VerificationContext } from "./method-telemetry.ts";
+import { memoScopeOf } from "./verification-memo.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace-layout.ts";
 import {
@@ -928,6 +930,14 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.deepEqual(commands(), RESTORE);
     assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+  });
+
+  test("the verification memo reads the tree id of a commit once", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    assert.deepEqual(commands(), ["rev-parse"]);
   });
 
   test("an agent that rewrites the history stops with history_rewritten and leaves the checkout at before", async (t) => {
