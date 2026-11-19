@@ -183,6 +183,7 @@ import {
 } from "../../agent/index.ts";
 import {
   operationToolDeclarations,
+  removeEmptyVariantDirectory,
   variantHasSessionFile,
   WorkbenchFootprint,
   WorkbenchInvites,
@@ -836,6 +837,11 @@ export function composeServices(options: ComposeServicesOptions) {
     variantInUse: (agentName, variantId) =>
       workbench.variantOpen(variantId) ||
       variantHasSessionFile(options.stateDirectory, { agentName, variantId }),
+    variantDeleted: (agentName, variantId) =>
+      removeEmptyVariantDirectory(options.stateDirectory, {
+        agentName,
+        variantId,
+      }),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     promptBase: {
       baseCommitOf: (bindingId, context) =>

@@ -106,6 +106,18 @@ test("a stale expected_revision on update answers agent.variant.revision_conflic
   });
 });
 
+test("delete returns the deleted row with its agent_name", () => {
+  withStore((tx) => {
+    const created = createVariant(tx, VALID);
+    const deleted = deleteVariant(tx, created.id, {
+      expected_revision: created.revision,
+      inUse: () => false,
+    });
+    assert.deepEqual(deleted, created);
+    assert.equal(deleted.agent_name, created.agent_name);
+  });
+});
+
 test("a stale expected_revision on delete answers agent.variant.revision_conflict and keeps the row", () => {
   withStore((tx) => {
     const created = createVariant(tx, VALID);

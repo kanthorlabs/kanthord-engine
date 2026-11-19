@@ -82,6 +82,7 @@ import {
 } from "./enablements.ts";
 import { cooldownDuration } from "./cooldowns.ts";
 import {
+  type AgentVariant,
   createVariant,
   deleteVariant,
   getVariant,
@@ -346,6 +347,7 @@ export interface Dependencies {
   approvedModels: ApprovedModelsFn;
   entriesOfAgent: EntriesOfAgent;
   variantInUse: (agentName: string, variantId: string) => boolean;
+  variantDeleted: (agentName: string, variantId: string) => void;
   repositoryPromptsOf: (
     tx: Transaction,
     bindingId: string,
@@ -1479,14 +1481,19 @@ export class AgentComponent {
     );
     registry.register(
       agentOperations["variant.delete"],
-      ({ params, body }, caller) =>
-        caller.commit((tx) => {
-          deleteVariant(tx, params.variant_id, {
+      ({ params, body }, caller) => {
+        let row: AgentVariant | undefined;
+        const answer = caller.commit((tx) => {
+          row = deleteVariant(tx, params.variant_id, {
             expected_revision: body.expected_revision,
             inUse: this.dependencies.variantInUse,
           });
           return { id: params.variant_id };
-        }),
+        });
+        assert.ok(row);
+        this.dependencies.variantDeleted(row.agent_name, params.variant_id);
+        return answer;
+      },
     );
     registry.register(agentOperations["cooldown.list"], (_input, caller) =>
       caller.commit((tx) => ({

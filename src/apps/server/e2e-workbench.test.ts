@@ -7139,7 +7139,7 @@ test(
 );
 
 test(
-  "(invariant guard) a create that the runtime refuses leaves no session file and the variant deletes with 200",
+  "(happy path) a create that the runtime refuses leaves an empty variant directory and the delete with 200 removes it",
   { timeout: VARIANT_TEST_TIMEOUT_MS },
   async (t) => {
     const state = temporary(t);
@@ -7167,6 +7167,51 @@ test(
       NO_SESSION_FILES,
     );
     completed(await deleteVariantOf(fixture, variant));
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), false);
+  },
+);
+
+test(
+  "(invariant guard) a refused delete keeps the variant directory",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    let refuse = false;
+    const fixture = await workbenchFixture(
+      t,
+      [],
+      state,
+      undefined,
+      [AGENT],
+      async () => {
+        if (refuse)
+          throw new Diagnostic("system.test.refused", "The runtime refuses.");
+      },
+    );
+    const variant = await variantOf(fixture);
+    refuse = true;
+    failed(
+      await variantSession(fixture, variant.id),
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.SetupRefused,
+    );
+    failed(
+      await deleteVariantOf(fixture, {
+        id: variant.id,
+        revision: variant.revision + SINGLE,
+      }),
+      HttpStatus.Conflict,
+      AgentErrorCode.VariantRevisionConflict,
+    );
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), true);
+    refuse = false;
+    completed(await variantSession(fixture, variant.id));
+    failed(
+      await deleteVariantOf(fixture, variant),
+      HttpStatus.Conflict,
+      VARIANT_IN_USE,
+    );
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), true);
   },
 );
 

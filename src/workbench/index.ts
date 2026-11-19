@@ -14,6 +14,7 @@ export {
 export {
   forkSummaryOf,
   recordOf,
+  removeEmptyVariantDirectory,
   variantHasSessionFile,
   variantSessionDirectory,
   type VariantPlace,

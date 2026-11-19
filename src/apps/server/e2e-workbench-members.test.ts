@@ -933,6 +933,10 @@ test(
       { ...persistence, resumed: true },
     );
     completed(await deleteVariant(second, variant));
+    assert.equal(
+      existsSync(join(state, "pi", "sessions", "workbench", AGENT, variant.id)),
+      false,
+    );
   },
 );
 
