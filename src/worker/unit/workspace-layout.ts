@@ -1,4 +1,5 @@
-import { relative } from "node:path";
+import assert from "node:assert/strict";
+import { basename, dirname, relative } from "node:path";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
@@ -25,6 +26,15 @@ export interface WorkspaceCheckout {
   name: string;
   directory: string;
   head: string;
+}
+export function workspaceKeyOf(
+  checkouts: readonly Pick<WorkspaceCheckout, "directory">[],
+): string {
+  const [first] = checkouts;
+  assert.ok(first, "A node workspace holds a checkout.");
+  const parent = dirname(first.directory);
+  assert.equal(basename(parent), CHECKOUTS_DIRECTORY);
+  return dirname(parent);
 }
 export function workRepositoriesOf(
   root: string,

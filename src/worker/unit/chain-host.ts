@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { Context } from "../../kernel/context.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import type { RepositoryTransport } from "../contract.ts";
@@ -18,8 +19,8 @@ import type { WorkspaceRoot } from "./workspace.ts";
 type InputKeys = "claim" | "setup" | "sshAccess";
 
 export interface StepHost {
-  workspaces: WorkspaceRoot;
-  transport: RepositoryTransport;
+  workspaces: WorkspaceRoot | null;
+  transport: RepositoryTransport | null;
   env: NodeJS.ProcessEnv;
 }
 
@@ -64,13 +65,15 @@ export function hostInputOf(
   ctx: Pick<ExecutionCtx, InputKeys>,
   io: Pick<StepIo, "host">,
 ): HostInput {
+  const { workspaces, transport, env } = io.host;
+  assert.ok(workspaces && transport, "A node workspace needs a worker host.");
   return {
     claim: ctx.claim,
     setup: ctx.setup,
     sshAccess: ctx.sshAccess,
-    workspaces: io.host.workspaces,
-    transport: io.host.transport,
-    env: io.host.env,
+    workspaces,
+    transport,
+    env,
   };
 }
 

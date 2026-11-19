@@ -3,6 +3,7 @@ import { DeadlineKind } from "./chain.ts";
 import type { Step } from "./chain-host.ts";
 import { next } from "./step-support.ts";
 import { VerificationMemo } from "./verification-memo.ts";
+import { workspaceKeyOf } from "./workspace-layout.ts";
 
 export const stateOpen: Step<
   unknown,
@@ -42,7 +43,7 @@ export const stateOpen: Step<
     return next(scope, {
       state: {
         input: { claim: ctx.claim, setup: ctx.setup, env: io.host.env },
-        workspaceKey: io.host.workspaces.nodeKey(ctx.claim.node_id),
+        workspaceKey: workspaceKeyOf(ctx.workspace.checkouts),
         cancel: io.run.operationContext,
         ports: io.ports,
         revision: ctx.revision,

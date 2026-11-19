@@ -3,10 +3,12 @@ import { EndReason } from "./execution-stop.ts";
 import {
   BudgetEndKind,
   type Chain,
+  ChainId,
   type ChainNode,
   type ChainStep,
   DeadlineKind,
   NodeKind,
+  phaseReads,
   SEED_KEYS,
 } from "./chain.ts";
 import { Phase } from "./telemetry.ts";
@@ -71,7 +73,21 @@ function phaseNote(built: Chain, phase: Phase): string {
     : "";
 }
 
+function printPhaseChain(built: Chain): string {
+  const nodes = built.phases.flatMap((phase) => phase.nodes);
+  return [
+    `chain ${built.id}`,
+    line(CHAIN_DEPTH, `seed ${phaseReads(nodes).join(", ")}`, ""),
+    ...built.phases.flatMap(({ phase, nodes: phaseNodes }) => [
+      line(CHAIN_DEPTH, `phase ${phase}`, "runPhase; no onExit, no onStop"),
+      ...nodeLines(phaseNodes, NODE_DEPTH),
+    ]),
+    line(CHAIN_DEPTH, "dispose resources", "by the caller, on every end"),
+  ].join("\n");
+}
+
 export function printChain(built: Chain): string {
+  if (built.id === ChainId.TasksPrepare) return printPhaseChain(built);
   return [
     `chain ${built.id}`,
     line(CHAIN_DEPTH, `seed ${SEED_KEYS.join(", ")}`, ""),

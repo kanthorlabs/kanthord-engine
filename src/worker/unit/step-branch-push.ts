@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { Context } from "../../kernel/context.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { DeadlineKind, type StopCode } from "./chain.ts";
@@ -25,10 +26,12 @@ async function pushNodeBranches(
   context: Context,
 ): Promise<void> {
   const { state } = ctx;
+  const { workspaces, transport } = host;
+  assert.ok(workspaces && transport, "A push needs a worker host.");
   const remaining = () => state.input.claim.expired_at - Date.now();
   for (const checkout of state.checkouts) {
     const key = {
-      nodeKey: host.workspaces.nodeKey(state.input.claim.node_id),
+      nodeKey: workspaces.nodeKey(state.input.claim.node_id),
       nodeBranch: state.nodeBranch,
       bindingId: checkout.binding_id,
     };
@@ -42,7 +45,7 @@ async function pushNodeBranches(
       confirmed: readPushRecord(key)?.confirmed ?? null,
       pending: head,
     });
-    await host.transport.pushNodeBranch(
+    await transport.pushNodeBranch(
       checkout.directory,
       state.nodeBranch,
       context,

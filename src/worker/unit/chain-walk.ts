@@ -14,7 +14,8 @@ import { ExecutionStop } from "./execution-stop.ts";
 import type { SpanEnd, SpanRecorder } from "./telemetry.ts";
 
 export const CANCELLED = "cancelled";
-export type Walked = StepKind | typeof CANCELLED | ExecutionStop;
+export const UNTIL = "until";
+export type Walked = StepKind | typeof CANCELLED | typeof UNTIL | ExecutionStop;
 
 export interface ScopeHolder {
   scope: unknown;
@@ -24,6 +25,7 @@ export interface Walker {
   ctx: ExecutionCtx;
   spans: SpanRecorder;
   cancel: CancellationContext;
+  until?: string | null;
   step(step: ChainStep, holder: ScopeHolder): Promise<Walked>;
 }
 
@@ -102,6 +104,7 @@ export async function walkNodes(
   holder: ScopeHolder,
 ): Promise<Walked> {
   for (const node of nodes) {
+    if (node.kind === NodeKind.Loop && node.id === walker.until) return UNTIL;
     const walked =
       node.kind === NodeKind.Step
         ? await walker.step(node.step, holder)

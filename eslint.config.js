@@ -481,8 +481,21 @@ export default tseslint.config(
               ],
             },
             {
-              from: element("apps-cli", { fileInternalPath: "*.test.ts" }),
+              from: element("apps-cli", {
+                fileInternalPath: "{*.test.ts,tasks-test-support.ts}",
+              }),
               allow: [
+                {
+                  to: element("worker-unit", {
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath: "{pi,pi-tools}.ts",
+                  }),
+                },
                 {
                   to: element("component", {
                     captured: { name: "{llm,repository,storage}" },
@@ -535,7 +548,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider,provider-failure,login,sessions}.ts",
+                      "{model-connector,platforms,provider,provider-failure,login,sessions,refresh-watch}.ts",
                   }),
                 },
                 {

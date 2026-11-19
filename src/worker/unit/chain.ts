@@ -48,6 +48,7 @@ export const ChainId = {
   Implement: "implement",
   Examine: "examine",
   Evaluation: "evaluation",
+  TasksPrepare: "tasks_prepare",
 } as const;
 export type ChainId = (typeof ChainId)[keyof typeof ChainId];
 
@@ -213,6 +214,7 @@ export type FoundryEnd<R> =
   | {
       kind: typeof FoundryEndKind.Stop;
       stop: ExecutionStop;
+      step: string;
       result: R;
       verificationTimedOut: boolean;
     }
@@ -514,6 +516,37 @@ function checkNodes(written: Written, nodes: readonly ChainNode[]): void {
   }
 }
 
+function collectReads(
+  nodes: readonly ChainNode[],
+  written: Set<Key>,
+  read: Set<Key>,
+): void {
+  const note = (keys: readonly Key[]) => {
+    for (const key of keys) if (!written.has(key)) read.add(key);
+  };
+  for (const node of nodes) {
+    if (node.kind === NodeKind.Step) {
+      note(node.step.reads);
+      for (const key of node.step.writes) written.add(key);
+      continue;
+    }
+    note(node.frame.reads);
+    collectReads(node.frame.body, written, read);
+    note(node.frame.endReads ?? []);
+  }
+}
+
+export function phaseReads(nodes: readonly ChainNode[]): Key[] {
+  const read = new Set<Key>();
+  collectReads(nodes, new Set(RUNNER_KEYS), read);
+  return [...read];
+}
+
+function phaseSeedKeys(built: Chain): Key[] {
+  if (built.id !== ChainId.TasksPrepare) return [];
+  return phaseReads(built.phases.flatMap(({ nodes }) => nodes));
+}
+
 function hostWritten(built: Chain, keys: Iterable<Key>): Written {
   return {
     chain: built.id,
@@ -528,7 +561,11 @@ function checkChain(built: Chain): void {
     built.tasks !== null,
     built.phases.some(({ phase }) => phase === Phase.Tasks),
   );
-  const written = hostWritten(built, [...SEED_KEYS, ...RUNNER_KEYS]);
+  const written = hostWritten(built, [
+    ...SEED_KEYS,
+    ...RUNNER_KEYS,
+    ...phaseSeedKeys(built),
+  ]);
   let prepared: Set<Key> | null = null;
   for (const { phase, nodes } of built.phases) {
     const tasks = phase === Phase.Tasks;

@@ -1,6 +1,6 @@
 # Worker CLI specification
 
-This specification for `kanthord worker` contains **22 command leaves, all implemented**.
+This specification for `kanthord worker` contains **23 command leaves, all implemented**.
 Requirements marked
 **target design** describe later runtime behavior and do not establish implementation.
 
@@ -47,12 +47,12 @@ separately from registration healthchecks.
 
 ## Shared input and output contract
 
-Every command below except `join` and `machine join` reaches the selected server through a published operation.
+Every command below except `join`, `machine join` and `tasks run` reaches the selected server through a published operation.
 It reads no server database. A proposed CLI command ships only together with its
 operation declaration and generated OpenAPI route. All commands accept `--help`,
 which needs no server or token. Unknown arguments/options and invalid local
 inputs fail before a request. No command prompts or accepts `--config`.
-Only `join` and `machine join` read standard input.
+Only `join`, `machine join` and `tasks run --credential-stdin` read standard input.
 
 Shared syntax, types, defaults, and validation are defined by each linked flag.
 Only applicability and Worker-specific requirements are listed here.
@@ -112,30 +112,31 @@ Worker and agent names and MCP session IDs retain their natural-key/protocol for
 Live registration and execution requirements appear per operation; registration
 and deregistration require no live registration.
 
-| Status | Command after `kanthord worker`                                      | Route                                                    | Operation ID                     | Access / registration                                                             |
-| ------ | -------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- |
-| I      | `register`                                                           | `POST /api/worker/register`                              | `worker.register`                | `client`; no live registration required                                           |
-| I      | `heartbeat [--token <jwt>]`                                          | `POST /api/worker/heartbeat`                             | `worker.heartbeat`               | `client`; live registration                                                       |
-| I      | `handover <execution-id> [M] [--token <jwt>]`                        | `POST /api/worker/handover`                              | `worker.handover`                | `client`; live registration and live execution                                    |
-| I      | `list`                                                               | `GET /api/worker/catalog`                                | `worker.catalog.list`            | `human`                                                                           |
-| I      | `get <worker-name>`                                                  | `GET /api/worker/catalog/:worker_name`                   | `worker.catalog.get`             | `human`                                                                           |
-| I      | `placement list`                                                     | `GET /api/worker/placement`                              | `worker.placement.list`          | `human`                                                                           |
-| I      | `registration list`                                                  | `GET /api/worker/registration`                           | `worker.registration.list`       | `human`                                                                           |
-| I      | `registration get <runtime-identity>`                                | `GET /api/worker/registration/:runtime_identity`         | `worker.registration.get`        | `human`                                                                           |
-| I      | `registration deregister <runtime-identity>`                         | `DELETE /api/worker/registration/:runtime_identity`      | `worker.registration.deregister` | `client`; no live registration required; ownership by client, binding and project |
-| I      | `registration resume <runtime-identity>`                             | `POST /api/worker/registration/:runtime_identity/resume` | `worker.registration.resume`     | `human`; mutation                                                                 |
-| I      | `instance create <name> --worker <worker> --placement <placement>`   | `POST /api/worker/instance`                              | `worker.instance.create`         | `human`; mutation                                                                 |
-| I      | `instance list`                                                      | `GET /api/worker/instance`                               | `worker.instance.list`           | `human`                                                                           |
-| I      | `instance get <name>`                                                | `GET /api/worker/instance/:instance_name`                | `worker.instance.get`            | `human`                                                                           |
-| I      | `instance rotate <name> --expected-revision <n>`                     | `POST /api/worker/instance/:instance_name/revision`      | `worker.instance.rotate`         | `human`; mutation                                                                 |
-| I      | `instance archive <name> --expected-revision <n> [--force]`          | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
-| I      | `join [--force]`                                                     | local                                                    | none                             | none; reads the instance configuration from standard input                        |
-| I      | `machine create <name> [--output] [--force]`                         | `POST /api/worker/machine`                               | `worker.machine.create`          | `human`; mutation                                                                 |
-| I      | `machine list`                                                       | `GET /api/worker/machine`                                | `worker.machine.list`            | `human`                                                                           |
-| I      | `machine get <name>`                                                 | `GET /api/worker/machine/:machine_name`                  | `worker.machine.get`             | `human`                                                                           |
-| I      | `machine rotate <name> --expected-revision <n> [--output] [--force]` | `POST /api/worker/machine/:machine_name/revision`        | `worker.machine.rotate`          | `human`; mutation                                                                 |
-| I      | `machine archive <name> --expected-revision <n>`                     | `POST /api/worker/machine/:machine_name/archive`         | `worker.machine.archive`         | `human`; mutation                                                                 |
-| I      | `machine join [--force]`                                             | local                                                    | none                             | none; reads the machine configuration from standard input                         |
+| Status | Command after `kanthord worker`                                       | Route                                                    | Operation ID                     | Access / registration                                                             |
+| ------ | --------------------------------------------------------------------- | -------------------------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------- |
+| I      | `register`                                                            | `POST /api/worker/register`                              | `worker.register`                | `client`; no live registration required                                           |
+| I      | `heartbeat [--token <jwt>]`                                           | `POST /api/worker/heartbeat`                             | `worker.heartbeat`               | `client`; live registration                                                       |
+| I      | `handover <execution-id> [M] [--token <jwt>]`                         | `POST /api/worker/handover`                              | `worker.handover`                | `client`; live registration and live execution                                    |
+| I      | `list`                                                                | `GET /api/worker/catalog`                                | `worker.catalog.list`            | `human`                                                                           |
+| I      | `get <worker-name>`                                                   | `GET /api/worker/catalog/:worker_name`                   | `worker.catalog.get`             | `human`                                                                           |
+| I      | `placement list`                                                      | `GET /api/worker/placement`                              | `worker.placement.list`          | `human`                                                                           |
+| I      | `registration list`                                                   | `GET /api/worker/registration`                           | `worker.registration.list`       | `human`                                                                           |
+| I      | `registration get <runtime-identity>`                                 | `GET /api/worker/registration/:runtime_identity`         | `worker.registration.get`        | `human`                                                                           |
+| I      | `registration deregister <runtime-identity>`                          | `DELETE /api/worker/registration/:runtime_identity`      | `worker.registration.deregister` | `client`; no live registration required; ownership by client, binding and project |
+| I      | `registration resume <runtime-identity>`                              | `POST /api/worker/registration/:runtime_identity/resume` | `worker.registration.resume`     | `human`; mutation                                                                 |
+| I      | `instance create <name> --worker <worker> --placement <placement>`    | `POST /api/worker/instance`                              | `worker.instance.create`         | `human`; mutation                                                                 |
+| I      | `instance list`                                                       | `GET /api/worker/instance`                               | `worker.instance.list`           | `human`                                                                           |
+| I      | `instance get <name>`                                                 | `GET /api/worker/instance/:instance_name`                | `worker.instance.get`            | `human`                                                                           |
+| I      | `instance rotate <name> --expected-revision <n>`                      | `POST /api/worker/instance/:instance_name/revision`      | `worker.instance.rotate`         | `human`; mutation                                                                 |
+| I      | `instance archive <name> --expected-revision <n> [--force]`           | `POST /api/worker/instance/:instance_name/archive`       | `worker.instance.archive`        | `human`; mutation                                                                 |
+| I      | `join [--force]`                                                      | local                                                    | none                             | none; reads the instance configuration from standard input                        |
+| I      | `machine create <name> [--output] [--force]`                          | `POST /api/worker/machine`                               | `worker.machine.create`          | `human`; mutation                                                                 |
+| I      | `machine list`                                                        | `GET /api/worker/machine`                                | `worker.machine.list`            | `human`                                                                           |
+| I      | `machine get <name>`                                                  | `GET /api/worker/machine/:machine_name`                  | `worker.machine.get`             | `human`                                                                           |
+| I      | `machine rotate <name> --expected-revision <n> [--output] [--force]`  | `POST /api/worker/machine/:machine_name/revision`        | `worker.machine.rotate`          | `human`; mutation                                                                 |
+| I      | `machine archive <name> --expected-revision <n>`                      | `POST /api/worker/machine/:machine_name/archive`         | `worker.machine.archive`         | `human`; mutation                                                                 |
+| I      | `machine join [--force]`                                              | local                                                    | none                             | none; reads the machine configuration from standard input                         |
+| I      | `tasks run <seed-folder> --credential-stdin --tree <binding_id=path>` | local                                                    | none                             | none; reads the LLM credential from standard input                                |
 
 `credential` runs inside the `worker` application alone and is no CLI command.
 Its implemented operation is `worker.credential` at `POST /api/worker/credential`, with `client` access and a live execution requirement. Its body holds `execution_id`, `nonce` and `ciphertext`, the sealed refresh report, and it answers 204 with no HTTP body (`null` through the direct adapter). It is a mutation with a 30-second timeout and the 32 MiB body limit. The worker application caller is later Plan 09 work.
@@ -917,6 +918,97 @@ No source fails with `worker.machine.config_absent`, which names the variable an
 The variable and the file for one name fail with `worker.machine.config_conflict`.
 A value that fails the schema, or whose `name` differs from the requested name, fails with `worker.machine.config_invalid`.
 
+## Local tasks runs
+
+### `tasks run`
+
+```text
+kanthord worker tasks run <seed-folder> --credential-stdin --tree <binding_id=path>...
+  [--pass-env <name>]... [--model <provider/model>] [--reasoning <level>]
+  [--system-prompt <file>] [--templates <folder>] [--unit <unit_id>]...
+  [--budget-turns <count>] [--budget-wall <duration>] [--skip-release-gate]
+  [--output <folder>] [--force] [--verify]
+```
+
+`tasks run` runs the tasks phase of an implement execution on this machine from a seed.
+It is local. It calls no route, opens no database and reads no server configuration file.
+The [command](../../src/apps/cli/worker-tasks.ts) composes the [local run](../../src/worker/unit/tasks-run.ts) with the CLI ports.
+`env.setup`, the verification commands and agent bash run on this host with its network.
+
+`<seed-folder>/seed.json` holds one JSON object, the [seed](../../src/worker/unit/tasks-seed.ts).
+It requires `claim`, `setup`, `revision` and `heads`.
+`heads` maps each binding of `setup.repositories` to its start commit.
+The optional keys are `plan`, `affectedTests`, `prior`, `link_updates` and `elapsed_ms`.
+An absent `plan` or `affectedTests` makes the run compute it in the phase `tasks_prepare`.
+An absent `prior` is `{ "verdict": null, "cleared": null }`. An absent `link_updates` is empty.
+`elapsed_ms` moves the claim start back by that time.
+The run removes `containerEnv` and `remoteEnv` from each environment document of the seed.
+
+| Option                     | Rule                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--credential-stdin`       | Required. The command reads one JSON object `{ "provider_id", "credential", "metadata"? }` from standard input. `credential` is a pi credential object.      |
+| `--tree <binding_id=path>` | Required once for each binding. `path` is a git repository that holds the seed head and the base branch.                                                     |
+| `--pass-env <name>`        | Repeatable. The command passes this variable of the shell to each child process. A provider credential variable or a fixed name is refused.                  |
+| `--model`, `--reasoning`   | Replace the provider, the model and the reasoning effort of the working agent.                                                                               |
+| `--system-prompt <file>`   | Replaces `prompt.final` of the working agent. The seed can omit `prompt.final` with this option.                                                             |
+| `--templates <folder>`     | Reads the prompt templates from this folder over the shipped set. The seed can omit `setup.templates` with this option.                                      |
+| `--unit <unit_id>`         | Repeatable. Keeps only these units of the plan. The node identity keeps the node unit.                                                                       |
+| `--budget-turns <count>`   | Replaces the turn budget.                                                                                                                                    |
+| `--budget-wall <duration>` | Replaces the wall-time budget. The duration is a positive integer with `s`, `m` or `h`.                                                                      |
+| `--skip-release-gate`      | Ends the phase on entry to the loop `release_gate`, with the end `completed` and no route.                                                                   |
+| `--output <folder>`        | The output folder. The default is `./tasks-run-<execution_id>`.                                                                                              |
+| `--force`                  | Replaces an empty folder, or an earlier run folder that holds `result.json` and `state/`. Any other folder is refused with `cli.worker.tasks.output_exists`. |
+| `--verify`                 | Runs the checks of the run and records them in `result.json`.                                                                                                |
+
+Before a run, disable core dumps with `ulimit -c 0`. Use a credential that the developer owns, not a credential of a project or a team.
+
+The credential rules:
+
+1. The command refuses a run without `--credential-stdin`. It has no option, no environment variable and no file for a credential.
+2. The command reads standard input before it makes the output folder or starts a child process. A terminal on standard input is refused.
+3. The command parses the object and then fills the input buffer with zeros.
+4. `provider_id` must be the pi provider of the working agent. An oauth token must stay valid until the wall deadline plus 5 minutes.
+5. `metadata` holds the routing metadata of the provider, such as `base_url` or `region`, and follows the metadata schema of the platform. Only standard input gives the routing metadata. A provider with a metadata schema requires `metadata`. A provider with no metadata schema refuses it. The `metadata` of the working agent in the seed must equal it, or the command refuses the run with `credential_invalid`, field `metadata`.
+6. Before the run, the command removes the provider credential variables, the AWS, Google Cloud and Azure credential chain variables, and each endpoint and routing variable that pi-ai or the AWS SDK reads from its own environment. The endpoint and routing variables are `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_BEDROCK`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `AWS_BEDROCK_SKIP_AUTH`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_RESOURCE_NAME`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`, `GOOGLE_CLOUD_LOCATION`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID` and the `ANTHROPIC_*` federation variables. The routing values come only from the `metadata` key. It sets `HOME` to `state/home/`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` under `state/home/.aws/`, `AWS_EC2_METADATA_DISABLED=true` and `METADATA_SERVER_DETECTION=none`.
+7. A frozen credential store serves the credential to pi. The pi directory of the run is `state/pi/`. A pi directory that holds `auth.json`, or a pi directory of the process other than `state/pi/`, stops the run.
+8. Each child process gets `PATH`, `LANG`, `TMPDIR`, `HOME` (`state/home/`), `GIT_CONFIG_NOSYSTEM=1`, `GIT_SSH_COMMAND="ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none"` and the `--pass-env` variables only. Git reads no system configuration, so no host credential helper and no host SSH key reach git.
+9. Each output file, the run log on stderr and each upload replace the credential values and each `--pass-env` value of 12 or more characters. They use the known-value matcher of the session redaction, which also finds encoded forms such as base64. A shorter `--pass-env` value is not a known secret.
+
+`--tree` clones each source into the bare mirror `state/origin/<binding_id>.git` and clones the checkout from the mirror.
+The mirror has no remote, and its files are read-only during the run. The command restores the write bits at each end. A folder that a hard kill leaves has a read-only mirror: run `chmod -R u+w <folder>` before a manual delete. `--force` restores the write bits itself. The source repository stays unchanged. A push to `origin`, to the mirror path or from the mirror fails.
+
+The output folder has mode `0700`. Each file has mode `0600`.
+
+| File            | Content                                                                                                                           |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `result.json`   | `end`, `exit_code`, `stop`, `step`, `mode` (`live`), `provider_id`, `overrides`, `seed_digest` and `checks`.                      |
+| `context.json`  | The tasks input with environment variable names only, and the tasks result. It holds no `credentials` key and no `sshAccess` key. |
+| `progress.json` | `progress`, `current_unit` and `completed_units`.                                                                                 |
+| `metrics.json`  | The time of each phase span and each unit span.                                                                                   |
+| `outbox.json`   | Each operation that a port records in place of a route, with its body. Evidence and asset identities are synthetic ULIDs.         |
+| `spans.jsonl`   | Each telemetry record, one JSON object per line.                                                                                  |
+| `uploads/`      | The bytes of each evidence asset, at `uploads/<evidence_id>/<asset_id>`.                                                          |
+| `state/`        | The mirrors, the checkouts, the release and base trees, `pi/` and `home/`.                                                        |
+
+`--verify` runs these checks: 3, each head of the result equals `HEAD` of its checkout; 5, each checkout is clean with no git operation in progress after `completed`; 6, the route is `passed`, or `null` with `--skip-release-gate`; 7, the stop is a requested stop, a listed stop of its step or `operation_failed` with a code.
+
+On an end, stdout is exactly one JSON line `{ "output", "end", "exit_code" }`.
+
+| Exit | End                                                                                                                                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | `completed` or `budget_end`, and each check passes.                                                                                                                                                                                                                           |
+| `1`  | A diagnostic: before the run, or after the output folder exists (`tree_invalid`, `unit_unknown`, the seed check of the phase). After the output folder exists, `result.json` records `end: "diagnostic"`, the `code` and `exit_code: 1`, so `--force` can replace the folder. |
+| `2`  | `stop`. SIGINT stops the run with `worker_stopped`.                                                                                                                                                                                                                           |
+| `4`  | A `--verify` check fails.                                                                                                                                                                                                                                                     |
+| `5`  | `failed`. The run log records `tasks failed` with its reason, `result.json` records `failed`, and stderr prints `cli.worker.tasks.internal_error`.                                                                                                                            |
+
+```sh
+ulimit -c 0
+op read op://dev/anthropic-tasks/credential-json \
+  | kanthord worker tasks run ./seed --tree binding_01ARZ3NDEKTSV4RRFFQ69G5FAA=../repo \
+    --credential-stdin
+```
+
 ## MCP and repository actions
 
 The target server owns one MCP v2 server. Every client, native agent or external
@@ -1142,6 +1234,15 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.worker.machine.revision_invalid`                         | `--expected-revision` is absent or is not a positive integer.                                                                                                                                                                                                                                                                                      | machine rotate, machine archive                                                                                                                                             |
 | local | `cli.worker.machine.<operation>.token_required`               | No option, environment variable or `cli.yaml` supplies a token. `<operation>` is `create`, `list`, `get`, `rotate` or `archive`.                                                                                                                                                                                                                   | machine create, machine list, machine get, machine rotate, machine archive                                                                                                  |
 | local | `cli.worker.machine.<operation>.indeterminate`                | The result is indeterminate. A mutation prints its key.                                                                                                                                                                                                                                                                                            | machine create, machine list, machine get, machine rotate, machine archive                                                                                                  |
+| local | `cli.worker.tasks.seed_invalid`                               | `seed.json` is absent, holds no JSON or fails the seed schema. The seed lacks `setup.templates` or `prompt.final` and its option is absent. A binding has no `--tree`. The `paths` field names the paths only.                                                                                                                                     | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.tree_invalid`                               | A `--tree` value names no binding of the seed or repeats one. A tree source is no git repository, or its clone lacks the seed head or the base branch.                                                                                                                                                                                             | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.mode_invalid`                               | `--credential-stdin` is absent.                                                                                                                                                                                                                                                                                                                    | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.option_invalid`                             | An option value is invalid, or `--pass-env` names an unset variable, a fixed name or a provider credential variable.                                                                                                                                                                                                                               | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.credential_invalid`                         | Standard input is a terminal or holds no valid credential object of the effective provider. The `metadata` key is absent for a provider that needs it, present for a provider without a metadata schema, fails the schema, or differs from the seed. The pi directory holds `auth.json`. The `field` field names the field only.                   | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.credential_expiring`                        | The oauth access token expires before the wall deadline of the run plus 5 minutes.                                                                                                                                                                                                                                                                 | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.unit_unknown`                               | A `--unit` names no unit of the plan.                                                                                                                                                                                                                                                                                                              | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.output_exists`                              | The output folder exists and `--force` is not given, or the folder is not empty and does not hold both `result.json` and `state/`.                                                                                                                                                                                                                 | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.internal_error`                             | The run ends with `failed`, or the pi directory of the process is not `state/pi/`. The command exits `5`.                                                                                                                                                                                                                                          | tasks run                                                                                                                                                                   |
 | 409   | `worker.instance.archived`                                    | The instance is archived.                                                                                                                                                                                                                                                                                                                          | instance rotate, instance archive                                                                                                                                           |
 | 409   | `worker.instance.in_use`                                      | A binding lists the instance, also with `--force`, or a registration of the instance holds a live execution and the archive has no `--force`; `details` hold `bindings` or `executions`.                                                                                                                                                           | instance archive                                                                                                                                                            |
 | 409   | `worker.instance.connection_superseded`                       | Another connection of the instance is current; `details.connection_name` names it. `serve worker` ends with `worker.instance.superseded`.                                                                                                                                                                                                          | worker.instance.connect, worker.instance.heartbeat, worker.instance.work (API only)                                                                                         |

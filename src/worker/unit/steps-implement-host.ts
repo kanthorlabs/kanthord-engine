@@ -33,6 +33,7 @@ export function stateIo(state: HostedState): ChainIo<ImplementHostPorts> {
   return {
     run: state.run,
     budget: state.agent.budget,
+    capabilities: [],
     resources: new AsyncDisposableStack(),
     host: hostOf(state.input),
     ports: implementHostPorts(state.input, {
@@ -116,6 +117,7 @@ export async function prepareStepsWorkspace(
           ...input.claim,
           resource_budget: input.setup.resource_budget,
         }),
+        capabilities: [],
         resources,
         host: hostOf(input),
         ports: workerPorts(input, run),

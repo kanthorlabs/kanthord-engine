@@ -511,6 +511,7 @@ export async function prepareEvaluation(
       {
         run,
         budget,
+        capabilities: [],
         resources,
         host: hostOf(input),
         ports: evaluationPorts({ run, budget, open }),

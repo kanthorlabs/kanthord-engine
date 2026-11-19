@@ -125,11 +125,11 @@ const TOP_LEVEL_NAMES = new Set([
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 235;
+const DOCUMENTED_COUNT = 236;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 230;
+const IMPLEMENTED_COUNT = 231;
 const OPERATION_COUNT = 273;
 const INTAKE_CREDENTIAL_LEAVES = [
   "intake credential archive",
@@ -168,7 +168,7 @@ const PAGE_COUNTS = {
   mission: 69,
   intake: 23,
   scheduler: 8,
-  worker: 22,
+  worker: 23,
   gateway: 3,
   other: 9,
   tracking: 12,

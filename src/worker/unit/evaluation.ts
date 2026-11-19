@@ -39,6 +39,7 @@ export async function runEvaluation(
     {
       run,
       budget,
+      capabilities: [],
       resources: new AsyncDisposableStack(),
       host: hostOf(input),
       ports: evaluationPorts({ run, budget, open: openAgent }),

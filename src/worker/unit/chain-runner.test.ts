@@ -24,13 +24,21 @@ import {
   type ChainTasks,
   DeadlineKind,
   type ExecutionCtx,
+  FoundryEndKind,
   type Key,
   type LoopFrame,
   loopNode,
   StepKind,
   stepNode,
 } from "./chain.ts";
-import { type ChainIo, executionBoundary, runChain } from "./chain-runner.ts";
+import {
+  type ChainIo,
+  executionBoundary,
+  PhaseEndKind,
+  PhaseSeedMissing,
+  runChain,
+  runPhase,
+} from "./chain-runner.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
@@ -107,6 +115,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
         ...claim,
         resource_budget: { wall_time_ms: WALL_TIME_MS },
       }),
+      capabilities: [],
       resources,
       host: { env: {} } as unknown as ChainIo["host"],
       ports: {} as ChainIo["ports"],
@@ -567,4 +576,81 @@ test("an abort with no stop leaves the result of the tasks step and the walk goe
     "release",
   ]);
   assert.deepEqual(h.releases, []);
+});
+
+const FRAME_READ: Key = "plan";
+const PHASE_READ: Key = "revision";
+const INNER_WRITE: Key = "setupPending";
+const UNTIL_LOOP = "release_gate";
+
+function phaseChain(h: Harness) {
+  const frame: LoopFrame<true> = {
+    reads: [FRAME_READ, INNER_WRITE],
+    init: () => true,
+    body: [stepNode(stepOf(h, "inner", { reads: [INNER_WRITE] }))],
+    next: () => null,
+  };
+  return chain<CommonPorts>(ChainId.TasksPrepare, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "first", { reads: [PHASE_READ] }))
+    .step(stepOf(h, "writer", { patch: { setupPending: true } }))
+    .loop("frame", frame)
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+}
+
+test("runPhase requires each phase read and each frame read that no node of the phase writes first", async (t) => {
+  const h = harness(t);
+  const built = phaseChain(h);
+  await assert.rejects(
+    runPhase(built, { phase: Phase.Prepare, seed: { keys: {} } }, h.io),
+    (error) =>
+      error instanceof PhaseSeedMissing &&
+      [...error.keys].sort().join() === [FRAME_READ, PHASE_READ].sort().join(),
+  );
+  assert.deepEqual(h.trace, []);
+  const end = await runPhase(
+    built,
+    {
+      phase: Phase.Prepare,
+      seed: {
+        keys: {
+          revision: {} as ExecutionCtx["revision"],
+          plan: {} as ExecutionCtx["plan"],
+        },
+      },
+    },
+    h.io,
+  );
+  assert.equal(end.kind, PhaseEndKind.Completed);
+  assert.deepEqual(h.trace, ["first", "writer", "inner"]);
+});
+
+test("a tasks walk with until ends with completed on entering the named loop", async (t) => {
+  const h = harness(t);
+  const once = (id: string): LoopFrame<true> => ({
+    reads: [],
+    init: () => true,
+    body: [stepNode(foundryOf(stepOf(h, id)))],
+    next: () => null,
+  });
+  const end = await runTasks(
+    {
+      nodes: [
+        loopNode("units", once("unit")),
+        loopNode(UNTIL_LOOP, once("gate")),
+      ],
+      seed: {},
+      resultOf: () => null,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: UNTIL_LOOP,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.Completed);
+  assert.deepEqual(h.trace, ["unit"]);
 });

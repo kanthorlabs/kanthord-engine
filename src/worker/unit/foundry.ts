@@ -16,12 +16,15 @@ import {
   CANCELLED,
   type ScopeHolder,
   sliceOf,
+  UNTIL,
   type Walked,
   type Walker,
   walkNodes,
 } from "./chain-walk.ts";
 import { ExecutionStop } from "./execution-stop.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
+
+const UNKNOWN_STEP = "unknown";
 
 export interface FoundryHost<P extends CommonPorts> {
   capabilities: readonly InlineExtension[];
@@ -45,6 +48,7 @@ interface TasksRun {
   control: FoundryControl;
   ports: CommonPorts;
   ctx: ExecutionCtx;
+  stoppedAt: string | null;
 }
 
 function contextOf(run: TasksRun, step: ChainStep): CancellationContext {
@@ -85,6 +89,7 @@ async function walkStep(
     );
     Object.assign(run.ctx, result.patch);
     holder.scope = result.scope;
+    if (result.stop !== undefined) run.stoppedAt ??= step.id;
     return walkedOf(run, result);
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
@@ -96,6 +101,7 @@ function walkerOf(run: TasksRun): Walker {
     ctx: run.ctx,
     spans: run.ports.telemetry,
     cancel: run.control.cancel,
+    until: run.control.until,
     step: (step, holder) => walkStep(run, step, holder),
   };
 }
@@ -119,22 +125,25 @@ export async function runTasks<R>(
     result: walk.resultOf(ctx),
     verificationTimedOut: ctx.verificationTimedOut,
   });
+  const run: TasksRun = { control, ports: host.ports, ctx, stoppedAt: null };
   let walked: Walked;
   try {
-    walked = await walkNodes(
-      walkerOf({ control, ports: host.ports, ctx }),
-      walk.nodes,
-      { scope: null },
-    );
+    walked = await walkNodes(walkerOf(run), walk.nodes, { scope: null });
   } catch (error) {
     return { kind: FoundryEndKind.Failed, error, ...reached() };
   }
   if (walked instanceof ExecutionStop)
-    return { kind: FoundryEndKind.Stop, stop: walked, ...reached() };
+    return {
+      kind: FoundryEndKind.Stop,
+      stop: walked,
+      step: run.stoppedAt ?? UNKNOWN_STEP,
+      ...reached(),
+    };
   if (walked === CANCELLED)
     return { kind: FoundryEndKind.Cancelled, ...reached() };
   if (walked === StepKind.BudgetEnd)
     return { kind: FoundryEndKind.BudgetEnd, ...reached() };
+  if (walked === UNTIL) return { kind: FoundryEndKind.Completed, ...reached() };
   assert.equal(walked, StepKind.Next, "A tasks phase holds no final step.");
   return { kind: FoundryEndKind.Completed, ...reached() };
 }
