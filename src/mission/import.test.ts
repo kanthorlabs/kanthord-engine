@@ -2299,6 +2299,7 @@ test("the export of a mission with every id line removed and one new plan file p
   assert.deepEqual(preview.creates, ["n.md"]);
   assert.deepEqual(preview.retirements, []);
 });
+
 test("an import that moves a task revises both owners with moved-out and moved-in", (t) => {
   const { apply, assigned, identified } = importer(t);
   const first = apply(plan());

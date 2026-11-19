@@ -383,9 +383,11 @@ test("a decision with an edit creates the node and the task with the edited valu
   assert.equal(revision.criterion, h.proposal().criterion);
   assert.deepEqual(JSON.parse(revision.verifications), EDITED_VERIFICATIONS);
   const tasks = JSON.parse(revision.tasks) as {
-    content: { verifications: string[] };
+    content: { name: string; requirement: string; verifications: string[] };
   }[];
   assert.deepEqual(tasks[0]!.content.verifications, EDITED_VERIFICATIONS);
+  assert.equal(tasks[0]!.content.name, EDITED_TASK.name);
+  assert.equal(tasks[0]!.content.requirement, EDITED_TASK.requirement);
   const stored = (await h.list()).items[0]!;
   assert.deepEqual(stored.content, proposed.content);
   assert.equal(stored.created_node_id, createdId);

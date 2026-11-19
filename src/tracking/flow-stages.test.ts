@@ -6,9 +6,9 @@ import {
   FlowGrain,
   FlowMeasure,
   FlowStage,
-  type StageWindow,
 } from "./contract.ts";
 import { BIN_COUNT, binOf, percentilesOf } from "./flow-bins.ts";
+import { assertConserved } from "./flow-conservation-test-support.ts";
 import {
   FLOW_VECTOR_COLUMNS,
   FlowStageKey,
@@ -217,27 +217,6 @@ const F5_ROWS = [
   }),
 ];
 
-const LAST_STAGE_OF_KIND: readonly FlowStage[] = [
-  FlowStage.ReleaseGate,
-  FlowStage.Outcome,
-];
-
-const STAGE_KIND_OF: Record<FlowStage, string> = {
-  [FlowStage.Queued]: "steps",
-  [FlowStage.Executing]: "steps",
-  [FlowStage.Verification]: "steps",
-  [FlowStage.ReleaseGate]: "steps",
-  [FlowStage.Evaluation]: "evaluation",
-  [FlowStage.Outcome]: "evaluation",
-};
-
-function exitSum(window: StageWindow): number {
-  return Object.values(window.exits).reduce(
-    (total, exit) => total + (exit?.count ?? NO_COUNT),
-    NO_COUNT,
-  );
-}
-
 function bucketWindows(rows: readonly FlowRow[], bucket: number) {
   const bucketRows = rows
     .filter((candidate) => candidate.bucket_start === bucket)
@@ -245,32 +224,6 @@ function bucketWindows(rows: readonly FlowRow[], bucket: number) {
   return stagesOf(bucketRows, NO_HISTOGRAMS, windows(COUNT_ONE), isHosted).map(
     ({ stage, current }) => ({ stage, current }),
   );
-}
-
-function assertConserved(
-  label: string,
-  stages: { stage: FlowStage; current: StageWindow }[],
-): void {
-  stages.forEach(({ stage, current }, index) => {
-    const exits = exitSum(current);
-    assert.ok(
-      exits <= current.entered,
-      `${label} ${stage}: exits ${exits} > entered ${current.entered}`,
-    );
-    if (LAST_STAGE_OF_KIND.includes(stage))
-      assert.equal(exits, current.entered, `${label} ${stage}`);
-    const next = stages[index + COUNT_ONE];
-    if (
-      next === undefined ||
-      STAGE_KIND_OF[next.stage] !== STAGE_KIND_OF[stage]
-    )
-      return;
-    assert.ok(
-      current.entered + current.unobserved >=
-        next.current.entered + next.current.unobserved,
-      `${label} ${stage} to ${next.stage}`,
-    );
-  });
 }
 
 for (const [name, rows] of [

@@ -22,6 +22,7 @@ import { admitRecords, admitServerSpan } from "./admission.ts";
 import { runFlowBackfill } from "./flow-backfill.ts";
 import { decodeBins, percentilesOf } from "./flow-bins.ts";
 import { openFlow } from "./flow-admission.ts";
+import { assertConserved } from "./flow-conservation-test-support.ts";
 import { FLOW_VECTOR_COLUMNS } from "./flow-model.ts";
 import { readFlow } from "./flow-read.ts";
 import { relabelFlow } from "./flow-relabel.ts";
@@ -521,6 +522,9 @@ test("fifteen gated hand-ons and one unobserved hand-on conserve the counts of r
     [gate.current.entered, exits, gate.current.unobserved],
     [GATED_EXECUTIONS, GATED_EXECUTIONS, 1],
   );
+  assertConserved("written rows current", read.stages);
+  for (const { stage, current, series } of read.stages)
+    assert.deepEqual(series.entered, [current.entered], stage);
 });
 
 test("an evaluation execution with an assessed end and a transition to Available is a rework", (t) => {
