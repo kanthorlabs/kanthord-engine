@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { isString } from "../../kernel/values.ts";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
@@ -93,7 +101,7 @@ function leaves(root: string, raw: string, toolName: string): boolean {
   }
   if (isAbsolute(path) || path.startsWith(HOME_PREFIX)) return true;
   if (path.split(SEGMENT_SEPARATOR).includes(PARENT_SEGMENT)) return true;
-  const joined = join(root, path);
+  const joined = resolve(root, path);
   const resolved = resolveNearest(
     toolName === READ_TOOL ? readTarget(joined) : joined,
   );

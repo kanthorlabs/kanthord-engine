@@ -139,7 +139,14 @@ test("(security) a read path whose pi variant is a symlink out of the root is bl
   symlinkSync(secret, join(f.root, "a\u2019"));
   symlinkSync(secret, join(f.root, "shot\u202FPM.png"));
   symlinkSync(secret, join(f.root, "e\u0301"));
-  for (const path of ["a'", "shot PM.png", "\u00e9"])
+  for (const path of [
+    "a'",
+    "a'/",
+    "a'//",
+    "shot PM.png",
+    "shot PM.png/",
+    "\u00e9",
+  ])
     assert.deepEqual(f.call("read", { path }), {
       block: true,
       reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
