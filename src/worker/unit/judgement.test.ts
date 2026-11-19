@@ -632,7 +632,7 @@ test("the judgement schema accepts a person blocker with a ground", () => {
   assert.equal(parsed.success, true);
 });
 
-test("the earlier verdict text keeps the latest eight verdicts", () => {
+test("the earlier verdict text keeps every verdict", () => {
   const verdicts = Array.from({ length: 10 }, (_, index) => ({
     attempt: index + 1,
     round: 1,
@@ -642,7 +642,6 @@ test("the earlier verdict text keeps the latest eight verdicts", () => {
   }));
   const text = earlierVerdictsText(verdicts);
   assert.ok(text?.includes("Attempt 10, round 1"));
-  assert.ok(text?.includes("Attempt 3, round 1"));
-  assert.equal(text?.includes("Attempt 2, round 1"), false);
+  assert.ok(text?.includes("Attempt 1, round 1"));
   assert.equal(earlierVerdictsText([]), null);
 });

@@ -50,7 +50,6 @@ const LINK_UPDATE_NEW_PREFIX = "New: ";
 const LINK_UPDATE_MISSING_LINE = "An update is no longer stored.";
 const LINK_UPDATE_SEPARATOR = "\n\n";
 export const REQUESTED_CHANGES_MAX_BYTES = 4096;
-const EARLIER_VERDICTS_MAX = 8;
 const AssessmentResult = {
   Success: "success",
   CriterionNotMet: "criterion-not-met",
@@ -594,7 +593,6 @@ export function earlierVerdictsText(
 ): string | null {
   if (verdicts.length === NO_ITEMS) return null;
   return verdicts
-    .slice(-EARLIER_VERDICTS_MAX)
     .map((verdict) =>
       cutAtLimit(
         [

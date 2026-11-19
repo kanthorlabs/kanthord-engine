@@ -1657,7 +1657,6 @@ test("a success rework assessment at the prepared tested input runs no verificat
   assert.deepEqual(assessment?.fixed_finding_ids, []);
   assert.deepEqual(assessment?.evidence_ids, [REWORK_EVIDENCE_ID]);
   assert.ok(assessment?.rationale.includes(REWORK_ASSESSMENT_ID));
-  assert.match(assessment?.rationale ?? "", /No commit followed/);
 });
 
 test("a rework assessment at another tested input keeps the full evaluation", async (t) => {

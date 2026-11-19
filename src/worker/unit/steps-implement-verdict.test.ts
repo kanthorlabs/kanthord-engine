@@ -21,6 +21,7 @@ import { NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { linkUpdatesText } from "./judgement.ts";
 import { readPrior, VerdictSource } from "./node-reads.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -324,6 +325,30 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     h.unblockReason = "Keep the legacy route.";
     await commitOnNode(h.root, "addressed");
     h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
+  });
+
+  test("an unblock reason plans the node unit with the reason when a merged base skips the failed checks verdict", async (t) => {
+    const { h } = await verdictHarness(t, []);
+    h.verdict = {
+      ...verdictAt(VERDICT, h.checkouts),
+      source: VerdictSource.FailedChecks,
+    };
+    h.unblockReason = "Keep the legacy route.";
+    await advanceBase(h, t, "moved base", BASE_FILE);
+    await h.input.transport.fetchBase(
+      h.root,
+      "main",
+      background,
+      FETCH_DEADLINE_MS,
+      TEST_SSH_ACCESS,
+    );
+    h.refreshed = await refreshAtClaim(h);
+    assert.equal(h.refreshed, RefreshResult.Merged);
     const { node } = await startCheck(h);
     assert.ok(node);
     assert.ok(node.text.includes("Keep the legacy route."));
