@@ -9,7 +9,11 @@ import {
   OperationLifetime,
   StoreName,
 } from "../kernel/operation.ts";
-import { GuardClass, reasoningEffortSchema } from "../agent/contract.ts";
+import {
+  AGENT_VARIANT_PREFIX,
+  GuardClass,
+  reasoningEffortSchema,
+} from "../agent/contract.ts";
 import { COPY_REPORT_TEXT_MAX_LENGTH } from "../llm/contract.ts";
 
 export interface ResolvedInvite {
@@ -334,6 +338,7 @@ const sessionListFields = z.strictObject({
   id: z.string(),
   agent_name: z.string(),
   display_name: z.string(),
+  variant_id: identitySchema(AGENT_VARIANT_PREFIX).nullable(),
   name: z.string().nullable(),
   created: timestampSchema,
   modified: timestampSchema,

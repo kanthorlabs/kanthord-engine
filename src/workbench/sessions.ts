@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { existsSync, readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type {
@@ -10,6 +11,7 @@ import { identitySchema } from "../kernel/identity.ts";
 import { homeRelative } from "../kernel/xdg.ts";
 import { isString } from "../kernel/values.ts";
 import { workbenchAgentNames } from "../agent/catalog.ts";
+import { AGENT_VARIANT_PREFIX } from "../agent/contract.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
   ActionOutcome,
@@ -55,6 +57,11 @@ export interface SessionPlace {
 }
 
 export type VariantPlace = { agentName: string; variantId: string };
+export type SessionOwner = { agentName: string; variantId: string | null };
+export type ExistingVariantPlace = {
+  variantId: string;
+  place: SessionPlace;
+};
 export type CreateSessionOptions = { parentSession?: string };
 export type OpeningInput = { model: Model<Api>; greeting: string };
 export type ForkOpeningInput = {
@@ -67,6 +74,7 @@ export const OpeningKind = { Opening: "opening", Fork: "fork" } as const;
 export type OpeningKind = (typeof OpeningKind)[keyof typeof OpeningKind];
 
 const sessionIdSchema = identitySchema(WORKBENCH_SESSION_PREFIX);
+const variantIdSchema = identitySchema(AGENT_VARIANT_PREFIX);
 const FORK_ID_END = ".";
 const NO_TEXT = "";
 const NO_CHARACTERS = 0;
@@ -123,6 +131,53 @@ export function variantSessionDirectory(
   );
 }
 
+export function variantSessionPlace(
+  stateDirectory: string,
+  variant: VariantPlace,
+): SessionPlace {
+  assert.ok(workbenchAgentNames().includes(variant.agentName));
+  assert.ok(variantIdSchema.safeParse(variant.variantId).success);
+  const place = {
+    cwd: workbenchDirectory(stateDirectory, variant.agentName),
+    sessionDir: variantSessionDirectory(stateDirectory, variant),
+  };
+  ensureDirectory(place.cwd);
+  ensureDirectory(place.sessionDir);
+  return place;
+}
+
+export function existingVariantPlaces(
+  stateDirectory: string,
+  agentName: string,
+): ExistingVariantPlace[] {
+  assert.ok(workbenchAgentNames().includes(agentName));
+  const baseDirectory = join(
+    stateDirectory,
+    PI_DIRECTORY_NAME,
+    SESSIONS_DIRECTORY_NAME,
+    WORKBENCH_DIRECTORY_NAME,
+    agentName,
+  );
+  if (!existsSync(baseDirectory)) return [];
+  return readdirSync(baseDirectory, { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() && variantIdSchema.safeParse(entry.name).success,
+    )
+    .map((entry) => entry.name)
+    .sort()
+    .map((variantId) => ({
+      variantId,
+      place: {
+        cwd: workbenchDirectory(stateDirectory, agentName),
+        sessionDir: variantSessionDirectory(stateDirectory, {
+          agentName,
+          variantId,
+        }),
+      },
+    }));
+}
+
 function messageCountOf(
   session: SessionInfo,
   opened: boolean,
@@ -151,7 +206,7 @@ export function forkSummaryOf(text: string): string | null {
   return text.startsWith(head) ? text.slice(head.length) : null;
 }
 
-export async function listSessions(place: SessionPlace, agentName: string) {
+export async function listSessions(place: SessionPlace, owner: SessionOwner) {
   const pi = await loadPi();
   const sessions: SessionInfo[] = await pi.SessionManager.list(
     place.cwd,
@@ -162,7 +217,8 @@ export async function listSessions(place: SessionPlace, agentName: string) {
     const forked = isForkOpening(session.firstMessage);
     return {
       id: session.id,
-      agent_name: agentName,
+      agent_name: owner.agentName,
+      variant_id: owner.variantId,
       name: session.name ?? null,
       created: session.created.getTime(),
       modified: session.modified.getTime(),
@@ -315,15 +371,24 @@ function openingKindOf(text: string | null): OpeningKind | null {
 export async function findSession(
   stateDirectory: string,
   id: string,
-): Promise<{ agentName: string; manager: SessionManager } | null> {
+): Promise<{
+  agentName: string;
+  variantId: string | null;
+  manager: SessionManager;
+} | null> {
   const pi = await loadPi();
   for (const agentName of workbenchAgentNames()) {
-    const place = sessionPlace(stateDirectory, agentName);
-    const path = pi.SessionManager.findById(place.cwd, id, place.sessionDir);
-    if (path === undefined) continue;
-    const manager = pi.SessionManager.open(path, place.sessionDir);
-    assert.equal(manager.getSessionId(), id);
-    return { agentName, manager };
+    const places: { variantId: string | null; place: SessionPlace }[] = [
+      { variantId: null, place: sessionPlace(stateDirectory, agentName) },
+      ...existingVariantPlaces(stateDirectory, agentName),
+    ];
+    for (const { variantId, place } of places) {
+      const path = pi.SessionManager.findById(place.cwd, id, place.sessionDir);
+      if (path === undefined) continue;
+      const manager = pi.SessionManager.open(path, place.sessionDir);
+      assert.equal(manager.getSessionId(), id);
+      return { agentName, variantId, manager };
+    }
   }
   return null;
 }

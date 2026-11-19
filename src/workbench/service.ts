@@ -1327,7 +1327,7 @@ export class WorkbenchService implements Service {
     for (const agentName of workbenchAgentNames()) {
       const listed = await listSessions(
         sessionPlace(this.dependencies.stateDirectory, agentName),
-        agentName,
+        { agentName, variantId: null },
       );
       for (const { id, created, host_session_id } of listed) {
         if (host_session_id !== host.id) continue;
@@ -3313,7 +3313,7 @@ export class WorkbenchService implements Service {
       stored.push(
         ...(await listSessions(
           sessionPlace(this.dependencies.stateDirectory, name),
-          name,
+          { agentName: name, variantId: null },
         )),
       );
     const items = [];
