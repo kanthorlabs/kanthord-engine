@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import {
   HEAD_COMMIT_SUBJECT,
@@ -7,9 +8,11 @@ import {
 import { AssetKind, NodeState, repositoryAddressSchema } from "./contract.ts";
 import { getRevision } from "./node-read.ts";
 import {
+  type EvidenceRow,
   readAssets,
+  readBranchStartPoints,
+  readExecutionEvidenceOfSubject,
   readPromptCommits,
-  readReleaseEvidence,
 } from "./record-store.ts";
 import { readNode } from "./store.ts";
 
@@ -18,18 +21,34 @@ const CLOSED_STATES: readonly string[] = [
   NodeState.Discarded,
 ];
 
+function branchStartOf(tx: Transaction, execution: SeedExecution): number {
+  const start = (
+    readBranchStartPoints(tx, [execution.node_id]).get(execution.node_id) ?? []
+  ).findLast((attempt) => attempt <= execution.attempt);
+  assert.ok(start !== undefined);
+  return start;
+}
+
+function headEvidenceOf(
+  tx: Transaction,
+  execution: SeedExecution,
+): EvidenceRow | undefined {
+  const rows = readExecutionEvidenceOfSubject(tx, execution.node_id, {
+    from: branchStartOf(tx, execution),
+    to: execution.attempt,
+    subject: HEAD_COMMIT_SUBJECT,
+  });
+  return (
+    rows.findLast((row) => row.execution_id === execution.execution_id) ??
+    rows.findLast((row) => row.created_at <= execution.created_at)
+  );
+}
+
 function pushedHeads(
   tx: Transaction,
   execution: SeedExecution,
 ): Record<string, string> {
-  const pushed = readReleaseEvidence(
-    tx,
-    execution.node_id,
-    execution.attempt,
-    execution.execution_id,
-  )
-    .filter(({ subject }) => subject === HEAD_COMMIT_SUBJECT)
-    .at(-1);
+  const pushed = headEvidenceOf(tx, execution);
   if (pushed === undefined) return {};
   return Object.fromEntries(
     readAssets(tx, pushed.id)

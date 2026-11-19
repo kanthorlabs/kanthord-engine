@@ -1080,9 +1080,15 @@ It answers `{ claim, setup, revision, heads }` for any execution of a node that 
 2. `setup` is the composition of [`worker.execution.setup.get`](#command-inventory) for the same execution. The route then removes `containerEnv`, `remoteEnv` and `build.args` from each `setup.repositories[].environment.document`.
 3. The composition reads the credential revisions that the execution pins, with no running-claim check. It writes no prompt record, no environment claim and no credential pin. A pinned revision that is revoked answers 409 `credential.revision.revoked`.
 4. `revision` is the pinned node revision.
-5. `heads` maps each repository binding of `setup` to a commit. The commit is the head of the newest `Head commit of the node branch` evidence of the execution. Without that evidence, it is the prompt commit that the first handover of the attempt pins. Without a pin, it is the current head of the base branch.
+5. `heads` maps each repository binding of `setup` to a commit, in this order of sources:
+   1. the head of the newest `Head commit of the node branch` evidence of the execution;
+   2. else the head of the newest such evidence of an earlier execution on the same node branch, created at or before the start of the execution;
+   3. else the prompt commit that the first handover of the attempt pins;
+   4. else the live head of the base branch at the time of the read.
 
-The route answers no credential, no SSH identity, no handover key and no value of `containerEnv`, `remoteEnv` or the process environment.
+The seed of an ended execution holds its final pushed head. Its `setup` reflects the current bindings and the current placement of the instance, not the state at the end of the execution. Two exports of one execution can therefore differ. The written `seed.json` is the fixed artifact.
+
+The route answers no credential, no SSH identity, no handover key and no value of `containerEnv`, `remoteEnv`, `build.args` or the process environment.
 An unknown execution answers 404 `scheduler.execution.not_found`. A closed node answers 409 `worker.execution.seed_unavailable`.
 
 ```sh
@@ -1125,7 +1131,7 @@ The hook writes `captures/<execution_id>/seed.json` in the data directory of the
 `seed.json` holds `claim`, `setup`, `revision`, `heads`, `prior`, `affectedTests`, `plan` and `elapsed_ms`, and it passes the seed schema of `tasks run`. `heads` holds the checkout heads at the end of `start`. `elapsed_ms` is the time since the claim start.
 The hook writes no credential, no SSH identity, no handover key and no value of the process environment. It removes `containerEnv`, `remoteEnv` and `build.args` from each `setup.repositories[].environment.document`. It writes `seed.json` with the write rules of `tasks seed`.
 A capture failure logs `tasks capture failed` with a redacted reason, and the execution continues. The capture is part of the instance data, so the instance deletes it with that data.
-A head of `start` can be a local merge of the base refresh that no remote holds. Give `tasks run` a `--tree` that holds that commit.
+A head of `start` can be a local merge of the base refresh that no remote holds. For a captured seed, give `tasks run` a `--tree` that holds the head commit and a local branch with the name of the base branch.
 
 ## MCP and repository actions
 
