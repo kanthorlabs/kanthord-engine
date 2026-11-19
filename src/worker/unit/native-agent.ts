@@ -230,7 +230,8 @@ function nativeAgent(
     },
     lastText() {
       assert.ok(session);
-      return session.getLastAssistantText();
+      const text = session.getLastAssistantText();
+      return text === undefined ? undefined : redaction.modelOutput(text);
     },
     closeTrace(status) {
       if (session) trace?.end(status);

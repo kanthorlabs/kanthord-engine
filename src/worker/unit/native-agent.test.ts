@@ -705,6 +705,17 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   );
 });
 
+test("the last text masks a pattern value that the session keeps", async (t) => {
+  const value = "Q7xR2mK9vL4pW8nZ";
+  const line = ["pass", 'word = "', value, '"'].join("");
+  const h = await fixture(t, [fauxAssistantMessage(line)]);
+  await h.agent.prompt(WORK);
+  const text = h.agent.lastText()!;
+  assert.ok(!text.includes(value));
+  assert.ok(text.includes("<redacted:quoted_assignment:"));
+  assert.ok(JSON.stringify(sessionMessages(h)).includes(value));
+});
+
 test("native instructions preserve pinned work and persist the session and last text", async (t) => {
   const h = await fixture(t, [
     fauxAssistantMessage("work done"),
