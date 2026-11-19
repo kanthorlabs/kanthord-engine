@@ -93,11 +93,13 @@ const APP: RepositoryGroup = {
   binding_id: "binding_app",
   binding_name: "app",
   resource_identity: "repository:github:acme/app",
+  review_flow: null,
 };
 const DOCS: RepositoryGroup = {
   binding_id: "binding_docs",
   binding_name: "docs",
   resource_identity: "repository:github:acme/docs",
+  review_flow: null,
 };
 const SECRET_VARIABLE = "REGISTRY_AUTH";
 const SECRET_CREDENTIAL = "registry-auth";
@@ -707,6 +709,7 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     binding_id: APP.binding_id,
     binding_name: APP.binding_name,
     resource_identity: APP.resource_identity,
+    review_flow: null,
     target: EnvironmentTarget.Image,
     source: "repository",
     commit: "c1",
@@ -954,6 +957,26 @@ test("at remote the status is failed by a failed proof file, or none", async (t)
   await h.compute();
   assert.equal(h.state().status, EnvironmentStatus.Failed);
   assert.deepEqual(h.events, [`wake ${PROJECT}`]);
+});
+
+test("the state answers the review flow of the current group and keeps the status", async (t) => {
+  const h = new Harness(t);
+  const sum = h.digest();
+  h.existing.add(h.provedOf(sum));
+  await h.compute();
+  const flows = [null, "off", "on"] as const;
+  for (const flow of flows) {
+    h.bindings = facts([{ ...APP, review_flow: flow }], [container("app")]);
+    h.onboarding.bindingsChanged(PROJECT);
+    assert.equal(h.state().review_flow, flow);
+    await h.compute();
+    assert.equal(h.state().review_flow, flow);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(
+      h.onboarding.environmentsClaimable(PROJECT, [APP.resource_identity]),
+      true,
+    );
+  }
 });
 
 test("a failed read after a successful read keeps the status and the digest", async (t) => {
@@ -2300,6 +2323,7 @@ function resolvingHarness(
       binding_id: binding.id,
       binding_name: "repo",
       resource_identity: binding.resource_identity,
+      review_flow: null,
     };
   });
   const environments = new ProjectEnvironments({

@@ -18,6 +18,7 @@ import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type CheckResult,
   ProjectErrorCode,
+  type ReviewFlow,
   WorkerPlacement,
 } from "./contract.ts";
 import type { GroupResolution } from "./environment.ts";
@@ -138,6 +139,7 @@ export interface RepositoryGroup {
   binding_name: string;
   resource_identity: string;
   environment_secrets?: Readonly<Record<string, string>>;
+  review_flow: ReviewFlow | null;
 }
 
 export interface WorkerBindingFacts {
@@ -232,6 +234,7 @@ export interface GroupRecord {
   reason_started_at: number | null;
   session: AbortController | null;
   environment_from_agent: boolean;
+  review_flow: ReviewFlow | null;
 }
 
 type WaitingStatus =
@@ -274,6 +277,7 @@ function failedRead(request: ReadRequest, failure: ReadFailure): ReadOutcome {
           proved: false,
         }),
     target,
+    review_flow: group.review_flow,
     reason: failure.reason,
   };
   return { next, failure };
@@ -410,6 +414,7 @@ function emptyRecord(
     reason_started_at: null,
     session: null,
     environment_from_agent: false,
+    review_flow: group.review_flow,
   };
 }
 
@@ -540,6 +545,7 @@ function stateOf(record: GroupRecord): EnvironmentState {
     checks: proof?.checks ?? [],
     repairs: record.repairs,
     repairing: record.session !== null,
+    review_flow: record.review_flow,
   };
 }
 
@@ -752,6 +758,7 @@ export class Onboarding {
     const key = keyOf(projectId, group.resource_identity);
     const record = this.records.get(key);
     if (record === undefined) return;
+    record.review_flow = group.review_flow;
     const rowChanged =
       record.binding_id !== group.binding_id ||
       record.binding_name !== group.binding_name;
@@ -995,6 +1002,7 @@ export class Onboarding {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
       binding_name: group.binding_name,
+      review_flow: group.review_flow,
       target,
       source: resolved.source,
       commit: resolved.commit,

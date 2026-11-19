@@ -125,6 +125,7 @@ import {
   pinnedConfigSchema,
   type ProjectBindings,
   ProjectErrorCode,
+  ReviewFlow,
   projectOperations,
   REPOSITORY_PLATFORM,
   repositoryConfigSchema,
@@ -310,6 +311,17 @@ function refuseRepositoryLinkTrust(
   if (config.platform !== RepositoryPlatform.GitHub)
     refuseLinkTrust(binding, LinkTrustReason.PlatformUnsupported);
   refuseInvalidLinkTrust(binding, config.link_trust);
+}
+function reviewFlowOf(
+  config: typeof repositoryConfigSchema._output,
+): ReviewFlow | null {
+  if (config.strategy.action?.name !== GitHubAction.PullRequest) return null;
+  const actorIds = isObject(config.link_trust)
+    ? (config.link_trust as Record<string, unknown>)[LinkTrustField.ActorIds]
+    : undefined;
+  return Array.isArray(actorIds) && actorIds.length > EMPTY_LENGTH
+    ? ReviewFlow.On
+    : ReviewFlow.Off;
 }
 function refuseInbox(binding: string, field: string, reason: string): never {
   throw new OperationError(
@@ -2228,14 +2240,16 @@ export class ProjectService implements Service, ProjectBindings {
             (binding) =>
               kindOf(binding.resource_identity) === BindingKind.Repository,
           )
-          .map((binding) => ({
-            binding_id: binding.id,
-            binding_name: binding.name,
-            resource_identity: binding.resource_identity,
-            environment_secrets:
-              repositoryConfigSchema.parse(binding.config)
-                .environment_secrets ?? {},
-          })),
+          .map((binding) => {
+            const config = repositoryConfigSchema.parse(binding.config);
+            return {
+              binding_id: binding.id,
+              binding_name: binding.name,
+              resource_identity: binding.resource_identity,
+              environment_secrets: config.environment_secrets ?? {},
+              review_flow: reviewFlowOf(config),
+            };
+          }),
         workers: bindings
           .filter(
             (binding) =>

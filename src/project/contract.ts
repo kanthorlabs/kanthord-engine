@@ -985,6 +985,13 @@ export type EnvironmentFailureClass =
   (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];
 export const environmentFailureClassSchema = z.enum(EnvironmentFailureClass);
 
+export const ReviewFlow = {
+  On: "on",
+  Off: "off",
+} as const;
+export type ReviewFlow = (typeof ReviewFlow)[keyof typeof ReviewFlow];
+export const reviewFlowSchema = z.enum(ReviewFlow);
+
 export const MAX_CHECKS = 32;
 
 export const checkResultSchema = z.strictObject({
@@ -1021,6 +1028,7 @@ export const environmentStateSchema = z.strictObject({
   checks: z.array(checkResultSchema).max(MAX_CHECKS),
   repairs: z.int().min(0),
   repairing: z.boolean(),
+  review_flow: reviewFlowSchema.nullable(),
 });
 export type EnvironmentState = z.infer<typeof environmentStateSchema>;
 

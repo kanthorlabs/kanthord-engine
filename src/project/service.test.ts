@@ -8027,3 +8027,65 @@ test("an active project answers resume with no environment check", (t) => {
   );
   assert.deepEqual(f.project.environmentStates(saved.project_id), []);
 });
+
+const PULL_REQUEST_ACTION = {
+  name: "pull_request",
+  follows: { type: "assessment_passed" },
+};
+const PUSH_ACTION = {
+  name: "push",
+  follows: { type: "assessment_passed" },
+};
+const REVIEW_FLOW_CASES: Array<{
+  name: string;
+  action: unknown;
+  link_trust?: unknown;
+  review_flow: ReviewFlow | null;
+}> = [
+  { name: "no-action", action: undefined, review_flow: null },
+  { name: "push", action: PUSH_ACTION, review_flow: null },
+  { name: "pr-open", action: PULL_REQUEST_ACTION, review_flow: ReviewFlow.Off },
+  {
+    name: "pr-empty",
+    action: PULL_REQUEST_ACTION,
+    link_trust: { actor_ids: [] },
+    review_flow: ReviewFlow.Off,
+  },
+  {
+    name: "pr-trusted",
+    action: PULL_REQUEST_ACTION,
+    link_trust: { actor_ids: ["583231"] },
+    review_flow: ReviewFlow.On,
+  },
+];
+
+for (const { name, action, link_trust, review_flow } of REVIEW_FLOW_CASES)
+  test(`the environment state of a ${name} binding answers the review flow ${review_flow}`, async (t) => {
+    const { f } = environmentReadFixture(t, {}, WRITABLE);
+    const base = repositoryBinding();
+    const saved = f.store.transaction((tx) => {
+      const project = insertProject(tx, name);
+      const written = persistBindings(tx, project.id, {
+        [REPOSITORY_NAME]: {
+          kind: BindingKind.Repository,
+          config: {
+            ...base.config,
+            strategy: {
+              base_branch: "main",
+              ...(action === undefined ? {} : { action }),
+            },
+            ...(link_trust === undefined ? {} : { link_trust }),
+          },
+        },
+      }).bindings[REPOSITORY_NAME]!;
+      return { project_id: project.id, binding_id: written.id };
+    });
+    f.project.environmentClaimed(saved.project_id, identityOf(f, saved));
+    await untilTrue(
+      () => f.project.environmentStates(saved.project_id).length === ONE_CALL,
+    );
+    assert.equal(
+      f.project.environmentStates(saved.project_id)[NO_ITEMS]?.review_flow,
+      review_flow,
+    );
+  });
