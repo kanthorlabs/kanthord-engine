@@ -991,6 +991,15 @@ export function composeServices(options: ComposeServicesOptions) {
       agentSelectionsOf: (...args) => scheduler.agentSelectionsOf(...args),
       agentPinsOf: (...args) => scheduler.agentPinsOf(...args),
     },
+    seeds: {
+      executionOf: (tx, executionId) =>
+        scheduler.seedExecutionOf(tx, executionId),
+      nodeOf: (tx, execution) => mission.seedNodeOf(tx, execution),
+      credentialMetadataOf: (tx, pinned, name) =>
+        custody.pinnedMetadata(tx, pinned, name),
+      sshPublicKeyOf: (tx, pinned, name) =>
+        custody.pinnedSshPublicKeyOf(tx, pinned, name),
+    },
     health: options.health,
     registrations: options.registrations,
     pool: {

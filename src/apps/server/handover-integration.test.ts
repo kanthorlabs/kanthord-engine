@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { setImmediate } from "node:timers/promises";
 import {
@@ -37,9 +39,11 @@ import { projectOperations } from "../../project/contract.ts";
 import {
   connectionPayloadSchema,
   HANDOVER_TIMEOUT_MS,
+  HEAD_COMMIT_SUBJECT,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
   type PromptBase,
+  withoutEnvironmentMaps,
   WORKER_TOKEN_INFO,
   WorkerErrorCode,
   workerOperations,
@@ -58,7 +62,11 @@ import {
   ChainLevel,
   PromptPart,
 } from "../../agent/contract.ts";
-import { Intent, missionOperations } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  Intent,
+  missionOperations,
+} from "../../mission/contract.ts";
 import {
   AdvancingProviderFailure,
   ExecutionStopReason,
@@ -87,6 +95,21 @@ import {
   FAKE_COMMIT,
   fakeRepositoryFiles,
 } from "./container-fakes-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
+import { tasksRun } from "../cli/worker-tasks.ts";
+import {
+  readJson,
+  runOptions,
+  sourceRepository,
+  commandRun as tasksCommandRun,
+  TEST_TIMEOUT_MS,
+} from "../cli/tasks-test-support.ts";
+import { RunEndKind, TasksExit } from "../worker/index.ts";
+import {
+  fauxAssistantMessage,
+  scriptedProvider,
+} from "../../worker/unit/test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   COVERING_WORKER_BINDINGS,
@@ -427,6 +450,7 @@ async function setup(
     instructionFile?: string;
     implementBindsOther?: boolean;
     secondNode?: boolean;
+    environment?: Record<string, unknown>;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -643,6 +667,9 @@ async function setup(
       ssh_credential: FAKE_SSH_CREDENTIAL,
       strategy: { base_branch: "main" },
       credential: "github",
+      ...(setupOptions.environment === undefined
+        ? {}
+        : { environment: setupOptions.environment }),
       prompts: {
         ...(setupOptions.instructionFile === undefined
           ? {}
@@ -1609,6 +1636,184 @@ test("the first handover of an attempt pins its prompt commits and a later execu
   assert.equal(reads, FIRST_HEAD_READ);
   assert.equal(storedPromptCommits(h), pinned);
 });
+
+const PUSHED_HEAD = "c".repeat(40);
+const ENV_CANARY = "seed-environment-canary-0123456789";
+const ENV_REMOTE_CANARY = "seed-remote-canary-0123456789";
+const CLOSED_STATE = "Completed";
+
+for (const adapter of ["direct", "http"] as const)
+  test(`${adapter} the seed export answers the setup of execution.setup.get with no environment map, the attempt base, then the pushed head, and refuses a client caller, an unknown execution and a closed node`, async (t) => {
+    const h = await setup(t, adapter, undefined, {
+      environment: {
+        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+        containerEnv: { SEED_CANARY: ENV_CANARY },
+        remoteEnv: { SEED_REMOTE: ENV_REMOTE_CANARY },
+      },
+      promptBase: {
+        instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+        instructionFileOf: async () => null,
+        baseCommitOf: async () => PINNED_HEAD,
+      },
+    });
+    completed(await h.handover());
+    const input = {
+      params: { execution_id: h.execution.execution_id },
+      query: {},
+      body: null,
+    };
+    const seedOf = (token = h.f.token) =>
+      h.call(workerOperations["execution.seed.get"], input, token);
+    const served = completed(
+      await h.call(workerOperations["execution.setup.get"], input, h.token),
+    );
+    assert.ok(JSON.stringify(served).includes(ENV_CANARY));
+    const seed = completed(await seedOf());
+    assert.deepEqual(seed.setup, withoutEnvironmentMaps(served));
+    assert.deepEqual(seed.claim, {
+      execution_id: h.execution.execution_id,
+      node_id: h.execution.node_id,
+      attempt: h.execution.attempt,
+      pinned_revision: h.execution.pinned_revision,
+      node_branch: h.execution.node_branch,
+      created_at: h.execution.created_at,
+      expired_at: h.execution.expired_at,
+      trace_id: h.execution.trace_id,
+      root_span_id: h.execution.root_span_id,
+    });
+    assert.equal(seed.revision.node_id, h.execution.node_id);
+    assert.equal(seed.revision.revision, h.execution.pinned_revision);
+    const repo = h.bindings.repo!.id;
+    assert.deepEqual(seed.heads, { [repo]: PINNED_HEAD });
+    const text = JSON.stringify(seed);
+    for (const secret of [
+      ENV_CANARY,
+      ENV_REMOTE_CANARY,
+      h.clientSecretOf(h.token),
+      "ssh_identities",
+      "PRIVATE KEY",
+    ])
+      assert.equal(text.includes(secret), false, secret);
+    completed(
+      await h.call(
+        missionOperations["evidence.submit"],
+        {
+          params: { node_id: h.execution.node_id },
+          query: {},
+          body: {
+            execution_id: h.execution.execution_id,
+            attempt: h.execution.attempt,
+            node_revision: h.execution.pinned_revision,
+            subject: HEAD_COMMIT_SUBJECT,
+            assets: [
+              {
+                kind: AssetKind.Repository,
+                address: {
+                  kind: AssetKind.Repository,
+                  binding_id: repo,
+                  commit: PUSHED_HEAD,
+                },
+              },
+            ],
+          },
+        },
+        h.token,
+        { idempotencyKey: createIdempotencyKey() },
+      ),
+    );
+    completed(await h.release());
+    const ended = completed(await seedOf());
+    assert.deepEqual(ended.heads, { [repo]: PUSHED_HEAD });
+    assert.deepEqual(ended.setup, seed.setup);
+    const reference = await h.call(
+      schedulerOperations.executionGet,
+      input,
+      h.token,
+    );
+    assert.ok(reference.type === OperationResultType.Failure);
+    refused(
+      await seedOf(h.token),
+      reference.status,
+      reference.error.error.code,
+    );
+    refused(
+      await h.call(workerOperations["execution.seed.get"], {
+        ...input,
+        params: { execution_id: createIdentity("execution") },
+      }),
+      HttpStatus.NotFound,
+      "scheduler.execution.not_found",
+    );
+    h.f.store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(CLOSED_STATE, h.execution.node_id);
+    refused(
+      await seedOf(),
+      HttpStatus.Conflict,
+      WorkerErrorCode.ExecutionSeedUnavailable,
+    );
+  });
+
+const CLI_SUCCESS = 0;
+const SEED_FOLDER_MODE = 0o700;
+const SEED_FILE_MODE = 0o600;
+const MODE_BITS = 0o777;
+
+test(
+  "worker tasks seed writes the seed of the route, and worker tasks run completes that seed with a scripted provider",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const root = temporary(t);
+    const { source, head } = await sourceRepository(root);
+    const h = await setup(t, "http", undefined, {
+      promptBase: {
+        instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+        instructionFileOf: async () => null,
+        baseCommitOf: async () => head,
+      },
+    });
+    completed(await h.handover());
+    const seedFolder = join(root, "seed");
+    const exported = await kanthord(
+      [
+        "worker",
+        "tasks",
+        "seed",
+        h.execution.execution_id,
+        "--output",
+        seedFolder,
+      ],
+      {
+        ...environment(root),
+        KANTHORD_ENDPOINT: h.f.endpoint,
+        KANTHORD_TOKEN: h.f.token,
+      },
+    );
+    assert.equal(exported.code, CLI_SUCCESS, exported.stderr);
+    const printed = JSON.parse(exported.stdout) as Record<string, unknown>;
+    assert.equal(printed.output, seedFolder);
+    assert.equal(statSync(seedFolder).mode & MODE_BITS, SEED_FOLDER_MODE);
+    const seedFile = join(seedFolder, "seed.json");
+    assert.equal(statSync(seedFile).mode & MODE_BITS, SEED_FILE_MODE);
+    const seed = JSON.parse(readFileSync(seedFile, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    assert.equal(printed.seed_digest, digest(seed));
+    const bindingId = h.bindings.repo!.id;
+    const fixture = { root, seedFolder, source, bindingId, head, seed };
+    const run = tasksCommandRun(
+      fixture,
+      scriptedProvider([fauxAssistantMessage("done")]),
+    );
+    const code = await tasksRun(seedFolder, runOptions(fixture), run.io);
+    assert.equal(code, TasksExit.Success, run.stderr.join(""));
+    assert.equal(
+      readJson(join(root, "out"), "result.json").end,
+      RunEndKind.Completed,
+    );
+  },
+);
 
 test("the server setup stores the agent.prompt span with the references and the engine version, and a retried setup answers the stored text", async (t) => {
   const h = await setup(t, "direct", undefined, {

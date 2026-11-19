@@ -63,6 +63,7 @@ import {
   type RepositoryBindingIdsOf,
   type RepositoryPolicyOf,
   type SchedulerClaims,
+  type SeedSources,
   type SessionRead,
   SessionRemoval,
   type SshHostKeysOf,
@@ -93,6 +94,7 @@ import {
 } from "../custody/contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
+import { executionSeed } from "./execution-seed.ts";
 import { executionSetup } from "./execution-setup.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import { linkUpdatePage } from "./link-update.ts";
@@ -261,6 +263,7 @@ export interface Dependencies {
   sshHostKeysOf: SshHostKeysOf;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
+  seeds?: SeedSources;
   agentConfiguration: AgentConfiguration;
   instanceCopies?: {
     archiveHeld(tx: Transaction, holder: string, now: number): void;
@@ -1568,6 +1571,14 @@ export class WorkerService implements Service {
     registry.register(
       workerOperations["execution.setup.get"],
       (_input, caller) => executionSetup(this.dependencies, this, caller),
+    );
+    registry.register(
+      workerOperations["execution.seed.get"],
+      ({ params }, caller) =>
+        executionSeed(this.dependencies, this, {
+          executionId: params.execution_id,
+          caller,
+        }),
     );
     registry.register(
       workerOperations["action.request"],

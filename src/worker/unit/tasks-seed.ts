@@ -120,7 +120,7 @@ const priorSchema = z.strictObject({
     .nullable(),
   cleared: z.string().nullable(),
 });
-const seedSchema = z.strictObject({
+export const seedSchema = z.strictObject({
   claim: claimSchema,
   setup: seedSetupSchema,
   revision: revisionSchema,

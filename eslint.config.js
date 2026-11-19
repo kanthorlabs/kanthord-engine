@@ -425,6 +425,11 @@ export default tseslint.config(
                   }),
                 },
                 {
+                  to: element("apps-cli", {
+                    fileInternalPath: "{worker-tasks,tasks-test-support}.ts",
+                  }),
+                },
+                {
                   to: element("service", {
                     captured: { name: "{worker,mission}" },
                     fileInternalPath: "test-support.ts",
@@ -733,6 +738,20 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "custody" },
+                    fileInternalPath: "contract.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "worker" },
+                fileInternalPath: "contract.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "mission" },
                     fileInternalPath: "contract.ts",
                   }),
                 },

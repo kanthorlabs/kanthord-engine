@@ -158,6 +158,7 @@ import {
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
+import { seedNodeOf } from "./seed-read.ts";
 import {
   listAttempts,
   pinPromptCommits,
@@ -1622,6 +1623,10 @@ export class MissionService
 
   intentOf(tx: Transaction, nodeId: string, nodeRevision: number): Intent {
     return getRevision(tx, nodeId, nodeRevision).content.intent;
+  }
+
+  seedNodeOf(...args: Parameters<typeof seedNodeOf>) {
+    return seedNodeOf(...args);
   }
 
   start(): Promise<Error | null> {

@@ -61,6 +61,7 @@ export {
   type LocalCredential,
 } from "./tasks-credential.ts";
 export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
+export { checkSeedFolder, writeSeed } from "./tasks-seed-file.ts";
 export {
   checkFileOptions,
   checkHeader,

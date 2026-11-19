@@ -49,7 +49,7 @@ import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
 import { setupCommandsOf } from "./step-env-setup.ts";
 import { repositoryOf } from "./setup-repository.ts";
 
-export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+export { HEAD_COMMIT_SUBJECT } from "../contract.ts";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;

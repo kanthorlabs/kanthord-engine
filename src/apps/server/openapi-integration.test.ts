@@ -125,6 +125,8 @@ const EXTERNAL_LINK_FRAGMENT_EXCEPTIONS = [
 const AGENT_PROVIDER_FRAGMENT_EXCEPTION = "openapi/agent/enablement.get.yaml";
 const EXECUTION_SETUP_FRAGMENT_EXCEPTION =
   "openapi/worker/execution.setup.get.yaml";
+const EXECUTION_SEED_FRAGMENT_EXCEPTION =
+  "openapi/worker/execution.seed.get.yaml";
 const TRACE_LIST_FRAGMENT_EXCEPTION = "openapi/tracking/trace.list.yaml";
 const CLEANUP_FRAGMENT_EXCEPTION = "openapi/footprint/cleanup.create.yaml";
 const FLOW_FRAGMENT_EXCEPTION = "openapi/tracking/analytics.flow.yaml";
@@ -143,6 +145,7 @@ const NAMED_FRAGMENT_EXCEPTIONS = new Set([
   ...EXTERNAL_LINK_FRAGMENT_EXCEPTIONS,
   AGENT_PROVIDER_FRAGMENT_EXCEPTION,
   EXECUTION_SETUP_FRAGMENT_EXCEPTION,
+  EXECUTION_SEED_FRAGMENT_EXCEPTION,
   TRACE_LIST_FRAGMENT_EXCEPTION,
   FLOW_FRAGMENT_EXCEPTION,
   CLEANUP_FRAGMENT_EXCEPTION,
@@ -306,6 +309,7 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["worker.registration.deregister", AccessPolicy.Client],
   ["worker.action.request", AccessPolicy.Client],
   ["worker.execution.setup.get", AccessPolicy.Client],
+  ["worker.execution.seed.get", AccessPolicy.Human],
   ["worker.execution.change_request.get", AccessPolicy.Client],
   ["worker.execution.failed_check.get", AccessPolicy.Client],
   ["worker.execution.link_update.get", AccessPolicy.Client],
@@ -496,8 +500,8 @@ const OPERATION_INVENTORY: readonly (readonly [string, AccessPolicy])[] = [
   ["footprint.measure.run", AccessPolicy.Human],
   ["footprint.backup.delete", AccessPolicy.Human],
 ];
-const OPERATION_COUNT = 281;
-const ROUTED_OPERATION_COUNT = 266;
+const OPERATION_COUNT = 282;
+const ROUTED_OPERATION_COUNT = 267;
 const INTAKE_OPERATION_COUNT = 37;
 const INTAKE_ROUTED_OPERATION_COUNT = 24;
 const SERVICE_OPERATION_IDS = [

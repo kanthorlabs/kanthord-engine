@@ -1,0 +1,1166 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  get:
+    operationId: worker.execution.seed.get
+    tags:
+      - worker
+    description: "Read the seed of an execution of a node that is not closed: the
+      claim, the setup without containerEnv and remoteEnv, the pinned revision
+      and the head of each binding. The answer holds no credential, no SSH
+      identity and no handover key."
+    x-access-policy: human
+    x-timeout-ms: 30000
+    x-mutation: false
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.execution.seed.get.Input/properties/params/p\
+            roperties/execution_id"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.execution.seed.get.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.execution.seed.get.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: "null"
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.execution.seed.get.Output:
+      type: object
+      properties:
+        claim:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            attempt:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            pinned_revision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            node_branch:
+              type: string
+              minLength: 1
+            created_at:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            expired_at:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            trace_id:
+              type: string
+              minLength: 1
+            root_span_id:
+              type: string
+              minLength: 1
+          required:
+            - execution_id
+            - node_id
+            - attempt
+            - pinned_revision
+            - node_branch
+            - created_at
+            - expired_at
+            - trace_id
+            - root_span_id
+          additionalProperties: false
+        setup:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+            worker_name:
+              type: string
+              minLength: 1
+            agents:
+              minItems: 1
+              type: array
+              items:
+                type: object
+                properties:
+                  agent_name:
+                    type: string
+                    minLength: 1
+                  enablement_id:
+                    anyOf:
+                      - type: string
+                        minLength: 1
+                      - type: "null"
+                  worker_binding_id:
+                    type: string
+                    minLength: 1
+                  effective_configuration:
+                    type: object
+                    properties:
+                      agent_provider:
+                        type: string
+                        minLength: 1
+                      provider:
+                        type: string
+                        enum:
+                          - openai-compatible
+                          - amazon-bedrock
+                          - ant-ling
+                          - anthropic
+                          - anthropic-subscription
+                          - azure
+                          - baseten
+                          - cerebras
+                          - cloudflare-ai-gateway
+                          - cloudflare-workers-ai
+                          - deepseek
+                          - fireworks
+                          - github-copilot
+                          - google
+                          - google-vertex
+                          - groq
+                          - huggingface
+                          - kimi-coding
+                          - meta
+                          - minimax
+                          - minimax-cn
+                          - mistral
+                          - moonshotai
+                          - moonshotai-cn
+                          - nvidia
+                          - openai
+                          - openai-codex
+                          - opencode
+                          - opencode-go
+                          - openrouter
+                          - qwen-token-plan
+                          - qwen-token-plan-cn
+                          - qwen-token-plan-individual
+                          - radius
+                          - together
+                          - typesafe
+                          - vercel-ai-gateway
+                          - xai
+                          - xiaomi
+                          - xiaomi-token-plan-ams
+                          - xiaomi-token-plan-cn
+                          - xiaomi-token-plan-sgp
+                          - zai
+                          - zai-coding-cn
+                      credential:
+                        type: string
+                        minLength: 1
+                      model_identifier:
+                        type: string
+                        minLength: 1
+                      reasoning_effort:
+                        type: string
+                        enum:
+                          - off
+                          - minimal
+                          - low
+                          - medium
+                          - high
+                          - xhigh
+                          - max
+                    required:
+                      - agent_provider
+                      - provider
+                      - credential
+                      - model_identifier
+                      - reasoning_effort
+                    additionalProperties: false
+                    description: The Agent component validates the whole configuration.
+                      `model_identifier` belongs to `getBuiltinModels(provider)`
+                      of pi-ai 0.86.0 or to the `models` metadata of the
+                      `openai-compatible` credential. `reasoning_effort` belongs
+                      to the supported reasoning levels of that model. JSON
+                      Schema validates neither lookup.
+                  position:
+                    type: integer
+                    minimum: 0
+                    maximum: 9007199254740991
+                  level:
+                    type: string
+                    enum:
+                      - enablement
+                      - binding
+                  credential_id:
+                    type: string
+                    minLength: 37
+                    maxLength: 37
+                    pattern: ^credential_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: credential_ followed by a canonical 26-character uppercase ULID.
+                  metadata:
+                    anyOf:
+                      - type: object
+                        propertyNames:
+                          type: string
+                        additionalProperties: {}
+                      - type: "null"
+                  prompt:
+                    type: object
+                    properties:
+                      final:
+                        type: string
+                      sources:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            part:
+                              type: string
+                              enum:
+                                - standard
+                                - role
+                                - workbench
+                                - instruction_file
+                                - repository
+                                - binding
+                                - framing
+                            name:
+                              type: string
+                              minLength: 1
+                            origin:
+                              type: string
+                              enum:
+                                - binary
+                                - file
+                                - database
+                                - repository
+                            path:
+                              anyOf:
+                                - type: string
+                                - type: "null"
+                            binding_id:
+                              anyOf:
+                                - type: string
+                                  minLength: 1
+                                - type: "null"
+                            commit:
+                              anyOf:
+                                - type: string
+                                  pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                                - type: "null"
+                            digest:
+                              type: string
+                              pattern: ^[0-9a-f]{64}$
+                          required:
+                            - part
+                            - name
+                            - origin
+                            - path
+                            - binding_id
+                            - commit
+                            - digest
+                          additionalProperties: false
+                    required:
+                      - final
+                      - sources
+                    additionalProperties: false
+                required:
+                  - agent_name
+                  - enablement_id
+                  - worker_binding_id
+                  - effective_configuration
+                  - position
+                  - level
+                  - credential_id
+                  - metadata
+                  - prompt
+                additionalProperties: false
+            templates:
+              type: object
+              properties:
+                work:
+                  type: string
+                framing-worker:
+                  type: string
+                framing-workbench:
+                  type: string
+                task-revision:
+                  type: string
+                criterion-revision:
+                  type: string
+                evaluation:
+                  type: string
+                examine:
+                  type: string
+                repair:
+                  type: string
+                conflict:
+                  type: string
+              required:
+                - work
+                - framing-worker
+                - framing-workbench
+                - task-revision
+                - criterion-revision
+                - evaluation
+                - examine
+                - repair
+                - conflict
+              additionalProperties: false
+            resource_budget:
+              type: object
+              properties:
+                wall_time_ms:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+                turns:
+                  type: integer
+                  exclusiveMinimum: 0
+                  maximum: 9007199254740991
+              required:
+                - wall_time_ms
+              additionalProperties: false
+            intent:
+              type: string
+              enum:
+                - implement
+                - examine
+            repositories:
+              type: array
+              items:
+                type: object
+                properties:
+                  binding_id:
+                    type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: binding_ followed by a canonical 26-character uppercase ULID.
+                  resource_identity:
+                    type: string
+                    minLength: 1
+                  name:
+                    type: string
+                  address:
+                    type: string
+                  ssh_host_key:
+                    type: object
+                    properties:
+                      known_hosts:
+                        type: string
+                        minLength: 1
+                    required:
+                      - known_hosts
+                    additionalProperties: false
+                  ssh_public_key:
+                    type: string
+                    minLength: 1
+                  strategy:
+                    type: object
+                    properties:
+                      base_branch:
+                        type: string
+                      upstream_branch:
+                        type: string
+                        minLength: 1
+                    required:
+                      - base_branch
+                    additionalProperties: false
+                  environment:
+                    anyOf:
+                      - oneOf:
+                          - type: object
+                            properties:
+                              source:
+                                type: string
+                                const: stored
+                              document:
+                                type: object
+                                properties:
+                                  image:
+                                    type: string
+                                    minLength: 1
+                                  build:
+                                    type: object
+                                    properties:
+                                      dockerfile:
+                                        type: string
+                                        minLength: 1
+                                      context:
+                                        type: string
+                                        minLength: 1
+                                    additionalProperties: {}
+                                  features:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties: {}
+                                  containerEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      type: string
+                                  remoteEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                        - type: "null"
+                                  onCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  updateContentCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  postCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  customizations:
+                                    type: object
+                                    properties:
+                                      kanthord:
+                                        type: object
+                                        properties:
+                                          checks:
+                                            maxItems: 32
+                                            type: array
+                                            items:
+                                              type: string
+                                              pattern: \S
+                                        additionalProperties: {}
+                                    additionalProperties: {}
+                                additionalProperties: {}
+                              digest:
+                                type: string
+                                minLength: 1
+                            required:
+                              - source
+                              - document
+                              - digest
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              source:
+                                type: string
+                                const: repository
+                              digest:
+                                type: string
+                                minLength: 1
+                            required:
+                              - source
+                              - digest
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              source:
+                                type: string
+                                const: detected
+                              document:
+                                type: object
+                                properties:
+                                  image:
+                                    type: string
+                                    minLength: 1
+                                  build:
+                                    type: object
+                                    properties:
+                                      dockerfile:
+                                        type: string
+                                        minLength: 1
+                                      context:
+                                        type: string
+                                        minLength: 1
+                                    additionalProperties: {}
+                                  features:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties: {}
+                                  containerEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      type: string
+                                  remoteEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                        - type: "null"
+                                  onCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  updateContentCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  postCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  customizations:
+                                    type: object
+                                    properties:
+                                      kanthord:
+                                        type: object
+                                        properties:
+                                          checks:
+                                            maxItems: 32
+                                            type: array
+                                            items:
+                                              type: string
+                                              pattern: \S
+                                        additionalProperties: {}
+                                    additionalProperties: {}
+                                additionalProperties: {}
+                            required:
+                              - source
+                              - document
+                            additionalProperties: false
+                          - type: object
+                            properties:
+                              source:
+                                type: string
+                                const: universal
+                              document:
+                                type: object
+                                properties:
+                                  image:
+                                    type: string
+                                    minLength: 1
+                                  build:
+                                    type: object
+                                    properties:
+                                      dockerfile:
+                                        type: string
+                                        minLength: 1
+                                      context:
+                                        type: string
+                                        minLength: 1
+                                    additionalProperties: {}
+                                  features:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties: {}
+                                  containerEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      type: string
+                                  remoteEnv:
+                                    type: object
+                                    propertyNames:
+                                      type: string
+                                    additionalProperties:
+                                      anyOf:
+                                        - type: string
+                                        - type: "null"
+                                  onCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  updateContentCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  postCreateCommand:
+                                    anyOf:
+                                      - anyOf:
+                                          - type: string
+                                            minLength: 1
+                                          - minItems: 1
+                                            type: array
+                                            items:
+                                              type: string
+                                      - type: object
+                                        propertyNames:
+                                          type: string
+                                        additionalProperties:
+                                          anyOf:
+                                            - type: string
+                                              minLength: 1
+                                            - minItems: 1
+                                              type: array
+                                              items:
+                                                type: string
+                                  customizations:
+                                    type: object
+                                    properties:
+                                      kanthord:
+                                        type: object
+                                        properties:
+                                          checks:
+                                            maxItems: 32
+                                            type: array
+                                            items:
+                                              type: string
+                                              pattern: \S
+                                        additionalProperties: {}
+                                    additionalProperties: {}
+                                additionalProperties: {}
+                            required:
+                              - source
+                              - document
+                            additionalProperties: false
+                      - type: "null"
+                required:
+                  - binding_id
+                  - resource_identity
+                  - name
+                  - address
+                  - ssh_host_key
+                  - ssh_public_key
+                  - strategy
+                  - environment
+                additionalProperties: false
+          required:
+            - execution_id
+            - worker_name
+            - agents
+            - templates
+            - resource_budget
+            - intent
+            - repositories
+          additionalProperties: false
+        revision:
+          type: object
+          properties:
+            node_id:
+              type: string
+              minLength: 31
+              maxLength: 31
+              pattern: ^node_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: node_ followed by a canonical 26-character uppercase ULID.
+            filename:
+              type: string
+              pattern: ^[a-z][a-z0-9_-]*\.md$
+            revision:
+              type: integer
+              exclusiveMinimum: 0
+              maximum: 9007199254740991
+            reason:
+              type: string
+            actor:
+              oneOf:
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: human
+                    account:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                    - kind
+                    - account
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: execution
+                    execution_id:
+                      type: string
+                      minLength: 36
+                      maxLength: 36
+                      pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: execution_ followed by a canonical 26-character uppercase ULID.
+                    client_id:
+                      anyOf:
+                        - type: string
+                          minLength: 42
+                          maxLength: 42
+                          pattern: ^client_identity_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                          description: client_identity_ followed by a canonical 26-character uppercase
+                            ULID.
+                        - type: "null"
+                    name:
+                      anyOf:
+                        - type: string
+                        - type: "null"
+                  required:
+                    - kind
+                    - execution_id
+                    - client_id
+                    - name
+                  additionalProperties: false
+                - type: object
+                  properties:
+                    kind:
+                      type: string
+                      const: service
+                    service:
+                      type: string
+                      enum:
+                        - scheduler
+                        - mission
+                    inbound_event_id:
+                      type: string
+                      minLength: 40
+                      maxLength: 40
+                      pattern: ^inbound_event_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: inbound_event_ followed by a canonical 26-character uppercase ULID.
+                  required:
+                    - kind
+                    - service
+                  additionalProperties: false
+            created_at:
+              type: integer
+              minimum: 0
+              maximum: 9007199254740991
+              description: Unix timestamp in milliseconds since 1970-01-01T00:00:00Z (UTC).
+            content:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                requirement:
+                  type: string
+                  minLength: 1
+                criterion:
+                  type: string
+                  minLength: 1
+                verifications:
+                  minItems: 1
+                  type: array
+                  items:
+                    type: string
+                    minLength: 1
+                bindings:
+                  type: array
+                  items:
+                    type: string
+                intent:
+                  type: string
+                  enum:
+                    - implement
+                    - examine
+                tags:
+                  default: []
+                  type: array
+                  items:
+                    type: string
+                    maxLength: 64
+                    pattern: ^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$
+                external_links:
+                  default: []
+                  maxItems: 10
+                  type: array
+                  items:
+                    oneOf:
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: github_issue
+                          resource_identity:
+                            type: string
+                            pattern: ^conversation:github:[^/\s:]+\/[^/\s:]+$
+                          number:
+                            type: integer
+                            exclusiveMinimum: 0
+                            maximum: 9007199254740991
+                        required:
+                          - kind
+                          - resource_identity
+                          - number
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: jira_issue
+                          resource_identity:
+                            type: string
+                            pattern: ^conversation:jira:[a-z0-9][a-z0-9-]*\.atlassian\.net\/[A-Z][A-Z0-9_]{1,9}$
+                          key:
+                            type: string
+                        required:
+                          - kind
+                          - resource_identity
+                          - key
+                        additionalProperties: false
+                      - type: object
+                        properties:
+                          kind:
+                            type: string
+                            const: slack_thread
+                          resource_identity:
+                            type: string
+                            pattern: ^conversation:slack:T[A-Z0-9]{2,31}$
+                          channel:
+                            type: string
+                            pattern: ^[CG][A-Z0-9]{2,31}$
+                          thread_ts:
+                            type: string
+                            pattern: ^[0-9]+\.[0-9]{6}$
+                        required:
+                          - kind
+                          - resource_identity
+                          - channel
+                          - thread_ts
+                        additionalProperties: false
+                commit_type:
+                  type: string
+                  enum:
+                    - feat
+                    - fix
+                    - docs
+                    - style
+                    - refactor
+                    - test
+                    - chore
+              required:
+                - name
+                - requirement
+                - criterion
+                - verifications
+                - bindings
+                - intent
+                - tags
+                - external_links
+              additionalProperties: false
+            tasks:
+              type: array
+              items:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    minLength: 31
+                    maxLength: 31
+                    pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: task_ followed by a canonical 26-character uppercase ULID.
+                  filename:
+                    type: string
+                    pattern: ^[a-z][a-z0-9_-]*\.md$
+                  content:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                      bindings:
+                        maxItems: 0
+                        type: array
+                        items:
+                          type: string
+                    required:
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                      - bindings
+                    additionalProperties: false
+                required:
+                  - id
+                  - filename
+                  - content
+                additionalProperties: false
+            change:
+              type: object
+              properties:
+                write:
+                  type: string
+                  enum:
+                    - import
+                    - node.create
+                    - node.update
+                    - node.rebind
+                    - criterion.set
+                    - unblock
+                previous_revision:
+                  anyOf:
+                    - type: integer
+                      exclusiveMinimum: 0
+                      maximum: 9007199254740991
+                    - type: "null"
+                changed_fields:
+                  type: array
+                  items:
+                    type: string
+                tasks:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id:
+                        type: string
+                        minLength: 31
+                        maxLength: 31
+                        pattern: ^task_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                        description: task_ followed by a canonical 26-character uppercase ULID.
+                      change:
+                        type: string
+                        enum:
+                          - created
+                          - updated
+                          - moved-in
+                          - moved-out
+                          - retired
+                      changed_fields:
+                        type: array
+                        items:
+                          type: string
+                    required:
+                      - id
+                      - change
+                      - changed_fields
+                    additionalProperties: false
+              required:
+                - write
+                - previous_revision
+                - changed_fields
+              additionalProperties: false
+            pinned_by_attempts:
+              type: array
+              items:
+                type: integer
+                exclusiveMinimum: 0
+                maximum: 9007199254740991
+          required:
+            - node_id
+            - filename
+            - revision
+            - reason
+            - actor
+            - created_at
+            - content
+            - tasks
+            - change
+            - pinned_by_attempts
+          additionalProperties: false
+        heads:
+          type: object
+          propertyNames:
+            type: string
+            minLength: 34
+            maxLength: 34
+            pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+            description: binding_ followed by a canonical 26-character uppercase ULID.
+          additionalProperties:
+            type: string
+            pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+      required:
+        - claim
+        - setup
+        - revision
+        - heads
+      additionalProperties: false

@@ -466,6 +466,37 @@ function invalidInput(): OperationError {
   );
 }
 
+function livePinnedRowOf(
+  tx: Transaction,
+  credentials: readonly string[],
+  credentialName: string,
+): CredentialRow | null {
+  const row = (
+    tx.database
+      .prepare(
+        `SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? ORDER BY holder, revision DESC`,
+      )
+      .all(credentialName) as CredentialRow[]
+  ).find(({ id }) => credentials.includes(id));
+  if (!row) return null;
+  if (row.ended_at !== null)
+    throw new OperationError(
+      HttpStatus.Conflict,
+      CustodyErrorCode.RevisionRevoked,
+      "Pinned credential revision is revoked.",
+    );
+  return row;
+}
+
+function pinnedMetadataOf(row: CredentialRow): CredentialMetadata {
+  return {
+    id: row.id,
+    name: row.name,
+    platform: row.platform,
+    metadata: row.metadata === null ? null : JSON.parse(row.metadata),
+  };
+}
+
 function sshPublicKeyOfRow(row: CredentialRow): string | null {
   const metadata = sshPublicKeyMetadataSchema.safeParse(
     row.metadata === null ? null : JSON.parse(row.metadata),
@@ -1476,8 +1507,16 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
+    return this.pinnedSshPublicKeyOf(tx, claim.credentials, credentialName);
+  }
+
+  pinnedSshPublicKeyOf(
+    tx: Transaction,
+    credentials: readonly string[],
+    credentialName: string,
+  ): string | null {
     const rows = rowsForName(tx, credentialName, SERVER_HOLDER);
-    const pinned = rows.find(({ id }) => claim.credentials.includes(id));
+    const pinned = rows.find(({ id }) => credentials.includes(id));
     if (pinned && pinned.ended_at !== null)
       throw new OperationError(
         HttpStatus.Conflict,
@@ -1626,27 +1665,19 @@ export class CustodyComponent implements Service, CredentialRecords {
       execution.runtimeIdentity,
       now,
     );
-    const row = (
-      tx.database
-        .prepare(
-          `SELECT ${ROW_COLUMNS} FROM credential WHERE name = ? ORDER BY holder, revision DESC`,
-        )
-        .all(credentialName) as CredentialRow[]
-    ).find(({ id }) => claim.credentials.includes(id));
+    const row = livePinnedRowOf(tx, claim.credentials, credentialName);
     if (!row) return null;
-    if (row.ended_at !== null)
-      throw new OperationError(
-        HttpStatus.Conflict,
-        CustodyErrorCode.RevisionRevoked,
-        "Pinned credential revision is revoked.",
-      );
     this.drainRevisions(tx, credentialName, row.holder, now);
-    return {
-      id: row.id,
-      name: row.name,
-      platform: row.platform,
-      metadata: row.metadata === null ? null : JSON.parse(row.metadata),
-    };
+    return pinnedMetadataOf(row);
+  }
+
+  pinnedMetadata(
+    tx: Transaction,
+    credentials: readonly string[],
+    credentialName: string,
+  ): CredentialMetadata | null {
+    const row = livePinnedRowOf(tx, credentials, credentialName);
+    return row ? pinnedMetadataOf(row) : null;
   }
 
   credentialMetadata(
