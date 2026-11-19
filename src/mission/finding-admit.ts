@@ -49,7 +49,9 @@ function requireFinding(revision: Revision, finding: FindingSubmit): void {
   const blocker = kindOfLabel(finding.label) === FindingKind.Blocker;
   if (
     blocker
-      ? finding.action !== FindingAction.Yes || finding.ground === null
+      ? (finding.action !== FindingAction.Yes &&
+          finding.action !== FindingAction.Person) ||
+        finding.ground === null
       : finding.ground !== null
   )
     invalidExecutionInput(FINDINGS_FIELD);

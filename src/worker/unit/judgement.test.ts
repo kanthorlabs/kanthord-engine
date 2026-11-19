@@ -621,3 +621,12 @@ test("the link updates text cuts no body and states no older updates when the pa
     null,
   );
 });
+
+test("the judgement schema accepts a person blocker with a ground", () => {
+  const parsed = evaluationJudgementSchema.safeParse({
+    result: "criterion-not-met",
+    rationale: "r",
+    findings: [{ ...BLOCKER, action: "person" }],
+  });
+  assert.equal(parsed.success, true);
+});

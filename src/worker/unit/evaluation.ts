@@ -139,6 +139,9 @@ function factsOf(
     action_labels: judged.findings
       .filter((finding) => finding.action === FindingAction.Yes)
       .map((finding) => finding.label),
+    person_labels: judged.findings
+      .filter((finding) => finding.action === FindingAction.Person)
+      .map((finding) => finding.label),
     fixed_count: judged.fixedCount,
   };
 }

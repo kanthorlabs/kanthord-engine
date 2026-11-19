@@ -27,6 +27,7 @@ import {
 import {
   AssessmentResult,
   type Finding,
+  FindingDecision,
   FindingRoute,
   FindingStatus,
   Intent,
@@ -410,8 +411,17 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
     ).items;
   const state = async () =>
     (await read<{ state: string }>(["mission", "node", "get", node])).state;
+  const decide = async (findingId: string) =>
+    completed(
+      await missionClient["finding.decide"]({
+        params: { finding_id: findingId },
+        query: {},
+        body: { decision: FindingDecision.Dismissed, decision_reason: "Done" },
+      }),
+    );
   return {
     execute,
+    decide,
     coder,
     reviewer,
     findings,
@@ -565,6 +575,32 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
         (await f.findings()).map((entry) => entry.route),
         [FindingRoute.Report, FindingRoute.Report],
       );
+    },
+  );
+
+  test(
+    "E11.3 a person blocker blocks the node with no coder round and waits for a decision",
+    { timeout: JOURNEY_TIMEOUT_MS },
+    async (t) => {
+      const f = await roundsFixture(t);
+      assert.deepEqual(
+        (await f.execute(f.coder, write("hello.txt"))).result,
+        RELEASED,
+      );
+      const round = await f.execute(
+        f.reviewer,
+        judgement({
+          result: AssessmentResult.CriterionNotMet,
+          findings: [{ ...item("B1"), action: "person" }],
+        }),
+      );
+      assert.equal(round.result.kind, CLOSED);
+      assert.equal(await f.state(), NodeState.Blocked);
+      assert.equal((await f.assessments()).length, SINGLE_ROUND.length);
+      const [finding] = await f.findings();
+      assert.equal(finding!.route, FindingRoute.Report);
+      const decided = await f.decide(finding!.id);
+      assert.equal(decided.decision, FindingDecision.Dismissed);
     },
   );
 });

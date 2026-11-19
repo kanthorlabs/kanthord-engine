@@ -90,7 +90,7 @@ const proposalSchema = z.strictObject({
   finding_labels: z.array(z.string()).default([]),
 });
 
-function isBlockerLabel(label: string): boolean {
+export function isBlockerLabel(label: string): boolean {
   return label.startsWith(BLOCKER_LABEL_PREFIX);
 }
 
@@ -120,8 +120,14 @@ export function evaluationJudgementSchemaOf(context: JudgementContext) {
           fail(["findings", index, "label"], "A finding label is unique");
         labels.add(finding.label);
         if (isBlockerLabel(finding.label)) {
-          if (finding.action !== FindingAction.Yes)
-            fail(["findings", index, "action"], "A blocker holds action yes");
+          if (
+            finding.action !== FindingAction.Yes &&
+            finding.action !== FindingAction.Person
+          )
+            fail(
+              ["findings", index, "action"],
+              "A blocker holds action yes or person",
+            );
           if (finding.ground === null)
             fail(["findings", index, "ground"], "A blocker holds a ground");
         } else if (finding.ground !== null)

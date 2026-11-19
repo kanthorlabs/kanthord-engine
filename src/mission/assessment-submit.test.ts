@@ -1723,3 +1723,53 @@ test("a finding label that names no blocker, repeats or two proposals name refus
   ]);
   assert.deepEqual(await h.findings(), []);
 });
+
+test("a success with a person suggestion reports it, starts no rework and leaves Evaluating", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const answer = await h.submit({
+    findings: [reviewerFinding("S1", { action: FindingAction.Person })],
+  });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  assert.equal(h.revokes(), ONE_ASSESSMENT);
+  assert.equal(revokedFailureCause(h.calls), null);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
+});
+
+test("a criterion-not-met round with only a person blocker blocks the attempt with the rule none", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const answer = await h.submit({
+    ...h.notMet,
+    findings: [reviewerFinding("B1", { action: FindingAction.Person })],
+  });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Blocked);
+  assert.equal(answer.outcome?.result, AssessmentResult.CriterionNotMet);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+    first_available_at: null,
+  });
+  const b1 = await h.byLabel("B1");
+  assert.equal(b1.route, FindingRoute.Report);
+  assert.equal(b1.status, FindingStatus.Open);
+});
+
+test("a criterion-not-met round with a person blocker and a yes blocker reworks below the limit", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const answer = await h.submit({
+    ...h.notMet,
+    findings: [
+      reviewerFinding("B1", { action: FindingAction.Person }),
+      reviewerFinding("B2"),
+    ],
+  });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Available);
+  assert.equal(answer.outcome, null);
+  assert.equal((await h.byLabel("B1")).route, FindingRoute.Report);
+  assert.equal((await h.byLabel("B2")).route, FindingRoute.Fix);
+});

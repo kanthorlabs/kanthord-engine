@@ -1741,7 +1741,11 @@ export const FindingKind = {
 } as const;
 export const findingKindSchema = z.enum(FindingKind);
 export type FindingKind = z.infer<typeof findingKindSchema>;
-export const FindingAction = { Yes: "yes", No: "no" } as const;
+export const FindingAction = {
+  Yes: "yes",
+  No: "no",
+  Person: "person",
+} as const;
 export const findingActionSchema = z.enum(FindingAction);
 export type FindingAction = z.infer<typeof findingActionSchema>;
 export const FindingGround = {
