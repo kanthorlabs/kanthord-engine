@@ -1300,6 +1300,40 @@ test("node create refuses a named task, a task of an examine node and a used tas
   );
 });
 
+test("node.create names the binding ID of a binding name in the bindings error", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [REPOSITORY_NAME];
+  f.refuses(
+    body,
+    MissionErrorCode.BindingsInvalid,
+    { binding: REPOSITORY_NAME, binding_id: BINDING_ID },
+    HttpStatus.BadRequest,
+  );
+});
+
+test("node.create gives only the value of a binding that is no ID and no name", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [UNKNOWN_NAME];
+  f.refuses(
+    body,
+    MissionErrorCode.BindingsInvalid,
+    { binding: UNKNOWN_NAME },
+    HttpStatus.BadRequest,
+  );
+});
+
+test("node.create with the binding ID creates the node", (t) => {
+  const f = nodeFixture(t);
+  const body = f.body(Intent.Implement);
+  body.content.bindings = [BINDING_ID];
+  assert.deepEqual(
+    f.create(body).revisions[FIRST_ELEMENT_INDEX]!.content.bindings,
+    [BINDING_ID],
+  );
+});
+
 test("node.create validates mission existence and version before content", (t) => {
   const f = nodeFixture(t);
   f.refuses(
@@ -2624,7 +2658,10 @@ test("node.update accepts the binding identities of a node read and refuses a bi
       assert.ok(error instanceof OperationError);
       assert.equal(error.status, HttpStatus.BadRequest);
       assert.equal(error.code, MissionErrorCode.BindingsInvalid);
-      assert.deepEqual(error.details, { binding: REPOSITORY_NAME });
+      assert.deepEqual(error.details, {
+        binding: REPOSITORY_NAME,
+        binding_id: BINDING_ID,
+      });
       return true;
     },
   );
