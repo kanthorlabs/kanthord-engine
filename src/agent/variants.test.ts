@@ -114,7 +114,6 @@ test("delete returns the deleted row with its agent_name", () => {
       inUse: () => false,
     });
     assert.deepEqual(deleted, created);
-    assert.equal(deleted.agent_name, created.agent_name);
   });
 });
 
