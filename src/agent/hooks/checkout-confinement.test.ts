@@ -107,6 +107,32 @@ test("(happy path) an edit and a write with a relative path inside the root pass
       assert.equal(f.call(tool, { path }), undefined);
 });
 
+const NORMALIZED_BYPASS_PATHS = [
+  "@/etc/passwd",
+  "@~/.ssh/id_rsa",
+  "file:///etc/passwd",
+  "file://remote/etc/passwd",
+  "@../outside/secret.txt",
+  "@link/secret.txt",
+];
+
+test("(security) a path that pi normalizes to a place outside the root is blocked on every file tool", (t) => {
+  const f = fixture(t);
+  for (const tool of [...FILE_TOOLS, ...WRITE_TOOLS])
+    for (const path of NORMALIZED_BYPASS_PATHS)
+      assert.deepEqual(f.call(tool, { path }), {
+        block: true,
+        reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
+      });
+});
+
+test("(happy path) an at-prefixed relative path inside the root passes", (t) => {
+  const f = fixture(t);
+  for (const tool of [...FILE_TOOLS, ...WRITE_TOOLS])
+    for (const path of ["@package.json", "@src/new.ts"])
+      assert.equal(f.call(tool, { path }), undefined);
+});
+
 test("every other tool name passes unchanged", (t) => {
   const f = fixture(t);
   for (const tool of ["bash", "probe", "environment_write"])

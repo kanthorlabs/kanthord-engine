@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { isString } from "../../kernel/values.ts";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 
@@ -13,6 +14,9 @@ const FILE_TOOLS: ReadonlySet<string> = new Set([
   "write",
 ]);
 const HOME_PREFIX = "~";
+const AT_PREFIX = "@";
+const FILE_URL = /^file:\/\//;
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const PARENT_SEGMENT = "..";
 const SEGMENT_SEPARATOR = /[\\/]/;
 const ABSENT_CODES: ReadonlySet<string> = new Set(["ENOENT", "ENOTDIR"]);
@@ -50,7 +54,19 @@ function inside(root: string, path: string): boolean {
   );
 }
 
-function leaves(root: string, path: string): boolean {
+function normalized(path: string): string {
+  const spaced = path.replace(UNICODE_SPACES, " ");
+  const stripped = spaced.startsWith(AT_PREFIX) ? spaced.slice(1) : spaced;
+  return FILE_URL.test(stripped) ? fileURLToPath(stripped) : stripped;
+}
+
+function leaves(root: string, raw: string): boolean {
+  let path: string;
+  try {
+    path = normalized(raw);
+  } catch {
+    return true;
+  }
   if (isAbsolute(path) || path.startsWith(HOME_PREFIX)) return true;
   if (path.split(SEGMENT_SEPARATOR).includes(PARENT_SEGMENT)) return true;
   const resolved = resolveNearest(join(root, path));

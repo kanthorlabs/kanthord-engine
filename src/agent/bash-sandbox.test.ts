@@ -72,9 +72,9 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     join(place.state, "workers"),
     join(place.state, "kanthord.log"),
     place.config,
-    join(place.data, "kanthord.db"),
-    join(place.data, "kanthord.db-wal"),
-    join(place.data, "kanthord.db-shm"),
+    place.data,
+    join(place.state, "projects"),
+    join(place.state, "environments"),
     "~/.config/kanthord-eval",
     "~/.pi/agent",
   ]);
@@ -103,6 +103,12 @@ test("denyRead holds the pi directory and names no ancestor of the cwd", async (
   await createBashSandbox(fake.runtime, "linux").wrap("true", cwd, {});
   const denied = fake.calls[0]?.customConfig.filesystem?.denyRead ?? [];
   assert.ok(denied.includes(join(place.state, "pi")));
+  for (const path of [
+    place.data,
+    join(place.state, "projects"),
+    join(place.state, "environments"),
+  ])
+    assert.ok(denied.includes(path));
   const ancestors = denied.filter(
     (path) => path === cwd || cwd.startsWith(`${path}/`),
   );

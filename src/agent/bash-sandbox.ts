@@ -14,7 +14,8 @@ const SUPPORTED_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux"];
 const UNAVAILABLE = "the bash sandbox is not available";
 const WORKERS_DIRECTORY = "workers";
 const LOG_FILE = "kanthord.log";
-const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
+const PROJECTS_DIRECTORY = "projects";
+const ENVIRONMENTS_DIRECTORY = "environments";
 
 const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
   allowedDomains: [NPM_REGISTRY_HOST, ...platformNetworkHosts()],
@@ -44,7 +45,9 @@ function configurationOf(
       join(place.state, WORKERS_DIRECTORY),
       join(place.state, LOG_FILE),
       place.config,
-      ...DATABASE_FILES.map((name) => join(place.data, name)),
+      place.data,
+      join(place.state, PROJECTS_DIRECTORY),
+      join(place.state, ENVIRONMENTS_DIRECTORY),
       "~/.config/kanthord-eval",
       "~/.pi/agent",
     ],

@@ -5,7 +5,7 @@ import { test } from "node:test";
 import { parse } from "yaml";
 import { z } from "zod";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
-import { bashSandbox } from "../agent/bash-sandbox.ts";
+import { bashSandbox, createBashSandbox } from "../agent/bash-sandbox.ts";
 import { agentOperations } from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
@@ -16,6 +16,7 @@ import {
   survivingProcesses,
 } from "../agent/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
+import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   testHumanIdentity,
@@ -181,6 +182,43 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
   );
   assert.equal(wrap.mock.callCount(), ONE_OPERATION);
   assert.equal(existsSync(marker), false);
+});
+
+test("(security) a workbench bash call that reads tracking.db fails under the denyRead list", async (t) => {
+  const directory = temporary(t);
+  const emulated = createBashSandbox(
+    {
+      initialize: async () => undefined,
+      wrapWithSandbox: async (command, _shell, customConfig) => {
+        const denied = customConfig?.filesystem?.denyRead ?? [];
+        return denied.some((path) => command.includes(path))
+          ? "echo denied >&2; exit 1"
+          : command;
+      },
+    },
+    "linux",
+  );
+  t.mock.method(bashSandbox, "wrap", emulated.wrap);
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  const tracking = join(directories(process.env).data, "tracking.db");
+  const denied = await bash.execute(
+    "call_bash",
+    { command: `cat ${tracking}` },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.equal(denied.isError, true);
+  assert.match(JSON.stringify(denied.content), /denied/);
+  const ran = await bash.execute(
+    "call_bash",
+    { command: "echo inside" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.match(JSON.stringify(ran.content), /inside/);
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [

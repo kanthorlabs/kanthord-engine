@@ -88,9 +88,11 @@ A `plan@1` variant run composes each phase with the variant. The phase session f
 The bash of a Workbench agent runs in the sandbox of `@anthropic-ai/sandbox-runtime` `0.0.26`: `sandbox-exec` on macOS and bubblewrap on Linux. The engine vendors the flow of the pi example extension `examples/extensions/sandbox/index.ts` of `@earendil-works/pi-coding-agent` 1.1.0 in `src/agent/bash-sandbox.ts`.
 The engine sets the sandbox configuration in code. It reads no `<cwd>/.pi/sandbox.json` and no `~/.pi/agent/extensions/sandbox.json`.
 `allowWrite` holds the working directory `<state>/workbench/<agent_name>` and the temporary directory of the child environment (`TMPDIR`, else `/tmp`).
-`denyRead` holds `~/.ssh`, `~/.aws`, `~/.gnupg`, the pi directory `<state>/pi` (it holds `sessions/workbench/` and the pi auth file), `<state>/workers`, `<state>/kanthord.log`, the configuration directory (it holds `kanthord.yaml` and `cli.yaml`), `kanthord.db`, `kanthord.db-wal` and `kanthord.db-shm` in the data directory, `~/.config/kanthord-eval` and `~/.pi/agent`. `denyRead` never names the working directory or an ancestor of it.
+`denyRead` holds `~/.ssh`, `~/.aws`, `~/.gnupg`, the pi directory `<state>/pi` (it holds `sessions/workbench/` and the pi auth file), `<state>/workers`, `<state>/kanthord.log`, the configuration directory (it holds `kanthord.yaml` and `cli.yaml`), the whole data directory (it holds `kanthord.db`, its sidecars and `tracking.db`), `<state>/projects`, `<state>/environments`, `~/.config/kanthord-eval` and `~/.pi/agent`. `denyRead` never names the working directory or an ancestor of it.
 A bash call fails with an error tool result when the sandbox cannot start. No command runs without the sandbox.
-`read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path.
+macOS needs `ripgrep` (`rg`) on `PATH`. Linux needs bubblewrap, `socat` and `ripgrep`. Without them every Workbench bash call fails.
+A command in the Workbench bash cannot bind or reach a loopback port on macOS. On Linux the sandbox has its own loopback, and the host ports stay unreachable.
+`read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path. The tools normalize each path as pi does first: a leading `@` is stripped, `~` is expanded and a `file://` URL is converted, so `@/etc/passwd` and `file:///etc/passwd` are refused.
 
 ## Guests and project scope
 

@@ -151,6 +151,8 @@ const OVERRIDE_TEXT = "Answer in one sentence.";
 const QUESTION = "How many objectives are open?";
 const ANSWER = "Two objectives are open.";
 const READ_TOOL = "read";
+const WRITE_TOOL = "write";
+const EDIT_TOOL = "edit";
 const FIRST_MESSAGE = "List the open objectives.";
 
 function failed<T>(
@@ -1086,6 +1088,40 @@ test("(security) a read of a session file by absolute path is blocked and reache
   assert.equal(result?.isError, true);
   assert.ok(result?.text.includes(sessionFile));
   assert.equal(JSON.stringify(entries).includes(content), false);
+  assert.deepEqual(callsOf(fixture, GUARD_PROMPT), []);
+});
+
+test("(security) a normalized path outside the cwd on read, write and edit is blocked and reaches no guard", async (t) => {
+  const arguments_: Record<
+    string,
+    (path: string) => Parameters<typeof fauxToolCall>[1]
+  > = {
+    [READ_TOOL]: (path) => ({ path }),
+    [WRITE_TOOL]: (path) => ({ path, content: "x" }),
+    [EDIT_TOOL]: (path) => ({ path, edits: [{ oldText: "a", newText: "b" }] }),
+  };
+  const calls = Object.keys(arguments_).flatMap((tool) =>
+    ["@/etc/passwd", "@~/.ssh/id_rsa", "file:///etc/passwd"].map((path) => ({
+      tool,
+      path,
+    })),
+  );
+  const fixture = await workbenchFixture(t, [
+    ...calls.map(
+      (call) => () => toolCall(call.tool, arguments_[call.tool]!(call.path)),
+    ),
+    fauxAssistantMessage(ANSWER),
+  ]);
+  const session = await createSession(fixture);
+  completed(await message(fixture, session.id, QUESTION));
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  const results = toolResults(entries);
+  assert.deepEqual(
+    results.map(({ toolName, isError }) => [toolName, isError]),
+    calls.map(({ tool }) => [tool, true]),
+  );
+  for (const [index, result] of results.entries())
+    assert.ok(result.text.includes(calls[index]!.path));
   assert.deepEqual(callsOf(fixture, GUARD_PROMPT), []);
 });
 
