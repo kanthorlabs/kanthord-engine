@@ -22,6 +22,7 @@ import { GUARD_SUBJECT, loadGuardSuite } from "./guard-run.ts";
 
 const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
+const CASE_INVALID = "eval.case.invalid";
 const FIXTURE_FILE = "alpha.json";
 const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
@@ -213,10 +214,7 @@ test("security: argument guard - a session_variant item of another agent than th
       "  max_tool_calls: 3",
     ].join("\n"),
   );
-  assert.throws(
-    () => loadSuite("ops@1", [], root),
-    /session_variant item names another agent/,
-  );
+  assert.throws(() => loadSuite("ops@1", [], root), { code: CASE_INVALID });
 });
 
 const SECRET_PATTERN_INDEX = 1;

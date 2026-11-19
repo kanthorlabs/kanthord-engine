@@ -403,12 +403,13 @@ test(
       if (frame.event === STATE_EVENT) state = frame.data as StateData;
     }
     assert.equal(state.display_name, NIGHT_OPS);
-    const host = fixture.workbenchService["sessions"].get(session.id);
-    assert.ok(host);
-    assert.equal(
-      fixture.workbenchService["feedState"](host).display_name,
-      NIGHT_OPS,
+    const events = completed(
+      await fixture.workbench["session.events"](
+        { params: { session_id: session.id }, query: {}, body: null },
+        fixture.options,
+      ),
     );
+    assert.equal(events.members[0]!.display_name, NIGHT_OPS);
     held.gate.resolve();
   },
 );

@@ -1464,7 +1464,7 @@ export class WorkbenchService implements Service {
     const row = this.dependencies.store.transaction((tx) =>
       this.dependencies.agentVariant(tx, variantId),
     );
-    assert.ok(row);
+    if (row === null) throw variantNotFound(variantId);
     return row;
   }
 
@@ -3219,7 +3219,8 @@ export class WorkbenchService implements Service {
     const place = this.dependencies.store.transaction((tx) => {
       if (source.variantId === null)
         return sessionPlace(this.dependencies.stateDirectory, source.agentName);
-      assert.ok(this.dependencies.agentVariant(tx, source.variantId));
+      if (this.dependencies.agentVariant(tx, source.variantId) === null)
+        throw variantNotFound(source.variantId);
       return variantSessionPlace(this.dependencies.stateDirectory, {
         agentName: source.agentName,
         variantId: source.variantId,
