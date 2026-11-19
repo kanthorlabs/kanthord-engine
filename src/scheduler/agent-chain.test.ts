@@ -470,6 +470,7 @@ function pinHarness(
     approvedModels: () => null,
     entriesOfAgent: () => [],
     variantInUse: () => false,
+    variantDeleted: () => {},
     repositoryPromptsOf: () => null,
     promptBase: {
       baseCommitOf: () => {

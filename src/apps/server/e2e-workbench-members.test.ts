@@ -870,7 +870,78 @@ test(
 );
 
 test(
-  "(invariant guard, rollback) a participant start that throws after the directory creation leaves no variant directory",
+  "(happy path, F150) a variant participant whose first prompt fails holds the variant while it is open and the variant deletes with 200 after a restart",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const persistence = {
+      path: join(temporary(t), "operational.db"),
+      masterKey: randomBytes(MASTER_KEY_BYTES).toString("base64"),
+      resumed: false,
+    };
+    const agents = [OPS, AGENT];
+    let variant: Awaited<ReturnType<typeof newVariant>> | undefined;
+    await t.test("the first prompt of the participant fails", async (step) => {
+      const first = await workbenchFixture(
+        step,
+        [],
+        state,
+        undefined,
+        agents,
+        undefined,
+        persistence,
+      );
+      variant = await newVariant(first, AGENT, VARIANT_NAME);
+      const host = await createHost(first, OPS);
+      step.mock.method(
+        first.workbenchService,
+        "relay" as never,
+        (async () => {
+          throw new Error(BOOM);
+        }) as never,
+        { times: SINGLE },
+      );
+      const result = await sendMessage(first, host.id, VARIANT_REQUEST);
+      assert.equal(result.type, OperationResultType.Failure);
+      assert.equal(first.provider.calls.length, NO_ITEMS);
+      assert.equal(variantFiles(state, AGENT, variant.id).length, NO_ITEMS);
+      assert.equal(
+        existsSync(
+          join(state, "pi", "sessions", "workbench", AGENT, variant.id),
+        ),
+        true,
+      );
+      assert.equal(first.workbenchService.variantOpen(variant.id), true);
+      failed(
+        await deleteVariant(first, variant),
+        HttpStatus.Conflict,
+        AgentErrorCode.VariantInUse,
+      );
+      assert.equal(
+        (await first.workbenchService.stop()) ?? undefined,
+        undefined,
+      );
+    });
+    assert.ok(variant);
+    const second = await workbenchFixture(
+      t,
+      [],
+      state,
+      undefined,
+      agents,
+      undefined,
+      { ...persistence, resumed: true },
+    );
+    completed(await deleteVariant(second, variant));
+    assert.equal(
+      existsSync(join(state, "pi", "sessions", "workbench", AGENT, variant.id)),
+      false,
+    );
+  },
+);
+
+test(
+  "(invariant guard, rollback) a participant start that throws after the directory creation keeps the directory with no session file and the variant deletes with 200",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const { state, fixture } = await conversationFixture(t, []);
@@ -886,9 +957,11 @@ test(
     );
     const result = await sendMessage(fixture, host.id, VARIANT_REQUEST);
     assert.equal(result.type, OperationResultType.Failure);
+    assert.equal(variantFiles(state, AGENT, variant.id).length, NO_ITEMS);
     assert.equal(
-      existsSync(join(state, "pi", "sessions", "workbench", AGENT, variant.id)),
-      false,
+      (await listed(fixture)).filter((item) => item.host_session_id === host.id)
+        .length,
+      NO_ITEMS,
     );
     assert.equal(fixture.provider.calls.length, NO_ITEMS);
     completed(await deleteVariant(fixture, variant));

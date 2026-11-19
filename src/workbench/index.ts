@@ -14,6 +14,8 @@ export {
 export {
   forkSummaryOf,
   recordOf,
+  removeEmptyVariantDirectory,
+  variantHasSessionFile,
   variantSessionDirectory,
   type VariantPlace,
 } from "./sessions.ts";

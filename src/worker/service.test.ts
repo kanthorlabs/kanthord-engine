@@ -299,6 +299,7 @@ const fakeAgentCollaborations: Omit<AgentDependencies, "store"> = {
   approvedModels: () => null,
   entriesOfAgent: () => [],
   variantInUse: () => false,
+  variantDeleted: () => {},
   repositoryPromptsOf: () => null,
   promptBase: {
     baseCommitOf: () => {
