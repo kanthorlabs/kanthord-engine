@@ -448,6 +448,8 @@ export interface ExecutionAttribution {
     client_id: string | null;
     name: string | null;
     worker_name: string;
+    trace_id: string;
+    started_at: number;
   } | null;
 }
 
@@ -1534,19 +1536,18 @@ export const blockedContextSchema = z.strictObject({
   requests: z.array(evidenceSchema),
 });
 export type BlockedContext = z.infer<typeof blockedContextSchema>;
+export const lastStopSchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  reason: textSchema,
+  code: textSchema.nullable(),
+  detail: textSchema.nullable(),
+  trace_id: textSchema,
+});
 export const pausedContextSchema = z.strictObject({
   rule: pauseRuleSchema,
   count: z.number().int().nonnegative().nullable(),
   limit: z.number().int().nonnegative().nullable(),
-  last_stop: z
-    .strictObject({
-      execution_id: identitySchema("execution"),
-      reason: textSchema,
-      code: textSchema.nullable(),
-      detail: textSchema.nullable(),
-      trace_id: textSchema,
-    })
-    .nullable(),
+  last_stop: lastStopSchema.nullable(),
 });
 export type PausedContext = z.infer<typeof pausedContextSchema>;
 export const humanActSchema = z.strictObject({
@@ -1611,6 +1612,22 @@ export const nodeSchema = z.strictObject({
   tags: z.array(tagSchema),
 });
 export type Node = z.infer<typeof nodeSchema>;
+export const liveExecutionSchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  attempt: z.number().int().positive(),
+  pinned_revision: z.number().int().positive(),
+  runtime_identity: textSchema,
+  instance_name: textSchema.nullable(),
+  worker_name: textSchema,
+  trace_id: textSchema,
+  started_at: timestamp,
+});
+export type LiveExecution = z.infer<typeof liveExecutionSchema>;
+export const nodeGetSchema = nodeSchema.extend({
+  live_execution: liveExecutionSchema.nullable(),
+  last_stop: lastStopSchema.nullable(),
+});
+export type NodeGet = z.infer<typeof nodeGetSchema>;
 export const controlResultSchema = z.strictObject({
   node: nodeSchema,
   attempt: attemptSchema.nullable(),
@@ -3048,7 +3065,7 @@ export const missionOperations = {
       z.strictObject({ node_id: identitySchema(NODE_IDENTITY_PREFIX) }),
       z.strictObject({}),
     ),
-    output: nodeSchema,
+    output: nodeGetSchema,
     description: "Get a mission node.",
   },
   "node.revision.list": {

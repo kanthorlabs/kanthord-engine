@@ -341,6 +341,8 @@ export interface ExecutionAttribution {
     client_id: string | null;
     name: string | null;
     worker_name: string;
+    trace_id: string;
+    started_at: number;
   } | null;
 }
 export interface PauseFactsRecord {

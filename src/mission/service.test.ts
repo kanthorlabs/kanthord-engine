@@ -53,6 +53,7 @@ import {
   type NodeChange,
   nodeChangeSchema,
   type NodeCreate,
+  nodeGetSchema,
   nodeSchema,
   NodeState,
   type NodeUpdate,
@@ -104,6 +105,7 @@ import {
 } from "./link-update-test-support.ts";
 import {
   codedAs,
+  controlHarness,
   databaseSnapshot,
   executionHarness,
   keptClaimHarness,
@@ -1021,7 +1023,7 @@ function nodeFixture(
       query: {},
       body: null,
     });
-    return nodeSchema.parse(
+    return nodeGetSchema.parse(
       f.registry.get(operation.id).handler(input, f.caller),
     );
   }
@@ -1550,7 +1552,7 @@ test("node get answers the tasks of the visible revision", (t) => {
     FIRST_ELEMENT_INDEX
   ]!.node_id;
   const taskId = addTask(f, implement);
-  const implementNode = nodeSchema.parse(
+  const implementNode = nodeGetSchema.parse(
     invoke("node.get", { node_id: implement }),
   );
   assert.equal(implementNode.intent, Intent.Implement);
@@ -1560,7 +1562,7 @@ test("node get answers the tasks of the visible revision", (t) => {
   assert.equal(implementNode.priority, LOWEST_PRIORITY);
   assert.deepEqual(implementNode.content.bindings, [BINDING_ID]);
   assert.deepEqual(
-    nodeSchema.parse(invoke("node.get", { node_id: examine })).tasks,
+    nodeGetSchema.parse(invoke("node.get", { node_id: examine })).tasks,
     [],
   );
   assert.throws(
@@ -2478,7 +2480,7 @@ test("node.priority.set reads absent priority as zero and overwrites without rev
     query: {},
     body: null,
   });
-  const initial = nodeSchema.parse(
+  const initial = nodeGetSchema.parse(
     f.registry.get(get.id).handler(input, f.caller),
   );
   assert.equal(initial.intent, Intent.Implement);
@@ -6170,4 +6172,117 @@ test("the executionReleased hook of an execution with no pending close does noth
   k.h.service.executionReleased(createIdentity("execution"), null);
   assert.deepEqual(databaseSnapshot(k.h.store), snapshot);
   assert.deepEqual(k.logs, []);
+});
+
+const PROGRESS_TRACE_ID = "b".repeat(32);
+const PROGRESS_STARTED_AT = 1234;
+const PROGRESS_ATTEMPT = 1;
+const NO_ATTEMPT_NUMBER = 0;
+const PROGRESS_PIN = 1;
+const PROGRESS_IDENTITY = testHumanIdentity(ACCOUNT_ID, DISPLAY_NAME, TOKEN_ID);
+
+function progressHarness(t: TestContext) {
+  const h = controlHarness(t, PROGRESS_IDENTITY);
+  const get = () =>
+    h.invoke("node.get", {
+      params: { node_id: h.node_id },
+      query: {},
+      body: null,
+    });
+  return { ...h, get };
+}
+
+test("node get of a node with a live execution answers live_execution", async (t) => {
+  const h = progressHarness(t);
+  const executionId = createIdentity("execution");
+  const runtimeIdentity = createIdentity("client_identity");
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, PROGRESS_PIN, h.actor, PROGRESS_STARTED_AT);
+    tx.database
+      .prepare("UPDATE mission_node SET state = ?, attempt = ? WHERE id = ?")
+      .run(NodeState.Executing, PROGRESS_ATTEMPT, h.node_id);
+  });
+  h.dependencies.schedulerClaims.liveExecutionOf = () => ({
+    execution_id: executionId,
+    runtime_identity: runtimeIdentity,
+    attempt: PROGRESS_ATTEMPT,
+    pinned_revision: PROGRESS_PIN,
+  });
+  h.dependencies.executionAttribution.of = () => ({
+    client_id: null,
+    name: "coder-instance",
+    worker_name: "coder@1",
+    trace_id: PROGRESS_TRACE_ID,
+    started_at: PROGRESS_STARTED_AT,
+  });
+  const node = await h.get();
+  assert.deepEqual(node.live_execution, {
+    execution_id: executionId,
+    attempt: PROGRESS_ATTEMPT,
+    pinned_revision: PROGRESS_PIN,
+    runtime_identity: runtimeIdentity,
+    instance_name: "coder-instance",
+    worker_name: "coder@1",
+    trace_id: PROGRESS_TRACE_ID,
+    started_at: PROGRESS_STARTED_AT,
+  });
+  assert.equal(node.last_stop, null);
+});
+
+test("node get of an Available node whose last execution stopped answers last_stop and no live_execution", async (t) => {
+  const h = progressHarness(t);
+  const executionId = createIdentity("execution");
+  h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, PROGRESS_PIN, h.actor, PROGRESS_STARTED_AT);
+    tx.database
+      .prepare("UPDATE mission_node SET attempt = ? WHERE id = ?")
+      .run(PROGRESS_ATTEMPT, h.node_id);
+  });
+  const lastStop = {
+    execution_id: executionId,
+    reason: "no_progress",
+    code: null,
+    detail: "The worker made no progress.",
+    trace_id: PROGRESS_TRACE_ID,
+  };
+  h.dependencies.pauseFacts.of = (_tx, nodeId, attempt) => {
+    assert.equal(nodeId, h.node_id);
+    assert.equal(attempt, PROGRESS_ATTEMPT);
+    return {
+      consecutive_failures: 1,
+      consecutive_stalls: 0,
+      last_stop: lastStop,
+    };
+  };
+  const node = await h.get();
+  assert.equal(node.state, NodeState.Available);
+  assert.equal(node.live_execution, null);
+  assert.deepEqual(node.last_stop, lastStop);
+});
+
+test("node get of a node at attempt 0 answers live_execution null and last_stop null", async (t) => {
+  const h = progressHarness(t);
+  const node = await h.get();
+  assert.equal(node.attempt, NO_ATTEMPT_NUMBER);
+  assert.equal(node.live_execution, null);
+  assert.equal(node.last_stop, null);
+});
+
+test("node list and the control answers hold no live_execution and no last_stop", async (t) => {
+  const h = progressHarness(t);
+  const page = await h.invoke("node.list", {
+    params: { mission_id: h.mission_id },
+    query: {},
+    body: null,
+  });
+  assert.equal(page.items.length, PROGRESS_ATTEMPT);
+  const paused = await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(),
+  });
+  for (const node of [...page.items, paused.node]) {
+    assert.equal("live_execution" in node, false);
+    assert.equal("last_stop" in node, false);
+  }
 });
