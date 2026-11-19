@@ -3945,6 +3945,7 @@ const IMPORT_UPDATED_NAME = "Updated imported content";
 const IMPORT_EXTRA_TASK = "extra-task.md";
 const IMPORT_OTHER_TASK = "other-task.md";
 const IMPORT_NEW_TASK = "new-task.md";
+const IMPORT_LATE_TASK = "late-task.md";
 const IMPORT_NEW_DEPENDENT = "new-dependent.md";
 const IMPORT_NODE_COUNT = 5;
 
@@ -4880,14 +4881,14 @@ test("import.apply retains stored task order, appends creates in set order and c
           ? { ...item, filename: NEW_FILENAME, name: IMPORT_UPDATED_NAME }
           : item,
       ),
-    f.taskEntry(IMPORT_EXTRA_TASK, IMPLEMENT_FILENAME),
+    f.taskEntry(IMPORT_LATE_TASK, IMPLEMENT_FILENAME),
   ];
   const result = f.apply(f.request(f.importSnapshot(next)));
   assert.equal(result.changes.revisions.length, SINGLE_ITEM);
   const revision = result.changes.revisions[FIRST_ELEMENT_INDEX]!;
   assert.deepEqual(
     revision.tasks?.map((item) => item.filename),
-    [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_EXTRA_TASK],
+    [NEW_FILENAME, IMPORT_NEW_TASK, IMPORT_LATE_TASK],
   );
   assert.deepEqual(revision.change.changed_fields, [TASKS_FIELD]);
   assert.deepEqual(
@@ -4912,7 +4913,7 @@ test("import.apply retains stored task order, appends creates in set order and c
   );
 });
 
-test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked", (t) => {
+test("import.apply same filename without identity keeps the current node", (t) => {
   const f = importApplyFixture(t);
   const first = f.apply(f.request());
   const entries = f.identified(first);
@@ -4921,15 +4922,13 @@ test("import.apply same filename without identity retires and replaces the old n
     item.id === old ? { ...item, id: undefined } : item,
   );
   const result = f.apply(f.request(f.importSnapshot(next)));
-  const replacement = assignedId(result, IMPLEMENT_FILENAME);
-  assert.notEqual(replacement, old);
-  assert.equal(f.node(old)?.retired_at, result.accepted_at);
-  assert.equal(f.node(replacement)?.retired_at, null);
+  assert.equal(assignedId(result, IMPLEMENT_FILENAME), old);
+  assert.equal(f.node(old)?.retired_at, null);
+  assert.deepEqual(result.changes.retired_node_ids, []);
   assert.deepEqual(
     f.jobs().map((job) => job.node_id),
-    [replacement],
+    [old],
   );
-  assert.deepEqual(result.changes.retired_node_ids, [old]);
   assert.deepEqual(
     f.store.database.prepare("PRAGMA foreign_key_check").all(),
     [],
@@ -4941,19 +4940,20 @@ test("import.apply rolls back every row including jobs after a late queue insert
   const first = f.apply(f.request());
   const entries = f.identified(first);
   const old = entries.find((item) => item.filename === IMPLEMENT_FILENAME)!.id!;
-  const next = entries.map((item) => {
-    if (item.id === old)
-      return { ...item, id: undefined, name: IMPORT_UPDATED_NAME };
-    if (item.filename === TASK_FILENAME)
-      return { ...item, filename: IMPORT_NEW_TASK };
-    return item;
-  });
+  const next = [
+    ...entries.map((item) => {
+      if (item.id === old) return { ...item, name: IMPORT_UPDATED_NAME };
+      if (item.filename === TASK_FILENAME)
+        return { ...item, filename: IMPORT_NEW_TASK };
+      return item;
+    }),
+    f.entry(IMPORT_NEW_DEPENDENT, Intent.Examine),
+  ];
   const body = f.request(f.importSnapshot(next));
   const before = f.state();
   const insert = f.queue.insert;
   f.queue.insert = (tx, id, projectId, priority) => {
     insert(tx, id, projectId, priority);
-    assert.equal(readNode(tx, old)?.retired_at !== null, true);
     assert.ok(f.state().revisions.length > before.revisions.length);
     assert.ok(f.state().nodes.length > before.nodes.length);
     throw new Error(IMPORT_QUEUE_FAILURE);
