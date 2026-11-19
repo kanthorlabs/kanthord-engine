@@ -30,6 +30,13 @@ When you hold the tool `evidence_read`:
 - For a refused type, name the asset id, and tell the owner to download it from the node page.
 - Never ask for a storage URL.
 
+## Files
+
+When you hold a file tool or `bash`:
+
+- Read and write only inside your working directory. Use a relative path.
+- Never read a session file, a credential file or a configuration file of KanthorD.
+
 ## Authors and guests
 
 - A note or a message names its author.
