@@ -224,7 +224,6 @@ import {
   lastThinkingLevel,
   listSessions,
   recordOf,
-  removeEmptyVariantDirectory,
   resumeCommand,
   type SessionPlace,
   sessionPlace,
@@ -1192,6 +1191,12 @@ export class WorkbenchService implements Service {
   private dropGrantTickets(host: OpenSession): void {
     for (const [key, ticket] of this.grantTickets)
       if (ticket.session_id === host.id) this.grantTickets.delete(key);
+  }
+
+  variantOpen(variantId: string): boolean {
+    return [...this.sessions.values()].some(
+      (open) => open.variantId === variantId,
+    );
   }
 
   claimGrant(claim: GrantClaim): GrantedInvite | null {
@@ -2820,17 +2825,6 @@ export class WorkbenchService implements Service {
     });
   }
 
-  private releaseVariantDirectory(agentName: string, variantId: string): void {
-    if (
-      [...this.sessions.values()].some((open) => open.variantId === variantId)
-    )
-      return;
-    removeEmptyVariantDirectory(this.dependencies.stateDirectory, {
-      agentName,
-      variantId,
-    });
-  }
-
   private async createParticipant(
     host: OpenSession,
     mention: MentionTarget,
@@ -2882,8 +2876,6 @@ export class WorkbenchService implements Service {
         const file = participant.manager.getSessionFile();
         if (file) rmSync(file, { force: true });
       }
-      if (variantId !== null)
-        this.releaseVariantDirectory(agentName, variantId);
       throw error;
     }
     return participant;
@@ -3573,8 +3565,6 @@ export class WorkbenchService implements Service {
         const file = session.manager.getSessionFile();
         if (file) rmSync(file, { force: true });
       }
-      if (variantId !== undefined)
-        this.releaseVariantDirectory(agentName, variantId);
       throw error;
     }
     return this.view(session);

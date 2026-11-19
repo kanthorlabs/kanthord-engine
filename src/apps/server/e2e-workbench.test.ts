@@ -6707,6 +6707,7 @@ const VARIANT_DRAFT = "## Conclusion\nThe draft.";
 const JSONL_SUFFIX = ".jsonl";
 const TWO_FILES = 2;
 const NO_MATCH = -1;
+const NO_SESSION_FILES = 0;
 const VARIANT_ASSISTANT_ROLE = "assistant";
 const BASE_CONFIGURATION: WorkbenchConfiguration = {
   agent_provider: DEFAULT,
@@ -7138,7 +7139,7 @@ test(
 );
 
 test(
-  "(invariant guard) a create that the runtime refuses leaves no variant directory and the variant deletes with 200",
+  "(invariant guard) a create that the runtime refuses leaves no session file and the variant deletes with 200",
   { timeout: VARIANT_TEST_TIMEOUT_MS },
   async (t) => {
     const state = temporary(t);
@@ -7161,7 +7162,60 @@ test(
       HttpStatus.Conflict,
       WorkbenchErrorCode.SetupRefused,
     );
-    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), false);
+    assert.equal(
+      jsonlFiles(variantDirectory(state, AGENT, variant.id)).length,
+      NO_SESSION_FILES,
+    );
     completed(await deleteVariantOf(fixture, variant));
+  },
+);
+
+test(
+  "(invariant guard) after a restart a variant with a session file and no open session answers 409 agent.variant.in_use on delete",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const persistence = {
+      path: join(temporary(t), "operational.db"),
+      masterKey: randomBytes(VARIANT_MASTER_KEY_BYTES).toString("base64"),
+      resumed: false,
+    };
+    let variant: Awaited<ReturnType<typeof variantOf>> | undefined;
+    await t.test("create the variant session", async (step) => {
+      const first = await workbenchFixture(
+        step,
+        [],
+        state,
+        undefined,
+        [AGENT],
+        undefined,
+        persistence,
+      );
+      variant = await variantOf(first);
+      completed(await variantSession(first, variant.id));
+      assert.equal(
+        (await first.workbenchService.stop()) ?? undefined,
+        undefined,
+      );
+    });
+    assert.ok(variant);
+    const second = await workbenchFixture(
+      t,
+      [],
+      state,
+      undefined,
+      [AGENT],
+      undefined,
+      { ...persistence, resumed: true },
+    );
+    assert.equal(
+      jsonlFiles(variantDirectory(state, AGENT, variant.id)).length,
+      SINGLE,
+    );
+    failed(
+      await deleteVariantOf(second, variant),
+      HttpStatus.Conflict,
+      VARIANT_IN_USE,
+    );
   },
 );
