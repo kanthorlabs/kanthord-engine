@@ -110,6 +110,12 @@ export function implementInputOf(
     heads: new Map(
       state.checkouts.map((checkout) => [checkout.binding_id, checkout.head]),
     ),
+    gitPaths: new Map(
+      state.checkouts.map((checkout) => [
+        checkout.binding_id,
+        checkout.gitPaths,
+      ]),
+    ),
     setupEntries: state.setup,
     baseHead: state.base,
     affectedTests: state.affectedTests,

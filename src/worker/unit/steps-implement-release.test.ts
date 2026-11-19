@@ -28,7 +28,6 @@ import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import { nodeUnitOf, ReleaseGateKind } from "./release-gate.ts";
 import { releaseGate } from "./steps-implement-host.ts";
 import { background } from "../../kernel/context.ts";
-import { commitWork } from "./local-git.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { GitStep } from "./method-telemetry.ts";
@@ -37,6 +36,7 @@ import {
   advanceBase,
   affectedCommand,
   agentTrees,
+  commitWork,
   declareAffected,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,

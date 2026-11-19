@@ -35,7 +35,7 @@ import type { SpanStart } from "./telemetry.ts";
 import type { TestedInput, VerificationRun } from "./verification.ts";
 import type {
   ExamineCheckout,
-  WorkspaceCheckout,
+  NodeCheckout,
   WorkspaceKind,
 } from "./workspace-layout.ts";
 import type { PlacedReview, ReviewScope } from "./review-scope.ts";
@@ -74,7 +74,7 @@ export type StopCode = `${EndReason}` | `${EndReason}/${string}`;
 
 export interface NodeWorkspace {
   root: string;
-  checkouts: WorkspaceCheckout[];
+  checkouts: NodeCheckout[];
 }
 
 export interface ReviewWorkspace {
