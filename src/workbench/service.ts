@@ -3049,7 +3049,12 @@ export class WorkbenchService implements Service {
         host.agentName,
         invite.granted_operations,
       ),
-      mention_names: guestMentionNames(this.dependencies.declarationOf),
+      mention_names: guestMentionNames(
+        this.dependencies.declarationOf,
+        this.dependencies.store.transaction((tx) =>
+          this.dependencies.agentVariants(tx),
+        ),
+      ),
       entries: projectEntries(mergeEntries(this.memberEntries(host, false))),
       run_active: this.runActive(host),
     };

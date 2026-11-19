@@ -28,6 +28,7 @@ import {
   MessageDelivery,
   WORKBENCH_GUEST_MESSAGE_MAX_BYTES,
   WORKBENCH_OPENING_TEXT,
+  WORKBENCH_PROJECT_SCOPE_TEXT,
   WORKBENCH_QUEUE_LIMIT,
   WORKBENCH_RELAY_ENTRY,
   workbenchOperations,
@@ -45,6 +46,7 @@ import {
   invitedProjectIds,
   pass,
   sendMessage,
+  toolCall,
   untilAbort,
   untilIdle,
   userRequestOf,
@@ -1289,5 +1291,250 @@ test(
     );
     const view = await guestEntries(fixture, joined.token);
     assert.deepEqual(view.granted_operations, expected);
+  },
+);
+
+const SWE_AGENT_NAME = "swe@1";
+const RE_AGENT_NAME = "re@1";
+const SWE_VARIANT_NAME = "Software Architecture";
+const RE_VARIANT_NAME = "Code Review";
+const OPS_VARIANT_NAME = "Night Ops";
+const VARIANT_INSTRUCTION = "Speak like a night porter.";
+const SWE_VARIANT_MENTION = `@${SWE_VARIANT_NAME} fix it`;
+const OPS_VARIANT_MENTION = `@${OPS_VARIANT_NAME} what is blocked?`;
+const OPS_VARIANT_FOLLOW_UP = `@${OPS_VARIANT_NAME} and what else?`;
+const NODE_LIST = toolName("mission.node.list");
+
+async function newVariant(
+  fixture: Fixture,
+  agentName: string,
+  displayName: string,
+) {
+  return completed(
+    await fixture.agent["variant.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: agentName,
+          display_name: displayName,
+          instruction: VARIANT_INSTRUCTION,
+        },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+test(
+  "(security) a guest mention of a variant of SWE answers 409 workbench.guest.agent_refused at send and starts no run",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, []);
+    await newVariant(fixture, SWE_AGENT_NAME, SWE_VARIANT_NAME);
+    const response = await guestSend(
+      fixture,
+      joined.token,
+      SWE_VARIANT_MENTION,
+    );
+    assert.equal(response.status, HttpStatus.Conflict);
+    assert.equal((await errorOf(response)).code, AGENT_REFUSED);
+    assert.equal(sessionOf(fixture, host.id).run, null);
+    assert.equal(fixture.provider.calls.length, NO_ITEMS);
+  },
+);
+
+test(
+  "(security) a queued guest item of a variant of SWE is dropped with an error message when the base declaration holds a built-in tool at the start",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, joined } = await queuedFixture(t, [
+      first.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    await newVariant(fixture, SWE_AGENT_NAME, SWE_VARIANT_NAME);
+    completed(await sendMessage(fixture, host.id, OWNER_MENTION));
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const dependencies = fixture.workbenchService["dependencies"];
+    const real = dependencies.declarationOf;
+    dependencies.declarationOf = (agentName) => {
+      const declaration = real(agentName)!;
+      return agentName === SWE_AGENT_NAME
+        ? { ...declaration, tools: { ...declaration.tools, builtin: [] } }
+        : declaration;
+    };
+    const queued = await guestRun(fixture, joined.token, SWE_VARIANT_MENTION);
+    assert.ok(queued.queued_message_id);
+    dependencies.declarationOf = real;
+    completed(await sendMessage(fixture, host.id, SECOND_OWNER_MENTION));
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const users = userTexts(await ownerEntries(fixture, host.id));
+    assert.ok(users.includes(SECOND_OWNER_MENTION));
+    assert.ok(!users.includes(SWE_VARIANT_MENTION));
+    assert.ok(sessionOf(fixture, host.id).runError);
+    assert.equal(fixture.provider.calls.length, PAIR);
+  },
+);
+
+test(
+  "(happy path) a guest mention of a variant of Yumi runs the variant member under the guest origin and the invite scope",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, created, joined } = await queuedFixture(t, [
+      held.step,
+    ]);
+    const variant = await newVariant(fixture, OPS, OPS_VARIANT_NAME);
+    const answer = await guestRun(fixture, joined.token, OPS_VARIANT_MENTION);
+    assert.deepEqual(answer, {
+      kind: KIND_RUN,
+      agent_name: OWNER_AGENT_NAME,
+      queued_message_id: null,
+    });
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    const session = sessionOf(fixture, host.id);
+    const run = session.run;
+    assert.ok(run);
+    assert.deepEqual(run.origin, { kind: AuthorKind.Guest, name: GUEST_NAME });
+    assert.equal(run.inviteId, created.id);
+    assert.deepEqual(
+      fixture.workbenchService.runScope(run),
+      await invitedProjectIds(fixture),
+    );
+    assert.equal(
+      fixture.workbenchService["memberOfRun"](session, run).variantId,
+      variant.id,
+    );
+    assert.ok(
+      fixture.provider.calls[0]!.systemPrompt?.includes(VARIANT_INSTRUCTION),
+    );
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+  },
+);
+
+test(
+  "(security) a tool call on a node of a project outside the invite in a guest variant run blocks with project_scope",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const target = { missionId: "" };
+    const { fixture, host, joined } = await queuedFixture(t, [
+      () =>
+        toolCall(NODE_LIST, {
+          params: { mission_id: target.missionId },
+          query: {},
+        }),
+      fauxAssistantMessage(FIRST_ANSWER),
+    ]);
+    await newVariant(fixture, OPS, OPS_VARIANT_NAME);
+    const outside = completed(
+      await fixture.projects.create(
+        { params: {}, query: {}, body: { name: "not-invited" } },
+        fixture.options,
+      ),
+    );
+    target.missionId = completed(
+      await fixture.missions.get(
+        { params: { project_id: outside.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    ).id;
+    await guestRun(fixture, joined.token, OPS_VARIANT_MENTION);
+    await untilIdle(fixture, host.id, t.signal);
+    const results = fixture.provider.calls[1]!.messages.filter(
+      ({ role }) => role === TOOL_RESULT_ROLE,
+    );
+    assert.equal(results.length, SINGLE);
+    assert.ok(
+      JSON.stringify(results).includes(WORKBENCH_PROJECT_SCOPE_TEXT),
+      JSON.stringify(results),
+    );
+    assert.ok(!JSON.stringify(results).includes(target.missionId));
+  },
+);
+
+test(
+  "(security) workbench.guest.get lists Yumi, Jeremy and a variant of Yumi as mention names and no variant of SWE or RE",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, joined } = await queuedFixture(t, []);
+    await newVariant(fixture, OPS, OPS_VARIANT_NAME);
+    await newVariant(fixture, SWE_AGENT_NAME, SWE_VARIANT_NAME);
+    await newVariant(fixture, RE_AGENT_NAME, RE_VARIANT_NAME);
+    const response = await asGuest(fixture, joined.token, GET_PATH);
+    const view = (await response.json()) as { mention_names: string[] };
+    assert.deepEqual(
+      [...view.mention_names].sort(),
+      ["Jeremy", OPS_VARIANT_NAME, "Yumi"].sort(),
+    );
+  },
+);
+
+test(
+  "(security) workbench.guest.get members and the guest state frame answer the variant display name and no guest answer holds the instruction or a variant_id",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(FIRST_ANSWER);
+    const { fixture, host, joined } = await queuedFixture(t, [
+      held.step,
+      fauxAssistantMessage(SECOND_ANSWER),
+    ]);
+    const variant = await newVariant(fixture, OPS, OPS_VARIANT_NAME);
+    const stream = await openStream(t, fixture, joined.token);
+    const answers = [
+      JSON.stringify(
+        await guestRun(fixture, joined.token, OPS_VARIANT_MENTION),
+      ),
+    ];
+    await untilProviderCalls(fixture, SINGLE, t.signal);
+    answers.push(
+      JSON.stringify(
+        await guestRun(fixture, joined.token, OPS_VARIANT_FOLLOW_UP),
+      ),
+    );
+    const frames: Frame[] = [];
+    let queueFrame: Frame | null = null;
+    for (let read = 0; read < FOLLOW_STATE_FRAMES; read++) {
+      const frame = await stream.next();
+      assert.ok(frame);
+      frames.push(frame);
+      const data = frame.data as Partial<StateFrameData> | undefined;
+      if (frame.event === STATE_EVENT && data?.queue?.length) {
+        queueFrame = frame;
+        break;
+      }
+    }
+    assert.ok(queueFrame);
+    const state = queueFrame.data as StateFrameData & {
+      display_name: string | null;
+    };
+    assert.equal(state.display_name, OPS_VARIANT_NAME);
+    assert.deepEqual(state.queue, [
+      {
+        id: state.queue[0]!.id,
+        agent_name: OWNER_AGENT_NAME,
+        display_name: OPS_VARIANT_NAME,
+        author_name: GUEST_NAME,
+      },
+    ]);
+    const view = await guestEntries(fixture, joined.token);
+    assert.deepEqual(
+      view.members.map(({ agent_name, display_name }) => [
+        agent_name,
+        display_name,
+      ]),
+      [
+        [OWNER_AGENT_NAME, "Yumi"],
+        [OWNER_AGENT_NAME, OPS_VARIANT_NAME],
+      ],
+    );
+    const everything = JSON.stringify([view, frames, answers]);
+    assert.ok(!everything.includes(VARIANT_INSTRUCTION));
+    assert.ok(!everything.includes(variant.id));
+    assert.ok(!everything.includes("variant_id"));
+    held.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
   },
 );

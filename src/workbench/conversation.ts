@@ -8,6 +8,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
+import type { AgentVariantItem } from "../agent/variants.ts";
 import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import {
   renderTemplate,
@@ -251,11 +252,22 @@ export function resolveGuestMention(
   return mention;
 }
 
-export function guestMentionNames(declarationOf: DeclarationOf): string[] {
-  return workbenchAgentNames()
+export function guestMentionNames(
+  declarationOf: DeclarationOf,
+  variants: readonly AgentVariantItem[],
+): string[] {
+  const guestAgents = workbenchAgentNames()
     .map((agentName) => declared(declarationOf, agentName))
-    .filter((declaration) => !holdsBuiltinTool(declaration))
-    .map((declaration) => declaration.display_name);
+    .filter((declaration) => !holdsBuiltinTool(declaration));
+  const guestAgentNames = new Set(
+    guestAgents.map(({ agent_name }) => agent_name),
+  );
+  return [
+    ...guestAgents.map(({ display_name }) => display_name),
+    ...variants
+      .filter(({ agent_name }) => guestAgentNames.has(agent_name))
+      .map(({ display_name }) => display_name),
+  ];
 }
 
 export interface Answerer {
