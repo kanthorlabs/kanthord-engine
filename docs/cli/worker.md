@@ -1086,6 +1086,8 @@ It answers `{ claim, setup, revision, heads }` for any execution of a node that 
    3. else the prompt commit that the first handover of the attempt pins;
    4. else the live head of the base branch at the time of the read.
 
+The step `evidence.head` writes the head evidence only in a `finish` that releases the execution. After a stop or a budget end, the execution writes no head evidence, also when the budget end pushes the node branch. The next execution of the node branch then gets an older head evidence, the prompt pin or the base head.
+
 The seed of an ended execution holds its final pushed head. Its `setup` reflects the current bindings and the current placement of the instance, not the state at the end of the execution. Two exports of one execution can therefore differ. The written `seed.json` is the fixed artifact.
 
 The route answers no credential, no SSH identity, no handover key and no value of `containerEnv`, `remoteEnv`, `build.args` or the process environment.

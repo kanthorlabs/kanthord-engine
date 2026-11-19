@@ -23,6 +23,7 @@ import {
   type ExecutionSetup,
   executionSetupSchema,
   linkUpdateReadSchema,
+  withoutEnvironmentMaps,
 } from "../contract.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import { RELEASE_GATE_LOOP } from "./foundry-implement.ts";
@@ -207,19 +208,13 @@ function readSeed(folder: string): { seed: Seed; digest: string } {
       "worker tasks run: seed.json fails its schema.",
       [["paths", issuePaths(parsed.error)]],
     );
-  return { seed: withoutEnvironmentMaps(parsed.data), digest: digest(value) };
-}
-
-function withoutEnvironmentMaps(seed: Seed): Seed {
-  const repositories = seed.setup.repositories.map((repository) => {
-    const environment = repository.environment;
-    if (environment === null || !("document" in environment)) return repository;
-    const document = { ...environment.document };
-    delete document.containerEnv;
-    delete document.remoteEnv;
-    return { ...repository, environment: { ...environment, document } };
-  });
-  return { ...seed, setup: { ...seed.setup, repositories } };
+  return {
+    seed: {
+      ...parsed.data,
+      setup: withoutEnvironmentMaps(parsed.data.setup),
+    },
+    digest: digest(value),
+  };
 }
 
 function optionInvalid(option: string): Diagnostic {

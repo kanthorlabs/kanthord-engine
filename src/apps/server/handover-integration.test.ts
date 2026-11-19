@@ -803,6 +803,7 @@ async function setup(
       }),
     );
   const instanceTokens: string[] = [];
+  const workerTokens: string[] = [];
   for (const [name, key] of instanceKeys) {
     const worker = workerTokenPayloadSchema.parse(
       await openJSON(
@@ -818,6 +819,7 @@ async function setup(
         ).sealed,
       ),
     );
+    workerTokens.push(worker.token);
     const connected = completed(
       await call(
         workerOperations["instance.connect"],
@@ -1087,6 +1089,7 @@ async function setup(
     sign,
     openSigned,
     instanceTokens,
+    workerTokens,
     instanceKeys,
     bindings: bindingSet.bindings,
     sshPublicKey: String(sshRecord.revisions[0]!.metadata!.public_key),
@@ -1644,6 +1647,12 @@ const ENV_CANARY = "seed-environment-canary-0123456789";
 const ENV_REMOTE_CANARY = "seed-remote-canary-0123456789";
 const BUILD_ARGS_CANARY = "seed-build-canary-0123456789";
 const CLOSED_STATE = "Completed";
+const SEED_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+  build: { dockerfile: "Dockerfile", args: { CANARY: BUILD_ARGS_CANARY } },
+  containerEnv: { SEED_CANARY: ENV_CANARY },
+  remoteEnv: { SEED_REMOTE: ENV_REMOTE_CANARY },
+};
 const AGENT_PROMPT = "agent.prompt";
 const NO_ROWS = 0;
 
@@ -1704,21 +1713,13 @@ async function submitHeads(
 }
 
 for (const adapter of ["direct", "http"] as const)
-  test(`${adapter} the seed export answers the setup of execution.setup.get with no environment value before the first setup read, the attempt pin or else the live base, then the pushed head of the execution and of an earlier execution, and refuses a worker token, an unknown execution and a closed node`, async (t) => {
+  test(`${adapter} the seed export answers the setup of execution.setup.get with no environment value before the first setup read, the attempt pin or else the live base, then the pushed head of the execution and of an earlier execution, and refuses a client connection token, an unknown execution and a closed node`, async (t) => {
     let base = PINNED_HEAD;
     let instructed = "";
     const h = await setup(t, adapter, undefined, {
       extraRepository: true,
       implementBindsOther: true,
-      environment: {
-        image: "mcr.microsoft.com/devcontainers/base:ubuntu",
-        build: {
-          dockerfile: "Dockerfile",
-          args: { CANARY: BUILD_ARGS_CANARY },
-        },
-        containerEnv: { SEED_CANARY: ENV_CANARY },
-        remoteEnv: { SEED_REMOTE: ENV_REMOTE_CANARY },
-      },
+      environment: SEED_ENVIRONMENT,
       promptBase: {
         instructionBindingsOf: (_tx, bindingIds) =>
           bindingIds.filter((bindingId) => bindingId === instructed),
@@ -1836,6 +1837,33 @@ test("the seed export of an OAuth credential holds no access token, no refresh t
   ]);
 });
 
+for (const adapter of ["direct", "http"] as const)
+  test(`${adapter} the seed export refuses the instance worker token and holds no worker token`, async (t) => {
+    const h = await setup(t, adapter, undefined, {
+      workerInstances: RELAY_INSTANCES,
+    });
+    const [workerToken] = h.workerTokens;
+    assert.ok(workerToken);
+    const reference = await h.call(
+      schedulerOperations.executionGet,
+      seedInput(h.execution.execution_id),
+      workerToken,
+    );
+    assert.ok(reference.type === OperationResultType.Failure);
+    refused(
+      await seedOf(h, h.execution.execution_id, workerToken),
+      reference.status,
+      reference.error.error.code,
+    );
+    completed(await h.handover());
+    const seed = completed(await seedOf(h, h.execution.execution_id));
+    assertNoSecret(JSON.stringify(seed), [
+      SECRET,
+      ...h.workerTokens,
+      ...h.instanceTokens,
+    ]);
+  });
+
 test("the seed read of an ended execution with an undrained older revision ends no revision, stores no prompt span and claims no environment, and a revoked pinned revision answers 409", async (t) => {
   const h = await setup(t, "direct");
   completed(await h.handover());
@@ -1885,6 +1913,7 @@ test(
     const root = temporary(t);
     const { source, head } = await sourceRepository(root);
     const h = await setup(t, "http", undefined, {
+      environment: SEED_ENVIRONMENT,
       promptBase: {
         instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
         instructionFileOf: async () => null,
@@ -1914,10 +1943,18 @@ test(
     assert.equal(statSync(seedFolder).mode & MODE_BITS, SEED_FOLDER_MODE);
     const seedFile = join(seedFolder, "seed.json");
     assert.equal(statSync(seedFile).mode & MODE_BITS, SEED_FILE_MODE);
-    const seed = JSON.parse(readFileSync(seedFile, "utf8")) as Record<
-      string,
-      unknown
-    >;
+    const seedText = readFileSync(seedFile, "utf8");
+    assertNoSecret(seedText, [
+      ENV_CANARY,
+      ENV_REMOTE_CANARY,
+      BUILD_ARGS_CANARY,
+      SECRET,
+      h.token,
+      h.clientSecretOf(h.token),
+      "ssh_identities",
+      "PRIVATE KEY",
+    ]);
+    const seed = JSON.parse(seedText) as Record<string, unknown>;
     assert.equal(printed.seed_digest, digest(seed));
     const bindingId = h.bindings.repo!.id;
     const fixture = { root, seedFolder, source, bindingId, head, seed };

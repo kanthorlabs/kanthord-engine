@@ -80,3 +80,12 @@ test("writeSeed refuses an output folder or a seed.json that is a symbolic link 
   assert.equal(refusedFile.code, TasksErrorCode.OutputExists);
   assert.equal(readFileSync(targetFile, "utf8"), TARGET_TEXT);
 });
+
+test("writeSeed deletes its temporary file when the rename onto seed.json fails", async (t) => {
+  const seed = await environmentSeed(t);
+  const folder = join(temporary(t), "seed");
+  mkdirSync(join(folder, SEED_FILE), { recursive: true });
+  writeFileSync(join(folder, SEED_FILE, TARGET_TEXT), TARGET_TEXT);
+  assert.throws(() => writeSeed(folder, seed));
+  assert.deepEqual(readdirSync(folder), [SEED_FILE]);
+});

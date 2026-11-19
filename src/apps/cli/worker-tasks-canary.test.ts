@@ -42,6 +42,11 @@ const UPLOAD_COUNT = 2;
 const FIRST_CALL = 1;
 const PI_FILES = ["auth.json", "settings.json"];
 const CANARIES = [CREDENTIAL_CANARY, PASS_VALUE];
+const ENVIRONMENT_CANARIES = {
+  container: "tasks-container-canary-0123456789",
+  remote: "tasks-remote-canary-0123456789",
+  build: "tasks-build-canary-0123456789",
+};
 const CANARY_TEXT = [
   ...CANARIES,
   ...CANARIES.map((canary) => Buffer.from(canary).toString("base64")),
@@ -113,7 +118,23 @@ test(
   "the canary values of the credential and of --pass-env reach no output file, no state file, no standard stream and no replay output, also from an open-world tool result, a tool error and an errorMessage",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const fixture = await seedFixture(t);
+    const fixture = await seedFixture(t, (seed) => {
+      const setup = seed.setup as { repositories: Record<string, unknown>[] };
+      setup.repositories = setup.repositories.map((repository) => ({
+        ...repository,
+        environment: {
+          source: "detected",
+          document: {
+            build: {
+              dockerfile: "Dockerfile",
+              args: { CANARY: ENVIRONMENT_CANARIES.build },
+            },
+            containerEnv: { CANARY: ENVIRONMENT_CANARIES.container },
+            remoteEnv: { CANARY: ENVIRONMENT_CANARIES.remote },
+          },
+        },
+      }));
+    });
     const provider = scriptedProvider([
       fauxAssistantMessage(
         fauxToolCall("bash", {
@@ -189,6 +210,9 @@ test(
     assertNoCanary(replayOutput, replay);
     for (const name of PI_FILES)
       assert.ok(!existsSync(join(output, "state", "pi", name)), name);
+    const context = readFileSync(join(output, "context.json"), "utf8");
+    for (const canary of Object.values(ENVIRONMENT_CANARIES))
+      assert.equal(context.includes(canary), false, canary);
     const keys = keysOf(readJson(output, "context.json"));
     for (const key of REFUSED_KEYS) assert.ok(!keys.includes(key), key);
   },

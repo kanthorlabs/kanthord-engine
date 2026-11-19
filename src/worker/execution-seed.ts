@@ -63,7 +63,7 @@ function readOnlyPrompts(
   };
 }
 
-function seedDependencies(
+export function seedDependencies(
   dependencies: Dependencies,
   seeds: SeedSources,
   execution: SeedExecution,

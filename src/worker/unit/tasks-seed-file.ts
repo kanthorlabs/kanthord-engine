@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readdirSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -81,6 +82,11 @@ export function writeSeed(folder: string, value: unknown): string {
       flag: EXCLUSIVE_WRITE,
     },
   );
-  renameSync(temporary, file);
+  try {
+    renameSync(temporary, file);
+  } catch (error) {
+    rmSync(temporary, { force: true });
+    throw error;
+  }
   return digest(seed);
 }
