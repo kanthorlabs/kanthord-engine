@@ -16,6 +16,7 @@ export const RunEndKind = {
   BudgetEnd: "budget_end",
   Stop: "stop",
   Failed: "failed",
+  Diagnostic: "diagnostic",
 } as const;
 export type RunEndKind = (typeof RunEndKind)[keyof typeof RunEndKind];
 

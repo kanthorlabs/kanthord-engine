@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readSync } from "node:fs";
 import { isatty } from "node:tty";
 import { type Command, CommanderError } from "commander";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
@@ -197,6 +197,40 @@ export function stopOnSignal(stop: CancellationContext): () => void {
   return () => void process.off(SIGINT, onSignal);
 }
 
+const READ_CHUNK_BYTES = 65536;
+const END_OF_INPUT = 0;
+const RETRY_WAIT_MS = 10;
+const WOULD_BLOCK = "EAGAIN";
+const ZERO_BYTE = 0;
+const WAIT_CELL = new Int32Array(
+  new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT),
+);
+
+function readChunk(descriptor: number, chunk: Buffer): number | null {
+  try {
+    return readSync(descriptor, chunk);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== WOULD_BLOCK) throw error;
+    Atomics.wait(WAIT_CELL, ZERO_BYTE, ZERO_BYTE, RETRY_WAIT_MS);
+    return null;
+  }
+}
+
+function readDescriptor(descriptor: number): Buffer {
+  const chunk = Buffer.alloc(READ_CHUNK_BYTES);
+  const chunks: Buffer[] = [];
+  try {
+    for (;;) {
+      const read = readChunk(descriptor, chunk);
+      if (read === END_OF_INPUT) return Buffer.concat(chunks);
+      if (read !== null) chunks.push(Buffer.from(chunk.subarray(0, read)));
+    }
+  } finally {
+    chunk.fill(ZERO_BYTE);
+    for (const part of chunks) part.fill(ZERO_BYTE);
+  }
+}
+
 async function runAction(seedFolder: string, command: Command): Promise<void> {
   const stop = new CancellationContext();
   const release = stopOnSignal(stop);
@@ -205,7 +239,7 @@ async function runAction(seedFolder: string, command: Command): Promise<void> {
       cwd: process.cwd(),
       shellEnv: process.env,
       stdinTerminal: isatty(STDIN_DESCRIPTOR),
-      readStdin: () => readFileSync(STDIN_DESCRIPTOR),
+      readStdin: () => readDescriptor(STDIN_DESCRIPTOR),
       stdout: (text) => void process.stdout.write(text),
       stderr: (text) => void process.stderr.write(text),
       modelRuntimeFactory: defaultModelRuntimeFactory,

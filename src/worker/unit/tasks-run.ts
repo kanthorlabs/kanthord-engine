@@ -270,7 +270,10 @@ async function foundryEndOf(
     return { ...base, end: RunEndKind.BudgetEnd };
   const { run } = composed;
   if (end.kind === FoundryEndKind.Failed) {
-    await logFailure(composed, end.error);
+    composed.output.log({
+      msg: TASKS_FAILED,
+      reason: await run.reasonOf(end.error),
+    });
     return { ...base, end: RunEndKind.Failed };
   }
   if (end.kind === FoundryEndKind.Stop)
@@ -355,8 +358,8 @@ interface Written {
   exitCode: TasksExit;
 }
 
-function resultRecord(composed: Composed, written: Written) {
-  const { plan } = composed;
+function resultRecord(target: RunTarget, written: Written) {
+  const { plan } = target;
   const { end, checks, exitCode } = written;
   const agent = plan.setup.agents[WORKING_AGENT]!;
   return {
@@ -571,29 +574,21 @@ async function disposed(
   return failures.find((failure) => failure !== null) ?? null;
 }
 
-async function logFailure(composed: Composed, error: unknown): Promise<void> {
-  composed.output.log({
-    msg: TASKS_FAILED,
-    reason: await composed.run.reasonOf(error),
-  });
+interface RunTarget {
+  plan: TasksPlan;
+  output: TasksOutput;
 }
 
-async function failedRun(
-  composed: Composed,
-  error: unknown,
-): Promise<LocalTasksEnd> {
-  await logFailure(composed, error);
-  const end: RunEnd = {
-    end: RunEndKind.Failed,
-    stop: null,
-    step: null,
-    result: null,
-    input: null,
-  };
-  composed.output.writeJson(
+function endOf(kind: RunEndKind): RunEnd {
+  return { end: kind, stop: null, step: null, result: null, input: null };
+}
+
+function failedRun(target: RunTarget, reason: string | null): LocalTasksEnd {
+  target.output.log({ msg: TASKS_FAILED, reason });
+  target.output.writeJson(
     OutputFile.Result,
-    resultRecord(composed, {
-      end,
+    resultRecord(target, {
+      end: endOf(RunEndKind.Failed),
       checks: null,
       exitCode: TasksExit.InternalError,
     }),
@@ -601,8 +596,25 @@ async function failedRun(
   return {
     end: RunEndKind.Failed,
     exitCode: TasksExit.InternalError,
-    output: composed.output.folder,
+    output: target.output.folder,
   };
+}
+
+function diagnosticEnd(target: RunTarget, error: Diagnostic): Diagnostic {
+  target.output.writeJson(OutputFile.Result, {
+    ...resultRecord(target, {
+      end: endOf(RunEndKind.Diagnostic),
+      checks: null,
+      exitCode: TasksExit.Diagnostic,
+    }),
+    code: error.code,
+  });
+  return error;
+}
+
+function endedBefore(input: LocalTasksInput, error: unknown): LocalTasksEnd {
+  if (error instanceof Diagnostic) throw diagnosticEnd(input, error);
+  return failedRun(input, error instanceof Error ? error.message : null);
 }
 
 async function preparedTrees(composed: Composed): Promise<LocalTrees | null> {
@@ -631,7 +643,13 @@ async function preparedTrees(composed: Composed): Promise<LocalTrees | null> {
 export async function runTasksLocal(
   input: LocalTasksInput,
 ): Promise<LocalTasksEnd> {
-  const { composed, opened } = composedOf(input);
+  let built: ReturnType<typeof composedOf>;
+  try {
+    built = composedOf(input);
+  } catch (error) {
+    return endedBefore(input, error);
+  }
+  const { composed, opened } = built;
   let ended: LocalTasksEnd | null = null;
   let failure: unknown = null;
   try {
@@ -639,13 +657,15 @@ export async function runTasksLocal(
   } catch (error) {
     if (error instanceof Diagnostic) {
       await disposed(composed, opened);
-      throw error;
+      throw diagnosticEnd(composed, error);
     }
     failure = error;
   }
   const disposal = await disposed(composed, opened);
   failure ??= disposal;
-  return failure === null ? ended! : failedRun(composed, failure);
+  return failure === null
+    ? ended!
+    : failedRun(composed, await composed.run.reasonOf(failure));
 }
 
 async function endedRun(composed: Composed): Promise<LocalTasksEnd> {

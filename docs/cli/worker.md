@@ -969,13 +969,13 @@ The credential rules:
 3. The command parses the object and then fills the input buffer with zeros.
 4. `provider_id` must be the pi provider of the working agent. An oauth token must stay valid until the wall deadline plus 5 minutes.
 5. `metadata` holds the routing metadata of the provider, such as `base_url` or `region`, and follows the metadata schema of the platform. Only standard input gives the routing metadata. A provider with a metadata schema requires `metadata`. A provider with no metadata schema refuses it. The `metadata` of the working agent in the seed must equal it, or the command refuses the run with `credential_invalid`, field `metadata`.
-6. Before the run, the command removes the provider credential variables and the AWS, Google Cloud and Azure credential chain variables from its own environment. It sets `HOME` to `state/home/`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` under `state/home/.aws/`, `AWS_EC2_METADATA_DISABLED=true` and `METADATA_SERVER_DETECTION=none`.
+6. Before the run, the command removes the provider credential variables, the AWS, Google Cloud and Azure credential chain variables, and each endpoint and routing variable that pi-ai or the AWS SDK reads from its own environment. The endpoint and routing variables are `AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ENDPOINT_URL`, `AWS_ENDPOINT_URL_BEDROCK`, `AWS_ENDPOINT_URL_BEDROCK_RUNTIME`, `AWS_BEDROCK_SKIP_AUTH`, `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_RESOURCE_NAME`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_DEPLOYMENT_NAME_MAP`, `GOOGLE_CLOUD_LOCATION`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_GATEWAY_ID` and the `ANTHROPIC_*` federation variables. The routing values come only from the `metadata` key. It sets `HOME` to `state/home/`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` under `state/home/.aws/`, `AWS_EC2_METADATA_DISABLED=true` and `METADATA_SERVER_DETECTION=none`.
 7. A frozen credential store serves the credential to pi. The pi directory of the run is `state/pi/`. A pi directory that holds `auth.json`, or a pi directory of the process other than `state/pi/`, stops the run.
 8. Each child process gets `PATH`, `LANG`, `TMPDIR`, `HOME` (`state/home/`), `GIT_CONFIG_NOSYSTEM=1`, `GIT_SSH_COMMAND="ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none"` and the `--pass-env` variables only. Git reads no system configuration, so no host credential helper and no host SSH key reach git.
 9. Each output file, the run log on stderr and each upload replace the credential values and each `--pass-env` value of 12 or more characters. They use the known-value matcher of the session redaction, which also finds encoded forms such as base64. A shorter `--pass-env` value is not a known secret.
 
 `--tree` clones each source into the bare mirror `state/origin/<binding_id>.git` and clones the checkout from the mirror.
-The mirror has no remote, and its files are read-only during the run. The source repository stays unchanged. A push to `origin`, to the mirror path or from the mirror fails.
+The mirror has no remote, and its files are read-only during the run. The command restores the write bits at each end. A folder that a hard kill leaves has a read-only mirror: run `chmod -R u+w <folder>` before a manual delete. `--force` restores the write bits itself. The source repository stays unchanged. A push to `origin`, to the mirror path or from the mirror fails.
 
 The output folder has mode `0700`. Each file has mode `0600`.
 
@@ -994,13 +994,13 @@ The output folder has mode `0700`. Each file has mode `0600`.
 
 On an end, stdout is exactly one JSON line `{ "output", "end", "exit_code" }`.
 
-| Exit | End                                                                                                                                                |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`  | `completed` or `budget_end`, and each check passes.                                                                                                |
-| `1`  | A diagnostic: before the run, or after the output folder exists (`tree_invalid`, `unit_unknown`, the seed check of the phase).                     |
-| `2`  | `stop`. SIGINT stops the run with `worker_stopped`.                                                                                                |
-| `4`  | A `--verify` check fails.                                                                                                                          |
-| `5`  | `failed`. The run log records `tasks failed` with its reason, `result.json` records `failed`, and stderr prints `cli.worker.tasks.internal_error`. |
+| Exit | End                                                                                                                                                                                                                                                                           |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | `completed` or `budget_end`, and each check passes.                                                                                                                                                                                                                           |
+| `1`  | A diagnostic: before the run, or after the output folder exists (`tree_invalid`, `unit_unknown`, the seed check of the phase). After the output folder exists, `result.json` records `end: "diagnostic"`, the `code` and `exit_code: 1`, so `--force` can replace the folder. |
+| `2`  | `stop`. SIGINT stops the run with `worker_stopped`.                                                                                                                                                                                                                           |
+| `4`  | A `--verify` check fails.                                                                                                                                                                                                                                                     |
+| `5`  | `failed`. The run log records `tasks failed` with its reason, `result.json` records `failed`, and stderr prints `cli.worker.tasks.internal_error`.                                                                                                                            |
 
 ```sh
 ulimit -c 0

@@ -77,6 +77,7 @@ const ATTACKER_URL = "http://attacker.invalid/v1";
 const RELEASE_GATE_LOOP = "release_gate";
 const TASKS_FAILED = "tasks failed";
 const KEPT_TEXT = "kept";
+const DIAGNOSTIC_END = "diagnostic";
 
 function commandRun(
   fixture: SeedFixture,
@@ -289,6 +290,8 @@ suite("worker tasks run", () => {
         ...hostEnvironment(),
         AWS_PROFILE: "ambient-profile",
         AWS_SECRET_ACCESS_KEY: "ambient-secret-0123456789",
+        AZURE_OPENAI_BASE_URL: "https://ambient.invalid/openai",
+        AWS_ENDPOINT_URL_BEDROCK_RUNTIME: "https://ambient.invalid/bedrock",
       };
       const seen: NodeJS.ProcessEnv[] = [];
       const scripted = scriptedModelRuntime(provider);
@@ -310,6 +313,8 @@ suite("worker tasks run", () => {
       for (const env of seen) {
         assert.equal(env.AWS_PROFILE, undefined);
         assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
+        assert.equal(env.AZURE_OPENAI_BASE_URL, undefined);
+        assert.equal(env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME, undefined);
         assert.equal(env.HOME, home);
         assert.ok(env.AWS_CONFIG_FILE?.startsWith(home));
         assert.ok(env.AWS_SHARED_CREDENTIALS_FILE?.startsWith(home));
@@ -575,7 +580,7 @@ suite("worker tasks run", () => {
   );
 
   test(
-    "a pi directory bound to another directory ends the run with exit 5 and internal_error",
+    "a pi directory bound to another directory ends the run with exit 5, internal_error, a tasks failed record and result.json",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
@@ -591,6 +596,47 @@ suite("worker tasks run", () => {
       assert.match(
         run.stderr.join(""),
         new RegExp(TasksErrorCode.InternalError),
+      );
+      const result = readJson(join(fixture.root, "out"), "result.json");
+      assert.equal(result.end, RunEndKind.Failed);
+      assert.equal(result.exit_code, TasksExit.InternalError);
+      assert.ok(
+        logRecords(run.stderr).some((record) => record.msg === TASKS_FAILED),
+      );
+    },
+  );
+
+  test(
+    "a diagnostic after the output folder exists writes result.json, so --force runs the next command",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const wrong = runOptions(fixture, { unit: ["task_unknown"] });
+      for (const options of [wrong, { ...wrong, force: true }]) {
+        const run = commandRun(fixture, scriptedProvider([]));
+        assert.equal(
+          (await diagnosticOf(tasksRun(fixture.seedFolder, options, run.io)))
+            .code,
+          TasksErrorCode.UnitUnknown,
+        );
+        const result = readJson(join(fixture.root, "out"), "result.json");
+        assert.equal(result.end, DIAGNOSTIC_END);
+        assert.equal(result.code, TasksErrorCode.UnitUnknown);
+        assert.equal(result.exit_code, ExitCode.Failure);
+      }
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      assert.equal(
+        await tasksRun(
+          fixture.seedFolder,
+          runOptions(fixture, { force: true }),
+          run.io,
+        ),
+        TasksExit.Success,
+        run.stderr.join(""),
       );
     },
   );
