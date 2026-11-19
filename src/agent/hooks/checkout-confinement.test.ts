@@ -133,6 +133,27 @@ test("(happy path) an at-prefixed relative path inside the root passes", (t) => 
       assert.equal(f.call(tool, { path }), undefined);
 });
 
+test("(security) a read path whose pi variant is a symlink out of the root is blocked", (t) => {
+  const f = fixture(t);
+  const secret = join(f.outside, "secret.txt");
+  symlinkSync(secret, join(f.root, "a\u2019"));
+  symlinkSync(secret, join(f.root, "shot\u202FPM.png"));
+  symlinkSync(secret, join(f.root, "e\u0301"));
+  for (const path of ["a'", "shot PM.png", "\u00e9"])
+    assert.deepEqual(f.call("read", { path }), {
+      block: true,
+      reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
+    });
+});
+
+test("(happy path) a read path whose pi variant is a file inside the root passes", (t) => {
+  const f = fixture(t);
+  writeFileSync(join(f.root, "it\u2019s.txt"), "inside");
+  writeFileSync(join(f.root, "shot\u202FAM.png"), "inside");
+  for (const path of ["it's.txt", "shot AM.png"])
+    assert.equal(f.call("read", { path }), undefined);
+});
+
 test("every other tool name passes unchanged", (t) => {
   const f = fixture(t);
   for (const tool of ["bash", "probe", "environment_write"])

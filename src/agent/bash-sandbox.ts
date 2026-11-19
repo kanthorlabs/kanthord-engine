@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
@@ -33,6 +33,11 @@ const DEFAULT_CONFIG: SandboxRuntimeConfig = {
 
 type Runtime = Pick<typeof SandboxManager, "initialize" | "wrapWithSandbox">;
 
+function overriddenConfigFile(): string[] {
+  const override = process.env.KANTHORD_CONFIG;
+  return override === undefined ? [] : [resolve(override)];
+}
+
 function configurationOf(
   allowWrite: string[],
 ): SandboxRuntimeConfig["filesystem"] {
@@ -45,6 +50,7 @@ function configurationOf(
       join(place.state, WORKERS_DIRECTORY),
       join(place.state, LOG_FILE),
       place.config,
+      ...overriddenConfigFile(),
       place.data,
       join(place.state, PROJECTS_DIRECTORY),
       join(place.state, ENVIRONMENTS_DIRECTORY),

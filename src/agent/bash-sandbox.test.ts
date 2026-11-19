@@ -72,6 +72,9 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     join(place.state, "workers"),
     join(place.state, "kanthord.log"),
     place.config,
+    ...(process.env.KANTHORD_CONFIG === undefined
+      ? []
+      : [process.env.KANTHORD_CONFIG]),
     place.data,
     join(place.state, "projects"),
     join(place.state, "environments"),
@@ -84,6 +87,22 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     "*.pem",
     "*.key",
   ]);
+});
+
+test("(security) denyRead holds a config file that KANTHORD_CONFIG names outside the config directory", async (t) => {
+  const cwd = temporary(t);
+  const overridden = join(temporary(t), "kanthord.yaml");
+  const previous = process.env.KANTHORD_CONFIG;
+  process.env.KANTHORD_CONFIG = overridden;
+  t.after(() => {
+    if (previous === undefined) delete process.env.KANTHORD_CONFIG;
+    else process.env.KANTHORD_CONFIG = previous;
+  });
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, cwd, {});
+  assert.ok(
+    fake.calls[0]?.customConfig.filesystem?.denyRead.includes(overridden),
+  );
 });
 
 test("the temporary directory falls back to /tmp", async (t) => {
