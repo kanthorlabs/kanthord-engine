@@ -1421,8 +1421,8 @@ export function composeServices(options: ComposeServicesOptions) {
     logger: options.logger,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
-      compose: (name, options) =>
-        agent.composePrompt(name, PromptConsumer.Workbench, options),
+      compose: (name, composeOptions) =>
+        agent.composePrompt(name, PromptConsumer.Workbench, composeOptions),
       templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {
