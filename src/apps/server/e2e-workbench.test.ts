@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay, setImmediate } from "node:timers/promises";
@@ -37,6 +43,7 @@ import {
   temporary,
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { isString } from "../../kernel/values.ts";
 import { getAgentDeclaration } from "../../agent/catalog.ts";
@@ -67,6 +74,7 @@ import {
   GuardCause,
   MessageDelivery,
   MessageKind,
+  PlanPhase,
   WORKBENCH_ACTION_RESULT_ENTRY,
   WORKBENCH_CONFIGURATION_ENTRY,
   WORKBENCH_EXPIRY_REASON,
@@ -6684,3 +6692,476 @@ async function watchedDiscardLater(t: TestContext) {
   const nodeId = await approveCreate(world, t.signal);
   return { world, clock, nodeId };
 }
+
+const VARIANT_TEST_TIMEOUT_MS = 60000;
+const VARIANT_NAME = "Night Ops";
+const VARIANT_INSTRUCTION = "Speak like a night porter.";
+const VARIANT_PLAN = "plan@1";
+const VARIANT_IN_USE = "agent.variant.in_use";
+const VARIANT_NOT_FOUND = "agent.variant.not_found";
+const VARIANT_MASTER_KEY_BYTES = 32;
+const VARIANT_SUMMARY = "Goal: continue the night shift.";
+const VARIANT_FORK_TEXT = "Continue the night shift.";
+const VARIANT_REVIEW = "## Conclusion\nClean.\n\n## Review\n- none";
+const VARIANT_DRAFT = "## Conclusion\nThe draft.";
+const JSONL_SUFFIX = ".jsonl";
+const TWO_FILES = 2;
+const NO_MATCH = -1;
+const VARIANT_ASSISTANT_ROLE = "assistant";
+const BASE_CONFIGURATION: WorkbenchConfiguration = {
+  agent_provider: DEFAULT,
+  model_identifier: SONNET,
+  reasoning_effort: OFF,
+};
+
+function newVariant(
+  fixture: Fixture,
+  agentName = AGENT,
+  instruction = VARIANT_INSTRUCTION,
+) {
+  return fixture.agent["variant.create"](
+    {
+      params: {},
+      query: {},
+      body: {
+        agent_name: agentName,
+        display_name: VARIANT_NAME,
+        instruction,
+      },
+    },
+    fixture.options,
+  );
+}
+
+async function variantOf(
+  fixture: Fixture,
+  agentName = AGENT,
+  instruction = VARIANT_INSTRUCTION,
+) {
+  return completed(await newVariant(fixture, agentName, instruction));
+}
+
+function variantSession(
+  fixture: Fixture,
+  variantId: string,
+  agentName = AGENT,
+  configuration: WorkbenchConfiguration = BASE_CONFIGURATION,
+) {
+  return fixture.workbench["session.create"](
+    {
+      params: {},
+      query: {},
+      body: { agent_name: agentName, variant_id: variantId, ...configuration },
+    },
+    fixture.options,
+  );
+}
+
+function deleteVariantOf(
+  fixture: Fixture,
+  variant: { id: string; revision: number },
+) {
+  return fixture.agent["variant.delete"](
+    {
+      params: { variant_id: variant.id },
+      query: {},
+      body: { expected_revision: variant.revision },
+    },
+    fixture.options,
+  );
+}
+
+function variantDirectory(
+  state: string,
+  agentName: string,
+  variantId: string,
+): string {
+  return join(state, "pi", "sessions", "workbench", agentName, variantId);
+}
+
+function jsonlFiles(directory: string): string[] {
+  return readdirSync(directory)
+    .filter((name) => name.endsWith(JSONL_SUFFIX))
+    .map((name) => join(directory, name));
+}
+
+function sessionGet(fixture: Fixture, sessionId: string) {
+  return fixture.workbench["session.get"](
+    { params: { session_id: sessionId }, query: {}, body: null },
+    fixture.options,
+  );
+}
+
+function sessionList(fixture: Fixture, agentName?: string) {
+  return fixture.workbench["session.list"](
+    {
+      params: {},
+      query: agentName === undefined ? {} : { agent_name: agentName },
+      body: null,
+    },
+    fixture.options,
+  );
+}
+
+function greetingOf(entries: readonly Entry[]): string {
+  const opening = entries
+    .filter((entry) => entry.type === MESSAGE_ENTRY)
+    .map((entry) => entry.message as { role: string; content: unknown })
+    .filter(({ role }) => role === VARIANT_ASSISTANT_ROLE)
+    .map(({ content }) =>
+      (content as { text?: string }[])
+        .map((block) => block.text ?? "")
+        .join(""),
+    )
+    .find((text) => text.startsWith(GREETING_PREFIX));
+  assert.ok(opening);
+  return opening;
+}
+
+test(
+  "(happy path) a variant session writes its file in the variant directory with the base cwd and a greeting that names the variant",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(t, [], state);
+    const variant = await variantOf(fixture);
+    const session = completed(await variantSession(fixture, variant.id));
+    assert.equal(session.variant_id, variant.id);
+    assert.equal(session.agent_name, AGENT);
+    const files = jsonlFiles(variantDirectory(state, AGENT, variant.id));
+    assert.equal(files.length, SINGLE);
+    const header = JSON.parse(
+      readFileSync(files[0]!, "utf8").split("\n")[0]!,
+    ) as { cwd: string };
+    assert.equal(header.cwd, join(state, "workbench", AGENT));
+    assert.ok(greetingOf(session.entries).includes(VARIANT_NAME));
+    assert.deepEqual(
+      jsonlFiles(join(state, "pi", "sessions", "workbench", AGENT)),
+      [],
+    );
+  },
+);
+
+test(
+  "(happy path) the list holds the variant session once with its variant name and a base session with a null variant_id",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await workbenchFixture(t, [], temporary(t));
+    const variant = await variantOf(fixture);
+    const created = completed(await variantSession(fixture, variant.id));
+    const base = await createSession(fixture);
+    const listed = completed(await sessionList(fixture));
+    const variants = listed.items.filter(({ id }) => id === created.id);
+    assert.equal(variants.length, SINGLE);
+    assert.equal(variants[0]!.variant_id, variant.id);
+    assert.equal(variants[0]!.display_name, VARIANT_NAME);
+    const plain = listed.items.filter(({ id }) => id === base.id);
+    assert.equal(plain.length, SINGLE);
+    assert.equal(plain[0]!.variant_id, null);
+    assert.equal(
+      listed.items.filter(({ id }) => id === created.id || id === base.id)
+        .length,
+      TWO_FILES,
+    );
+    const filtered = completed(await sessionList(fixture, AGENT));
+    assert.deepEqual(
+      filtered.items.map(({ id }) => id).sort(),
+      [base.id, created.id].sort(),
+    );
+  },
+);
+
+test(
+  "(happy path) get opens the variant session after a restart with its variant_id and the variant name on the host member",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const persistence = {
+      path: join(temporary(t), "operational.db"),
+      masterKey: randomBytes(VARIANT_MASTER_KEY_BYTES).toString("base64"),
+      resumed: false,
+    };
+    const ids = { variant: "", session: "" };
+    await t.test("create the variant session", async (step) => {
+      const first = await workbenchFixture(
+        step,
+        [],
+        state,
+        undefined,
+        [AGENT],
+        undefined,
+        persistence,
+      );
+      const variant = await variantOf(first);
+      const created = completed(await variantSession(first, variant.id));
+      ids.variant = variant.id;
+      ids.session = created.id;
+      assert.equal(
+        (await first.workbenchService.stop()) ?? undefined,
+        undefined,
+      );
+    });
+    const second = await workbenchFixture(
+      t,
+      [],
+      state,
+      undefined,
+      [AGENT],
+      undefined,
+      { ...persistence, resumed: true },
+    );
+    const read = completed(await sessionGet(second, ids.session));
+    assert.equal(read.variant_id, ids.variant);
+    assert.equal(read.members[0]!.session_id, ids.session);
+    assert.equal(read.members[0]!.display_name, VARIANT_NAME);
+  },
+);
+
+test(
+  "(happy path) the system prompt holds the variant instruction after the role text and before the workbench text, with the variant name in the identity",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await workbenchFixture(
+      t,
+      [fauxAssistantMessage(ANSWER)],
+      temporary(t),
+    );
+    const variant = await variantOf(fixture);
+    const session = completed(await variantSession(fixture, variant.id));
+    completed(await message(fixture, session.id, QUESTION));
+    await untilIdle(fixture, session.id, t.signal);
+    const prompt = fixture.provider.calls[0]!.systemPrompt!;
+    const role = prompt.indexOf(SWE_AGENT_PROMPT);
+    const instruction = prompt.indexOf(VARIANT_INSTRUCTION);
+    const workbench = prompt.indexOf(WORKBENCH_PROMPT);
+    assert.notEqual(role, NO_MATCH);
+    assert.ok(role < instruction);
+    assert.ok(instruction < workbench);
+    assert.ok(prompt.includes(`Your name is ${VARIANT_NAME}.`));
+  },
+);
+
+test(
+  "(happy path) configure keeps the variant of the session and the next open composes with it",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await workbenchFixture(
+      t,
+      [fauxAssistantMessage(ANSWER)],
+      temporary(t),
+    );
+    const variant = await variantOf(fixture);
+    const session = completed(await variantSession(fixture, variant.id));
+    const lowHaiku = {
+      agent_provider: DEFAULT,
+      model_identifier: HAIKU,
+      reasoning_effort: LOW,
+    };
+    assert.deepEqual(
+      completed(
+        await fixture.workbench["session.configure"](
+          { params: { session_id: session.id }, query: {}, body: lowHaiku },
+          fixture.options,
+        ),
+      ),
+      lowHaiku,
+    );
+    assert.equal(
+      completed(await sessionGet(fixture, session.id)).variant_id,
+      variant.id,
+    );
+    completed(await message(fixture, session.id, QUESTION));
+    await untilIdle(fixture, session.id, t.signal);
+    assert.ok(
+      fixture.provider.calls[0]!.systemPrompt!.includes(VARIANT_INSTRUCTION),
+    );
+  },
+);
+
+test(
+  "(happy path) a fork of a variant session keeps the variant and writes its file in the variant directory",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        fauxAssistantMessage(ANSWER),
+        fauxAssistantMessage(VARIANT_SUMMARY),
+        pass(),
+        fauxAssistantMessage(ANSWER),
+      ],
+      state,
+      undefined,
+      [AGENT, GUARD_AGENT],
+    );
+    const variant = await variantOf(fixture);
+    const source = completed(await variantSession(fixture, variant.id));
+    completed(await message(fixture, source.id, QUESTION));
+    await untilIdle(fixture, source.id, t.signal);
+    const forked = completed(
+      await forkOf(fixture, source.id, VARIANT_FORK_TEXT),
+    );
+    await untilIdle(fixture, forked.session_id, t.signal);
+    const read = completed(await sessionGet(fixture, forked.session_id));
+    assert.equal(read.variant_id, variant.id);
+    assert.equal(read.members[0]!.display_name, VARIANT_NAME);
+    assert.equal(
+      jsonlFiles(variantDirectory(state, AGENT, variant.id)).length,
+      TWO_FILES,
+    );
+  },
+);
+
+test(
+  "(security) a create with the variant_id of another agent answers 404 agent.variant.not_found and creates no directory",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(t, [], state);
+    const other = await variantOf(fixture, REVIEW_AGENT);
+    failed(
+      await variantSession(fixture, other.id),
+      HttpStatus.NotFound,
+      VARIANT_NOT_FOUND,
+    );
+    for (const agentName of [AGENT, REVIEW_AGENT])
+      assert.equal(
+        existsSync(variantDirectory(state, agentName, other.id)),
+        false,
+      );
+  },
+);
+
+test(
+  "(happy path) a plan variant run shows both phase entries in the merged poll, composes each phase with the variant and lists no phase session",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(
+      t,
+      [
+        fauxAssistantMessage(VARIANT_DRAFT),
+        fauxAssistantMessage(VARIANT_REVIEW),
+      ],
+      state,
+      undefined,
+      [VARIANT_PLAN],
+    );
+    const variant = await variantOf(fixture, VARIANT_PLAN);
+    const host = completed(
+      await variantSession(fixture, variant.id, VARIANT_PLAN),
+    );
+    completed(await message(fixture, host.id, QUESTION));
+    const entries = await untilIdle(fixture, host.id, t.signal);
+    const phases = new Set(
+      entries.flatMap(({ phase }) => (phase === undefined ? [] : [phase])),
+    );
+    assert.deepEqual(
+      [...phases].sort(),
+      [PlanPhase.Planner, PlanPhase.Reviewer].sort(),
+    );
+    assert.equal(fixture.provider.calls.length, TWO_FILES);
+    for (const call of fixture.provider.calls)
+      assert.ok(call.systemPrompt!.includes(VARIANT_INSTRUCTION));
+    const listed = completed(await sessionList(fixture));
+    assert.deepEqual(
+      listed.items.map(({ id }) => id),
+      [host.id],
+    );
+    assert.equal(
+      jsonlFiles(variantDirectory(state, VARIANT_PLAN, "phases")).length,
+      TWO_FILES,
+    );
+  },
+);
+
+test(
+  "(invariant guard) the read paths create no directory so an unused variant deletes with 200",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(t, [], state);
+    const variant = await variantOf(fixture);
+    const base = await createSession(fixture);
+    completed(await sessionList(fixture));
+    completed(await sessionGet(fixture, base.id));
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), false);
+    completed(await deleteVariantOf(fixture, variant));
+  },
+);
+
+test(
+  "(invariant guard) a variant with a session answers 409 agent.variant.in_use on delete and keeps its row and file",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(t, [], state);
+    const variant = await variantOf(fixture);
+    completed(await variantSession(fixture, variant.id));
+    failed(
+      await deleteVariantOf(fixture, variant),
+      HttpStatus.Conflict,
+      VARIANT_IN_USE,
+    );
+    const row = completed(
+      await fixture.agent["variant.get"](
+        { params: { variant_id: variant.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    assert.equal(row.id, variant.id);
+    assert.equal(
+      jsonlFiles(variantDirectory(state, AGENT, variant.id)).length,
+      SINGLE,
+    );
+  },
+);
+
+test(
+  "(invariant guard) a create with a refused configuration creates no variant directory",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    const fixture = await workbenchFixture(t, [], state);
+    const variant = await variantOf(fixture);
+    failed(
+      await variantSession(fixture, variant.id, AGENT, {
+        ...BASE_CONFIGURATION,
+        agent_provider: "absent",
+      }),
+      HttpStatus.NotFound,
+      "agent.enablement.provider.not_found",
+    );
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), false);
+  },
+);
+
+test(
+  "(invariant guard) a create that the runtime refuses leaves no variant directory and the variant deletes with 200",
+  { timeout: VARIANT_TEST_TIMEOUT_MS },
+  async (t) => {
+    const state = temporary(t);
+    let refuse = false;
+    const fixture = await workbenchFixture(
+      t,
+      [],
+      state,
+      undefined,
+      [AGENT],
+      async () => {
+        if (refuse)
+          throw new Diagnostic("system.test.refused", "The runtime refuses.");
+      },
+    );
+    const variant = await variantOf(fixture);
+    refuse = true;
+    failed(
+      await variantSession(fixture, variant.id),
+      HttpStatus.Conflict,
+      WorkbenchErrorCode.SetupRefused,
+    );
+    assert.equal(existsSync(variantDirectory(state, AGENT, variant.id)), false);
+    completed(await deleteVariantOf(fixture, variant));
+  },
+);

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type {
@@ -77,6 +77,7 @@ const sessionIdSchema = identitySchema(WORKBENCH_SESSION_PREFIX);
 const variantIdSchema = identitySchema(AGENT_VARIANT_PREFIX);
 const FORK_ID_END = ".";
 const NO_TEXT = "";
+const NO_ENTRIES = 0;
 const NO_CHARACTERS = 0;
 const TITLE_MAX_CHARS = FORK_SOURCE_TITLE_MAX_CHARS;
 
@@ -144,6 +145,15 @@ export function variantSessionPlace(
   ensureDirectory(place.cwd);
   ensureDirectory(place.sessionDir);
   return place;
+}
+
+export function removeEmptyVariantDirectory(
+  stateDirectory: string,
+  variant: VariantPlace,
+): void {
+  const directory = variantSessionDirectory(stateDirectory, variant);
+  if (existsSync(directory) && readdirSync(directory).length === NO_ENTRIES)
+    rmdirSync(directory);
 }
 
 export function existingVariantPlaces(
@@ -374,6 +384,7 @@ export async function findSession(
 ): Promise<{
   agentName: string;
   variantId: string | null;
+  place: SessionPlace;
   manager: SessionManager;
 } | null> {
   const pi = await loadPi();
@@ -387,7 +398,7 @@ export async function findSession(
       if (path === undefined) continue;
       const manager = pi.SessionManager.open(path, place.sessionDir);
       assert.equal(manager.getSessionId(), id);
-      return { agentName, variantId, manager };
+      return { agentName, variantId, place, manager };
     }
   }
   return null;
