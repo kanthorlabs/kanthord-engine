@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -80,6 +81,10 @@ const TASKS_FAILED = "tasks failed";
 const KEPT_TEXT = "kept";
 const DIAGNOSTIC_END = "diagnostic";
 const UNIT_COMPLETE = "complete";
+
+function sha256Of(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 function commandRun(
   fixture: SeedFixture,
@@ -374,8 +379,8 @@ suite("worker tasks run", () => {
       );
       const result = readJson(join(fixture.root, "out"), "result.json");
       assert.deepEqual(result.overrides, {
-        system_prompt: true,
-        templates: true,
+        system_prompt: sha256Of("Local system prompt marker."),
+        templates: { work: sha256Of("Local work template marker.") },
       });
     },
   );
@@ -439,7 +444,7 @@ suite("worker tasks run", () => {
   );
 
   test(
-    "metrics.json holds the run time of each step of the tasks phase",
+    "metrics.json holds the run time of each step of tasks_prepare and of the tasks phase",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
@@ -459,6 +464,12 @@ suite("worker tasks run", () => {
       assert.deepEqual(
         metrics.steps.map((entry) => entry.step),
         [
+          "affected.declaration",
+          "setup.entries(live)",
+          "agent.open",
+          "env.setup(live)",
+          "state.open",
+          "units.plan",
           "budget.check",
           "unit.enter",
           "unit.turn",

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
+import { Type } from "@earendil-works/pi-ai";
+import type {
+  AgentToolResult,
+  InlineExtension,
+} from "@earendil-works/pi-coding-agent";
 import { simpleGit } from "simple-git";
 import { CancellationContext } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
+import { HostTool } from "../../worker/contract.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
   anthropicSetup,
@@ -229,4 +235,98 @@ export async function diagnosticOf(
     return { code: coded.code, fields: coded.fields };
   }
   return assert.fail("The run gave no diagnostic.");
+}
+
+export const TURNS_FILE = "turns.jsonl";
+
+export function toolUse(
+  name: string,
+  input: Parameters<typeof fauxToolCall>[1],
+) {
+  return fauxAssistantMessage(fauxToolCall(name, input), {
+    stopReason: "toolUse",
+  });
+}
+
+export function replayOptions(
+  fixture: SeedFixture,
+  turns: string,
+  options: Partial<TasksRunOptions> = {},
+): TasksRunOptions {
+  return runOptions(fixture, {
+    credentialStdin: undefined,
+    replay: turns,
+    output: join(fixture.root, "replay"),
+    verify: true,
+    ...options,
+  });
+}
+
+export function checkOf(folder: string, check: number) {
+  const result = readJson(folder, "result.json") as {
+    checks: { check: number; applies: boolean; passed: boolean }[];
+  };
+  return result.checks.find((entry) => entry.check === check);
+}
+
+export function checkoutOf(folder: string): string {
+  const context = readJson(folder, "context.json") as {
+    input: { checkouts: { directory: string }[] };
+  };
+  return context.input.checkouts[0]!.directory;
+}
+
+export function turnLines(folder: string): Record<string, unknown>[] {
+  return readFileSync(join(folder, TURNS_FILE), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+export interface ToolCounts {
+  openWorld: number;
+  closedWorld: number;
+}
+
+export type OpenWorldAnswer = (count: number) => AgentToolResult<unknown>;
+
+export function openCall(count: number): AgentToolResult<unknown> {
+  return {
+    content: [{ type: "text", text: `open call ${count}` }],
+    details: {},
+  };
+}
+
+export function countedCapabilities(
+  counts: ToolCounts,
+  answer: OpenWorldAnswer = openCall,
+): TasksCommandIo["capabilities"] {
+  const capability: InlineExtension = (pi) => {
+    pi.registerTool({
+      name: HostTool.LinkUpdateList,
+      label: "Open-world test tool",
+      description: "Answer a new value at each call.",
+      parameters: Type.Object({}),
+      annotations: { openWorldHint: true },
+      execute: async () => {
+        counts.openWorld += 1;
+        return answer(counts.openWorld);
+      },
+    });
+    pi.registerTool({
+      name: HostTool.EvidenceUpload,
+      label: "Closed-world test tool",
+      description: "Answer a new value at each call.",
+      parameters: Type.Object({}),
+      annotations: { openWorldHint: false },
+      execute: async () => {
+        counts.closedWorld += 1;
+        return {
+          content: [{ type: "text", text: "closed call" }],
+          details: {},
+        };
+      },
+    });
+  };
+  return () => [capability];
 }

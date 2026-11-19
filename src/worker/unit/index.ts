@@ -61,7 +61,12 @@ export {
   type LocalCredential,
 } from "./tasks-credential.ts";
 export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
-export { readTurns } from "./tasks-turns.ts";
+export {
+  checkFileOptions,
+  checkHeader,
+  readTurns,
+  recordedOptions,
+} from "./tasks-turns-file.ts";
 export {
   defaultCapabilities,
   runTasksLocal,

@@ -1,4 +1,4 @@
-import { readFileSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import {
   type Api,
   type AssistantMessage,
@@ -8,143 +8,41 @@ import {
 } from "@earendil-works/pi-ai";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AgentToolResult } from "@earendil-works/pi-coding-agent";
-import { z } from "zod";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import type { TasksOutput } from "./tasks-output.ts";
 import { tasksDiagnostic, TasksErrorCode } from "./tasks-seed.ts";
+import {
+  type RecordedTurns,
+  type ToolLine,
+  TurnKind,
+  TURNS_VERSION,
+  type TurnsOverrides,
+} from "./tasks-turns-file.ts";
 
-export const TURNS_VERSION = 1;
-export const TurnKind = {
-  Header: "header",
-  Request: "request",
-  Answer: "answer",
-  Tool: "tool",
+export const DivergeReason = {
+  RequestDiffers: "request_differs",
+  RequestExtra: "request_extra",
+  ToolUnrecorded: "tool_unrecorded",
+  RedactedRecord: "redacted_record",
+  TurnsUnused: "turns_unused",
 } as const;
+export type DivergeReason = (typeof DivergeReason)[keyof typeof DivergeReason];
+
+export interface Divergence {
+  turn: number;
+  reason: DivergeReason;
+  step: string | null;
+}
 
 const OUTPUT_TOKEN = "<kanthord:output>";
-const NEWLINE = "\n";
-const NO_TEXT = "";
-const FIRST_LINE = 1;
-const UNTIMED_KEYS: readonly string[] = ["timestamp", "durationMs"];
+const BASH_LOG_TOKEN = "<kanthord:pi-bash-log>";
+const BASH_LOG_PATTERN = /[^\s"\]]*pi-bash-[0-9a-f]+\.log/g;
+const UNSENT_KEYS: readonly string[] = ["timestamp", "durationMs", "details"];
 const STOP_FAILURES: readonly string[] = ["error", "aborted"];
 const DIVERGED = "The replay diverged from the recorded turns.";
-
-const headerSchema = z.strictObject({
-  kind: z.literal(TurnKind.Header),
-  version: z.number().int(),
-});
-const requestSchema = z.strictObject({
-  kind: z.literal(TurnKind.Request),
-  model: z.strictObject({ provider: z.string(), id: z.string() }),
-  messages: z.array(z.looseObject({ role: z.string() })),
-});
-const answerSchema = z.strictObject({
-  kind: z.literal(TurnKind.Answer),
-  message: z.looseObject({
-    role: z.literal("assistant"),
-    content: z.array(z.unknown()),
-    stopReason: z.string(),
-  }),
-});
-const toolSchema = z.strictObject({
-  kind: z.literal(TurnKind.Tool),
-  name: z.string().min(1),
-  call_id: z.string().min(1),
-  result: z.looseObject({ content: z.array(z.unknown()) }).optional(),
-  error: z.string().optional(),
-});
-const lineSchema = z.discriminatedUnion("kind", [
-  requestSchema,
-  answerSchema,
-  toolSchema,
-]);
-type ToolLine = z.infer<typeof toolSchema>;
-
-export interface RecordedTurn {
-  request: string;
-  answer: unknown;
-}
-
-export interface RecordedTurns {
-  turns: RecordedTurn[];
-  tools: Map<string, ToolLine>;
-}
-
-function replayInvalid(fields: [string, string][]) {
-  return tasksDiagnostic(
-    TasksErrorCode.ReplayInvalid,
-    "worker tasks run: the --replay file has another version or an invalid line.",
-    fields,
-  );
-}
-
-function parsedLine(text: string, line: number): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw replayInvalid([["line", String(line)]]);
-  }
-}
-
-function headerOf(lines: readonly string[]): void {
-  const header = headerSchema.safeParse(parsedLine(lines[0] ?? "", FIRST_LINE));
-  if (!header.success) throw replayInvalid([["line", String(FIRST_LINE)]]);
-  if (header.data.version !== TURNS_VERSION)
-    throw replayInvalid([["field", "version"]]);
-}
-
-interface Pairing {
-  recorded: RecordedTurns;
-  pending: string | null;
-}
-
-function addLine(pairing: Pairing, text: string, line: number): void {
-  const parsed = lineSchema.safeParse(parsedLine(text, line));
-  const invalid = () => replayInvalid([["line", String(line)]]);
-  if (!parsed.success) throw invalid();
-  const entry = parsed.data;
-  if (entry.kind === TurnKind.Tool) {
-    if (pairing.recorded.tools.has(entry.call_id)) throw invalid();
-    if ((entry.result === undefined) === (entry.error === undefined))
-      throw invalid();
-    pairing.recorded.tools.set(entry.call_id, entry);
-    return;
-  }
-  if (entry.kind === TurnKind.Request) {
-    if (pairing.pending !== null) throw invalid();
-    pairing.pending = canonicalJSON(entry);
-    return;
-  }
-  if (pairing.pending === null) throw invalid();
-  pairing.recorded.turns.push({
-    request: pairing.pending,
-    answer: entry.message,
-  });
-  pairing.pending = null;
-}
-
-export function readTurns(path: string): RecordedTurns {
-  let text: string;
-  try {
-    text = readFileSync(path, "utf8");
-  } catch {
-    throw replayInvalid([["option", "--replay"]]);
-  }
-  const lines = text.split(NEWLINE);
-  if (lines.at(-1) === NO_TEXT) lines.pop();
-  headerOf(lines);
-  const pairing: Pairing = {
-    recorded: { turns: [], tools: new Map() },
-    pending: null,
-  };
-  lines.slice(FIRST_LINE).forEach((entry, index) => {
-    addLine(pairing, entry, index + FIRST_LINE + FIRST_LINE);
-  });
-  if (pairing.pending !== null)
-    throw replayInvalid([["line", String(lines.length)]]);
-  return pairing.recorded;
-}
+const NEXT_TURN = 1;
+const NO_TOOLS = 0;
 
 class OutputPaths {
   private readonly forms: readonly string[];
@@ -176,14 +74,14 @@ class OutputPaths {
   }
 }
 
-function untimed(message: object): object {
+function sentPart(message: object): object {
   return Object.fromEntries(
-    Object.entries(message).filter(([key]) => !UNTIMED_KEYS.includes(key)),
+    Object.entries(message).filter(([key]) => !UNSENT_KEYS.includes(key)),
   );
 }
 
-function sessionless(_whole: string, rule: string, index: string): string {
-  return `<redacted:${rule}:${index}:session>`;
+function ruleMarker(_whole: string, rule: string): string {
+  return `<redacted:${rule}>`;
 }
 
 function answerStream(message: AssistantMessage): AssistantMessageEventStream {
@@ -205,13 +103,34 @@ function answerStream(message: AssistantMessage): AssistantMessageEventStream {
   return stream;
 }
 
+export function replayDiverged(divergence: Divergence) {
+  return tasksDiagnostic(
+    TasksErrorCode.ReplayDiverged,
+    "worker tasks run: the replay diverged from the recorded turns.",
+    [
+      ["turn", String(divergence.turn)],
+      ["reason", divergence.reason],
+      ...(divergence.step === null
+        ? []
+        : [["step", divergence.step] as [string, string]]),
+    ],
+  );
+}
+
+export interface TurnsHeaderInput {
+  seed_digest: string;
+  overrides: TurnsOverrides;
+}
+
 export interface TurnsInput {
   output: TasksOutput;
+  header: TurnsHeaderInput;
   replay: RecordedTurns | null;
   onDiverged(): void;
 }
 
 type ToolRun = () => Promise<AgentToolResult<unknown>>;
+type ToolRecord = Omit<ToolLine, "kind" | "redacted">;
 
 export class Turns {
   private readonly output: TasksOutput;
@@ -219,7 +138,7 @@ export class Turns {
   private readonly onDiverged: () => void;
   private readonly paths: OutputPaths;
   private position = 0;
-  private hasDiverged = false;
+  private divergence: Divergence | null = null;
   private writeError: unknown = null;
 
   constructor(input: TurnsInput) {
@@ -227,15 +146,35 @@ export class Turns {
     this.replay = input.replay;
     this.onDiverged = input.onDiverged;
     this.paths = new OutputPaths(input.output.folder);
-    this.write({ kind: TurnKind.Header, version: TURNS_VERSION });
+    this.write({
+      kind: TurnKind.Header,
+      version: TURNS_VERSION,
+      ...input.header,
+    });
   }
 
-  get diverged(): boolean {
-    return this.hasDiverged;
+  get diverged(): Divergence | null {
+    return this.divergence;
   }
 
   get failure(): unknown {
     return this.writeError;
+  }
+
+  unused(): boolean {
+    if (this.replay === null) return false;
+    return (
+      this.position < this.replay.turns.length ||
+      this.replay.tools.size > NO_TOOLS
+    );
+  }
+
+  markUnused(): void {
+    this.divergence ??= {
+      turn: this.position,
+      reason: DivergeReason.TurnsUnused,
+      step: null,
+    };
   }
 
   private write(record: unknown): void {
@@ -246,8 +185,19 @@ export class Turns {
     }
   }
 
-  private diverge(): never {
-    this.hasDiverged = true;
+  private writeMarked(record: object, marked: boolean): void {
+    const plain = JSON.parse(JSON.stringify(record)) as object;
+    const changed =
+      canonicalJSON(this.output.redacted(plain)) !== canonicalJSON(plain);
+    this.write(marked || changed ? { ...plain, redacted: true } : plain);
+  }
+
+  private diverge(reason: DivergeReason, turn: number): never {
+    this.divergence ??= {
+      turn,
+      reason,
+      step: this.output.currentStep,
+    };
     this.onDiverged();
     throw new Error(DIVERGED);
   }
@@ -256,20 +206,28 @@ export class Turns {
     const text = JSON.stringify({
       kind: TurnKind.Request,
       model: { provider: model.provider, id: model.id },
-      messages: messages.map(untimed),
+      messages: messages.map(sentPart),
     });
-    return this.output.redacted(
+    const redacted = this.output.redacted(
       JSON.parse(
-        this.paths.hidden(text).replace(SESSION_MARKER_PATTERN, sessionless),
+        this.paths.hidden(text).replace(BASH_LOG_PATTERN, BASH_LOG_TOKEN),
       ),
+    );
+    return JSON.parse(
+      JSON.stringify(redacted).replace(SESSION_MARKER_PATTERN, ruleMarker),
     );
   }
 
   private replayed(request: unknown): AssistantMessageEventStream {
     const turn = this.replay?.turns[this.position];
-    if (turn === undefined || turn.request !== canonicalJSON(request))
-      return this.diverge();
-    this.position += 1;
+    const number = this.position + NEXT_TURN;
+    if (turn === undefined)
+      return this.diverge(DivergeReason.RequestExtra, number);
+    if (turn.request !== canonicalJSON(request))
+      return this.diverge(DivergeReason.RequestDiffers, number);
+    if (turn.redacted)
+      return this.diverge(DivergeReason.RedactedRecord, number);
+    this.position += NEXT_TURN;
     return answerStream(this.paths.show<AssistantMessage>(turn.answer));
   }
 
@@ -282,17 +240,17 @@ export class Turns {
           ? await original(model, context, options)
           : this.replayed(request);
       void stream.result().then((message) => {
-        this.write({
-          kind: TurnKind.Answer,
-          message: this.paths.hide(message),
-        });
+        this.writeMarked(
+          { kind: TurnKind.Answer, message: this.paths.hide(message) },
+          false,
+        );
       });
       return stream;
     };
   }
 
-  private recordTool(line: Omit<ToolLine, "kind">): void {
-    this.write({ kind: TurnKind.Tool, ...line });
+  private recordTool(line: ToolRecord, marked = false): void {
+    this.writeMarked({ kind: TurnKind.Tool, ...line }, marked);
   }
 
   private async liveTool(
@@ -305,7 +263,10 @@ export class Turns {
       this.recordTool({
         name,
         call_id: callId,
-        result: this.paths.hide(result) as ToolLine["result"],
+        result: this.paths.hide({
+          content: result.content,
+          isError: result.isError,
+        }) as ToolLine["result"],
       });
       return result;
     } catch (error) {
@@ -327,16 +288,25 @@ export class Turns {
   ): Promise<AgentToolResult<unknown>> {
     if (this.replay === null) return this.liveTool(name, callId, run);
     const recorded = this.replay.tools.get(callId);
-    if (recorded === undefined || recorded.name !== name) return this.diverge();
+    if (recorded === undefined || recorded.name !== name)
+      return this.diverge(DivergeReason.ToolUnrecorded, this.position);
     this.replay.tools.delete(callId);
-    this.recordTool({
-      name: recorded.name,
-      call_id: recorded.call_id,
-      result: recorded.result,
-      error: recorded.error,
-    });
+    this.recordTool(
+      {
+        name: recorded.name,
+        call_id: recorded.call_id,
+        result: recorded.result,
+        error: recorded.error,
+      },
+      recorded.redacted === true,
+    );
     if (recorded.error !== undefined)
       throw new Error(this.paths.show<string>(recorded.error));
-    return this.paths.show<AgentToolResult<unknown>>(recorded.result);
+    return {
+      ...this.paths.show<Omit<AgentToolResult<unknown>, "details">>(
+        recorded.result,
+      ),
+      details: undefined,
+    };
   }
 }

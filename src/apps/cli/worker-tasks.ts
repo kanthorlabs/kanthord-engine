@@ -1,10 +1,12 @@
-import { readSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, readSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isatty } from "node:tty";
 import { type Command, CommanderError } from "commander";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import {
+  checkFileOptions,
+  checkHeader,
   checkOutputFolder,
   credentialInvalid,
   credentialOf,
@@ -20,6 +22,7 @@ import {
   type LocalTasksInput,
   type ModelRuntimeFactory,
   readTurns,
+  recordedOptions,
   replayCredential,
   RunEndKind,
   runTasksLocal,
@@ -138,11 +141,9 @@ function printInternalError(io: TasksCommandIo): void {
   io.stderr(`${diagnostic(failed)}${NEWLINE}${diagnosticRows(failed)}`);
 }
 
-const OVERRIDE_OPTIONS: readonly (keyof TasksRunOptions)[] = [
+const RECORDED_OPTIONS: readonly (keyof TasksRunOptions)[] = [
   "model",
   "reasoning",
-  "systemPrompt",
-  "templates",
   "budgetTurns",
   "budgetWall",
   "skipReleaseGate",
@@ -151,7 +152,7 @@ const OVERRIDE_OPTIONS: readonly (keyof TasksRunOptions)[] = [
 function modeInvalid(): Diagnostic {
   return tasksDiagnostic(
     TasksErrorCode.ModeInvalid,
-    "worker tasks run: pass exactly one of --replay and --credential-stdin, and no override with --replay.",
+    "worker tasks run: pass exactly one of --replay and --credential-stdin, and no recorded override with --replay.",
   );
 }
 
@@ -161,36 +162,49 @@ function replayPathOf(options: TasksRunOptions, cwd: string): string | null {
   if (live) return null;
   if (
     options.unit.length ||
-    OVERRIDE_OPTIONS.some((name) => options[name] !== undefined)
+    RECORDED_OPTIONS.some((name) => options[name] !== undefined)
   )
     throw modeInvalid();
   return resolve(cwd, options.replay!);
 }
 
+function realPathOf(path: string): string {
+  const parent = dirname(path);
+  if (existsSync(path) || parent === path) return realpathSync(path);
+  return join(realPathOf(parent), basename(path));
+}
+
+function within(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(`${folder}${sep}`);
+}
+
+function checkReplayOutput(folder: string, output: string): void {
+  const recorded = realPathOf(folder);
+  const target = realPathOf(output);
+  if (within(recorded, target) || within(target, recorded))
+    throw tasksDiagnostic(
+      TasksErrorCode.OptionInvalid,
+      "worker tasks run: --output and the folder of the --replay file hold one another.",
+      [["option", "--output"]],
+    );
+}
+
 interface ModeInput {
-  replayPath: string | null;
+  replay: LocalTasksInput["replay"];
   plan: TasksPlan;
   io: TasksCommandIo;
 }
 
-function modeOf(input: ModeInput): {
-  credential: LocalCredential;
-  replay: LocalTasksInput["replay"];
-} {
-  const { replayPath, plan, io } = input;
-  if (replayPath === null)
-    return { credential: credentialOf(stdinOf(io), plan), replay: null };
-  const folder = dirname(replayPath);
-  if (folder === plan.output)
-    throw tasksDiagnostic(
-      TasksErrorCode.OptionInvalid,
-      "worker tasks run: --output names the folder of the --replay file.",
-      [["option", "--output"]],
-    );
-  return {
-    credential: replayCredential(plan),
-    replay: { turns: readTurns(replayPath), folder },
-  };
+function credentialOfMode(input: ModeInput): LocalCredential {
+  const { replay, plan, io } = input;
+  return replay === null
+    ? credentialOf(stdinOf(io), plan)
+    : replayCredential(plan);
+}
+
+function recordedReplay(replayPath: string | null): LocalTasksInput["replay"] {
+  if (replayPath === null) return null;
+  return { turns: readTurns(replayPath), folder: dirname(replayPath) };
 }
 
 async function localEnd(input: LocalTasksInput): Promise<LocalTasksEnd> {
@@ -211,15 +225,26 @@ export async function tasksRun(
   options: TasksRunOptions,
   io: TasksCommandIo,
 ): Promise<TasksExit> {
-  const replayPath = replayPathOf(options, io.cwd);
+  const replay = recordedReplay(replayPathOf(options, io.cwd));
+  if (replay !== null) checkFileOptions(replay.turns.header, options);
   const plan = await tasksPlanOf(
-    planOptions(seedFolder, options, io.cwd),
+    planOptions(
+      seedFolder,
+      replay === null
+        ? options
+        : { ...options, ...recordedOptions(replay.turns.header) },
+      io.cwd,
+    ),
     Date.now(),
   );
+  if (replay !== null) {
+    checkHeader(replay.turns.header, plan);
+    checkReplayOutput(replay.folder, plan.output);
+  }
   checkOutputFolder(plan.output, plan.force);
   const passed = passedValues(plan.passEnv, io.shellEnv);
   const passValues = knownPassValues(Object.values(passed));
-  const { credential, replay } = modeOf({ replayPath, plan, io });
+  const credential = credentialOfMode({ replay, plan, io });
   const env = { ...shellOf(io.shellEnv), ...passed };
   const output = TasksOutput.create(
     plan.output,

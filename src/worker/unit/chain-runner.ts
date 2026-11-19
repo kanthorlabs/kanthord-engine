@@ -34,6 +34,7 @@ import {
   ExecutionEndKind,
   ExecutionStop,
 } from "./execution-stop.ts";
+import type { StepWatch } from "./foundry.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import { Phase } from "./telemetry.ts";
 
@@ -48,6 +49,7 @@ export interface ChainIo<P extends CommonPorts = CommonPorts> {
   resources: AsyncDisposableStack;
   host: StepHost;
   ports: P;
+  steps?: StepWatch;
 }
 
 interface Walk<P extends CommonPorts = CommonPorts> {
@@ -123,6 +125,7 @@ async function walkStep(
   const { run } = walk.io;
   const context = stepContext(walk, step);
   walk.step = step.id;
+  walk.io.steps?.started(step.id);
   try {
     const result = await stepResult(walk, step, { context, holder });
     Object.assign(walk.ctx, result.patch);
@@ -133,6 +136,7 @@ async function walkStep(
     return result.kind;
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
+    walk.io.steps?.ended(step.id, holder.scope);
   }
 }
 

@@ -234,6 +234,10 @@ export class TasksOutput {
     this.step = step;
   }
 
+  get currentStep(): string | null {
+    return this.step;
+  }
+
   turn(record: unknown): void {
     appendFileSync(
       join(this.folder, OutputFile.Turns),

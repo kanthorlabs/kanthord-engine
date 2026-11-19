@@ -1,6 +1,12 @@
 import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { simpleGit } from "simple-git";
+import { childEnvironment } from "../../agent/environment.ts";
 import { background } from "../../kernel/context.ts";
+import {
+  GIT_UNSAFE_OPTIONS,
+  isolatedGitEnvironment,
+} from "../../kernel/git-environment.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import { type ChainNode, type ChainStep, NodeKind } from "./chain.ts";
 import { tasksPrepareChain } from "./chain-tasks-prepare.ts";
@@ -64,6 +70,44 @@ const NO_OPERATIONS = 0;
 const COMMIT_SEPARATOR = "\0";
 const FIELD_SEPARATOR = "\n";
 const COMMIT_FORMAT = "--format=%H%n%T%n%B";
+const CONFIG_COUNT = "GIT_CONFIG_COUNT";
+const NO_CONFIG = 0;
+const SIGNATURE_OFF: readonly (readonly [string, string])[] = [
+  ["log.showSignature", "false"],
+  ["gpg.program", "false"],
+  ["gpg.ssh.program", "false"],
+  ["gpg.x509.program", "false"],
+];
+
+function signatureOffEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const base = isolatedGitEnvironment(childEnvironment(env));
+  const start = Number(base[CONFIG_COUNT] ?? NO_CONFIG);
+  const added = Object.fromEntries(
+    SIGNATURE_OFF.flatMap(([key, value], index) => [
+      [`GIT_CONFIG_KEY_${start + index}`, key],
+      [`GIT_CONFIG_VALUE_${start + index}`, value],
+    ]),
+  );
+  return {
+    ...base,
+    ...added,
+    [CONFIG_COUNT]: String(start + SIGNATURE_OFF.length),
+  };
+}
+
+function commitLog(
+  directory: string,
+  range: string,
+  input: VerifyInput,
+): Promise<string> {
+  return simpleGit({
+    baseDir: directory,
+    timeout: { block: VERIFY_DEADLINE_MS },
+    unsafe: { ...GIT_UNSAFE_OPTIONS, allowUnsafeGpgProgram: true },
+  })
+    .env(signatureOffEnvironment(input.env))
+    .raw(["log", "-z", COMMIT_FORMAT, range]);
+}
 const REQUESTED_STOPS: readonly string[] = [
   EndReason.WorkerStopped,
   EndReason.HumanPaused,
@@ -172,15 +216,10 @@ async function commitsOf(
   const named = new Map<string, string>();
   const lists: string[][] = [];
   for (const checkout of input.trees.workspace.checkouts) {
-    const log = await localGit(
+    const log = await commitLog(
       join(folder, relative(input.output, checkout.directory)),
-      [
-        "log",
-        "-z",
-        COMMIT_FORMAT,
-        `${input.plan.seed.heads[checkout.binding_id]}..HEAD`,
-      ],
-      gitCall(input),
+      `${input.plan.seed.heads[checkout.binding_id]}..HEAD`,
+      input,
     );
     const list = log
       .split(COMMIT_SEPARATOR)

@@ -83,7 +83,8 @@ import {
   unlockTree,
 } from "./tasks-trees.ts";
 import { StepRecord } from "./tasks-steps.ts";
-import { type RecordedTurns, Turns } from "./tasks-turns.ts";
+import { replayDiverged, Turns } from "./tasks-turns.ts";
+import type { RecordedTurns, TurnsOverrides } from "./tasks-turns-file.ts";
 import {
   type CheckResult,
   type RunEnd,
@@ -522,8 +523,13 @@ function composedOf(input: LocalTasksInput): {
   ];
   const knownSecrets = async () => secrets;
   const stop = new CancellationContext(input.stop);
+  const steps = new StepRecord(output);
   const turns = new Turns({
     output,
+    header: {
+      seed_digest: plan.digest,
+      overrides: plan.overrides as TurnsOverrides,
+    },
     replay: input.replay?.turns ?? null,
     onDiverged: () =>
       stop.cancel(new ExecutionStop(EndReason.WorkerStopped, null)),
@@ -598,9 +604,10 @@ function composedOf(input: LocalTasksInput): {
       budget,
       env,
       turns,
-      steps: new StepRecord(output),
+      steps,
       replay: input.replay,
       io: {
+        steps,
         run,
         budget,
         capabilities,
@@ -688,6 +695,7 @@ function diagnosticEnd(target: RunTarget, error: Diagnostic): Diagnostic {
       exitCode: TasksExit.Diagnostic,
     }),
     code: error.code,
+    fields: Object.fromEntries(error.fields),
   });
   return error;
 }
@@ -769,11 +777,9 @@ async function endedRun(composed: Composed): Promise<LocalTasksEnd> {
   }
   const end = await tasksEnd(composed, trees);
   if (composed.turns.failure !== null) throw composed.turns.failure;
-  if (composed.turns.diverged)
-    throw tasksDiagnostic(
-      TasksErrorCode.ReplayDiverged,
-      "worker tasks run: a model request differs from the recorded request.",
-    );
+  const { turns } = composed;
+  if (end.end === RunEndKind.Completed && turns.unused()) turns.markUnused();
+  if (turns.diverged !== null) throw replayDiverged(turns.diverged);
   const checks = plan.verify
     ? await verifyRun({
         end,
