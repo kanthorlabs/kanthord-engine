@@ -10,6 +10,7 @@ import {
   type ExecutionEnds,
   FINDING_IDENTITY_PREFIX,
   FindingAction,
+  FindingKind,
   FindingRoute,
   type FindingSubmit,
   type GateFiles,
@@ -51,6 +52,7 @@ import {
   insertOutcome,
   type OutcomeRow,
   readAssessmentRound,
+  readExecutionAssessmentsOfAttempt,
   readLandedCommitEvidence,
   readRequests,
 } from "./record-store.ts";
@@ -77,6 +79,7 @@ function routeOf(
     proposed.has(finding.label)
   )
     return FindingRoute.Record;
+  if (finding.action === FindingAction.Person) return FindingRoute.Report;
   if (!reworkDue) return FindingRoute.Report;
   return intent === Intent.Implement ? FindingRoute.Fix : FindingRoute.Record;
 }
@@ -117,6 +120,8 @@ interface ReworkFacts {
   reworks: number;
   reworkLimit: number;
   actionItems: number;
+  personOnly: boolean;
+  unchanged: boolean;
   result: AssessmentResult;
   intent: Intent;
 }
@@ -154,11 +159,40 @@ function actionItemCount(
   );
 }
 
+function personOnlyOf(body: AssessmentSubmit, actionItems: number): boolean {
+  return (
+    body.result === AssessmentResult.CriterionNotMet &&
+    actionItems === NO_ACTION_ITEMS &&
+    body.findings.some(
+      (finding) =>
+        kindOfLabel(finding.label) === FindingKind.Blocker &&
+        finding.action === FindingAction.Person,
+    )
+  );
+}
+
+function unchangedOf(scope: SubmitScope, assessment: AssessmentRow): boolean {
+  if (scope.body.result !== AssessmentResult.Success) return false;
+  const earlier = readExecutionAssessmentsOfAttempt(
+    scope.tx,
+    scope.node.id,
+    scope.attempt.attempt,
+    AssessmentResult.Success,
+  )
+    .filter((row) => row.id !== assessment.id)
+    .at(-1);
+  return (
+    earlier !== undefined &&
+    earlier.tested_input === canonicalJSON(scope.body.tested_input)
+  );
+}
+
 function reworkFactsOf(scope: SubmitScope, source: ReworkSource): ReworkFacts {
   const { tx, node, attempt, body, dependencies } = scope;
   const { assessment, open, current } = source;
   const round = readAssessmentRound(tx, assessment);
   assert.ok(round !== null);
+  const actionItems = actionItemCount(body, open);
   return {
     current,
     reworks: round - FIRST_ROUND,
@@ -166,7 +200,9 @@ function reworkFactsOf(scope: SubmitScope, source: ReworkSource): ReworkFacts {
     reworkLimit: dependencies.config.rework_limit,
     planDefect: current && body.cause?.category === CauseCategory.Plan,
     intent: scope.revision.content.intent,
-    actionItems: actionItemCount(body, open),
+    actionItems,
+    personOnly: personOnlyOf(body, actionItems),
+    unchanged: unchangedOf(scope, assessment),
     result: body.result,
   };
 }
@@ -178,6 +214,8 @@ function reworkDueOf(facts: ReworkFacts): boolean {
     facts.actionItems > NO_ACTION_ITEMS;
   return (
     facts.current &&
+    !facts.personOnly &&
+    !facts.unchanged &&
     !facts.requested &&
     !facts.planDefect &&
     facts.reworks < facts.reworkLimit &&
@@ -186,6 +224,7 @@ function reworkDueOf(facts: ReworkFacts): boolean {
 }
 
 function limitedOf(facts: ReworkFacts): TransitionLimit {
+  if (facts.personOnly) return null;
   if (facts.planDefect)
     return { rule: TransitionRule.PlanDefect, count: null, limit: null };
   if (facts.result !== AssessmentResult.CriterionNotMet || facts.requested)

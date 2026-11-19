@@ -691,7 +691,14 @@ async function liveStopUnit(
         }),
       "execution.rework_assessment.get": async () => completed(null),
       "execution.review_round.get": async () =>
-        completed({ round: 1, final: false, review_base: null, findings: [] }),
+        completed({
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+        }),
       "evidence.submit": async () =>
         completed({ evidence: { id: "verification" } }),
       "assessment.submit": async (input: { body: unknown }) => {

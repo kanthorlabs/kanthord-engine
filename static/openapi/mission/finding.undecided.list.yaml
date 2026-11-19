@@ -146,6 +146,7 @@ components:
                 enum:
                   - yes
                   - no
+                  - person
               task_id:
                 anyOf:
                   - type: string

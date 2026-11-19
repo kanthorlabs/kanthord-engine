@@ -30,7 +30,11 @@ import {
   DEFAULT_SSH_PORT,
   LOCAL_GIT_SSH_ACCESS,
 } from "../../repository/sshd-test-support.ts";
-import type { Revision, TaskContent } from "../../mission/contract.ts";
+import type {
+  EarlierVerdict,
+  Revision,
+  TaskContent,
+} from "../../mission/contract.ts";
 import {
   anthropicSetup,
   TEST_SSH_HOST_KEY,
@@ -412,6 +416,8 @@ async function openExecution(
     ...workspace,
     verdict: null as Verdict | null,
     cleared: null as string | null,
+    unblockReason: null as string | null,
+    earlierVerdicts: [] as EarlierVerdict[],
     unchangedTurns: 0,
     refreshed: null as RefreshResult | null,
     lastVerification: null as VerificationFacts,

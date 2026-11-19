@@ -41,6 +41,8 @@ function capture(t: TestContext) {
           final: false,
           review_base: null,
           findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
         });
       if (path.endsWith("/decide"))
         return Response.json(decidedFinding(path.split("/").at(-2)!));

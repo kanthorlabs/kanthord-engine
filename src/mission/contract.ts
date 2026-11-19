@@ -1741,7 +1741,11 @@ export const FindingKind = {
 } as const;
 export const findingKindSchema = z.enum(FindingKind);
 export type FindingKind = z.infer<typeof findingKindSchema>;
-export const FindingAction = { Yes: "yes", No: "no" } as const;
+export const FindingAction = {
+  Yes: "yes",
+  No: "no",
+  Person: "person",
+} as const;
 export const findingActionSchema = z.enum(FindingAction);
 export type FindingAction = z.infer<typeof findingActionSchema>;
 export const FindingGround = {
@@ -1826,11 +1830,21 @@ export const findingSchema = z.strictObject({
   decided_at: timestamp.nullable(),
 });
 export type Finding = z.infer<typeof findingSchema>;
+export const earlierVerdictSchema = z.strictObject({
+  attempt: z.number().int().positive(),
+  round: z.number().int().positive(),
+  result: assessmentResultSchema,
+  rationale: textSchema,
+  findings: z.array(findingSchema),
+});
+export type EarlierVerdict = z.infer<typeof earlierVerdictSchema>;
 export const reviewRoundSchema = z.strictObject({
   round: z.number().int().positive(),
   final: z.boolean(),
   review_base: testedInputSchema.nullable(),
   findings: z.array(findingSchema),
+  unblock_reason: textSchema.nullable(),
+  earlier_verdicts: z.array(earlierVerdictSchema),
 });
 export type ReviewRound = z.infer<typeof reviewRoundSchema>;
 export const findingDecideSchema = z.strictObject({
