@@ -69,7 +69,11 @@ import {
   type ToolDecision,
 } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
-import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
+import type {
+  ComposeOptions,
+  PromptPartAnswer,
+  PromptTemplates,
+} from "../agent/contract.ts";
 import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
 import { renderTemplate } from "../agent/prompt-templates.ts";
 import {
@@ -307,7 +311,10 @@ export interface Dependencies {
   stateDirectory: string;
   hostHome?: string;
   agentPrompt: {
-    compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
+    compose(
+      agentName: string,
+      options: ComposeOptions,
+    ): Promise<PromptPartAnswer[]>;
     templates(context: Context): Promise<PromptTemplates>;
   };
   agentConfiguration: {
@@ -1522,7 +1529,7 @@ export class WorkbenchService implements Service {
       const hostHome = this.dependencies.hostHome ?? homedir();
       const composed = await this.dependencies.agentPrompt.compose(
         session.agentName,
-        context,
+        { context, variant: null },
       );
       const parts = isPhase ? withoutOfferAction(composed) : composed;
       const templates = await this.dependencies.agentPrompt.templates(context);

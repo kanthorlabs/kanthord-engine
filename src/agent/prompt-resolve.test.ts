@@ -121,6 +121,7 @@ test("the references of a composition resolve to the composed text", async (t) =
       templates: SHIPPED_TEMPLATE_SET,
       directory,
       workbench: false,
+      variant: null,
       context: background,
     })),
     ...bindingParts(
@@ -180,6 +181,7 @@ test("each origin resolves its text and its layer and heading", async () => {
             templates: SHIPPED_TEMPLATE_SET,
             directory: null,
             workbench: false,
+            variant: null,
             context: background,
           })
         )[0]!.digest!,
@@ -274,6 +276,7 @@ test("a text whose digest or source changed resolves as changed with no text and
     templates: SHIPPED_TEMPLATE_SET,
     directory,
     workbench: false,
+    variant: null,
     context: background,
   });
   assert.equal(role!.origin, PromptOrigin.File);
@@ -341,6 +344,7 @@ test("an invalid source resolves as invalid and an unreachable remote as unreach
     templates: SHIPPED_TEMPLATE_SET,
     directory,
     workbench: false,
+    variant: null,
     context: background,
   });
   const framing = framingPart(
@@ -415,6 +419,7 @@ test("the resolved swe@1 prompt forbids a merge of another branch and the resolv
       templates: SHIPPED_TEMPLATE_SET,
       directory: null,
       workbench: false,
+      variant: null,
       context: background,
     });
     const role = await resolveReference(referenceOf(parts[2]!), readers());
@@ -438,6 +443,7 @@ test("(invariant guard) a recorded identity part resolves to the same text", asy
     templates: SHIPPED_TEMPLATE_SET,
     directory: null,
     workbench: false,
+    variant: null,
     context: background,
   });
   assert.equal(identity!.part, PromptPart.Identity);

@@ -338,6 +338,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
           templates: SHIPPED_TEMPLATE_SET,
           directory: promptDirectory,
           workbench: false,
+          variant: null,
           context: background,
         }),
     },

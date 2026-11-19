@@ -230,6 +230,7 @@ function fixture(
         templates: SHIPPED_TEMPLATE_SET,
         directory: state.promptDirectory ?? null,
         workbench: false,
+        variant: null,
         context,
       }),
     repositoryPromptsOf: (_tx, bindingId) =>

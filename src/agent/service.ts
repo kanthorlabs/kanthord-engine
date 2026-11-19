@@ -44,6 +44,7 @@ import {
   type AgentSelection,
   type AgentView,
   type ApprovedModelsFn,
+  type ComposeOptions,
   type CooldownChange,
   CooldownChangeKind,
   type CopyHeldFn,
@@ -61,6 +62,7 @@ import {
   PromptPartState,
   type PromptRecord,
   type PromptTemplates,
+  type PromptVariant,
   PromptView,
   type ProviderCapabilityFn,
   type ProviderHealthCheckFn,
@@ -1300,8 +1302,9 @@ export class AgentComponent {
   async composePrompt(
     agentName: string,
     consumer: PromptConsumer,
-    context: Context,
+    options: ComposeOptions,
   ): Promise<PromptPartAnswer[]> {
+    const { context, variant } = options;
     const agent = getAgentDeclaration(agentName);
     assert.ok(agent);
     const directory = agent.internal ? null : this.agentDirectory();
@@ -1313,15 +1316,30 @@ export class AgentComponent {
       ),
       directory,
       workbench: consumer === PromptConsumer.Workbench,
+      variant,
       context,
     });
+  }
+
+  private variantOf(agentName: string, variantId: string): PromptVariant {
+    const row = this.dependencies.store.transaction((tx) =>
+      getVariant(tx, variantId),
+    );
+    if (row?.agent_name === agentName)
+      return { display_name: row.display_name, instruction: row.instruction };
+    throw new OperationError(
+      HttpStatus.NotFound,
+      AgentErrorCode.VariantNotFound,
+      "The agent variant does not exist.",
+    );
   }
 
   private async agentPromptOf(
     declaration: AgentDeclaration,
     query: (typeof agentOperations)["get"]["input"]["_output"]["query"],
-    context: Context,
+    options: ComposeOptions,
   ): Promise<{ parts: PromptPartAnswer[]; final: string | null }> {
+    const { context } = options;
     if (declaration.internal && query.task === GuardTask.Summary) {
       const parts = [guardSummaryPart()];
       return { parts, final: parts[0]!.text };
@@ -1330,7 +1348,7 @@ export class AgentComponent {
       const parts = await this.composePrompt(
         declaration.agent_name,
         PromptConsumer.Worker,
-        context,
+        { context, variant: null },
       );
       return { parts, final: parts[0]!.text };
     }
@@ -1341,7 +1359,7 @@ export class AgentComponent {
         : PromptConsumer.Worker;
     const files = await this.instructionFilesOf(stack?.targets ?? [], context);
     const parts = [
-      ...(await this.composePrompt(declaration.agent_name, consumer, context)),
+      ...(await this.composePrompt(declaration.agent_name, consumer, options)),
       ...bindingParts(stack?.repositories ?? [], declaration.agent_name, files),
       await this.promptFraming(consumer, context),
     ];
@@ -1522,11 +1540,14 @@ export class AgentComponent {
           params.agent_name,
         );
         assert.equal(declaration.agent_name, params.agent_name);
-        const { parts, final } = await this.agentPromptOf(
-          declaration,
-          query,
-          caller.context,
-        );
+        const variant =
+          query.variant_id === undefined
+            ? null
+            : this.variantOf(params.agent_name, query.variant_id);
+        const { parts, final } = await this.agentPromptOf(declaration, query, {
+          context: caller.context,
+          variant,
+        });
         return caller.commit((tx) => {
           const row = getEnablement(tx, params.agent_name);
           const view = this.agentView(

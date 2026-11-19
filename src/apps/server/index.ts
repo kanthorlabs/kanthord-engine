@@ -989,7 +989,10 @@ export function composeServices(options: ComposeServicesOptions) {
     config: options.config.worker,
     agentPrompt: {
       compose: (name, context) =>
-        agent.composePrompt(name, PromptConsumer.Worker, context),
+        agent.composePrompt(name, PromptConsumer.Worker, {
+          context,
+          variant: null,
+        }),
       templates: (context) => agent.promptTemplates(context),
       framing: (context) => agent.promptFraming(PromptConsumer.Worker, context),
     },
@@ -1288,7 +1291,10 @@ export function composeServices(options: ComposeServicesOptions) {
       }),
     serverAgentCredentials: (input) => custody.serverAgentCredentials(input),
     composePrompt: (name, context) =>
-      agent.composePrompt(name, PromptConsumer.Worker, context),
+      agent.composePrompt(name, PromptConsumer.Worker, {
+        context,
+        variant: null,
+      }),
     repositoryPromptsOf: (tx, id) => project.repositoryPolicyOf(tx, id),
     instructionFileOf: (bindingId, commit, context) =>
       project.instructionFileOf(bindingId, commit, context),
@@ -1413,8 +1419,8 @@ export function composeServices(options: ComposeServicesOptions) {
     logger: options.logger,
     stateDirectory: options.stateDirectory,
     agentPrompt: {
-      compose: (name, context) =>
-        agent.composePrompt(name, PromptConsumer.Workbench, context),
+      compose: (name, options) =>
+        agent.composePrompt(name, PromptConsumer.Workbench, options),
       templates: (context) => agent.promptTemplates(context),
     },
     agentConfiguration: {

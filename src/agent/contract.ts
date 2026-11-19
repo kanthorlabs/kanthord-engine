@@ -64,6 +64,7 @@ export const PromptPart = {
   Standard: "standard",
   Identity: "identity",
   Role: "role",
+  Variant: "variant",
   Workbench: "workbench",
   InstructionFile: "instruction_file",
   Repository: "repository",
@@ -71,6 +72,12 @@ export const PromptPart = {
   Framing: "framing",
 } as const;
 export type PromptPart = (typeof PromptPart)[keyof typeof PromptPart];
+
+export type PromptVariant = { display_name: string; instruction: string };
+export type ComposeOptions = {
+  context: Context;
+  variant: PromptVariant | null;
+};
 
 export const PromptLayer = {
   KanthorD: 1,
@@ -649,6 +656,7 @@ export const agentOperations = {
           binding_id: z.string().min(1).optional(),
           node_id: z.string().min(1).optional(),
           attempt: z.coerce.number().int().positive().optional(),
+          variant_id: identitySchema(AGENT_VARIANT_PREFIX).optional(),
         })
         .refine(
           ({ project_id, binding_id }) =>
@@ -672,6 +680,18 @@ export const agentOperations = {
           {
             path: ["node_id"],
             message: "The query node_id excludes project_id and binding_id.",
+          },
+        )
+        .refine(
+          ({ variant_id, project_id, binding_id, node_id }) =>
+            variant_id === undefined ||
+            (project_id === undefined &&
+              binding_id === undefined &&
+              node_id === undefined),
+          {
+            path: ["variant_id"],
+            message:
+              "The query variant_id excludes project_id, binding_id and node_id.",
           },
         ),
       body: z.null(),

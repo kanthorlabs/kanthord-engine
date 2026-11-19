@@ -4,6 +4,11 @@ import {
   AGENT_VARIANT_PREFIX,
   AgentErrorCode,
   agentOperations,
+  PromptLayer,
+  PromptOrigin,
+  PromptPart,
+  type PromptPartAnswer,
+  PromptPartState,
 } from "../../agent/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
@@ -19,6 +24,15 @@ const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const BASE = "ops@1";
 const NAME = "Planner";
 const INSTRUCTION = "Plan first.";
+const NIGHT_OPS = "Night Ops";
+const VARIANT_PARTS = [
+  PromptPart.Standard,
+  PromptPart.Identity,
+  PromptPart.Role,
+  PromptPart.Variant,
+  PromptPart.Workbench,
+  PromptPart.Framing,
+];
 const FIRST_REVISION = 1;
 const SECOND_REVISION = 2;
 const MALFORMED_ID = "not-a-variant-id";
@@ -55,11 +69,15 @@ function call(
   });
 }
 
-async function createRow(fixture: Fixture, name = NAME): Promise<Row> {
+async function createRow(
+  fixture: Fixture,
+  name = NAME,
+  options: { agentName?: string; instruction?: string } = {},
+): Promise<Row> {
   const response = await call(fixture, "POST", VARIANT_PATH, {
-    agent_name: BASE,
+    agent_name: options.agentName ?? BASE,
     display_name: name,
-    instruction: INSTRUCTION,
+    instruction: options.instruction ?? INSTRUCTION,
   });
   assert.equal(response.status, HttpStatus.OK);
   return (await response.json()) as Row;
@@ -192,4 +210,64 @@ test("(security) a machine token answers 401 on each variant route", async (t) =
     assert.equal(response.status, HttpStatus.Unauthorized, operation.id);
     assert.equal((await errorOf(response)).code, UNAUTHORIZED);
   }
+});
+
+async function variantPrompt(
+  fixture: Fixture,
+  row: Row,
+): Promise<{ parts: PromptPartAnswer[]; final: string }> {
+  const response = await call(
+    fixture,
+    "GET",
+    `/api/agent/${row.agent_name}?variant_id=${row.id}`,
+  );
+  assert.equal(response.status, HttpStatus.OK);
+  return (
+    (await response.json()) as {
+      prompt: { parts: PromptPartAnswer[]; final: string };
+    }
+  ).prompt;
+}
+
+test("agent.get with variant_id lists the variant part and renders the variant name in identity", async (t) => {
+  const fixture = await setup(t);
+  const row = await createRow(fixture, NIGHT_OPS);
+  const { parts, final } = await variantPrompt(fixture, row);
+  assert.deepEqual(
+    parts.map(({ part }) => part),
+    VARIANT_PARTS,
+  );
+  const variant = parts.find(({ part }) => part === PromptPart.Variant);
+  assert.equal(variant?.layer, PromptLayer.KanthorD);
+  assert.equal(variant?.origin, PromptOrigin.Database);
+  assert.equal(variant?.state, PromptPartState.Resolved);
+  assert.equal(variant?.name, NIGHT_OPS);
+  assert.equal(variant?.text, INSTRUCTION);
+  const identity = parts.find(({ part }) => part === PromptPart.Identity);
+  assert.match(identity?.text ?? "", new RegExp(NIGHT_OPS));
+  assert.doesNotMatch(identity?.text ?? "", /Yumi/);
+  assert.match(final, new RegExp(INSTRUCTION));
+});
+
+test("(security) a template placeholder in the instruction stays literal in the variant part", async (t) => {
+  const fixture = await setup(t);
+  const instruction = "Call yourself {{display_name}}.";
+  const row = await createRow(fixture, NIGHT_OPS, { instruction });
+  const { parts } = await variantPrompt(fixture, row);
+  assert.equal(
+    parts.find(({ part }) => part === PromptPart.Variant)?.text,
+    instruction,
+  );
+});
+
+test("(security) a variant of another agent answers 404 agent.variant.not_found", async (t) => {
+  const fixture = await setup(t);
+  const row = await createRow(fixture, NIGHT_OPS, { agentName: "re@1" });
+  const response = await call(
+    fixture,
+    "GET",
+    `${SWE_PATH}?variant_id=${row.id}`,
+  );
+  assert.equal(response.status, HttpStatus.NotFound);
+  assert.equal((await errorOf(response)).code, AgentErrorCode.VariantNotFound);
 });
