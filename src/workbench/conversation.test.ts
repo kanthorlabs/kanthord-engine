@@ -97,6 +97,7 @@ test("security: H1 @Guard answers 404 agent.catalog.not_found because guard@1 st
         agentConfiguration: {
           validateEntry: () => assert.fail("no agent resolved"),
         } as never,
+        agentVariant: () => null,
         agentVariants: () => [],
       }),
     (error) =>

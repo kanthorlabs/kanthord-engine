@@ -144,10 +144,40 @@ function workbenchMentionNames(
   return [...catalog, ...variants];
 }
 
+export interface MentionTarget {
+  agent_name: string;
+  variant_id: string | null;
+}
+
+export function variantNotFound(variantId: string): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    AgentErrorCode.VariantNotFound,
+    "The agent variant does not exist.",
+    { variant_id: variantId },
+  );
+}
+
+export function validateMention(
+  tx: Transaction,
+  target: MentionTarget,
+  dependencies: Pick<Dependencies, "agentConfiguration" | "agentVariant">,
+): void {
+  if (
+    target.variant_id !== null &&
+    dependencies.agentVariant(tx, target.variant_id) === null
+  )
+    throw variantNotFound(target.variant_id);
+  dependencies.agentConfiguration.validateEntry(tx, target.agent_name, null);
+}
+
 export function resolveMention(
   tx: Transaction,
   text: string,
-  dependencies: Pick<Dependencies, "agentConfiguration" | "agentVariants">,
+  dependencies: Pick<
+    Dependencies,
+    "agentConfiguration" | "agentVariant" | "agentVariants"
+  >,
 ): MentionMatch | null {
   const mention = leadingMention(text, workbenchMentionNames(tx, dependencies));
   if (mention === null) return null;
@@ -158,7 +188,7 @@ export function resolveMention(
       "Agent not found.",
       { mention: mention.mention },
     );
-  dependencies.agentConfiguration.validateEntry(tx, mention.agent_name, null);
+  validateMention(tx, mention, dependencies);
   return {
     agent_name: mention.agent_name,
     display_name: mention.display_name,
@@ -183,25 +213,41 @@ function holdsBuiltinTool(declaration: AgentDeclaration): boolean {
   return declaration.tools.builtin.length > NO_CHARACTERS;
 }
 
-export function resolveGuestMention(
-  tx: Transaction,
-  text: string,
-  dependencies: Pick<
-    Dependencies,
-    "agentConfiguration" | "agentVariants" | "declarationOf"
-  >,
-): MentionMatch | null {
-  const mention = resolveMention(tx, text, dependencies);
-  if (
-    mention !== null &&
-    holdsBuiltinTool(declared(dependencies.declarationOf, mention.agent_name))
-  )
+function refuseBuiltinToolAgent(
+  declarationOf: DeclarationOf,
+  agentName: string,
+): void {
+  if (holdsBuiltinTool(declared(declarationOf, agentName)))
     throw new OperationError(
       HttpStatus.Conflict,
       WorkbenchErrorCode.GuestAgentRefused,
       "A guest cannot mention an agent that holds a built-in tool.",
-      { agent_name: mention.agent_name },
+      { agent_name: agentName },
     );
+}
+
+type GuestMentionDependencies = Pick<
+  Dependencies,
+  "agentConfiguration" | "agentVariant" | "agentVariants" | "declarationOf"
+>;
+
+export function validateGuestMention(
+  tx: Transaction,
+  target: MentionTarget,
+  dependencies: GuestMentionDependencies,
+): void {
+  validateMention(tx, target, dependencies);
+  refuseBuiltinToolAgent(dependencies.declarationOf, target.agent_name);
+}
+
+export function resolveGuestMention(
+  tx: Transaction,
+  text: string,
+  dependencies: GuestMentionDependencies,
+): MentionMatch | null {
+  const mention = resolveMention(tx, text, dependencies);
+  if (mention !== null)
+    refuseBuiltinToolAgent(dependencies.declarationOf, mention.agent_name);
   return mention;
 }
 

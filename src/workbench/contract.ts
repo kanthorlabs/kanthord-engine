@@ -444,6 +444,7 @@ export const queuedMessageSchema = z.strictObject({
   id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
   text: z.string(),
   agent_name: z.string().nullable(),
+  variant_id: z.string().nullable(),
   display_name: z.string().nullable(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
