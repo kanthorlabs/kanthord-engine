@@ -6,7 +6,7 @@ import {
   type FailureCause,
   unattributed,
 } from "../../kernel/cause.ts";
-import { UnmetGround } from "./judgement.ts";
+import { isBlockerLabel, UnmetGround } from "./judgement.ts";
 import type { AffectedVerdict } from "./affected.ts";
 import { VerificationClass } from "./verification.ts";
 
@@ -30,9 +30,11 @@ export interface EvaluationFacts {
   round: number;
   final_round: boolean;
   action_labels: string[];
+  person_labels: string[];
   fixed_count: number;
 }
 
+const NO_BLOCKERS = 0;
 const GROUND_CAUSES: Readonly<
   Record<UnmetGround, [CauseCategory, CauseSubcategory]>
 > = {
@@ -55,6 +57,15 @@ const PLAN_GROUNDS: readonly UnmetGround[] = [
   UnmetGround.Unstated,
 ];
 
+function personOnlyBlockers(facts: EvaluationFacts): boolean {
+  const personBlockers = facts.person_labels.filter(isBlockerLabel).length;
+  return (
+    facts.stage === EvaluationStage.Judgement &&
+    personBlockers > NO_BLOCKERS &&
+    personBlockers === facts.unmet_ids.length
+  );
+}
+
 export function reworkCauseOf(facts: EvaluationFacts): FailureCause {
   if (facts.stage === EvaluationStage.Setup)
     return unattributed([CauseCategory.Environment, CauseCategory.Model]);
@@ -65,6 +76,12 @@ export function reworkCauseOf(facts: EvaluationFacts): FailureCause {
     return unattributed([CauseCategory.Model, CauseCategory.Plan]);
   if (facts.stage === EvaluationStage.Affected)
     return unattributed([CauseCategory.Model, CauseCategory.Plan]);
+  if (personOnlyBlockers(facts))
+    return attributed(
+      CauseCategory.Human,
+      CauseSubcategory.Intervention,
+      CauseAssigner.Reviewer,
+    );
   const ground =
     PLAN_GROUNDS.find((plan) => facts.unmet_grounds.includes(plan)) ??
     facts.unmet_grounds[0];

@@ -123,6 +123,10 @@ function changeRevision(
   return revision;
 }
 
+function unblockReasonOf(body: Unblock): string | null {
+  return body.reason ?? body.change?.reason ?? null;
+}
+
 export function unblockNode(
   tx: Transaction,
   dependencies: Dependencies,
@@ -178,6 +182,7 @@ export function unblockNode(
       actor,
       now,
       body.start_point ?? StartPoint.NodeBranch,
+      unblockReasonOf(body),
     );
   transition(tx, dependencies, mission, node, NodeState.Available, now);
   return actedOn(

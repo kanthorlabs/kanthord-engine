@@ -20,12 +20,14 @@ import { stopAfter } from "../../kernel/stop-test-support.ts";
 
 const SECOND_ATTEMPT = 2;
 const ONE_READ = 1;
+const TWO_READS = 2;
 const CLEARED_RATIONALE = "cleared";
 const REPOSITORIES = [
   { binding_id: "binding_api", name: "api" },
   { binding_id: "binding_web", name: "web" },
 ];
 
+const NO_UNBLOCK = { unblockReason: null, earlierVerdicts: [] };
 const NO_LINK_UPDATES = {
   "execution.link_update.get": async () => ({
     type: OperationResultType.Completed,
@@ -170,8 +172,9 @@ test("the prior is the rework verdict, else the cleared rationale, else null", a
     assert.deepEqual(
       await readPrior(run, REPOSITORIES),
       rework === notFound
-        ? { verdict: null, cleared: expected }
+        ? { ...NO_UNBLOCK, verdict: null, cleared: expected }
         : {
+            ...NO_UNBLOCK,
             verdict: {
               source: VerdictSource.Rework,
               text: expected,
@@ -197,7 +200,14 @@ function reviewRound(findings: unknown[]) {
   return {
     type: OperationResultType.Completed,
     status: 200,
-    data: { round: 2, final: false, review_base: null, findings },
+    data: {
+      round: 2,
+      final: false,
+      review_base: null,
+      findings,
+      unblock_reason: null,
+      earlier_verdicts: [],
+    },
   };
 }
 
@@ -295,6 +305,7 @@ test("an attempt not ended by a change request reads no change request", async (
     run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
     assert.equal(await readRequestedChanges(run, REPOSITORIES), null);
     assert.deepEqual(await readPrior(run, REPOSITORIES), {
+      ...NO_UNBLOCK,
       verdict: null,
       cleared: CLEARED_RATIONALE,
     });
@@ -436,6 +447,7 @@ test("a cleared assessment with the result success is not instruction text", asy
     } as unknown as MethodClients["mission"];
     run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
     assert.deepEqual(await readPrior(run, REPOSITORIES), {
+      ...NO_UNBLOCK,
       verdict: null,
       cleared,
     });
@@ -481,6 +493,7 @@ test("a failed check comes before a rework assessment and the text holds both", 
     "unit",
   ]) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    ...NO_UNBLOCK,
     verdict: {
       source: VerdictSource.Rework,
       text: [
@@ -508,6 +521,7 @@ test("a failed check without a rework assessment is the whole verdict", async (t
     "lint",
   ]) as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    ...NO_UNBLOCK,
     verdict: {
       source: VerdictSource.FailedChecks,
       text: [
@@ -563,9 +577,10 @@ test("readPrior adds the open findings of the review round and the round of a re
         findings,
         round: 2,
       });
-    else assert.deepEqual(prior, { verdict: null, cleared: null });
+    else
+      assert.deepEqual(prior, { ...NO_UNBLOCK, verdict: null, cleared: null });
   }
-  assert.equal(reads, ONE_READ);
+  assert.equal(reads, TWO_READS);
 });
 
 const LINK_UPDATE_READ = {
@@ -647,6 +662,7 @@ test("only an update gives a verdict with no judged commit", async (t) => {
     ...linkUpdateRead(),
   } as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    ...NO_UNBLOCK,
     verdict: {
       source: VerdictSource.Rework,
       text: linkUpdatesText(LINK_UPDATE_READ),
@@ -667,7 +683,44 @@ test("no update keeps the verdict absent at attempt 1", async (t) => {
   } as unknown as MethodClients["mission"];
   run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
   assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    ...NO_UNBLOCK,
     verdict: null,
     cleared: null,
+  });
+});
+
+test("readPrior returns the unblock reason and the earlier verdicts of the review round", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  stopAfter(t, () => run.dispose());
+  const earlier = {
+    attempt: 1,
+    round: 1,
+    result: "criterion-not-met",
+    rationale: "The route misses a test.",
+    findings: [],
+  };
+  run.clients.mission = {
+    "execution.review_round.get": async () => ({
+      type: OperationResultType.Completed,
+      status: 200,
+      data: {
+        round: 1,
+        final: false,
+        review_base: null,
+        findings: [],
+        unblock_reason: "Keep the legacy route.",
+        earlier_verdicts: [earlier],
+      },
+    }),
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+    "execution.clearedOutcome.get": async () => NOT_FOUND,
+    "execution.cleared_assessment.get": async () => NOT_FOUND,
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
+  assert.deepEqual(await readPrior(run, REPOSITORIES), {
+    verdict: null,
+    cleared: null,
+    unblockReason: "Keep the legacy route.",
+    earlierVerdicts: [earlier],
   });
 });

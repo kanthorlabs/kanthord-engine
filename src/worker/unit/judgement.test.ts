@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   affectedFailureReport,
+  earlierVerdictsText,
   evaluationJudgementSchemaOf,
   judgementBlockers,
   judgementRationale,
@@ -620,4 +621,27 @@ test("the link updates text cuts no body and states no older updates when the pa
     linkUpdatesText({ items: [], next_cursor: null, total: 0 }),
     null,
   );
+});
+
+test("the judgement schema accepts a person blocker with a ground", () => {
+  const parsed = evaluationJudgementSchema.safeParse({
+    result: "criterion-not-met",
+    rationale: "r",
+    findings: [{ ...BLOCKER, action: "person" }],
+  });
+  assert.equal(parsed.success, true);
+});
+
+test("the earlier verdict text keeps every verdict", () => {
+  const verdicts = Array.from({ length: 10 }, (_, index) => ({
+    attempt: index + 1,
+    round: 1,
+    result: "criterion-not-met" as const,
+    rationale: "r",
+    findings: [],
+  }));
+  const text = earlierVerdictsText(verdicts);
+  assert.ok(text?.includes("Attempt 10, round 1"));
+  assert.ok(text?.includes("Attempt 1, round 1"));
+  assert.equal(earlierVerdictsText([]), null);
 });

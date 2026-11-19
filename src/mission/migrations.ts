@@ -54,6 +54,7 @@ const createMissionTables: Migration = (database) => {
       closed_at INTEGER,
       start_point TEXT NOT NULL DEFAULT 'node_branch',
       prompt_commits TEXT,
+      unblock_reason TEXT,
       PRIMARY KEY (node_id, attempt)
     );
     CREATE UNIQUE INDEX mission_attempt_open ON mission_attempt (node_id) WHERE closed_at IS NULL;

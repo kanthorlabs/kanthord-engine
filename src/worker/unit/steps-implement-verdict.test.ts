@@ -21,6 +21,7 @@ import { NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { linkUpdatesText } from "./judgement.ts";
 import { readPrior, VerdictSource } from "./node-reads.ts";
+import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -149,6 +150,8 @@ function reworkAssessment(h: Harness, result: string) {
         final: false,
         review_base: null,
         findings: [],
+        unblock_reason: null,
+        earlier_verdicts: [],
       }),
   } as unknown as MethodClients["mission"];
   h.run.clients.worker = {
@@ -314,6 +317,43 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       },
     );
     assert.equal(h.provider.calls.length, NO_PROVIDER_CALLS);
+  });
+
+  test("an unblock reason plans the node unit with the reason when the verdict has later work", async (t) => {
+    const { h } = await verdictHarness(t, []);
+    h.verdict = verdictAt(VERDICT, h.checkouts);
+    h.unblockReason = "Keep the legacy route.";
+    await commitOnNode(h.root, "addressed");
+    h.checkouts[0]!.head = (await simpleGit(h.root).revparse(["HEAD"])).trim();
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
+  });
+
+  test("an unblock reason plans the node unit with the reason when a merged base skips the failed checks verdict", async (t) => {
+    const { h } = await verdictHarness(t, []);
+    h.verdict = {
+      ...verdictAt(VERDICT, h.checkouts),
+      source: VerdictSource.FailedChecks,
+    };
+    h.unblockReason = "Keep the legacy route.";
+    await advanceBase(h, t, "moved base", BASE_FILE);
+    await h.input.transport.fetchBase(
+      h.root,
+      "main",
+      background,
+      FETCH_DEADLINE_MS,
+      TEST_SSH_ACCESS,
+    );
+    h.refreshed = await refreshAtClaim(h);
+    assert.equal(h.refreshed, RefreshResult.Merged);
+    const { node } = await startCheck(h);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
   });
 
   async function headOf(h: Harness): Promise<string> {
@@ -682,6 +722,30 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(node);
     assert.ok(node.text.includes(LINK_BODY));
     assert.ok(node.text.includes(linkUpdatesText(read)!));
+    assert.deepEqual(node.judged, []);
+    assert.equal(node.round, null);
+  });
+
+  test("an unblock reason alone plans the node unit with the reason when every task is done", async (t) => {
+    const { h } = await verdictHarness(t, [fauxAssistantMessage("never")]);
+    h.unblockReason = "Keep the legacy route.";
+    h.earlierVerdicts = [
+      {
+        attempt: 1,
+        round: 1,
+        result: "criterion-not-met",
+        rationale: "The route misses a test.",
+        findings: [],
+      },
+    ];
+    const { node, pending } = await startCheck(h);
+    assert.deepEqual(pending, []);
+    assert.ok(node);
+    assert.ok(node.text.includes("Keep the legacy route."));
+    assert.ok(
+      node.text.includes("answer the unblock reason with FIXED or OPEN"),
+    );
+    assert.ok(node.text.includes("Attempt 1, round 1: criterion-not-met."));
     assert.deepEqual(node.judged, []);
     assert.equal(node.round, null);
   });

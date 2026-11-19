@@ -172,6 +172,8 @@ export async function runNativeExecution(
         ...workspace,
         verdict: prior.verdict,
         cleared: prior.cleared,
+        unblockReason: prior.unblockReason,
+        earlierVerdicts: prior.earlierVerdicts,
         unchangedTurns: 0,
         refreshed: null,
         lastVerification: null,
