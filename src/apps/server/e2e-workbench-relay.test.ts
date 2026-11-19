@@ -18,6 +18,7 @@ import {
   WorkbenchRecordKind,
 } from "../../workbench/contract.ts";
 import {
+  AGENT,
   completed,
   createHost,
   sendMessage,
@@ -36,6 +37,12 @@ const MENTION_REQUEST = "@RE look at the marker.";
 const HOST_REQUEST = "@Yumi what did RE say?";
 const REVIEW_ANSWER = "The marker file is present.";
 const HOST_ANSWER = "RE found the marker file.";
+const VARIANT_NAME = "Software Architecture";
+const RENAMED_VARIANT_NAME = "Design Review";
+const VARIANT_INSTRUCTION = "Review the design before any code.";
+const VARIANT_REQUEST = `@${VARIANT_NAME} review the design`;
+const VARIANT_ANSWER = "The design holds.";
+const VARIANT_HOST_REQUEST = "@Yumi what did the reviewer say?";
 const RELAY_HEAD = renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Relay, {});
 const CUSTOM_MESSAGE_ENTRY = "custom_message";
 const SYSTEM_ROLE = "system";
@@ -216,5 +223,88 @@ test(
     assert.ok(!relay.includes(watchId));
     assert.ok(!relay.includes("node_ids"));
     assert.ok(!relay.includes(NOTICE_PROJECT_ONE));
+  },
+);
+
+async function variantConversation(t: TestContext, renameBeforeHost: boolean) {
+  const fixture = await workbenchFixture(
+    t,
+    [fauxAssistantMessage(VARIANT_ANSWER), fauxAssistantMessage(HOST_ANSWER)],
+    undefined,
+    undefined,
+    [OPS, AGENT],
+  );
+  const variant = completed(
+    await fixture.agent["variant.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: AGENT,
+          display_name: VARIANT_NAME,
+          instruction: VARIANT_INSTRUCTION,
+        },
+      },
+      fixture.options,
+    ),
+  );
+  const host = await createHost(fixture, OPS);
+  completed(await sendMessage(fixture, host.id, VARIANT_REQUEST));
+  await untilIdle(fixture, host.id, t.signal);
+  if (renameBeforeHost)
+    completed(
+      await fixture.agent["variant.update"](
+        {
+          params: { variant_id: variant.id },
+          query: {},
+          body: {
+            display_name: RENAMED_VARIANT_NAME,
+            instruction: VARIANT_INSTRUCTION,
+            expected_revision: variant.revision,
+          },
+        },
+        fixture.options,
+      ),
+    );
+  completed(await sendMessage(fixture, host.id, VARIANT_HOST_REQUEST));
+  await untilIdle(fixture, host.id, t.signal);
+  return relaysOf(fixture.provider.calls.at(-SINGLE)!.messages);
+}
+
+test(
+  "(happy path) the next host run receives one relay that names the variant member by its display name",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const relays = await variantConversation(t, false);
+    assert.equal(relays.length, SINGLE);
+    const [relay] = relays;
+    assert.equal(
+      occurrences(relay!, `Ulrich to @${VARIANT_NAME}: ${VARIANT_REQUEST}`),
+      SINGLE,
+    );
+    assert.equal(
+      occurrences(relay!, `${VARIANT_NAME}: ${VARIANT_ANSWER}`),
+      SINGLE,
+    );
+    assert.ok(!relay!.includes(VARIANT_INSTRUCTION));
+    assert.ok(!relay!.includes(VARIANT_HOST_REQUEST));
+  },
+);
+
+test(
+  "(happy path) a rename before the host run changes the name of the variant member in the relay",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const [relay] = await variantConversation(t, true);
+    assert.ok(relay);
+    assert.equal(
+      occurrences(relay, `${RENAMED_VARIANT_NAME}: ${VARIANT_ANSWER}`),
+      SINGLE,
+    );
+    assert.equal(
+      occurrences(relay, `Ulrich to @${RENAMED_VARIANT_NAME}: `),
+      SINGLE,
+    );
+    assert.ok(!relay.includes(`${VARIANT_NAME}: ${VARIANT_ANSWER}`));
   },
 );
