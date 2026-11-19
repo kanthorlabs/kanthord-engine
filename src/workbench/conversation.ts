@@ -68,6 +68,7 @@ export const RELAY_MAX_BYTES = 65536;
 export interface MentionName {
   agent_name: string;
   display_name: string;
+  variant_id: string | null;
 }
 
 export interface MentionMatch extends MentionName {
@@ -117,27 +118,38 @@ export function leadingMention(
     kind: MentionKind.Known,
     agent_name: matched.agent_name,
     display_name: matched.display_name,
+    variant_id: matched.variant_id,
     rest: body.slice(matched.display_name.length).trimStart(),
   };
 }
 
-function workbenchMentionNames(): MentionName[] {
-  return workbenchAgentNames().map((agentName) => {
+function workbenchMentionNames(
+  tx: Transaction,
+  dependencies: Pick<Dependencies, "agentVariants">,
+): MentionName[] {
+  const catalog = workbenchAgentNames().map((agentName) => {
     const declaration = getAgentDeclaration(agentName);
     if (!declaration) throw new Error(`Undeclared agent ${agentName}.`);
     return {
       agent_name: declaration.agent_name,
       display_name: declaration.display_name,
+      variant_id: null,
     };
   });
+  const variants = dependencies.agentVariants(tx).map((variant) => ({
+    agent_name: variant.agent_name,
+    display_name: variant.display_name,
+    variant_id: variant.id,
+  }));
+  return [...catalog, ...variants];
 }
 
 export function resolveMention(
   tx: Transaction,
   text: string,
-  dependencies: Pick<Dependencies, "agentConfiguration">,
+  dependencies: Pick<Dependencies, "agentConfiguration" | "agentVariants">,
 ): MentionMatch | null {
-  const mention = leadingMention(text, workbenchMentionNames());
+  const mention = leadingMention(text, workbenchMentionNames(tx, dependencies));
   if (mention === null) return null;
   if (mention.kind === MentionKind.Unknown)
     throw new OperationError(
@@ -150,6 +162,7 @@ export function resolveMention(
   return {
     agent_name: mention.agent_name,
     display_name: mention.display_name,
+    variant_id: mention.variant_id,
     rest: mention.rest,
   };
 }
@@ -173,7 +186,10 @@ function holdsBuiltinTool(declaration: AgentDeclaration): boolean {
 export function resolveGuestMention(
   tx: Transaction,
   text: string,
-  dependencies: Pick<Dependencies, "agentConfiguration" | "declarationOf">,
+  dependencies: Pick<
+    Dependencies,
+    "agentConfiguration" | "agentVariants" | "declarationOf"
+  >,
 ): MentionMatch | null {
   const mention = resolveMention(tx, text, dependencies);
   if (

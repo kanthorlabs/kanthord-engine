@@ -69,7 +69,7 @@ import {
   type ToolDecision,
 } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
-import type { AgentVariant } from "../agent/variants.ts";
+import type { AgentVariant, AgentVariantItem } from "../agent/variants.ts";
 import type {
   ComposeOptions,
   PromptPartAnswer,
@@ -316,6 +316,7 @@ export interface Dependencies {
   stateDirectory: string;
   hostHome?: string;
   agentVariant: (tx: Transaction, variantId: string) => AgentVariant | null;
+  agentVariants: (tx: Transaction) => readonly AgentVariantItem[];
   agentPrompt: {
     compose(
       agentName: string,
