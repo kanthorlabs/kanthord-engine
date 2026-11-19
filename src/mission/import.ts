@@ -269,7 +269,7 @@ function resolveIdentity(
   currentTasks: Map<string, CurrentTask>,
 ): Pick<ResolvedImportEntry, "current" | "task"> {
   const none = { current: null, task: null };
-  if (entry.id === undefined) return none;
+  assert.ok(entry.id !== undefined, "An entry with an id resolves by id.");
   const id = entry.id;
   if (seen.has(id))
     violations.push(
@@ -332,6 +332,53 @@ function resolveIdentity(
       ),
     );
   return { current, task: null };
+}
+
+interface UnclaimedByFilename {
+  nodes: Map<string, NodeRow>;
+  tasks: Map<string, CurrentTask>;
+}
+
+function unclaimedOf(
+  entries: readonly NormalizedEntry[],
+  currentNodes: Map<string, NodeRow>,
+  currentTasks: Map<string, CurrentTask>,
+): UnclaimedByFilename {
+  const claimed = new Set(entries.flatMap((entry) => entry.id ?? []));
+  const unclaimed = (id: string) => !claimed.has(id);
+  return {
+    nodes: new Map(
+      [...currentNodes.values()]
+        .filter((node) => unclaimed(node.id))
+        .map((node) => [node.filename, node]),
+    ),
+    tasks: new Map(
+      [...currentTasks.values()]
+        .filter((task) => unclaimed(task.id))
+        .map((task) => [task.filename, task]),
+    ),
+  };
+}
+
+function matchByFilename(
+  entry: NormalizedEntry,
+  unclaimed: UnclaimedByFilename,
+): Pick<ResolvedImportEntry, "current" | "task"> {
+  if (isTaskEntry(entry))
+    return { current: null, task: unclaimed.tasks.get(entry.filename) ?? null };
+  return { current: unclaimed.nodes.get(entry.filename) ?? null, task: null };
+}
+
+function keyOf(
+  entry: NormalizedEntry,
+  identity: Pick<ResolvedImportEntry, "current" | "task">,
+): string {
+  return (
+    entry.id ??
+    identity.current?.id ??
+    identity.task?.id ??
+    `${TEMPORARY_KEY_PREFIX}${entry.filename}`
+  );
 }
 
 function resolveReference(
@@ -712,7 +759,7 @@ interface ClassifyScope {
 
 function classifyEntry(scope: ClassifyScope, item: ResolvedImportEntry): void {
   const { tx, result, owners, kept } = scope;
-  if (item.entry.id === undefined) {
+  if (item.current === null && item.task === null) {
     result.creates.push(item.entry.filename);
     return;
   }
@@ -799,19 +846,23 @@ export function resolveImportSet(
     dependencies: new Map(),
   };
   const seen = new Set<string>();
+  const unclaimed = unclaimedOf(entries, currentNodes, currentTasks);
   for (const entry of entries) {
-    const identity = resolveIdentity(
-      tx,
-      mission,
-      entry,
-      seen,
-      result.violations,
-      currentTasks,
-    );
+    const identity =
+      entry.id === undefined
+        ? matchByFilename(entry, unclaimed)
+        : resolveIdentity(
+            tx,
+            mission,
+            entry,
+            seen,
+            result.violations,
+            currentTasks,
+          );
     const terminal = terminalOwner(identity, currentNodes);
     result.resolved_entries.push({
       entry,
-      key: entry.id ?? `${TEMPORARY_KEY_PREFIX}${entry.filename}`,
+      key: keyOf(entry, identity),
       ...identity,
       owner_id: null,
       depends_on: new Set(),

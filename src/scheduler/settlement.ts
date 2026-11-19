@@ -162,6 +162,8 @@ export function executionAttribution(
     client_id: attribution?.client_id ?? null,
     name: attribution?.name ?? null,
     worker_name: binding.worker_name,
+    trace_id: row.trace_id,
+    started_at: row.created_at,
   };
 }
 

@@ -12,6 +12,7 @@ import type {
   InboundKindValue,
   InboundPlatformValue,
 } from "../../intake/contract.ts";
+import { proposalDecideSchema } from "../../mission/contract.ts";
 import { LLM_PLATFORMS } from "../../llm/index.ts";
 import { REPOSITORY_PLATFORMS } from "../../repository/index.ts";
 import { STORAGE_PLATFORMS } from "../../storage/index.ts";
@@ -19,6 +20,7 @@ import { temporary } from "../../kernel/test-support.ts";
 import { ExitCode } from "./constants.ts";
 import { EXAMPLE_MARKER, fileBodyOf } from "./file-body.ts";
 import { createProgram } from "./index.ts";
+import { PROPOSAL_DECIDE_HELP } from "./mission-help.ts";
 import { runKanthord } from "./test-support.ts";
 
 const FILE_FLAG = "--file";
@@ -27,6 +29,7 @@ const MIN_FILE_COMMANDS = 30;
 const EXAMPLE_INDENT = /^ {2}/gm;
 const MAX_COMMANDS = 400;
 const NOTES_MARKER = "\nNotes:\n";
+const NO_EDITS = 0;
 
 type FileCommand = { path: string[]; command: Command };
 
@@ -145,4 +148,26 @@ test("every command with a --file option prints a body example that its schema a
     assert.ok(parsed.success, `${label}: ${JSON.stringify(parsed.error)}`);
     assertPlatformFields(path, example, createdPlatforms);
   }
+});
+
+test("mission proposal decide --help prints the reject-all note after an example with edits", async (t) => {
+  const env = environment(temporary(t));
+  const help = await runKanthord(
+    ["mission", "proposal", "decide", "--help"],
+    env,
+    t.signal,
+  );
+  assert.equal(help.code, ExitCode.Success, help.stderr);
+  const marker = help.stdout.indexOf(`${EXAMPLE_MARKER}\n`);
+  assert.notEqual(marker, NOT_FOUND);
+  const [printed, notes] = help.stdout
+    .slice(marker + EXAMPLE_MARKER.length + 1)
+    .split(NOTES_MARKER);
+  const example: unknown = JSON.parse(printed!.replace(EXAMPLE_INDENT, ""));
+  assert.ok(proposalDecideSchema.safeParse(example).success);
+  assert.ok((example as { edits: unknown[] }).edits.length > NO_EDITS);
+  assert.equal(
+    `${NOTES_MARKER}${notes}`.trimEnd(),
+    `\n${PROPOSAL_DECIDE_HELP.trimStart()}`.trimEnd(),
+  );
 });

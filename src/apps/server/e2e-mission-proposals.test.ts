@@ -62,6 +62,7 @@ const PROPOSAL_NAME = "Fix accounts";
 const SECOND_PROPOSAL_NAME = "Fix sessions";
 const THIRD_PROPOSAL_NAME = "Fix tokens";
 const DECISION_REASON = "Two fixes cover the defect.";
+const EDITED_REQUIREMENT = "Describe the edited requirement of the fix node.";
 const VALIDATION_ERROR_CODE = "gateway.request.validation_failed";
 const INVALID_ASSESSMENT_ARGUMENT = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const INVALID_ASSESSMENT_ID_CODE =
@@ -259,6 +260,11 @@ async function setup(t: TestContext, proposalNames: string[]) {
   };
 }
 
+function requirementOf(item: { content: object }): string {
+  assert.ok("requirement" in item.content);
+  return String(item.content.requirement);
+}
+
 function proposalsByName(page: Page<Proposal>): Map<string, Proposal> {
   return new Map(
     page.items.map((item) => {
@@ -289,6 +295,7 @@ test(
       client: typeof human,
       approvedProposalIds: string[],
       version: number,
+      edits?: { proposal_id: string; requirement: string }[],
     ) =>
       client["proposal.decide"](
         {
@@ -297,6 +304,7 @@ test(
           body: {
             expected_mission_version: version,
             approved_proposal_ids: approvedProposalIds,
+            ...(edits === undefined ? {} : { edits }),
           },
         },
         { idempotencyKey: createIdempotencyKey() },
@@ -370,6 +378,24 @@ test(
             "approved_proposal_ids",
           ),
         );
+        const unapproved = refused(
+          await decideOver(
+            human,
+            [ids[FIRST_INDEX]!],
+            await h.missionVersion(),
+            [
+              {
+                proposal_id: ids[SINGLE_ITEM]!,
+                requirement: EDITED_REQUIREMENT,
+              },
+            ],
+          ),
+          HttpStatus.BadRequest,
+        );
+        assert.equal(unapproved.error.error.code, VALIDATION_ERROR_CODE);
+        assert.ok(
+          JSON.stringify(unapproved.error.error.details).includes("edits"),
+        );
       },
     );
 
@@ -415,7 +441,12 @@ test(
           proposals.get(PROPOSAL_NAME)!.id,
         ];
         decided = completed(
-          await decideOver(human, approvedIds, await h.missionVersion()),
+          await decideOver(human, approvedIds, await h.missionVersion(), [
+            {
+              proposal_id: proposals.get(PROPOSAL_NAME)!.id,
+              requirement: EDITED_REQUIREMENT,
+            },
+          ]),
         );
         assert.equal(decided.created.length, TWO_ITEMS);
         assert.deepEqual(decided.rejected_proposal_ids, []);
@@ -445,6 +476,16 @@ test(
             [taskContent.id],
           );
           const record = listed.get(created.content.name)!;
+          assert.equal(
+            fix.content.requirement,
+            created.content.name === PROPOSAL_NAME
+              ? EDITED_REQUIREMENT
+              : requirementOf(proposals.get(created.content.name)!),
+          );
+          assert.deepEqual(
+            record.content,
+            proposals.get(created.content.name)!.content,
+          );
           assert.equal(typeof record.approved_at, NUMBER_TYPE);
           assert.equal(record.rejected_at, null);
           assert.equal(record.created_node_id, fixId);

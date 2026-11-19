@@ -8,6 +8,7 @@ import {
   FlowStage,
 } from "./contract.ts";
 import { BIN_COUNT, binOf, percentilesOf } from "./flow-bins.ts";
+import { assertConserved } from "./flow-conservation-test-support.ts";
 import {
   FLOW_VECTOR_COLUMNS,
   FlowStageKey,
@@ -199,30 +200,56 @@ const FUNNEL_ROWS = [
   row({ stage: FlowStage.Outcome, exit: FlowExit.Rework }),
 ];
 
-test("the exits of each stage are at most entered plus unobserved", () => {
-  const stages = stagesOf(
-    FUNNEL_ROWS,
-    NO_HISTOGRAMS,
-    windows(COUNT_TWO),
-    isHosted,
-  );
-  for (const { stage, current } of stages) {
-    const exits = Object.values(current.exits).reduce(
-      (total, exit) => total + (exit?.count ?? NO_COUNT),
-      NO_COUNT,
-    );
-    assert.ok(
-      exits <= current.entered + current.unobserved,
-      `${stage}: ${exits} > ${current.entered} + ${current.unobserved}`,
-    );
-  }
-});
+const F5_ROWS = [
+  row({ stage: FlowStage.Verification, exit: FlowExit.Open }),
+  row({
+    stage: FlowStage.ReleaseGate,
+    exit: FlowExit.HandedOn,
+    executions: COUNT_SIXTEEN,
+    unobserved: COUNT_ONE,
+  }),
+  row({
+    bucket_start: SECOND,
+    stage: FlowStage.ReleaseGate,
+    exit: FlowExit.HandedOn,
+    executions: COUNT_TWO,
+    unobserved: COUNT_TWO,
+  }),
+];
 
-test("release_gate hands on the unobserved execution beyond entered", () => {
+function bucketWindows(rows: readonly FlowRow[], bucket: number) {
+  const bucketRows = rows
+    .filter((candidate) => candidate.bucket_start === bucket)
+    .map((candidate) => ({ ...candidate, bucket_start: FIRST }));
+  return stagesOf(bucketRows, NO_HISTOGRAMS, windows(COUNT_ONE), isHosted).map(
+    ({ stage, current }) => ({ stage, current }),
+  );
+}
+
+for (const [name, rows] of [
+  ["FUNNEL_ROWS", FUNNEL_ROWS],
+  ["COUNT_ROWS", COUNT_ROWS],
+  ["F5_ROWS", F5_ROWS],
+] as const) {
+  test(`the stage counts of ${name} are conserved for current and every series bucket`, () => {
+    const stages = stagesOf(rows, NO_HISTOGRAMS, windows(COUNT_TWO), isHosted);
+    assertConserved(`${name} current`, stages);
+    [FIRST, SECOND].forEach((bucket, index) => {
+      const bucketStages = bucketWindows(rows, bucket);
+      assertConserved(`${name} bucket ${index}`, bucketStages);
+      bucketStages.forEach(({ stage, current }) => {
+        const series = stages.find((result) => result.stage === stage)?.series;
+        assert.equal(series?.entered[index], current.entered, stage);
+      });
+    });
+  });
+}
+
+test("release_gate hands on only the executions of entered and keeps the unobserved execution apart", () => {
   const { current } = stageOf(FUNNEL_ROWS, FlowStage.ReleaseGate);
   assert.equal(current.entered, COUNT_FIFTEEN);
   assert.equal(current.unobserved, COUNT_ONE);
-  assert.equal(current.exits.handed_on?.count, COUNT_SIXTEEN);
+  assert.equal(current.exits.handed_on?.count, COUNT_FIFTEEN);
 });
 
 test("evaluation and outcome read the rows of the kind evaluation", () => {

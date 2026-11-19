@@ -4,13 +4,17 @@ import { HttpStatus } from "../kernel/http.ts";
 import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  type ExecutionAttribution,
+  type LiveExecution,
   type MissionBindings,
   MissionErrorCode,
   type Node,
   NODE_IDENTITY_PREFIX,
   NODE_LIST_LIMIT_DEFAULT,
+  type NodeGet,
   NodeState,
   type Revision,
+  type SchedulerClaims,
 } from "./contract.ts";
 import { revisionFromRow } from "./revision.ts";
 import {
@@ -125,13 +129,45 @@ export function nodeRecord(
   };
 }
 
+export interface NodeGetRead extends PausedDependencies {
+  schedulerClaims: SchedulerClaims;
+  executionAttribution: ExecutionAttribution;
+  now: number;
+}
+
+function liveExecutionOf(
+  tx: Transaction,
+  read: NodeGetRead,
+  nodeId: string,
+): LiveExecution | null {
+  const live = read.schedulerClaims.liveExecutionOf(tx, nodeId, read.now);
+  if (live === null) return null;
+  const attribution = read.executionAttribution.of(tx, live.execution_id);
+  assert.ok(attribution, "A live execution has an attribution.");
+  return {
+    execution_id: live.execution_id,
+    attempt: live.attempt,
+    pinned_revision: live.pinned_revision,
+    runtime_identity: live.runtime_identity,
+    instance_name: attribution.name,
+    worker_name: attribution.worker_name,
+    trace_id: attribution.trace_id,
+    started_at: attribution.started_at,
+  };
+}
+
 export function getNode(
   tx: Transaction,
   nodeId: string,
   bindings: MissionBindings,
-  paused: PausedDependencies,
-): Node {
-  return nodeRecord(tx, requireNode(tx, nodeId), bindings, paused);
+  read: NodeGetRead,
+): NodeGet {
+  const node = requireNode(tx, nodeId);
+  return {
+    ...nodeRecord(tx, node, bindings, read),
+    live_execution: liveExecutionOf(tx, read, node.id),
+    last_stop: read.pauseFacts.of(tx, node.id, node.attempt).last_stop,
+  };
 }
 
 export function getRevision(

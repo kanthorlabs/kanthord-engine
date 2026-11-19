@@ -122,6 +122,12 @@ export const missionExamples = {
   proposalDecide: {
     expected_mission_version: MISSION_VERSION,
     approved_proposal_ids: ["proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV"],
+    edits: [
+      {
+        proposal_id: "proposal_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        requirement: "Describe the changed requirement of the fix node.",
+      },
+    ],
   },
   inboxItemDone: { snoozed_until: null },
   followupDecide: {

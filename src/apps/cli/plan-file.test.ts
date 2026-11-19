@@ -170,13 +170,16 @@ function answerOf(
   current: Node,
   visibleTasks: TaskContent[],
   request: Request,
+  change: NodeChange,
 ): unknown {
   if (
     request.path === `/api/mission/node/${NODE_ID}/revision/${VISIBLE_REVISION}`
   )
     return revisionOf(visibleTasks);
   if (request.path === `/api/mission/node/${NODE_ID}`)
-    return request.method === GET ? current : NODE_CHANGE;
+    return request.method === GET
+      ? { ...current, live_execution: null, last_stop: null }
+      : change;
   if (request.path === `/api/mission/node/${NODE_ID}/unblock`)
     return controlResult(current);
   if (request.path === `/api/mission/project/${PROJECT_ID}`)
@@ -205,6 +208,7 @@ async function stubServer(
   current: Node,
   requests: Request[],
   visibleTasks: TaskContent[],
+  change: NodeChange = NODE_CHANGE,
 ): Promise<string> {
   const server = createServer((incoming, response) => {
     const chunks: Buffer[] = [];
@@ -218,7 +222,9 @@ async function stubServer(
       };
       requests.push(request);
       response.writeHead(200, { "Content-Type": "application/json" });
-      response.end(JSON.stringify(answerOf(current, visibleTasks, request)));
+      response.end(
+        JSON.stringify(answerOf(current, visibleTasks, request, change)),
+      );
     });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -251,10 +257,11 @@ async function run(
   files: [string, string][],
   extra: string[] = [],
   visibleTasks: TaskContent[] = [],
+  change: NodeChange = NODE_CHANGE,
 ) {
   const directory = temporary(t);
   const requests: Request[] = [];
-  const endpoint = await stubServer(t, current, requests, visibleTasks);
+  const endpoint = await stubServer(t, current, requests, visibleTasks, change);
   const paths = files.flatMap(([name, text]) => [
     "--plan-file",
     write(directory, name, text),
@@ -336,6 +343,63 @@ test("node update sends matched task IDs, a new task with no id and the binding 
       expectedTask(API_FILENAME),
     ],
     reason: REASON,
+  });
+});
+
+test("node update with a scratch file name sends the stored node file name", async (t) => {
+  const scratch = "scratch.md";
+  const { result, requests } = await run(
+    t,
+    "update",
+    node([taskContent(FORM_TASK_ID, FORM_FILENAME)]),
+    [
+      [scratch, NODE_TEXT],
+      [FORM_FILENAME, taskText(scratch)],
+    ],
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  const sent = writes(requests);
+  assert.equal(sent.length, ONE_WRITE);
+  assert.equal((sent[0]!.body as { filename: string }).filename, NODE_FILENAME);
+});
+
+test("node update with plan files writes the note of an open attempt to stderr and keeps stdout unchanged", async (t) => {
+  const applied = VISIBLE_REVISION + 1;
+  const answer: NodeChange = {
+    ...NODE_CHANGE,
+    revisions: [
+      {
+        ...revisionOf([]),
+        revision: applied,
+        change: {
+          write: "node.update",
+          previous_revision: VISIBLE_REVISION,
+          changed_fields: ["content"],
+        },
+      },
+    ],
+    open_attempts_unchanged: [{ node_id: NODE_ID, attempt: ATTEMPT }],
+  };
+  const { result } = await run(
+    t,
+    "update",
+    pinnedNode([taskContent(FORM_TASK_ID, FORM_FILENAME)]),
+    [
+      [NODE_FILENAME, NODE_TEXT],
+      [FORM_FILENAME, taskText(NODE_FILENAME)],
+    ],
+    [],
+    [taskContent(FORM_TASK_ID, FORM_FILENAME)],
+    answer,
+  );
+  assert.equal(result.code, ExitCode.Success, result.stderr);
+  assert.equal(
+    result.stderr,
+    `note: attempt ${ATTEMPT} of ${NODE_ID} keeps revision ${VISIBLE_REVISION}; block, then unblock with change, to apply revision ${applied}\n`,
+  );
+  assert.deepEqual(JSON.parse(result.stdout), {
+    ...answer,
+    idempotency_key: JSON.parse(result.stdout).idempotency_key,
   });
 });
 

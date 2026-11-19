@@ -10,7 +10,9 @@ import {
   MissionErrorCode,
   NodeState,
   PROPOSAL_IDENTITY_PREFIX,
+  type ProposalContent,
   type ProposalDecide,
+  type ProposalEdit,
 } from "./contract.ts";
 import { stateConflict } from "./control.ts";
 import { unblockNode } from "./control-unblock.ts";
@@ -51,6 +53,18 @@ function decided(assessmentId: string): never {
 
 function isOpen(item: FixProposal): boolean {
   return item.approved_at === null && item.rejected_at === null;
+}
+
+function editedContent(
+  content: ProposalContent,
+  edit: ProposalEdit | undefined,
+): Pick<ProposalContent, "name" | "requirement" | "criterion" | "task"> {
+  return {
+    name: edit?.name ?? content.name,
+    requirement: edit?.requirement ?? content.requirement,
+    criterion: edit?.criterion ?? content.criterion,
+    task: edit?.task ?? content.task,
+  };
 }
 
 export function decideProposals(
@@ -95,13 +109,17 @@ export function decideProposals(
   const proposerRevision = readCurrentRevision(tx, proposer.id);
   assert.ok(proposerRevision);
   let missionVersion = mission.version;
+  const edits = new Map(
+    (body.edits ?? []).map((edit) => [edit.proposal_id, edit]),
+  );
   const created = approved.map((proposal) => {
     const source = requireNode(tx, proposal.content.dependency_id);
     requireActive(source);
     const sourceRow = readCurrentRevision(tx, source.id);
     assert.ok(sourceRow);
     const stem = filenameStem(proposal.id);
-    const { task } = proposal.content;
+    const edited = editedContent(proposal.content, edits.get(proposal.id));
+    const { task } = edited;
     const sourceContent = revisionFromRow(tx, sourceRow).content;
     const change = createNode(
       tx,
@@ -109,9 +127,9 @@ export function decideProposals(
       {
         filename: `${stem}${FILENAME_SUFFIX}`,
         content: {
-          name: proposal.content.name,
-          requirement: proposal.content.requirement,
-          criterion: proposal.content.criterion,
+          name: edited.name,
+          requirement: edited.requirement,
+          criterion: edited.criterion,
           verifications: task.verifications,
           bindings: sourceContent.bindings,
           intent: Intent.Implement,

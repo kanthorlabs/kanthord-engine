@@ -212,7 +212,7 @@ export function validatePlanContent(
 
 export type ResolvedBinding = { binding_id: string; resource_identity: string };
 
-function invalidBindings(
+export function invalidBindings(
   details: Record<string, string | number> | null = null,
 ): never {
   throw new OperationError(

@@ -921,3 +921,15 @@ test("a claim that its worker cannot read stays running and a restart with the s
     ),
   );
 });
+
+test("node get reads the claimed execution and its trace during a claim", async (t) => {
+  const h = await setup(t, "direct");
+  const claim = completed(await h.pull());
+  assert.ok(claim.kind === WorkPullKind.Claimed);
+  const node = await h.node();
+  assert.equal(node.live_execution?.execution_id, claim.execution.execution_id);
+  assert.equal(node.live_execution?.trace_id, claim.execution.trace_id);
+  assert.equal(node.live_execution?.attempt, claim.execution.attempt);
+  assert.equal(node.live_execution?.started_at, claim.execution.created_at);
+  assert.equal(node.last_stop, null);
+});

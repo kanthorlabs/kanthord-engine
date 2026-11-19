@@ -92,6 +92,54 @@ components:
                 maxLength: 35
                 pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
                 description: proposal_ followed by a canonical 26-character uppercase ULID.
+            edits:
+              maxItems: 10
+              type: array
+              items:
+                type: object
+                properties:
+                  proposal_id:
+                    type: string
+                    minLength: 35
+                    maxLength: 35
+                    pattern: ^proposal_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: proposal_ followed by a canonical 26-character uppercase ULID.
+                  name:
+                    type: string
+                    minLength: 1
+                  requirement:
+                    type: string
+                    minLength: 1
+                  criterion:
+                    type: string
+                    minLength: 1
+                  task:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                        minLength: 1
+                      requirement:
+                        type: string
+                        minLength: 1
+                      criterion:
+                        type: string
+                        minLength: 1
+                      verifications:
+                        minItems: 1
+                        type: array
+                        items:
+                          type: string
+                          minLength: 1
+                    required:
+                      - name
+                      - requirement
+                      - criterion
+                      - verifications
+                    additionalProperties: false
+                required:
+                  - proposal_id
+                additionalProperties: false
             reason:
               type: string
               minLength: 1
