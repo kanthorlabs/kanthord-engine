@@ -35,7 +35,7 @@ type Runtime = Pick<typeof SandboxManager, "initialize" | "wrapWithSandbox">;
 
 function overriddenConfigFile(): string[] {
   const override = process.env.KANTHORD_CONFIG;
-  return override === undefined ? [] : [resolve(override)];
+  return override ? [resolve(override)] : [];
 }
 
 function configurationOf(

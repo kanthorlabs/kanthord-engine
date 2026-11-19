@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isString } from "../../kernel/values.ts";
@@ -68,12 +68,20 @@ function normalized(path: string): string {
 function readVariants(path: string): string[] {
   const decomposed = path.normalize("NFD");
   return [
-    path,
     path.replace(SCREENSHOT_TIME, `${NARROW_NO_BREAK_SPACE}$1.`),
     decomposed,
     path.replace(STRAIGHT_QUOTE, CURLY_QUOTE),
     decomposed.replace(STRAIGHT_QUOTE, CURLY_QUOTE),
   ];
+}
+
+function readTarget(path: string): string {
+  if (existsSync(path)) return path;
+  return (
+    readVariants(path).find(
+      (variant) => variant !== path && existsSync(variant),
+    ) ?? path
+  );
 }
 
 function leaves(root: string, raw: string, toolName: string): boolean {
@@ -85,11 +93,11 @@ function leaves(root: string, raw: string, toolName: string): boolean {
   }
   if (isAbsolute(path) || path.startsWith(HOME_PREFIX)) return true;
   if (path.split(SEGMENT_SEPARATOR).includes(PARENT_SEGMENT)) return true;
-  const candidates = toolName === READ_TOOL ? readVariants(path) : [path];
-  return candidates.some((candidate) => {
-    const resolved = resolveNearest(join(root, candidate));
-    return resolved === null || !inside(root, resolved);
-  });
+  const joined = join(root, path);
+  const resolved = resolveNearest(
+    toolName === READ_TOOL ? readTarget(joined) : joined,
+  );
+  return resolved === null || !inside(realpathSync(root), resolved);
 }
 
 export function checkoutConfinement(root: string): InlineExtension {
@@ -99,8 +107,7 @@ export function checkoutConfinement(root: string): InlineExtension {
       if (!FILE_TOOLS.has(event.toolName)) return undefined;
       const { path } = event.input as { path?: unknown };
       if (!isString(path)) return undefined;
-      const realRoot = realpathSync(root);
-      if (!leaves(realRoot, path, event.toolName)) return undefined;
+      if (!leaves(root, path, event.toolName)) return undefined;
       return {
         block: true,
         reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,

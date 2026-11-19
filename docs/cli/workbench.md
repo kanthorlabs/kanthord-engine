@@ -92,7 +92,7 @@ The engine sets the sandbox configuration in code. It reads no `<cwd>/.pi/sandbo
 A bash call fails with an error tool result when the sandbox cannot start. No command runs without the sandbox.
 macOS needs `ripgrep` (`rg`) on `PATH`. Linux needs bubblewrap, `socat` and `ripgrep`. Without them every Workbench bash call fails.
 A command in the Workbench bash cannot bind or reach a loopback port on macOS. On Linux the sandbox has its own loopback, and the host ports stay unreachable.
-`read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path. The tools normalize each path as pi does first: a leading `@` is stripped, `~` is expanded and a `file://` URL is converted, so `@/etc/passwd` and `file:///etc/passwd` are refused. `read` also checks each name variant that pi tries for a missing file: a narrow no-break space before `AM` or `PM`, the NFD form, and U+2019 for `'`. A variant that resolves outside the working directory is refused.
+`read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path. The tools normalize each path as pi does first: a leading `@` is stripped, `~` is expanded and a `file://` URL is converted, so `@/etc/passwd` and `file:///etc/passwd` are refused. `read` checks the file that pi opens. For a missing file, pi tries name variants of the full path: a narrow no-break space before `AM` or `PM`, the NFD form, and U+2019 for `'`. When the first variant that exists resolves outside the working directory, `read` is refused.
 
 ## Guests and project scope
 

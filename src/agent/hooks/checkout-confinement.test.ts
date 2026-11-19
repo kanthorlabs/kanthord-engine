@@ -154,6 +154,44 @@ test("(happy path) a read path whose pi variant is a file inside the root passes
     assert.equal(f.call("read", { path }), undefined);
 });
 
+test("(security) in a root that holds a quote, a read variant that names a sibling of the root is blocked and a path inside the root passes", (t) => {
+  const base = mkdtempSync(join(tmpdir(), "confinement-"));
+  stopAfter(t, () => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, "it's");
+  mkdirSync(root);
+  mkdirSync(join(base, "it\u2019s"));
+  writeFileSync(join(base, "it\u2019s", "y"), "sibling");
+  writeFileSync(join(root, "package.json"), "{}");
+  const handlers: Handler[] = [];
+  const extension = checkoutConfinement(root) as (pi: ExtensionAPI) => void;
+  extension({
+    on: (_name: string, handler: Handler) => handlers.push(handler),
+  } as unknown as ExtensionAPI);
+  assert.deepEqual(
+    handlers[0]!({
+      type: "tool_call",
+      toolCallId: "call",
+      toolName: "read",
+      input: { path: "y" },
+    } as unknown as ToolCallEvent),
+    {
+      block: true,
+      reason:
+        "The path y is outside the checkout. Use a relative path inside the checkout.",
+    },
+  );
+  for (const path of ["package.json", "src/new.ts"])
+    assert.equal(
+      handlers[0]!({
+        type: "tool_call",
+        toolCallId: "call",
+        toolName: "read",
+        input: { path },
+      } as unknown as ToolCallEvent),
+      undefined,
+    );
+});
+
 test("every other tool name passes unchanged", (t) => {
   const f = fixture(t);
   for (const tool of ["bash", "probe", "environment_write"])
