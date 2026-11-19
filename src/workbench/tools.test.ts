@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { parse } from "yaml";
 import { z } from "zod";
 import { AGENT_DECLARATIONS } from "../agent/catalog.ts";
+import { bashSandbox, createBashSandbox } from "../agent/bash-sandbox.ts";
 import { agentOperations } from "../agent/contract.ts";
 import { loadPi } from "../agent/pi.ts";
 import {
@@ -15,6 +17,7 @@ import {
 } from "../agent/test-support.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   testHumanIdentity,
@@ -76,6 +79,7 @@ const ONE_CHILD = 1;
 const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
   const [bash] = builtinTools(
     await loadPi(),
     "swe@1",
@@ -105,6 +109,7 @@ test("a workbench bash call that times out leaves no process of its tree", async
 });
 
 test("a background child of a Workbench bash call lives after the call", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
   const [bash] = builtinTools(
     await loadPi(),
     "swe@1",
@@ -121,6 +126,100 @@ test("a background child of a Workbench bash call lives after the call", async (
   const spawned = spawnedPids(t, result.content);
   assert.equal(spawned.length, ONE_CHILD);
   assert.deepEqual(await survivingProcesses(spawned), spawned);
+});
+
+test("the swe@1 bash runs the wrapped command with the child environment", async (t) => {
+  const directory = temporary(t);
+  const name = "ANTHROPIC_OAUTH_TOKEN";
+  const previous = process.env[name];
+  process.env[name] = "sentinel";
+  t.after(() => {
+    if (previous === undefined) delete process.env[name];
+    else process.env[name] = previous;
+  });
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string) => `echo wrapped; ${command}`,
+  );
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  const command = `echo "seen=\${${name}-unset}"`;
+  const result = await bash.execute(
+    "call_bash",
+    { command },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const [call] = wrap.mock.calls;
+  assert.ok(call);
+  assert.equal(call.arguments[0], command);
+  assert.equal(call.arguments[1], directory);
+  assert.equal(call.arguments[2]?.[name], undefined);
+  const text = result.content
+    .map((item) => ("text" in item ? item.text : ""))
+    .join("");
+  assert.match(text, /^wrapped\nseen=unset\n/);
+});
+
+test("a workbench bash call fails and spawns no process when the wrap rejects", async (t) => {
+  const directory = temporary(t);
+  const marker = join(directory, "marker");
+  const wrap = t.mock.method(bashSandbox, "wrap", async () => {
+    throw new Error("the bash sandbox is not available: probe");
+  });
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  await assert.rejects(
+    bash.execute(
+      "call_bash",
+      { command: `touch ${marker}` },
+      undefined,
+      undefined,
+      undefined as never,
+    ),
+    /the bash sandbox is not available: probe/,
+  );
+  assert.equal(wrap.mock.callCount(), ONE_OPERATION);
+  assert.equal(existsSync(marker), false);
+});
+
+test("(security) a workbench bash call that reads tracking.db fails under the denyRead list", async (t) => {
+  const directory = temporary(t);
+  const emulated = createBashSandbox(
+    {
+      initialize: async () => undefined,
+      wrapWithSandbox: async (command, _shell, customConfig) => {
+        const denied = customConfig?.filesystem?.denyRead ?? [];
+        return denied.some((path) => command.includes(path))
+          ? "echo denied >&2; exit 1"
+          : command;
+      },
+    },
+    "linux",
+  );
+  t.mock.method(bashSandbox, "wrap", emulated.wrap);
+  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  assert.ok(bash);
+  const tracking = join(directories(process.env).data, "tracking.db");
+  const denied = await bash.execute(
+    "call_bash",
+    { command: `cat ${tracking}` },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.equal(denied.isError, true);
+  assert.match(JSON.stringify(denied.content), /denied/);
+  const ran = await bash.execute(
+    "call_bash",
+    { command: "echo inside" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.match(JSON.stringify(ran.content), /inside/);
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [

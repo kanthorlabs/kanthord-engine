@@ -32,6 +32,7 @@ import {
   ToolSource,
 } from "../agent/contract.ts";
 import { childEnvironment } from "../agent/environment.ts";
+import { bashSandbox } from "../agent/bash-sandbox.ts";
 import { processBashOperations } from "../agent/bash-process.ts";
 import {
   intakeCredentialOperations,
@@ -335,11 +336,11 @@ export function builtinTools(
       env: childEnvironment(context.env),
     }),
     operations: {
-      exec: (command, directory, options) =>
-        local.exec(command, directory, {
-          ...options,
-          env: childEnvironment(options.env ?? process.env),
-        }),
+      exec: async (command, directory, options) => {
+        const env = childEnvironment(options.env ?? process.env);
+        const wrapped = await bashSandbox.wrap(command, directory, env);
+        return local.exec(wrapped, directory, { ...options, env });
+      },
     },
   });
   return {

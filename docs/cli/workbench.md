@@ -83,6 +83,17 @@ The agent open composes the system prompt with the current variant row, so a new
 A `plan@1` variant run composes each phase with the variant. The phase session files stay in the `phases/` directory of the base `plan@1` session directory. `workbench.session.list` never treats `phases/` as a variant directory and lists no phase session.
 `workbench.session.list` creates no directory. The filter `agent_name` selects the base agent and includes the variant sessions of that agent.
 
+## Built-in tools
+
+The bash of a Workbench agent runs in the sandbox of `@anthropic-ai/sandbox-runtime` `0.0.26`: `sandbox-exec` on macOS and bubblewrap on Linux. The engine vendors the flow of the pi example extension `examples/extensions/sandbox/index.ts` of `@earendil-works/pi-coding-agent` 1.1.0 in `src/agent/bash-sandbox.ts`.
+The engine sets the sandbox configuration in code. It reads no `<cwd>/.pi/sandbox.json` and no `~/.pi/agent/extensions/sandbox.json`.
+`allowWrite` holds the working directory `<state>/workbench/<agent_name>` and the temporary directory of the child environment (`TMPDIR`, else `/tmp`).
+`denyRead` holds `~/.ssh`, `~/.aws`, `~/.gnupg`, the pi directory `<state>/pi` (it holds `sessions/workbench/` and the pi auth file), `<state>/workers`, `<state>/kanthord.log`, the configuration directory (it holds `kanthord.yaml` and `cli.yaml`), the configuration file that `KANTHORD_CONFIG` names, the whole data directory (it holds `kanthord.db`, its sidecars and `tracking.db`), `<state>/projects`, `<state>/environments`, `~/.config/kanthord-eval` and `~/.pi/agent`. `denyRead` never names the working directory or an ancestor of it.
+A bash call fails with an error tool result when the sandbox cannot start. No command runs without the sandbox.
+macOS needs `ripgrep` (`rg`) on `PATH`. Linux needs bubblewrap, `socat` and `ripgrep`. Without them every Workbench bash call fails.
+A command in the Workbench bash cannot bind or reach a loopback port on macOS. On Linux the sandbox has its own loopback, and the host ports stay unreachable.
+`read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path. The tools normalize each path as pi does first: a leading `@` is stripped, `~` is expanded and a `file://` URL is converted, so `@/etc/passwd` and `file:///etc/passwd` are refused. `read` checks the file that pi opens. For a missing file, pi tries name variants of the full path: a narrow no-break space before `AM` or `PM`, the NFD form, and U+2019 for `'`. When the first variant that exists resolves outside the working directory, `read` is refused.
+
 ## Guests and project scope
 
 `workbench.invite.create` takes the body `{ invitee_name, project_ids, granted_operations }`. `project_ids` names 1 to 50 existing projects, each once. The set never changes. Revoke the invite and create a new one to change it. `granted_operations` lists the project-scoped operations that the guest-started runs of the invite run with no card. The list is fixed at create. A refused or repeated id answers 400 `workbench.invite.grant_invalid`.
