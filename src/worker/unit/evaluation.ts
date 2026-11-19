@@ -3,6 +3,7 @@ import { PromptTemplate } from "../../agent/contract.ts";
 import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
 import {
+  type Assessment,
   AssessmentResult,
   AssetKind,
   FindingAction,
@@ -33,6 +34,7 @@ import {
   readHumanRequests,
   readPinnedRevision,
   readReviewRound,
+  readReworkAssessment,
 } from "./node-reads.ts";
 import {
   ROUND_PATCH_MEDIA_TYPE,
@@ -575,6 +577,52 @@ async function submitPatchEvidence(context: EvaluateContext) {
   return patchIds;
 }
 
+type EvaluationAssessment = Awaited<ReturnType<typeof evaluate>>;
+
+async function unchangedAssessmentOf(
+  run: ExecutionRun,
+  testedInput: TestedInput,
+): Promise<Assessment | null> {
+  const rework = await readReworkAssessment(run);
+  if (
+    rework === null ||
+    rework.result !== AssessmentResult.Success ||
+    rework.tested_input === null ||
+    canonicalJSON(rework.tested_input) !== canonicalJSON(testedInput)
+  )
+    return null;
+  return rework;
+}
+
+async function unchangedEvaluation(
+  rework: Assessment,
+  round: ReviewRound,
+): Promise<EvaluationAssessment> {
+  return {
+    evidence_ids: rework.evidence_ids,
+    dependency_outcome_ids: rework.dependency_outcome_ids,
+    result: AssessmentResult.Success,
+    rationale: `No commit followed assessment ${rework.id}. The review of the same commits stands.`,
+    proposals: [],
+    findings: [],
+    fixed_finding_ids: [],
+    facts: {
+      stage: EvaluationStage.Judgement,
+      unmet_ids: [],
+      unmet_grounds: [],
+      proposal_count: NO_ITEMS,
+      repaired: null,
+      verification_class: VerificationClass.Pass,
+      affected: null,
+      round: round.round,
+      final_round: round.final,
+      action_labels: [],
+      person_labels: [],
+      fixed_count: NO_ITEMS,
+    },
+  };
+}
+
 async function evaluate(
   input: StepsInput,
   run: ExecutionRun,
@@ -647,9 +695,13 @@ export async function runEvaluation(
     round,
   );
   try {
+    const unchanged = await unchangedAssessmentOf(run, prepared.tested_input);
     const assessment = await run.spans.within(
       evaluationSpan(run.spans, testedCommitOf(prepared.tested_input)),
-      () => evaluate(input, run, revision, prepared, budget, openAgent, round),
+      () =>
+        unchanged === null
+          ? evaluate(input, run, revision, prepared, budget, openAgent, round)
+          : unchangedEvaluation(unchanged, round),
       evaluationEnd,
     );
     const answer = await run.submitAssessment(input.claim.node_id, {

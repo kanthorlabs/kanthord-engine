@@ -900,6 +900,36 @@ const SECOND_ROUND = 2;
 const FINAL_ROUND = 3;
 const REWORK_ONCE = 1;
 const FAILED_EXIT_CODE = 1;
+const SECOND_COMMIT = "b".repeat(40);
+const THIRD_COMMIT = "c".repeat(40);
+
+async function evidenceAt(
+  h: Awaited<ReturnType<typeof reviewHarness>>,
+  commit: string,
+) {
+  const address = { ...h.address, commit };
+  const evidence = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Verified again",
+      assets: [{ kind: AssetKind.Repository, address }],
+      verification: {
+        tested_input: address,
+        results: [
+          {
+            command: "true",
+            exit_code: SUCCESSFUL_EXIT_CODE,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  return { evidence_ids: [evidence.evidence.id], tested_input: address };
+}
 
 test("a success with an action:yes finding reworks below the limit and the final round reports its findings", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
@@ -913,6 +943,7 @@ test("a success with an action:yes finding reworks below the limit and the final
   const s1 = await h.byLabel("S1");
   h.evaluate();
   const second = await h.submit({
+    ...(await evidenceAt(h, SECOND_COMMIT)),
     findings: [reviewerFinding("S2")],
     fixed_finding_ids: [s1.id],
   });
@@ -923,7 +954,10 @@ test("a success with an action:yes finding reworks below the limit and the final
   assert.equal(fixed.status, FindingStatus.Fixed);
   assert.equal(fixed.fixed_assessment_id, second.assessment.id);
   h.evaluate();
-  const final = await h.submit({ findings: [reviewerFinding("S3")] });
+  const final = await h.submit({
+    ...(await evidenceAt(h, THIRD_COMMIT)),
+    findings: [reviewerFinding("S3")],
+  });
   assert.equal(final.assessment.round, FINAL_ROUND);
   assert.ok("state" in final.node);
   assert.equal(final.node.state, NodeState.Completed);
@@ -933,6 +967,38 @@ test("a success with an action:yes finding reworks below the limit and the final
   assert.equal(unlisted.route, FindingRoute.Report);
   assert.equal(unlisted.status, FindingStatus.Open);
   assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+});
+
+test("a success at new tested commits with an open fix finding still reworks below the limit", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  await h.submit({ findings: [reviewerFinding("S1")] });
+  h.evaluate();
+  const second = await h.submit({
+    ...(await evidenceAt(h, SECOND_COMMIT)),
+    findings: [reviewerFinding("S2")],
+  });
+  assert.ok("state" in second.node);
+  assert.equal(second.node.state, NodeState.Available);
+  assert.equal(second.outcome, null);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+  assert.equal((await h.byLabel("S2")).route, FindingRoute.Fix);
+});
+
+test("a success at the tested commits of the earlier success starts no rework and reports the open finding", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const first = await h.submit({ findings: [reviewerFinding("S1")] });
+  assert.ok("state" in first.node);
+  assert.equal(first.node.state, NodeState.Available);
+  assert.equal((await h.byLabel("S1")).route, FindingRoute.Fix);
+  h.evaluate();
+  const second = await h.submit();
+  assert.equal(second.assessment.round, SECOND_ROUND);
+  assert.ok("state" in second.node);
+  assert.equal(second.node.state, NodeState.Completed);
+  assert.equal(second.outcome?.result, AssessmentResult.Success);
+  const s1 = await h.byLabel("S1");
+  assert.equal(s1.route, FindingRoute.Report);
+  assert.equal(s1.status, FindingStatus.Open);
 });
 
 test("an unlisted open finding keeps its text, reworks a success and reads fixed when the final round lists it", async (t) => {

@@ -52,6 +52,7 @@ import {
   insertOutcome,
   type OutcomeRow,
   readAssessmentRound,
+  readExecutionAssessmentsOfAttempt,
   readLandedCommitEvidence,
   readRequests,
 } from "./record-store.ts";
@@ -120,6 +121,7 @@ interface ReworkFacts {
   reworkLimit: number;
   actionItems: number;
   personOnly: boolean;
+  unchanged: boolean;
   result: AssessmentResult;
   intent: Intent;
 }
@@ -169,6 +171,22 @@ function personOnlyOf(body: AssessmentSubmit, actionItems: number): boolean {
   );
 }
 
+function unchangedOf(scope: SubmitScope, assessment: AssessmentRow): boolean {
+  if (scope.body.result !== AssessmentResult.Success) return false;
+  const earlier = readExecutionAssessmentsOfAttempt(
+    scope.tx,
+    scope.node.id,
+    scope.attempt.attempt,
+    AssessmentResult.Success,
+  )
+    .filter((row) => row.id !== assessment.id)
+    .at(-1);
+  return (
+    earlier !== undefined &&
+    earlier.tested_input === canonicalJSON(scope.body.tested_input)
+  );
+}
+
 function reworkFactsOf(scope: SubmitScope, source: ReworkSource): ReworkFacts {
   const { tx, node, attempt, body, dependencies } = scope;
   const { assessment, open, current } = source;
@@ -184,6 +202,7 @@ function reworkFactsOf(scope: SubmitScope, source: ReworkSource): ReworkFacts {
     intent: scope.revision.content.intent,
     actionItems,
     personOnly: personOnlyOf(body, actionItems),
+    unchanged: unchangedOf(scope, assessment),
     result: body.result,
   };
 }
@@ -196,6 +215,7 @@ function reworkDueOf(facts: ReworkFacts): boolean {
   return (
     facts.current &&
     !facts.personOnly &&
+    !facts.unchanged &&
     !facts.requested &&
     !facts.planDefect &&
     facts.reworks < facts.reworkLimit &&

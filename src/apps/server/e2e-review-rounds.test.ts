@@ -87,6 +87,9 @@ const CONTENT = {
 };
 const SUGGESTION_COUNT = 8;
 const ROUND_PATCH_SUBJECT = "Review round patch";
+const VERIFICATION_SUBJECT = "Evaluation verification results";
+const SINGLE_VERIFICATION = 1;
+const NO_CALLS = 0;
 const UNLISTED_LABEL = "S8";
 const NO_OFFSET = 0;
 const OPEN_AFTER_ROUND_TWO = 3;
@@ -601,6 +604,47 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
       assert.equal(finding!.route, FindingRoute.Report);
       const decided = await f.decide(finding!.id);
       assert.equal(decided.decision, FindingDecision.Dismissed);
+    },
+  );
+
+  test(
+    "E11.4 a coder rework with no commit leads to one evaluation with no verification and a pass",
+    { timeout: JOURNEY_TIMEOUT_MS },
+    async (t) => {
+      const f = await roundsFixture(t);
+      assert.deepEqual(
+        (await f.execute(f.coder, write("hello.txt"))).result,
+        RELEASED,
+      );
+      const roundOne = await f.execute(
+        f.reviewer,
+        judgement({
+          result: AssessmentResult.Success,
+          findings: [item("S1")],
+        }),
+      );
+      assert.deepEqual(roundOne.result, REVOKED);
+      assert.equal(await f.state(), NodeState.Available);
+      const rework = await f.execute(f.coder, [
+        fauxAssistantMessage("S1 is OPEN: nothing to change"),
+      ]);
+      assert.deepEqual(rework.result, RELEASED);
+      const roundTwo = await f.execute(f.reviewer, []);
+      assert.equal(roundTwo.result.kind, CLOSED);
+      assert.equal(roundTwo.provider.calls.length, NO_CALLS);
+      assert.equal(await f.state(), NodeState.Completed);
+      assert.deepEqual(
+        (await f.assessments()).map((entry) => entry.round).toSorted(),
+        [1, 2],
+      );
+      assert.equal(
+        (await f.evidence()).filter(
+          (entry) => entry.subject === VERIFICATION_SUBJECT,
+        ).length,
+        SINGLE_VERIFICATION,
+      );
+      const [finding] = await f.findings();
+      assert.equal(finding!.route, FindingRoute.Report);
     },
   );
 });

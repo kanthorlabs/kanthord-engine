@@ -308,6 +308,7 @@ test("evaluation writes failed-verification assessments without inference and ga
       },
       mission: {
         "execution.review_round.get": async () => complete(FIRST_ROUND),
+        "execution.rework_assessment.get": async () => complete(null),
         "execution.pinnedRevision.get": async () =>
           complete({
             content: {
@@ -532,6 +533,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
     },
     mission: {
       "execution.review_round.get": async () => complete(FIRST_ROUND),
+      "execution.rework_assessment.get": async () => complete(null),
       "execution.pinnedRevision.get": async () =>
         complete({
           content: {
@@ -654,6 +656,7 @@ interface ReviewOptions {
   clearedOutcome?: unknown;
   changeRequests?: unknown;
   linkUpdates?: unknown;
+  reworkAssessment?: unknown;
   answer?: unknown;
   lifetimeMs?: number;
   observe?: (batch: readonly TelemetryRecord[]) => void;
@@ -725,6 +728,8 @@ async function reviewOf(
     mission: {
       "execution.review_round.get": async () =>
         complete(options.round ?? FIRST_ROUND),
+      "execution.rework_assessment.get": async () =>
+        complete(options.reworkAssessment ?? null),
       "execution.clearedOutcome.get": async () =>
         complete(options.clearedOutcome),
       "execution.pinnedRevision.get": async () =>
@@ -1621,4 +1626,48 @@ test("the evaluation instruction holds the change request text, the unblock reas
   assert.match(instruction, /Attempt 1, round 2: criterion-not-met\./);
   assert.match(instruction, /The route misses a test\./);
   assert.match(instruction, /B1 \(blocker, yes, open\) name B1/);
+});
+
+const PRODUCED_ADDRESS = { kind: "produced", sha256: "a".repeat(64) };
+const REWORK_ASSESSMENT_ID = "assessment_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const REWORK_EVIDENCE_ID = "evidence_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+
+function reworkAssessmentAt(testedInput: unknown) {
+  return {
+    id: REWORK_ASSESSMENT_ID,
+    result: AssessmentResult.Success,
+    rationale: "Judged",
+    tested_input: testedInput,
+    evidence_ids: [REWORK_EVIDENCE_ID],
+    dependency_outcome_ids: [],
+  };
+}
+
+test("a success rework assessment at the prepared tested input runs no verification and opens no reviewer agent", async (t) => {
+  const review = await reviewOf(t, "false", undefined, {
+    reworkAssessment: reworkAssessmentAt(PRODUCED_ADDRESS),
+  });
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.deepEqual(review.verifications, []);
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.assessments.length, SINGLE_RELEASE);
+  const [assessment] = review.assessments;
+  assert.equal(assessment?.result, AssessmentResult.Success);
+  assert.deepEqual(assessment?.findings, []);
+  assert.deepEqual(assessment?.fixed_finding_ids, []);
+  assert.deepEqual(assessment?.evidence_ids, [REWORK_EVIDENCE_ID]);
+  assert.ok(assessment?.rationale.includes(REWORK_ASSESSMENT_ID));
+  assert.match(assessment?.rationale ?? "", /No commit followed/);
+});
+
+test("a rework assessment at another tested input keeps the full evaluation", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    reworkAssessment: reworkAssessmentAt({
+      ...PRODUCED_ADDRESS,
+      sha256: "b".repeat(64),
+    }),
+  });
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.equal(review.verifications.length, SINGLE_RELEASE);
+  assert.equal(review.opens(), ONE_OPEN);
 });
