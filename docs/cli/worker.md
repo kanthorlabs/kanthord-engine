@@ -944,21 +944,23 @@ An absent `prior` is `{ "verdict": null, "cleared": null }`. An absent `link_upd
 `elapsed_ms` moves the claim start back by that time.
 The run removes `containerEnv` and `remoteEnv` from each environment document of the seed.
 
-| Option                     | Rule                                                                                                                                        |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--credential-stdin`       | Required. The command reads one JSON object `{ "provider_id", "credential" }` from standard input. `credential` is a pi credential object.  |
-| `--tree <binding_id=path>` | Required once for each binding. `path` is a git repository that holds the seed head and the base branch.                                    |
-| `--pass-env <name>`        | Repeatable. The command passes this variable of the shell to each child process. A provider credential variable or a fixed name is refused. |
-| `--model`, `--reasoning`   | Replace the provider, the model and the reasoning effort of the working agent.                                                              |
-| `--system-prompt <file>`   | Replaces `prompt.final` of the working agent. The seed can omit `prompt.final` with this option.                                            |
-| `--templates <folder>`     | Reads the prompt templates from this folder over the shipped set. The seed can omit `setup.templates` with this option.                     |
-| `--unit <unit_id>`         | Repeatable. Keeps only these units of the plan. The node identity keeps the node unit.                                                      |
-| `--budget-turns <count>`   | Replaces the turn budget.                                                                                                                   |
-| `--budget-wall <duration>` | Replaces the wall-time budget. The duration is a positive integer with `s`, `m` or `h`.                                                     |
-| `--skip-release-gate`      | Ends the phase on entry to the loop `release_gate`, with the end `completed` and no route.                                                  |
-| `--output <folder>`        | The output folder. The default is `./tasks-run-<execution_id>`.                                                                             |
-| `--force`                  | Replaces an empty folder or the folder of an earlier run. Any other folder is refused.                                                      |
-| `--verify`                 | Runs the checks of the run and records them in `result.json`.                                                                               |
+| Option                     | Rule                                                                                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--credential-stdin`       | Required. The command reads one JSON object `{ "provider_id", "credential", "metadata"? }` from standard input. `credential` is a pi credential object.      |
+| `--tree <binding_id=path>` | Required once for each binding. `path` is a git repository that holds the seed head and the base branch.                                                     |
+| `--pass-env <name>`        | Repeatable. The command passes this variable of the shell to each child process. A provider credential variable or a fixed name is refused.                  |
+| `--model`, `--reasoning`   | Replace the provider, the model and the reasoning effort of the working agent.                                                                               |
+| `--system-prompt <file>`   | Replaces `prompt.final` of the working agent. The seed can omit `prompt.final` with this option.                                                             |
+| `--templates <folder>`     | Reads the prompt templates from this folder over the shipped set. The seed can omit `setup.templates` with this option.                                      |
+| `--unit <unit_id>`         | Repeatable. Keeps only these units of the plan. The node identity keeps the node unit.                                                                       |
+| `--budget-turns <count>`   | Replaces the turn budget.                                                                                                                                    |
+| `--budget-wall <duration>` | Replaces the wall-time budget. The duration is a positive integer with `s`, `m` or `h`.                                                                      |
+| `--skip-release-gate`      | Ends the phase on entry to the loop `release_gate`, with the end `completed` and no route.                                                                   |
+| `--output <folder>`        | The output folder. The default is `./tasks-run-<execution_id>`.                                                                                              |
+| `--force`                  | Replaces an empty folder, or an earlier run folder that holds `result.json` and `state/`. Any other folder is refused with `cli.worker.tasks.output_exists`. |
+| `--verify`                 | Runs the checks of the run and records them in `result.json`.                                                                                                |
+
+Before a run, disable core dumps with `ulimit -c 0`. Use a credential that the developer owns, not a credential of a project or a team.
 
 The credential rules:
 
@@ -966,12 +968,14 @@ The credential rules:
 2. The command reads standard input before it makes the output folder or starts a child process. A terminal on standard input is refused.
 3. The command parses the object and then fills the input buffer with zeros.
 4. `provider_id` must be the pi provider of the working agent. An oauth token must stay valid until the wall deadline plus 5 minutes.
-5. A frozen credential store serves the credential to pi. The pi directory of the run is `state/pi/` and holds no `auth.json`.
-6. Each child process gets `PATH`, `LANG`, `TMPDIR`, `HOME` (`state/home/`) and the `--pass-env` variables only.
-7. Each output file, the run log on stderr and each upload replaces the credential values with `[redacted]`. It also replaces each `--pass-env` value of 12 or more characters.
+5. `metadata` holds the routing metadata of the provider, such as `base_url` or `region`, and follows the metadata schema of the platform. Only standard input gives the routing metadata. A provider with a metadata schema requires `metadata`. A provider with no metadata schema refuses it. The `metadata` of the working agent in the seed must equal it, or the command refuses the run with `credential_invalid`, field `metadata`.
+6. Before the run, the command removes the provider credential variables and the AWS, Google Cloud and Azure credential chain variables from its own environment. It sets `HOME` to `state/home/`, `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` under `state/home/.aws/`, `AWS_EC2_METADATA_DISABLED=true` and `METADATA_SERVER_DETECTION=none`.
+7. A frozen credential store serves the credential to pi. The pi directory of the run is `state/pi/`. A pi directory that holds `auth.json`, or a pi directory of the process other than `state/pi/`, stops the run.
+8. Each child process gets `PATH`, `LANG`, `TMPDIR`, `HOME` (`state/home/`), `GIT_CONFIG_NOSYSTEM=1`, `GIT_SSH_COMMAND="ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none"` and the `--pass-env` variables only. Git reads no system configuration, so no host credential helper and no host SSH key reach git.
+9. Each output file, the run log on stderr and each upload replace the credential values and each `--pass-env` value of 12 or more characters. They use the known-value matcher of the session redaction, which also finds encoded forms such as base64. A shorter `--pass-env` value is not a known secret.
 
 `--tree` clones each source into the bare mirror `state/origin/<binding_id>.git` and clones the checkout from the mirror.
-The source repository stays unchanged. A push to `origin` from the checkout fails.
+The mirror has no remote, and its files are read-only during the run. The source repository stays unchanged. A push to `origin`, to the mirror path or from the mirror fails.
 
 The output folder has mode `0700`. Each file has mode `0600`.
 
@@ -990,17 +994,19 @@ The output folder has mode `0700`. Each file has mode `0600`.
 
 On an end, stdout is exactly one JSON line `{ "output", "end", "exit_code" }`.
 
-| Exit | End                                                        |
-| ---- | ---------------------------------------------------------- |
-| `0`  | `completed` or `budget_end`, and each check passes.        |
-| `1`  | A diagnostic before the run.                               |
-| `2`  | `stop`. SIGINT stops the run with `worker_stopped`.        |
-| `4`  | A `--verify` check fails.                                  |
-| `5`  | `failed`. stderr prints `cli.worker.tasks.internal_error`. |
+| Exit | End                                                                                                                                                |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | `completed` or `budget_end`, and each check passes.                                                                                                |
+| `1`  | A diagnostic: before the run, or after the output folder exists (`tree_invalid`, `unit_unknown`, the seed check of the phase).                     |
+| `2`  | `stop`. SIGINT stops the run with `worker_stopped`.                                                                                                |
+| `4`  | A `--verify` check fails.                                                                                                                          |
+| `5`  | `failed`. The run log records `tasks failed` with its reason, `result.json` records `failed`, and stderr prints `cli.worker.tasks.internal_error`. |
 
 ```sh
-kanthord worker tasks run ./seed --tree binding_01ARZ3NDEKTSV4RRFFQ69G5FAA=../repo \
-  --credential-stdin < credential.json
+ulimit -c 0
+op read op://dev/anthropic-tasks/credential-json \
+  | kanthord worker tasks run ./seed --tree binding_01ARZ3NDEKTSV4RRFFQ69G5FAA=../repo \
+    --credential-stdin
 ```
 
 ## MCP and repository actions
@@ -1232,11 +1238,11 @@ Every remote command can also answer the shared codes of [other.md](other.md#err
 | local | `cli.worker.tasks.tree_invalid`                               | A `--tree` value names no binding of the seed or repeats one. A tree source is no git repository, or its clone lacks the seed head or the base branch.                                                                                                                                                                                             | tasks run                                                                                                                                                                   |
 | local | `cli.worker.tasks.mode_invalid`                               | `--credential-stdin` is absent.                                                                                                                                                                                                                                                                                                                    | tasks run                                                                                                                                                                   |
 | local | `cli.worker.tasks.option_invalid`                             | An option value is invalid, or `--pass-env` names an unset variable, a fixed name or a provider credential variable.                                                                                                                                                                                                                               | tasks run                                                                                                                                                                   |
-| local | `cli.worker.tasks.credential_invalid`                         | Standard input is a terminal or holds no valid credential object of the effective provider, or the pi directory holds `auth.json`. The `field` field names the field only.                                                                                                                                                                         | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.credential_invalid`                         | Standard input is a terminal or holds no valid credential object of the effective provider. The `metadata` key is absent for a provider that needs it, present for a provider without a metadata schema, fails the schema, or differs from the seed. The pi directory holds `auth.json`. The `field` field names the field only.                   | tasks run                                                                                                                                                                   |
 | local | `cli.worker.tasks.credential_expiring`                        | The oauth access token expires before the wall deadline of the run plus 5 minutes.                                                                                                                                                                                                                                                                 | tasks run                                                                                                                                                                   |
 | local | `cli.worker.tasks.unit_unknown`                               | A `--unit` names no unit of the plan.                                                                                                                                                                                                                                                                                                              | tasks run                                                                                                                                                                   |
-| local | `cli.worker.tasks.output_exists`                              | The output folder exists and `--force` is not given, or the folder is not empty and holds no earlier run.                                                                                                                                                                                                                                          | tasks run                                                                                                                                                                   |
-| local | `cli.worker.tasks.internal_error`                             | The run ends with `failed`. The command exits `5`.                                                                                                                                                                                                                                                                                                 | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.output_exists`                              | The output folder exists and `--force` is not given, or the folder is not empty and does not hold both `result.json` and `state/`.                                                                                                                                                                                                                 | tasks run                                                                                                                                                                   |
+| local | `cli.worker.tasks.internal_error`                             | The run ends with `failed`, or the pi directory of the process is not `state/pi/`. The command exits `5`.                                                                                                                                                                                                                                          | tasks run                                                                                                                                                                   |
 | 409   | `worker.instance.archived`                                    | The instance is archived.                                                                                                                                                                                                                                                                                                                          | instance rotate, instance archive                                                                                                                                           |
 | 409   | `worker.instance.in_use`                                      | A binding lists the instance, also with `--force`, or a registration of the instance holds a live execution and the archive has no `--force`; `details` hold `bindings` or `executions`.                                                                                                                                                           | instance archive                                                                                                                                                            |
 | 409   | `worker.instance.connection_superseded`                       | Another connection of the instance is current; `details.connection_name` names it. `serve worker` ends with `worker.instance.superseded`.                                                                                                                                                                                                          | worker.instance.connect, worker.instance.heartbeat, worker.instance.work (API only)                                                                                         |

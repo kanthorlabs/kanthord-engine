@@ -1,31 +1,27 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { suite, test, type TestContext } from "node:test";
+import { suite, test } from "node:test";
 import { simpleGit } from "simple-git";
 import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { CancellationContext } from "../../kernel/context.ts";
-import { createIdentity } from "../../kernel/identity.ts";
 import {
   hostEnvironment,
   temporary,
   temporaryDirectory,
 } from "../../kernel/test-support.ts";
-import { HostTool } from "../../worker/contract.ts";
 import {
-  anthropicSetup,
   fauxAssistantMessage,
   fauxToolCall,
-  repositorySetup,
   scriptedModelRuntime,
   scriptedProvider,
   type ScriptedProvider,
@@ -38,15 +34,25 @@ import {
   TasksErrorCode,
   TasksExit,
 } from "../worker/index.ts";
-import { missionOperations } from "../../mission/contract.ts";
 import { ExitCode } from "./constants.ts";
-import { runInProcess } from "./test-support.ts";
 import {
-  stopOnSignal,
-  type TasksCommandIo,
-  tasksRun,
-  type TasksRunOptions,
-} from "./worker-tasks.ts";
+  apiKeyInput,
+  type CommandRun,
+  CREDENTIAL_CANARY,
+  diagnosticOf,
+  OUTPUT_FILES,
+  PASS_NAME,
+  PASS_VALUE,
+  readJson,
+  runOptions,
+  seedFixture,
+  type SeedFixture,
+  commandRun as sharedCommandRun,
+  TEST_TIMEOUT_MS,
+  writeGood,
+} from "./tasks-test-support.ts";
+import { runInProcess } from "./test-support.ts";
+import { stopOnSignal, type TasksCommandIo, tasksRun } from "./worker-tasks.ts";
 
 const PI_ROOT = temporaryDirectory();
 const PI_DIRECTORY = join(PI_ROOT, PI_DIRECTORY_NAME);
@@ -54,221 +60,86 @@ process.on("exit", () => rmSync(PI_ROOT, { recursive: true, force: true }));
 installPiTools({ directory: PI_DIRECTORY });
 usePiDirectory(PI_DIRECTORY);
 
-const CREDENTIAL_CANARY = "canary-credential-value-0123456789";
-const PASS_VALUE = "canary-pass-value-0123456789";
-const PASS_NAME = "TASKS_CANARY";
 const UNPASSED_NAME = "TASKS_UNPASSED";
 const UNPASSED_VALUE = "unpassed-value-0123456789";
-const SEED_FILE = "seed.json";
-const TEST_TIMEOUT_MS = 120000;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const MODE_BITS = 0o777;
-const IDENTITY = [
-  "-c",
-  "user.name=Test",
-  "-c",
-  "user.email=test@example.invalid",
-];
-const OUTPUT_FILES = [
-  "result.json",
-  "context.json",
-  "progress.json",
-  "metrics.json",
-  "outbox.json",
-  "spans.jsonl",
-];
-const REFUSED_KEYS = ["credentials", "sshAccess"];
-const OBJECT_TYPE = "object";
 const ROUTE_PASSED = "passed";
 const CLEAN_OUTPUT = "";
 const BARE_VALUE = "true";
-const ONE_UPLOAD = 1;
-const ZERO_BYTE = 0;
 const NO_CALLS = 0;
-
-interface SeedFixture {
-  root: string;
-  seedFolder: string;
-  source: string;
-  bindingId: string;
-  head: string;
-  seed: Record<string, unknown>;
-}
-
-async function sourceRepository(root: string): Promise<{
-  source: string;
-  head: string;
-}> {
-  const source = join(root, "source");
-  mkdirSync(source);
-  const git = simpleGit(source);
-  await git.raw(["init", "-b", "main"]);
-  writeFileSync(join(source, "file"), "base");
-  await git.add("file");
-  await git.raw([...IDENTITY, "commit", "-m", "base"]);
-  return { source, head: (await git.revparse(["HEAD"])).trim() };
-}
-
-function revisionOf(nodeId: string, tasks: ReturnType<typeof task>[]) {
-  return {
-    node_id: nodeId,
-    filename: "implement.md",
-    revision: 1,
-    reason: "seed",
-    actor: { kind: "human", account: "ulrich", name: "Ulrich" },
-    created_at: 1,
-    content: {
-      name: "implement",
-      requirement: "implement",
-      criterion: "implement",
-      verifications: ["true"],
-      bindings: [],
-      intent: "implement",
-      tags: [],
-      external_links: [],
-    },
-    tasks,
-    change: {
-      write: "import",
-      previous_revision: null,
-      changed_fields: [],
-    },
-    pinned_by_attempts: [1],
-  };
-}
-
-async function seedFixture(
-  t: TestContext,
-  shape: (seed: Record<string, unknown>) => void = () => {},
-): Promise<SeedFixture> {
-  const root = temporary(t);
-  const { source, head } = await sourceRepository(root);
-  const repository = repositorySetup();
-  const setup = anthropicSetup({ repositories: [repository] });
-  const nodeId = createIdentity("node");
-  const seed: Record<string, unknown> = {
-    claim: {
-      execution_id: setup.execution_id,
-      node_id: nodeId,
-      attempt: 1,
-      pinned_revision: 1,
-      node_branch: `kanthord/${nodeId}`,
-      created_at: 1000,
-      expired_at: 1000 + 3600000,
-      trace_id: "trace",
-      root_span_id: "1".repeat(16),
-    },
-    setup,
-    revision: revisionOf(nodeId, [task("work", "grep -q good file")]),
-    heads: { [repository.binding_id]: head },
-  };
-  shape(seed);
-  const seedFolder = join(root, "seed");
-  mkdirSync(seedFolder);
-  writeFileSync(join(seedFolder, SEED_FILE), JSON.stringify(seed));
-  return {
-    root,
-    seedFolder,
-    source,
-    bindingId: repository.binding_id,
-    head,
-    seed,
-  };
-}
-
-interface CommandRun {
-  io: TasksCommandIo;
-  stdout: string[];
-  stderr: string[];
-}
-
-function apiKeyInput(key = CREDENTIAL_CANARY): Buffer {
-  return Buffer.from(
-    JSON.stringify({
-      provider_id: "anthropic",
-      credential: { type: "api_key", key },
-    }),
-  );
-}
+const ZERO_BYTE = 0;
+const CLAIM_LENGTH_MS = 3600000;
+const START_TOLERANCE_MS = 60000;
+const SLOW_WRITER_MS = 500;
+const CLEAN_TREES_CHECK = 5;
+const ATTACKER_URL = "http://attacker.invalid/v1";
+const RELEASE_GATE_LOOP = "release_gate";
+const TASKS_FAILED = "tasks failed";
+const KEPT_TEXT = "kept";
 
 function commandRun(
   fixture: SeedFixture,
   provider: ScriptedProvider,
   overrides: Partial<TasksCommandIo> = {},
 ): CommandRun {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
-  return {
-    stdout,
-    stderr,
-    io: {
-      cwd: fixture.root,
-      shellEnv: hostEnvironment(),
-      stdinTerminal: false,
-      readStdin: () => apiKeyInput(),
-      stdout: (text) => void stdout.push(text),
-      stderr: (text) => void stderr.push(text),
-      modelRuntimeFactory: scriptedModelRuntime(provider),
-      stop: new CancellationContext(),
-      ...overrides,
-    },
-  };
-}
-
-function runOptions(
-  fixture: SeedFixture,
-  options: Partial<TasksRunOptions> = {},
-): TasksRunOptions {
-  return {
-    credentialStdin: true,
-    tree: [`${fixture.bindingId}=${fixture.source}`],
-    passEnv: [],
-    unit: [],
-    output: join(fixture.root, "out"),
-    ...options,
-  };
-}
-
-function writeGood() {
-  return fauxAssistantMessage(
-    fauxToolCall("write", { path: "file", content: "good" }),
-    { stopReason: "toolUse" },
-  );
-}
-
-function readJson(folder: string, name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(folder, name), "utf8")) as Record<
-    string,
-    unknown
-  >;
-}
-
-function filesOf(folder: string): string[] {
-  return readdirSync(folder, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(folder, entry.name);
-    return entry.isDirectory() ? filesOf(path) : [path];
+  return sharedCommandRun(fixture, provider, {
+    piDirectory: PI_DIRECTORY,
+    ...overrides,
   });
 }
 
-function keysOf(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap(keysOf);
-  if (value === null || typeof value !== OBJECT_TYPE) return [];
-  return Object.entries(value as object).flatMap(([key, item]) => [
-    key,
-    ...keysOf(item),
-  ]);
+function bash(command: string) {
+  return fauxAssistantMessage(fauxToolCall("bash", { command }), {
+    stopReason: "toolUse",
+  });
 }
 
-async function diagnosticOf(
-  run: Promise<unknown>,
-): Promise<{ code: string; fields: unknown }> {
-  try {
-    await run;
-  } catch (error) {
-    const coded = error as { code: string; fields: unknown };
-    return { code: coded.code, fields: coded.fields };
-  }
-  return assert.fail("The run gave no diagnostic.");
+function toolResultOf(provider: ScriptedProvider, call: number): string {
+  return JSON.stringify(provider.calls.at(call)?.messages.at(-1));
+}
+
+function mirrorOf(fixture: SeedFixture): string {
+  return join(
+    fixture.root,
+    "out",
+    "state",
+    "origin",
+    `${fixture.bindingId}.git`,
+  );
+}
+
+function logRecords(stderr: readonly string[]): Record<string, unknown>[] {
+  return stderr
+    .join("")
+    .split("\n")
+    .filter((line) => line.startsWith("{"))
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function spawnTasksRun(
+  args: string[],
+  input: Buffer,
+): Promise<{ code: number | null; stderr: string }> {
+  const entry = new URL("../../main.ts", import.meta.url).href;
+  return new Promise((resolve) => {
+    const child = spawn(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `process.argv=[process.execPath,'kanthord',...${JSON.stringify(args)}];await import(${JSON.stringify(entry)});`,
+      ],
+      { env: hostEnvironment(), stdio: ["pipe", "pipe", "pipe"] },
+    );
+    const stderr: Buffer[] = [];
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.stdout.resume();
+    setTimeout(() => child.stdin.end(input), SLOW_WRITER_MS);
+    child.on("close", (code) =>
+      resolve({ code, stderr: Buffer.concat(stderr).toString("utf8") }),
+    );
+  });
 }
 
 suite("worker tasks run", () => {
@@ -289,6 +160,7 @@ suite("worker tasks run", () => {
       ]);
       const run = commandRun(fixture, provider);
       const output = join(fixture.root, "out");
+      const startedAt = Date.now();
       const code = await tasksRun(
         fixture.seedFolder,
         runOptions(fixture, { verify: true }),
@@ -306,12 +178,16 @@ suite("worker tasks run", () => {
       );
       const context = readJson(output, "context.json") as {
         input: {
+          claim: { created_at: number; expired_at: number };
           plan: { pending: { task: { id: string } }[] };
           affectedTests: unknown[];
           until: string | null;
         };
         result: { route: { kind: string } };
       };
+      const { claim } = context.input;
+      assert.ok(Math.abs(claim.created_at - startedAt) < START_TOLERANCE_MS);
+      assert.equal(claim.expired_at - claim.created_at, CLAIM_LENGTH_MS);
       const [work] = (fixture.seed.revision as { tasks: { id: string }[] })
         .tasks;
       assert.deepEqual(
@@ -330,19 +206,15 @@ suite("worker tasks run", () => {
   );
 
   test(
-    "--tree leaves the source repository unchanged, and an agent git push origin fails",
+    "--tree leaves the source and the mirror unchanged against a push to origin, to the mirror path and from the mirror",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
       const source = simpleGit(fixture.source);
       const before = await source.raw(["show-ref"]);
       const provider = scriptedProvider([
-        fauxAssistantMessage(
-          fauxToolCall("bash", {
-            command:
-              "git push origin HEAD:refs/heads/agent-push; echo push_exit=$?",
-          }),
-          { stopReason: "toolUse" },
+        bash(
+          'git push origin HEAD:refs/heads/agent-push; echo push_exit=$?; M=$(git remote get-url origin); git push "$M" HEAD:refs/heads/agent-push; echo mirror_exit=$?; git -C "$M" push; echo from_mirror_exit=$?',
         ),
         writeGood(),
         fauxAssistantMessage("done"),
@@ -357,41 +229,30 @@ suite("worker tasks run", () => {
       assert.equal(await source.raw(["show-ref"]), before);
       assert.equal(await source.raw(["status", "--porcelain"]), CLEAN_OUTPUT);
       assert.equal((await source.revparse(["HEAD"])).trim(), fixture.head);
-      const mirror = join(
-        fixture.root,
-        "out",
-        "state",
-        "origin",
-        `${fixture.bindingId}.git`,
-      );
+      const mirror = simpleGit(mirrorOf(fixture));
       assert.equal(
-        (await simpleGit(mirror).raw(["config", "core.bare"])).trim(),
+        (await mirror.raw(["config", "core.bare"])).trim(),
         BARE_VALUE,
       );
-      assert.equal(
-        await simpleGit(mirror)
-          .raw(["show-ref", "refs/heads/agent-push"])
-          .catch(() => CLEAN_OUTPUT),
-        CLEAN_OUTPUT,
-      );
-      const pushed = JSON.stringify(provider.calls.at(1)?.messages);
+      assert.equal(await mirror.raw(["show-ref"]), before);
+      assert.equal(await mirror.raw(["remote"]), CLEAN_OUTPUT);
+      const pushed = toolResultOf(provider, 1);
       assert.match(pushed, /push_exit=(?!0)[0-9]+/);
+      assert.match(pushed, /mirror_exit=(?!0)[0-9]+/);
+      assert.match(pushed, /from_mirror_exit=(?!0)[0-9]+/);
     },
   );
 
   test(
-    "agent bash receives a --pass-env variable, and no other variable of the host process",
+    "agent bash receives a --pass-env variable and the fixed git variables, and no other variable of the host process",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
       process.env[UNPASSED_NAME] = UNPASSED_VALUE;
       t.after(() => delete process.env[UNPASSED_NAME]);
       const provider = scriptedProvider([
-        fauxAssistantMessage(
-          fauxToolCall("bash", {
-            command: `echo "unpassed=$${UNPASSED_NAME}"; test -n "$${PASS_NAME}" && echo passed=yes; echo "home=$HOME"`,
-          }),
-          { stopReason: "toolUse" },
+        bash(
+          `echo "unpassed=$${UNPASSED_NAME}"; test -n "$${PASS_NAME}" && echo passed=yes; echo "home=$HOME"; echo "helper=$(git config --get credential.helper)"; echo "nosystem=$GIT_CONFIG_NOSYSTEM"; echo "ssh=$GIT_SSH_COMMAND"`,
         ),
         writeGood(),
         fauxAssistantMessage("done"),
@@ -405,68 +266,54 @@ suite("worker tasks run", () => {
         run.io,
       );
       assert.equal(code, TasksExit.Success, run.stderr.join(""));
-      const shown = JSON.stringify(provider.calls.at(1)?.messages.at(-1));
+      const shown = toolResultOf(provider, 1);
       assert.match(shown, /unpassed=\\n/);
       assert.match(shown, /passed=yes/);
       assert.match(shown, /home=[^\\]*\/out\/state\/home/);
+      assert.match(shown, /helper=\\n/);
+      assert.match(shown, /nosystem=1\\n/);
+      assert.match(shown, /ssh=ssh -F \/dev\/null -o IdentitiesOnly=yes/);
     },
   );
 
   test(
-    "the canary values of the credential and of --pass-env reach no output file and no standard stream",
+    "the run removes the ambient cloud credentials of the shell before the model runtime opens",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
       const provider = scriptedProvider([
-        fauxAssistantMessage(
-          fauxToolCall("bash", {
-            command: `echo "$${PASS_NAME}" > evidence.txt; cat evidence.txt`,
-          }),
-          { stopReason: "toolUse" },
-        ),
-        fauxAssistantMessage(
-          fauxToolCall(HostTool.EvidenceUpload, { path: "evidence.txt" }),
-          { stopReason: "toolUse" },
-        ),
         writeGood(),
-        fauxAssistantMessage(`done ${CREDENTIAL_CANARY} ${PASS_VALUE}`),
+        fauxAssistantMessage("done"),
       ]);
+      const shellEnv: NodeJS.ProcessEnv = {
+        ...hostEnvironment(),
+        AWS_PROFILE: "ambient-profile",
+        AWS_SECRET_ACCESS_KEY: "ambient-secret-0123456789",
+      };
+      const seen: NodeJS.ProcessEnv[] = [];
+      const scripted = scriptedModelRuntime(provider);
       const run = commandRun(fixture, provider, {
-        shellEnv: { ...hostEnvironment(), [PASS_NAME]: PASS_VALUE },
+        shellEnv,
+        modelRuntimeFactory: (input) => {
+          seen.push({ ...shellEnv });
+          return scripted(input);
+        },
       });
-      const output = join(fixture.root, "out");
       const code = await tasksRun(
         fixture.seedFolder,
-        runOptions(fixture, { passEnv: [PASS_NAME] }),
+        runOptions(fixture),
         run.io,
       );
       assert.equal(code, TasksExit.Success, run.stderr.join(""));
-      const outbox = readJson(output, "outbox.json") as unknown as {
-        operation: string;
-      }[];
-      assert.ok(
-        outbox.some(
-          (entry) =>
-            entry.operation === missionOperations["evidence.submit"].id,
-        ),
-      );
-      const uploads = filesOf(join(output, "uploads"));
-      assert.equal(uploads.length, ONE_UPLOAD);
-      const files = [
-        ...OUTPUT_FILES.map((name) => join(output, name)),
-        ...uploads,
-      ];
-      const texts = [
-        ...files.map((file) => readFileSync(file, "utf8")),
-        run.stdout.join(""),
-        run.stderr.join(""),
-      ];
-      for (const canary of [CREDENTIAL_CANARY, PASS_VALUE])
-        for (const [index, text] of texts.entries())
-          assert.ok(!text.includes(canary), `${files[index] ?? "stream"}`);
-      assert.ok(readFileSync(uploads[0]!, "utf8").includes("[redacted]"));
-      const keys = keysOf(readJson(output, "context.json"));
-      for (const key of REFUSED_KEYS) assert.ok(!keys.includes(key), key);
+      assert.ok(seen.length > NO_CALLS);
+      const home = join(fixture.root, "out", "state", "home");
+      for (const env of seen) {
+        assert.equal(env.AWS_PROFILE, undefined);
+        assert.equal(env.AWS_SECRET_ACCESS_KEY, undefined);
+        assert.equal(env.HOME, home);
+        assert.ok(env.AWS_CONFIG_FILE?.startsWith(home));
+        assert.ok(env.AWS_SHARED_CREDENTIALS_FILE?.startsWith(home));
+      }
     },
   );
 
@@ -491,8 +338,10 @@ suite("worker tasks run", () => {
         ).code,
         TasksErrorCode.SeedInvalid,
       );
-      const prompt = join(fixture.root, "system.md");
-      writeFileSync(prompt, "Local system prompt marker.");
+      writeFileSync(
+        join(fixture.root, "system.md"),
+        "Local system prompt marker.",
+      );
       const templates = join(fixture.root, "templates");
       mkdirSync(templates);
       writeFileSync(join(templates, "work.md"), "Local work template marker.");
@@ -521,6 +370,115 @@ suite("worker tasks run", () => {
         system_prompt: true,
         templates: true,
       });
+    },
+  );
+
+  test(
+    "--skip-release-gate ends with completed, no route and no release tree",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const output = join(fixture.root, "out");
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { skipReleaseGate: true, verify: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const context = readJson(output, "context.json") as {
+        input: { until: string | null };
+        result: { route: unknown };
+      };
+      assert.equal(context.input.until, RELEASE_GATE_LOOP);
+      assert.equal(context.result.route, null);
+      assert.ok(!existsSync(join(output, "state", "release")));
+    },
+  );
+
+  test(
+    "a seeded plan with --unit runs only the named unit",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const first = task("first", "grep -q good file");
+      const second = task("second", "true");
+      const fixture = await seedFixture(t, (seed) => {
+        (seed.revision as { tasks: unknown[] }).tasks = [first, second];
+        seed.plan = {
+          pending: [
+            { unit_id: first.id, instruction: null },
+            { unit_id: second.id, instruction: null },
+          ],
+          node: null,
+        };
+      });
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { unit: [first.id], skipReleaseGate: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const progress = readJson(join(fixture.root, "out"), "progress.json");
+      assert.deepEqual(progress.completed_units, [first.id]);
+      const unknown = commandRun(fixture, scriptedProvider([]));
+      assert.equal(
+        (
+          await diagnosticOf(
+            tasksRun(
+              fixture.seedFolder,
+              runOptions(fixture, { unit: ["task_unknown"], force: true }),
+              unknown.io,
+            ),
+          )
+        ).code,
+        TasksErrorCode.UnitUnknown,
+      );
+    },
+  );
+
+  test(
+    "a failed --verify check exits with 4",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t, (seed) => {
+        const revision = seed.revision as {
+          content: { verifications: string[] };
+        };
+        revision.content.verifications = [
+          "touch ../../checkouts/repo/leftover",
+        ];
+      });
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { verify: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.VerifyFailed, run.stderr.join(""));
+      const result = readJson(join(fixture.root, "out"), "result.json") as {
+        exit_code: number;
+        checks: { check: number; passed: boolean }[];
+      };
+      assert.equal(result.exit_code, TasksExit.VerifyFailed);
+      assert.deepEqual(
+        result.checks
+          .filter((check) => !check.passed)
+          .map(({ check }) => check),
+        [CLEAN_TREES_CHECK],
+      );
     },
   );
 
@@ -557,7 +515,7 @@ suite("worker tasks run", () => {
   );
 
   test(
-    "an unknown error ends the run with failed, exit 5 and internal_error",
+    "an unknown error in the tasks phase ends with failed, exit 5, a log record with its reason and internal_error",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {
       const fixture = await seedFixture(t);
@@ -568,7 +526,8 @@ suite("worker tasks run", () => {
       const run = commandRun(fixture, provider);
       const stderr = run.io.stderr;
       run.io.stderr = (text) => {
-        if (text.includes('"task started"')) throw new Error("unknown failure");
+        if (text.includes('"task started"'))
+          throw new Error("unknown failure marker");
         stderr(text);
       };
       const code = await tasksRun(
@@ -578,20 +537,92 @@ suite("worker tasks run", () => {
       );
       assert.equal(code, TasksExit.InternalError);
       assert.equal(JSON.parse(run.stdout.join("")).end, RunEndKind.Failed);
+      const result = readJson(join(fixture.root, "out"), "result.json");
+      assert.equal(result.end, RunEndKind.Failed);
+      assert.equal(result.exit_code, TasksExit.InternalError);
+      const failed = logRecords(run.stderr).find(
+        (record) => record.msg === TASKS_FAILED,
+      );
+      assert.match(String(failed?.reason), /unknown failure marker/);
       assert.match(
         run.stderr.join(""),
         new RegExp(TasksErrorCode.InternalError),
       );
     },
   );
+
+  test(
+    "an error after the tasks end writes result.json with failed and exit 5",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const provider = scriptedProvider([
+        writeGood(),
+        bash("mkdir ../../../context.json"),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.InternalError);
+      const result = readJson(join(fixture.root, "out"), "result.json");
+      assert.equal(result.end, RunEndKind.Failed);
+      assert.equal(result.exit_code, TasksExit.InternalError);
+    },
+  );
+
+  test(
+    "a pi directory bound to another directory ends the run with exit 5 and internal_error",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const run = commandRun(fixture, scriptedProvider([]), {
+        piDirectory: null,
+      });
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.InternalError);
+      assert.match(
+        run.stderr.join(""),
+        new RegExp(TasksErrorCode.InternalError),
+      );
+    },
+  );
+
+  test("--force refuses a folder with state/ and no result.json, and keeps its content", async (t) => {
+    const fixture = await seedFixture(t);
+    const output = join(fixture.root, "out");
+    mkdirSync(join(output, "state"), { recursive: true });
+    writeFileSync(join(output, "state", "kept.txt"), KEPT_TEXT);
+    const run = commandRun(fixture, scriptedProvider([]));
+    const refusal = await diagnosticOf(
+      tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { force: true }),
+        run.io,
+      ),
+    );
+    assert.equal(refusal.code, TasksErrorCode.OutputExists);
+    assert.equal(
+      readFileSync(join(output, "state", "kept.txt"), "utf8"),
+      KEPT_TEXT,
+    );
+  });
 });
 
 suite("worker tasks run credentials", () => {
   test("live mode without --credential-stdin and a credential option exit with 1 before any read", async (t) => {
     const fixture = await seedFixture(t);
+    const output = join(fixture.root, "out");
     const env = { ...hostEnvironment(), XDG_CONFIG_HOME: temporary(t) };
     const live = await runInProcess(
-      ["worker", "tasks", "run", fixture.seedFolder],
+      ["worker", "tasks", "run", fixture.seedFolder, "--output", output],
       env,
     );
     assert.equal(live.code, ExitCode.Failure);
@@ -602,6 +633,8 @@ suite("worker tasks run credentials", () => {
         "tasks",
         "run",
         fixture.seedFolder,
+        "--output",
+        output,
         "--credential",
         CREDENTIAL_CANARY,
       ],
@@ -609,12 +642,41 @@ suite("worker tasks run credentials", () => {
     );
     assert.notEqual(option.code, ExitCode.Success);
     assert.ok(!option.stdout.includes(CREDENTIAL_CANARY));
-    assert.ok(!existsSync(join(fixture.root, "out")));
+    assert.ok(!existsSync(output));
+  });
+
+  test("a slow standard input writer gives the credential to the command", async (t) => {
+    const fixture = await seedFixture(t);
+    const result = await spawnTasksRun(
+      [
+        "worker",
+        "tasks",
+        "run",
+        fixture.seedFolder,
+        "--credential-stdin",
+        "--tree",
+        `${fixture.bindingId}=${fixture.source}`,
+        "--output",
+        join(fixture.root, "out"),
+      ],
+      Buffer.from(
+        JSON.stringify({
+          provider_id: "openai",
+          credential: { type: "api_key", key: CREDENTIAL_CANARY },
+        }),
+      ),
+    );
+    assert.equal(result.code, ExitCode.Failure);
+    assert.match(result.stderr, new RegExp(TasksErrorCode.CredentialInvalid));
+    assert.match(result.stderr, /provider_id/);
+    assert.ok(!result.stderr.includes(CREDENTIAL_CANARY));
   });
 
   test("a terminal, a malformed object, another provider and an expiring token are refused before the output folder exists", async (t) => {
     const fixture = await seedFixture(t);
     const output = join(fixture.root, "out");
+    const stdinOf = (value: unknown) => () =>
+      Buffer.from(JSON.stringify(value));
     const refusals: [Partial<TasksCommandIo>, string, string][] = [
       [{ stdinTerminal: true }, TasksErrorCode.CredentialInvalid, "stdin"],
       [
@@ -624,31 +686,25 @@ suite("worker tasks run credentials", () => {
       ],
       [
         {
-          readStdin: () =>
-            Buffer.from(
-              JSON.stringify({
-                provider_id: "openai",
-                credential: { type: "api_key", key: CREDENTIAL_CANARY },
-              }),
-            ),
+          readStdin: stdinOf({
+            provider_id: "openai",
+            credential: { type: "api_key", key: CREDENTIAL_CANARY },
+          }),
         },
         TasksErrorCode.CredentialInvalid,
         "provider_id",
       ],
       [
         {
-          readStdin: () =>
-            Buffer.from(
-              JSON.stringify({
-                provider_id: "anthropic",
-                credential: {
-                  type: "oauth",
-                  access: CREDENTIAL_CANARY,
-                  refresh: CREDENTIAL_CANARY,
-                  expires: Date.now() + 60000,
-                },
-              }),
-            ),
+          readStdin: stdinOf({
+            provider_id: "anthropic",
+            credential: {
+              type: "oauth",
+              access: CREDENTIAL_CANARY,
+              refresh: CREDENTIAL_CANARY,
+              expires: Date.now() + 60000,
+            },
+          }),
         },
         TasksErrorCode.CredentialExpiring,
         "",
@@ -666,33 +722,82 @@ suite("worker tasks run credentials", () => {
     }
   });
 
+  test("the routing metadata comes from standard input, and a seed endpoint that differs is refused before the output folder exists", async (t) => {
+    const attacked = await seedFixture(t, (seed) => {
+      const setup = seed.setup as { agents: { metadata: unknown }[] };
+      setup.agents[0]!.metadata = { base_url: ATTACKER_URL };
+    });
+    const compatible = await seedFixture(t, (seed) => {
+      const setup = seed.setup as {
+        agents: {
+          metadata: unknown;
+          effective_configuration: { provider: string };
+        }[];
+      };
+      setup.agents[0]!.effective_configuration.provider = "openai-compatible";
+      setup.agents[0]!.metadata = {
+        base_url: "https://models.example.invalid/v1",
+        models: [{ id: "claude-sonnet-4-5" }],
+      };
+    });
+    const cases: [SeedFixture, Buffer][] = [
+      [attacked, apiKeyInput()],
+      [
+        compatible,
+        Buffer.from(
+          JSON.stringify({
+            provider_id: "openai-compatible",
+            credential: { type: "api_key", key: CREDENTIAL_CANARY },
+          }),
+        ),
+      ],
+      [
+        compatible,
+        Buffer.from(
+          JSON.stringify({
+            provider_id: "openai-compatible",
+            credential: { type: "api_key", key: CREDENTIAL_CANARY },
+            metadata: {
+              base_url: ATTACKER_URL,
+              models: [{ id: "claude-sonnet-4-5" }],
+            },
+          }),
+        ),
+      ],
+    ];
+    for (const [fixture, input] of cases) {
+      const run = commandRun(fixture, scriptedProvider([]), {
+        readStdin: () => input,
+      });
+      const refusal = await diagnosticOf(
+        tasksRun(fixture.seedFolder, runOptions(fixture), run.io),
+      );
+      assert.equal(refusal.code, TasksErrorCode.CredentialInvalid);
+      assert.deepEqual(refusal.fields, [["field", "metadata"]]);
+      assert.ok(!existsSync(join(fixture.root, "out")));
+    }
+  });
+
   test("the standard input buffer is zero after the parse", async (t) => {
     const fixture = await seedFixture(t);
     const input = apiKeyInput();
     const run = commandRun(fixture, scriptedProvider([]), {
       readStdin: () => input,
-    });
-    await diagnosticOf(
-      tasksRun(
-        fixture.seedFolder,
-        runOptions(fixture, { passEnv: ["UNSET_TASKS_VARIABLE"] }),
-        run.io,
-      ),
-    );
-    const parsed = commandRun(fixture, scriptedProvider([]), {
-      readStdin: () => input,
       modelRuntimeFactory: async () => {
         throw new Error("stop after the parse");
       },
     });
-    await tasksRun(fixture.seedFolder, runOptions(fixture), parsed.io);
+    await tasksRun(fixture.seedFolder, runOptions(fixture), run.io);
     assert.ok(input.every((byte) => byte === ZERO_BYTE));
   });
 
   test("--pass-env refuses a credential variable of a provider", async (t) => {
     const fixture = await seedFixture(t);
     const run = commandRun(fixture, scriptedProvider([]), {
-      shellEnv: { ...hostEnvironment(), ANTHROPIC_API_KEY: CREDENTIAL_CANARY },
+      shellEnv: {
+        ...hostEnvironment(),
+        ANTHROPIC_API_KEY: CREDENTIAL_CANARY,
+      },
     });
     const refusal = await diagnosticOf(
       tasksRun(

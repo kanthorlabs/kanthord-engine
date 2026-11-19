@@ -481,7 +481,9 @@ export default tseslint.config(
               ],
             },
             {
-              from: element("apps-cli", { fileInternalPath: "*.test.ts" }),
+              from: element("apps-cli", {
+                fileInternalPath: "{*.test.ts,tasks-test-support.ts}",
+              }),
               allow: [
                 {
                   to: element("worker-unit", {

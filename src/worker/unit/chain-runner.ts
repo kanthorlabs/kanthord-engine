@@ -363,7 +363,7 @@ export interface PhaseSeed {
   keys: Partial<ExecutionCtx>;
 }
 
-export interface PhaseInput {
+interface PhaseInput {
   phase: Phase;
   seed: PhaseSeed;
 }

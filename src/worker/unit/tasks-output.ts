@@ -4,12 +4,18 @@ import {
   mkdirSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { KNOWN_VALUE_MIN_CHARACTERS } from "../../agent/sensitive-text.ts";
+import {
+  type KnownMatcher,
+  knownMatcher,
+  redactValue,
+} from "../../agent/sensitive-text.ts";
 import type { TelemetryRecord } from "../../tracking/contract.ts";
 import { tasksDiagnostic, TasksErrorCode } from "./tasks-seed.ts";
+import { ORIGIN_DIRECTORY, unlockTree } from "./tasks-trees.ts";
 import type { TelemetrySink } from "./telemetry.ts";
 
 export const OutputFile = {
@@ -22,7 +28,8 @@ export const OutputFile = {
 } as const;
 export const UPLOADS_DIRECTORY = "uploads";
 export const STATE_DIRECTORY = "state";
-export const REDACTED = "[redacted]";
+export const HOME_DIRECTORY = "home";
+const REDACTED = "[redacted]";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const JSON_INDENT = 2;
@@ -36,7 +43,6 @@ const EVIDENCE_PREFIX = "evidence";
 const ASSET_PREFIX = "evidence_asset";
 const STRING_TYPE = "string";
 const OBJECT_TYPE = "object";
-const RUN_MARKERS = [OutputFile.Result, STATE_DIRECTORY];
 
 export interface OutboxEntry {
   operation: string;
@@ -113,11 +119,26 @@ function redactBytes(bytes: Buffer, secrets: readonly string[]): Buffer {
   return result;
 }
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+function utf8Text(bytes: Buffer): string | null {
+  try {
+    return UTF8.decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
 function isRunFolder(folder: string): boolean {
   const entries = readdirSync(folder);
+  if (entries.length === NO_BYTES) return true;
   return (
-    entries.length === NO_BYTES ||
-    RUN_MARKERS.some((marker) => entries.includes(marker))
+    statSync(join(folder, OutputFile.Result), {
+      throwIfNoEntry: false,
+    })?.isFile() === true &&
+    statSync(join(folder, STATE_DIRECTORY), {
+      throwIfNoEntry: false,
+    })?.isDirectory() === true
   );
 }
 
@@ -135,6 +156,7 @@ export class TasksOutput {
   readonly folder: string;
   readonly state: string;
   private readonly secrets: readonly string[];
+  private readonly matcher: KnownMatcher;
   private readonly entries: OutboxEntry[] = [];
   private readonly records: TelemetryRecord[] = [];
   private readonly logLine: (line: string) => void;
@@ -148,6 +170,8 @@ export class TasksOutput {
     this.folder = folder;
     this.state = join(folder, STATE_DIRECTORY);
     this.secrets = secrets;
+    this.matcher = knownMatcher();
+    for (const secret of secrets) this.matcher.addSecret(secret);
     this.logLine = logLine;
   }
 
@@ -156,16 +180,12 @@ export class TasksOutput {
     secrets: OutputSecrets,
     logLine: (line: string) => void,
   ): TasksOutput {
+    unlockTree(join(folder, STATE_DIRECTORY, ORIGIN_DIRECTORY));
     rmSync(folder, { recursive: true, force: true });
     mkdirSync(folder, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
     const output = new TasksOutput(
       folder,
-      [
-        ...secrets.credential.filter(Boolean),
-        ...secrets.passed.filter(
-          (value) => value.length >= KNOWN_VALUE_MIN_CHARACTERS,
-        ),
-      ],
+      [...secrets.credential, ...secrets.passed].filter(Boolean),
       logLine,
     );
     for (const directory of [UPLOADS_DIRECTORY, STATE_DIRECTORY])
@@ -184,11 +204,16 @@ export class TasksOutput {
   }
 
   redacted(value: unknown): unknown {
-    return redactJson(jsonValue(value), this.secrets);
+    return redactValue(
+      redactJson(jsonValue(value), this.secrets),
+      this.matcher,
+    );
   }
 
-  redactedText(text: string): string {
-    return redactText(text, this.secrets);
+  private redactedBytes(bytes: Buffer): Buffer {
+    const text = utf8Text(bytes);
+    if (text === null) return redactBytes(bytes, this.secrets);
+    return Buffer.from(this.redacted(text) as string, "utf8");
   }
 
   writeJson(name: string, value: unknown): void {
@@ -223,7 +248,7 @@ export class TasksOutput {
         this.directory(UPLOADS_DIRECTORY, evidence.evidence_id),
         evidence.asset_id,
       ),
-      redactBytes(bytes, this.secrets),
+      this.redactedBytes(bytes),
       { mode: PRIVATE_FILE_MODE },
     );
   }

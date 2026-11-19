@@ -12,6 +12,7 @@ import {
 } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { background, type Context } from "../../kernel/context.ts";
+import { Diagnostic } from "../../kernel/errors.ts";
 import { frozenStore } from "../../llm/refresh-watch.ts";
 import { AssetKind } from "../../mission/contract.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
@@ -49,6 +50,7 @@ import {
   wallDeadlineOfPlan,
 } from "./tasks-credential.ts";
 import {
+  HOME_DIRECTORY,
   OutputFile,
   STATE_DIRECTORY,
   type TasksOutput,
@@ -64,7 +66,9 @@ import {
   localReleaseTreePort,
   localRepositoryPort,
   type LocalTrees,
+  ORIGIN_DIRECTORY,
   prepareTrees,
+  unlockTree,
 } from "./tasks-trees.ts";
 import {
   type CheckResult,
@@ -84,10 +88,15 @@ export const TasksExit = {
 } as const;
 export type TasksExit = (typeof TasksExit)[keyof typeof TasksExit];
 
-export const RunMode = { Live: "live" } as const;
+const RunMode = { Live: "live" } as const;
 
-const HOME_DIRECTORY = "home";
 export const PI_AUTH_FILE = "auth.json";
+const TASKS_FAILED = "tasks failed";
+const FIXED_GIT_ENV = {
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_SSH_COMMAND:
+    "ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none",
+};
 const WORKING_AGENT = 0;
 const NO_ROUTE = "A local tasks run calls no route.";
 const BASE64 = "base64";
@@ -101,6 +110,7 @@ export interface LocalTasksInput {
   hostTools: SessionHostTools;
   modelRuntimeFactory: ModelRuntimeFactory;
   stop: Context;
+  piDirectory: string | null;
 }
 
 export interface LocalTasksEnd {
@@ -258,11 +268,18 @@ async function foundryEndOf(
     return { ...base, end: RunEndKind.Completed };
   if (end.kind === FoundryEndKind.BudgetEnd)
     return { ...base, end: RunEndKind.BudgetEnd };
-  if (end.kind === FoundryEndKind.Failed)
-    return { ...base, end: RunEndKind.Failed };
-  if (end.kind === FoundryEndKind.Stop)
-    return { ...base, end: RunEndKind.Stop, stop: end.stop, step: end.step };
   const { run } = composed;
+  if (end.kind === FoundryEndKind.Failed) {
+    await logFailure(composed, end.error);
+    return { ...base, end: RunEndKind.Failed };
+  }
+  if (end.kind === FoundryEndKind.Stop)
+    return {
+      ...base,
+      end: RunEndKind.Stop,
+      stop: run.halt(end.stop),
+      step: end.step,
+    };
   const stop = await run.stopOf(run.operationContext.signal.reason);
   return { ...base, end: RunEndKind.Stop, stop };
 }
@@ -338,11 +355,11 @@ interface Written {
   exitCode: TasksExit;
 }
 
-function writeOutputs(composed: Composed, written: Written): void {
-  const { output, plan } = composed;
+function resultRecord(composed: Composed, written: Written) {
+  const { plan } = composed;
   const { end, checks, exitCode } = written;
   const agent = plan.setup.agents[WORKING_AGENT]!;
-  output.writeJson(OutputFile.Result, {
+  return {
     end: end.end,
     exit_code: exitCode,
     stop: stopRecord(end.stop),
@@ -352,7 +369,13 @@ function writeOutputs(composed: Composed, written: Written): void {
     overrides: plan.overrides,
     seed_digest: plan.digest,
     checks,
-  });
+  };
+}
+
+function writeOutputs(composed: Composed, written: Written): void {
+  const { output } = composed;
+  const { end } = written;
+  output.writeJson(OutputFile.Result, resultRecord(composed, written));
   output.writeJson(OutputFile.Context, {
     input: end.input,
     result: end.result,
@@ -412,19 +435,15 @@ function composedOf(input: LocalTasksInput): {
 } {
   const { plan, output, credential } = input;
   const state = output.directory(STATE_DIRECTORY);
-  const pi = output.directory(STATE_DIRECTORY, PI_DIRECTORY_NAME);
-  installPiTools({ directory: pi });
-  usePiDirectory(pi);
-  if (existsSync(join(piAgentDirectory(), PI_AUTH_FILE)))
-    throw tasksDiagnostic(
-      TasksErrorCode.CredentialInvalid,
-      "worker tasks run: the pi directory holds a credential file.",
-      [["field", PI_AUTH_FILE]],
-    );
   const env = {
     ...input.env,
+    ...FIXED_GIT_ENV,
     HOME: output.directory(STATE_DIRECTORY, HOME_DIRECTORY),
   };
+  bindPiDirectory(
+    input.piDirectory ?? output.directory(STATE_DIRECTORY, PI_DIRECTORY_NAME),
+    env,
+  );
   const secrets = [
     ...credentialValues(credential.credential),
     ...input.passValues,
@@ -512,19 +531,78 @@ function composedOf(input: LocalTasksInput): {
   };
 }
 
+function bindPiDirectory(pi: string, env: NodeJS.ProcessEnv): void {
+  installPiTools({ directory: pi, env });
+  usePiDirectory(pi);
+  if (piAgentDirectory() !== pi)
+    throw new Error("The pi directory of the process is another directory.");
+  if (existsSync(join(pi, PI_AUTH_FILE)))
+    throw tasksDiagnostic(
+      TasksErrorCode.CredentialInvalid,
+      "worker tasks run: the pi directory holds a credential file.",
+      [["field", PI_AUTH_FILE]],
+    );
+}
+
+async function settled(work: () => Promise<void>): Promise<unknown> {
+  try {
+    await work();
+    return null;
+  } catch (error) {
+    return error;
+  }
+}
+
 async function disposed(
   composed: Composed,
   opened: ReadonlySet<NativeAgent>,
-): Promise<void> {
-  try {
-    for (const agent of opened) {
-      await agent.abort();
-      await agent.close();
-    }
-    await composed.io.resources.disposeAsync();
-  } finally {
-    composed.run.dispose();
-  }
+): Promise<unknown> {
+  const failures: unknown[] = [];
+  for (const agent of opened)
+    failures.push(
+      await settled(async () => {
+        await agent.abort();
+        await agent.close();
+      }),
+    );
+  failures.push(await settled(() => composed.io.resources.disposeAsync()));
+  unlockTree(join(composed.output.state, ORIGIN_DIRECTORY));
+  composed.run.dispose();
+  return failures.find((failure) => failure !== null) ?? null;
+}
+
+async function logFailure(composed: Composed, error: unknown): Promise<void> {
+  composed.output.log({
+    msg: TASKS_FAILED,
+    reason: await composed.run.reasonOf(error),
+  });
+}
+
+async function failedRun(
+  composed: Composed,
+  error: unknown,
+): Promise<LocalTasksEnd> {
+  await logFailure(composed, error);
+  const end: RunEnd = {
+    end: RunEndKind.Failed,
+    stop: null,
+    step: null,
+    result: null,
+    input: null,
+  };
+  composed.output.writeJson(
+    OutputFile.Result,
+    resultRecord(composed, {
+      end,
+      checks: null,
+      exitCode: TasksExit.InternalError,
+    }),
+  );
+  return {
+    end: RunEndKind.Failed,
+    exitCode: TasksExit.InternalError,
+    output: composed.output.folder,
+  };
 }
 
 async function preparedTrees(composed: Composed): Promise<LocalTrees | null> {
@@ -554,40 +632,53 @@ export async function runTasksLocal(
   input: LocalTasksInput,
 ): Promise<LocalTasksEnd> {
   const { composed, opened } = composedOf(input);
-  const { plan, output, run } = composed;
+  let ended: LocalTasksEnd | null = null;
+  let failure: unknown = null;
   try {
-    const trees = await preparedTrees(composed);
-    if (trees === null) {
-      const end = stopEnd(
-        await run.stopOf(run.operationContext.signal.reason),
-        null,
-      );
-      writeOutputs(composed, {
-        end,
-        checks: null,
-        exitCode: exitOf(end, null),
-      });
-      return {
-        end: end.end,
-        exitCode: exitOf(end, null),
-        output: output.folder,
-      };
+    ended = await endedRun(composed);
+  } catch (error) {
+    if (error instanceof Diagnostic) {
+      await disposed(composed, opened);
+      throw error;
     }
-    const end = await tasksEnd(composed, trees);
-    const checks = plan.verify
-      ? await verifyRun({
-          end,
-          trees,
-          plan,
-          env: composed.env,
-          until: plan.until,
-        })
-      : null;
-    const exitCode = exitOf(end, checks);
-    writeOutputs(composed, { end, checks, exitCode });
-    assert.ok(exitCode !== TasksExit.Diagnostic);
-    return { end: end.end, exitCode, output: output.folder };
-  } finally {
-    await disposed(composed, opened);
+    failure = error;
   }
+  const disposal = await disposed(composed, opened);
+  failure ??= disposal;
+  return failure === null ? ended! : failedRun(composed, failure);
+}
+
+async function endedRun(composed: Composed): Promise<LocalTasksEnd> {
+  const { plan, output, run } = composed;
+  const trees = await preparedTrees(composed);
+  if (trees === null) {
+    const end = stopEnd(
+      await run.stopOf(run.operationContext.signal.reason),
+      null,
+    );
+    writeOutputs(composed, {
+      end,
+      checks: null,
+      exitCode: exitOf(end, null),
+    });
+    return {
+      end: end.end,
+      exitCode: exitOf(end, null),
+      output: output.folder,
+    };
+  }
+  const end = await tasksEnd(composed, trees);
+  const checks = plan.verify
+    ? await verifyRun({
+        end,
+        trees,
+        plan,
+        env: composed.env,
+        until: plan.until,
+      })
+    : null;
+  const exitCode = exitOf(end, checks);
+  writeOutputs(composed, { end, checks, exitCode });
+  assert.ok(exitCode !== TasksExit.Diagnostic);
+  return { end: end.end, exitCode, output: output.folder };
 }

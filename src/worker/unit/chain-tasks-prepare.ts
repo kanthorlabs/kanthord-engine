@@ -22,7 +22,7 @@ import { stateOpen } from "./step-state-open.ts";
 import { unitsPlan } from "./step-units-plan.ts";
 import { Phase } from "./telemetry.ts";
 
-export const TASKS_PREPARE_LOOP = "tasks_prepare";
+const TASKS_PREPARE_LOOP = "tasks_prepare";
 
 function unlessSeeded(
   seeded: ReadonlySet<Key>,

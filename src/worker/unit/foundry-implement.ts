@@ -66,6 +66,8 @@ const ONE_FRAME = true;
 const FIRST_UNIT = 0;
 const NEXT_UNIT = 1;
 
+export const RELEASE_GATE_LOOP = "release_gate";
+
 export interface ImplementInput extends FoundryControl {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -224,7 +226,7 @@ function releaseRoundsFrame(runner: TaskRunner | null): LoopFrame<RoundScope> {
     body: [
       stepNode(budgetCheck),
       loopNode("units", unitsFrame(runner)),
-      loopNode("release_gate", releaseGateFrame),
+      loopNode(RELEASE_GATE_LOOP, releaseGateFrame),
     ],
     next: ({ route, state }) => {
       if (route.kind !== ReleaseGateKind.Routed) return null;

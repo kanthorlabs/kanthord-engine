@@ -27,7 +27,7 @@ export interface RunEnd {
   input: unknown;
 }
 
-export const VerifyCheck = {
+const VerifyCheck = {
   Heads: 3,
   CleanTrees: 5,
   Route: 6,

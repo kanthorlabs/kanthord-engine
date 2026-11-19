@@ -1,4 +1,11 @@
-import { mkdirSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { simpleGit } from "simple-git";
 import { childEnvironment } from "../../agent/environment.ts";
@@ -48,6 +55,36 @@ const PUSH_REFUSED_SUFFIX = ".push-refused";
 const SINGLE_CHECKOUT = 1;
 const MIN_DEADLINE_MS = 1;
 const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+const LOCKED_DIRECTORY_MODE = 0o500;
+const LOCKED_FILE_MODE = 0o400;
+
+interface TreeModes {
+  directory: number;
+  file: number;
+}
+
+const LOCKED: TreeModes = {
+  directory: LOCKED_DIRECTORY_MODE,
+  file: LOCKED_FILE_MODE,
+};
+const UNLOCKED: TreeModes = {
+  directory: PRIVATE_DIRECTORY_MODE,
+  file: PRIVATE_FILE_MODE,
+};
+
+function chmodTree(path: string, modes: TreeModes): void {
+  const stat = lstatSync(path);
+  if (stat.isSymbolicLink()) return;
+  if (!stat.isDirectory()) return chmodSync(path, modes.file);
+  chmodSync(path, PRIVATE_DIRECTORY_MODE);
+  for (const entry of readdirSync(path)) chmodTree(join(path, entry), modes);
+  chmodSync(path, modes.directory);
+}
+
+export function unlockTree(path: string): void {
+  if (existsSync(path)) chmodTree(path, UNLOCKED);
+}
 
 export interface LocalGitCall {
   env: NodeJS.ProcessEnv;
@@ -60,7 +97,7 @@ export interface LocalTrees {
   mirrors: ReadonlyMap<string, string>;
 }
 
-export interface TreeSources {
+interface TreeSources {
   state: string;
   setup: ExecutionSetup;
   nodeBranch: string;
@@ -98,7 +135,7 @@ export async function localGit(
   }
 }
 
-export function mirrorOf(state: string, bindingId: string): string {
+function mirrorOf(state: string, bindingId: string): string {
   return join(state, ORIGIN_DIRECTORY, `${bindingId}${MIRROR_SUFFIX}`);
 }
 
@@ -135,6 +172,7 @@ async function prepareCheckout(
       ["clone", "--mirror", "--no-local", "--", source, mirror],
       call,
     );
+    await localGit(mirror, ["remote", "remove", "origin"], call);
     await localGit(
       dirname(directory),
       ["clone", "--no-local", "--no-checkout", "--", mirror, directory],
@@ -164,6 +202,7 @@ async function prepareCheckout(
       ["config", "remote.origin.pushurl", `${mirror}${PUSH_REFUSED_SUFFIX}`],
       call,
     );
+    chmodTree(mirror, LOCKED);
   }, binding_id);
   excludeScratch(directory);
   return { binding_id, name, directory, head: head! };
@@ -198,7 +237,7 @@ export async function prepareTrees(
   };
 }
 
-export interface LocalTreeHost {
+interface LocalTreeHost {
   state: string;
   setup: ExecutionSetup;
   env: NodeJS.ProcessEnv;

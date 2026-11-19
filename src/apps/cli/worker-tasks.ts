@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { isatty } from "node:tty";
 import { type Command, CommanderError } from "commander";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
@@ -10,6 +11,7 @@ import {
   defaultModelRuntimeFactory,
   EndReason,
   ExecutionStop,
+  knownPassValues,
   localHostTools,
   type LocalTasksEnd,
   type LocalTasksInput,
@@ -22,6 +24,7 @@ import {
   type TasksOptions,
   TasksOutput,
   tasksPlanOf,
+  withoutAmbientCredentials,
 } from "../worker/index.ts";
 
 const STDIN_DESCRIPTOR = 0;
@@ -39,6 +42,7 @@ export interface TasksCommandIo {
   stderr(text: string): void;
   modelRuntimeFactory: ModelRuntimeFactory;
   stop: Context;
+  piDirectory: string | null;
 }
 
 export interface TasksRunOptions {
@@ -155,21 +159,21 @@ export async function tasksRun(
   );
   checkOutputFolder(plan.output, plan.force);
   const passed = passedValues(plan.passEnv, io.shellEnv);
+  const passValues = knownPassValues(Object.values(passed));
   const credential = credentialOf(stdinOf(io), plan);
+  const env = { ...shellOf(io.shellEnv), ...passed };
   const output = TasksOutput.create(
     plan.output,
-    {
-      credential: credentialValues(credential.credential),
-      passed: Object.values(passed),
-    },
+    { credential: credentialValues(credential.credential), passed: passValues },
     io.stderr,
   );
+  withoutAmbientCredentials(io.shellEnv, output);
   const end = await localEnd({
     plan,
     credential,
     output,
-    env: { ...shellOf(io.shellEnv), ...passed },
-    passValues: Object.values(passed),
+    env,
+    passValues,
     hostTools: localHostTools({
       output,
       claim: plan.claim,
@@ -177,6 +181,7 @@ export async function tasksRun(
     }),
     modelRuntimeFactory: io.modelRuntimeFactory,
     stop: io.stop,
+    piDirectory: io.piDirectory,
   });
   io.stdout(
     `${JSON.stringify({ output: end.output, end: end.end, exit_code: end.exitCode })}${NEWLINE}`,
@@ -199,12 +204,13 @@ async function runAction(seedFolder: string, command: Command): Promise<void> {
     const code = await tasksRun(seedFolder, command.opts<TasksRunOptions>(), {
       cwd: process.cwd(),
       shellEnv: process.env,
-      stdinTerminal: !!process.stdin.isTTY,
+      stdinTerminal: isatty(STDIN_DESCRIPTOR),
       readStdin: () => readFileSync(STDIN_DESCRIPTOR),
       stdout: (text) => void process.stdout.write(text),
       stderr: (text) => void process.stderr.write(text),
       modelRuntimeFactory: defaultModelRuntimeFactory,
       stop,
+      piDirectory: null,
     });
     if (code !== TasksExit.Success)
       throw new CommanderError(code, EXIT_CODE, "");

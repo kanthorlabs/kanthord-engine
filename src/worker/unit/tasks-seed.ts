@@ -20,6 +20,7 @@ import {
   linkUpdateReadSchema,
 } from "../contract.ts";
 import type { MethodClaim } from "./execution-stop.ts";
+import { RELEASE_GATE_LOOP } from "./foundry-implement.ts";
 import { VerdictSource } from "./node-verdict.ts";
 
 export const TasksErrorCode = {
@@ -37,7 +38,6 @@ export type TasksErrorCode =
   (typeof TasksErrorCode)[keyof typeof TasksErrorCode];
 
 export const SEED_FILE = "seed.json";
-export const RELEASE_GATE_LOOP = "release_gate";
 const OUTPUT_PREFIX = "tasks-run-";
 const MODEL_SEPARATOR = "/";
 const DURATION_PATTERN = /^([1-9][0-9]*)(s|m|h)$/;
@@ -47,12 +47,7 @@ const DURATION_UNIT_MS: Readonly<Record<string, number>> = {
   m: 60000,
   h: 3600000,
 };
-export const FIXED_ENV_NAMES: readonly string[] = [
-  "PATH",
-  "LANG",
-  "TMPDIR",
-  "HOME",
-];
+const FIXED_ENV_NAMES: readonly string[] = ["PATH", "LANG", "TMPDIR", "HOME"];
 const WORKING_AGENT = 0;
 const NO_ELAPSED_MS = 0;
 const PROBE_VALUE = "probe";
@@ -116,7 +111,7 @@ const priorSchema = z.strictObject({
     .nullable(),
   cleared: z.string().nullable(),
 });
-export const seedSchema = z.strictObject({
+const seedSchema = z.strictObject({
   claim: claimSchema,
   setup: seedSetupSchema,
   revision: revisionSchema,
@@ -375,7 +370,7 @@ function treesOf(
   return trees;
 }
 
-export function passEnvRefused(name: string): boolean {
+function passEnvRefused(name: string): boolean {
   return (
     !ENV_NAME_PATTERN.test(name) ||
     FIXED_ENV_NAMES.includes(name) ||

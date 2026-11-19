@@ -46,7 +46,6 @@ export type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
 export type { MethodClaim } from "./execution-stop.ts";
 export {
   tasksPlanOf,
-  passEnvRefused,
   TasksErrorCode,
   tasksDiagnostic,
   type TasksOptions,
@@ -56,6 +55,8 @@ export {
   credentialInvalid,
   credentialOf,
   credentialValues,
+  knownPassValues,
+  withoutAmbientCredentials,
   type LocalCredential,
 } from "./tasks-credential.ts";
 export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
