@@ -377,7 +377,7 @@ test("(security) no tool list of the agent catalog holds workbench.session.actio
     );
 });
 
-test("(security) no tool list of the agent catalog holds llm.credential.rotate, project.bindingSet.write or agent.enablement.put", () => {
+test("(security) no tool list of the agent catalog holds llm.credential.rotate, project.bindingSet.write, agent.enablement.put or an agent.variant id", () => {
   const setupIds = [
     llmOperations.rotate.id,
     projectOperations["bindingSet.write"].id,
@@ -389,8 +389,15 @@ test("(security) no tool list of the agent catalog holds llm.credential.rotate, 
         !declaration.tools.operation.includes(id),
         `${declaration.agent_name} ${id}`,
       );
+  for (const declaration of Object.values(AGENT_DECLARATIONS))
+    for (const id of declaration.tools.operation)
+      assert.ok(
+        !id.startsWith(VARIANT_OPERATION_PREFIX),
+        `${declaration.agent_name} ${id}`,
+      );
 });
 
+const VARIANT_OPERATION_PREFIX = "agent.variant.";
 const GUARD_CASES_DIRECTORY = new URL("../../eval/guard/", import.meta.url);
 const YAML_EXTENSION = ".yaml";
 const AUTO_EXPECT = "auto";
