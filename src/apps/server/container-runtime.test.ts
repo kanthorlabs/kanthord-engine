@@ -62,6 +62,7 @@ const FORWARDED_ENVIRONMENT = {
   GIT_AUTHOR_EMAIL: "author@example.invalid",
   GIT_COMMITTER_NAME: "Committer Name",
   GIT_COMMITTER_EMAIL: "committer@example.invalid",
+  KANTHORD_CAPTURE_TASKS: "capture-on-value",
 };
 const HOST_ENVIRONMENT = {
   ...FORWARDED_ENVIRONMENT,
@@ -134,6 +135,8 @@ const GOLDEN_RUN = [
   "GIT_COMMITTER_NAME",
   "--env",
   "GIT_COMMITTER_EMAIL",
+  "--env",
+  "KANTHORD_CAPTURE_TASKS",
   "--entrypoint",
   "/usr/bin/tini",
   IMAGE,

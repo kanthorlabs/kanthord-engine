@@ -256,9 +256,8 @@ async function budgetEnd(
   );
 }
 
-async function captureStart(walk: Walk): Promise<void> {
-  const { capture, run } = walk.io;
-  if (capture === undefined) return;
+async function captureStart(walk: Walk, capture: TasksCapture): Promise<void> {
+  const { run } = walk.io;
   try {
     await capture(walk.ctx);
   } catch (error) {
@@ -281,7 +280,8 @@ async function walkPhases<P extends CommonPorts>(
       return budgetEnd(built, walk, progress.prepared);
     if (kind === StepKind.Closed) return closedEnd(walk.ctx, kind);
     if (phase === Phase.Prepare) progress.prepared = true;
-    if (phase === Phase.Start) await captureStart(walk);
+    if (phase === Phase.Start && walk.io.capture !== undefined)
+      await captureStart(walk, walk.io.capture);
   }
   return assert.fail("A chain ends with a final step.");
 }

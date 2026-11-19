@@ -1374,13 +1374,20 @@ export const executionSeedSchema = z.strictObject({
   heads: z.record(identitySchema("binding"), seedCommitSchema),
 });
 export type ExecutionSeed = z.infer<typeof executionSeedSchema>;
-export function withoutEnvironmentMaps(setup: ExecutionSetup): ExecutionSetup {
+export function withoutEnvironmentMaps<
+  S extends Pick<ExecutionSetup, "repositories">,
+>(setup: S): S {
   const repositories = setup.repositories.map((repository) => {
     const environment = repository.environment;
     if (environment === null || !("document" in environment)) return repository;
     const document = { ...environment.document };
     delete document.containerEnv;
     delete document.remoteEnv;
+    if (document.build !== undefined) {
+      const build = { ...document.build };
+      delete build.args;
+      document.build = build;
+    }
     return { ...repository, environment: { ...environment, document } };
   });
   return { ...setup, repositories };

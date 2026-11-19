@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { withoutEnvironmentMaps } from "../contract.ts";
 import type { ExecutionCtx } from "./chain.ts";
 import { writeSeed } from "./tasks-seed-file.ts";
 
@@ -29,7 +28,7 @@ function capturedSeed(ctx: CaptureKeys, now: number): unknown {
       trace_id: claim.trace_id,
       root_span_id: claim.root_span_id,
     },
-    setup: withoutEnvironmentMaps(ctx.setup),
+    setup: ctx.setup,
     revision: ctx.revision,
     heads: Object.fromEntries(
       state.checkouts.map(({ binding_id, head }) => [binding_id, head]),

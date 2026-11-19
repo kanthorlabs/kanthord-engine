@@ -919,6 +919,7 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
   const CAPTURE_ON = "1";
   const RELEASED = "released";
   const PRIVATE_DIRECTORY_MODE = 0o700;
+  const PRIVATE_FILE_MODE = 0o600;
   const MODE_BITS = 0o777;
 
   test(
@@ -957,6 +958,10 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
         captured.execution.execution_id,
       );
       assert.equal(statSync(folder).mode & MODE_BITS, PRIVATE_DIRECTORY_MODE);
+      assert.equal(
+        statSync(join(folder, "seed.json")).mode & MODE_BITS,
+        PRIVATE_FILE_MODE,
+      );
       const seedFolder = join(temporary(t), "seed");
       mkdirSync(seedFolder);
       const text = readFileSync(join(folder, "seed.json"), "utf8");
