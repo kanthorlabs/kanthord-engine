@@ -56,11 +56,19 @@ export {
   credentialOf,
   credentialValues,
   knownPassValues,
+  replayCredential,
   withoutAmbientCredentials,
   type LocalCredential,
 } from "./tasks-credential.ts";
 export { checkOutputFolder, TasksOutput } from "./tasks-output.ts";
 export {
+  checkFileOptions,
+  checkHeader,
+  readTurns,
+  recordedOptions,
+} from "./tasks-turns-file.ts";
+export {
+  defaultCapabilities,
   runTasksLocal,
   PI_AUTH_FILE,
   TasksExit,

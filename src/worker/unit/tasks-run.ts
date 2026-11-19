@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { agentPort, type SessionModelFactory } from "../../agent/agent-port.ts";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import {
+  agentPort,
+  type SessionModelFactory,
+  type SessionPort,
+  type SessionTrace,
+} from "../../agent/agent-port.ts";
 import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
 import type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
 import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
@@ -11,7 +17,11 @@ import {
   usePiDirectory,
 } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
-import { background, type Context } from "../../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  type Context,
+} from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { frozenStore } from "../../llm/refresh-watch.ts";
 import { AssetKind } from "../../mission/contract.ts";
@@ -32,6 +42,7 @@ import { tasksPrepareChain } from "./chain-tasks-prepare.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import {
+  type EvidenceDraft,
   type EvidencePort,
   type ImplementHostPorts,
   PortResultKind,
@@ -55,6 +66,7 @@ import {
   STATE_DIRECTORY,
   type TasksOutput,
 } from "./tasks-output.ts";
+import { openWorldCapability } from "./tasks-open-world.ts";
 import {
   type Seed,
   type SeedPlan,
@@ -70,6 +82,9 @@ import {
   prepareTrees,
   unlockTree,
 } from "./tasks-trees.ts";
+import { StepRecord } from "./tasks-steps.ts";
+import { replayDiverged, Turns } from "./tasks-turns.ts";
+import type { RecordedTurns, TurnsOverrides } from "./tasks-turns-file.ts";
 import {
   type CheckResult,
   type RunEnd,
@@ -88,7 +103,7 @@ export const TasksExit = {
 } as const;
 export type TasksExit = (typeof TasksExit)[keyof typeof TasksExit];
 
-const RunMode = { Live: "live" } as const;
+const RunMode = { Live: "live", Replay: "replay" } as const;
 
 export const PI_AUTH_FILE = "auth.json";
 const TASKS_FAILED = "tasks failed";
@@ -101,16 +116,28 @@ const WORKING_AGENT = 0;
 const NO_ROUTE = "A local tasks run calls no route.";
 const BASE64 = "base64";
 
+export interface LocalReplay {
+  turns: RecordedTurns;
+  folder: string;
+}
+
 export interface LocalTasksInput {
   plan: TasksPlan;
   credential: LocalCredential;
   output: TasksOutput;
   env: Readonly<Record<string, string>>;
   passValues: readonly string[];
-  hostTools: SessionHostTools;
+  capabilities: readonly InlineExtension[];
+  replay: LocalReplay | null;
   modelRuntimeFactory: ModelRuntimeFactory;
   stop: Context;
   piDirectory: string | null;
+}
+
+export function defaultCapabilities(
+  tools: SessionHostTools,
+): InlineExtension[] {
+  return [executionEvidence(tools), linkUpdates(tools)];
 }
 
 export interface LocalTasksEnd {
@@ -135,6 +162,28 @@ function ok<T>(value: T) {
   return { kind: PortResultKind.Ok, value } as const;
 }
 
+function redactedDraft(
+  draft: EvidenceDraft,
+  output: TasksOutput,
+): EvidenceDraft {
+  return {
+    ...draft,
+    assets: draft.assets.map((asset) =>
+      asset.kind === AssetKind.Produced
+        ? {
+            ...asset,
+            content: {
+              ...asset.content,
+              data: output
+                .redactedBytes(Buffer.from(asset.content.data, BASE64))
+                .toString(BASE64),
+            },
+          }
+        : asset,
+    ),
+  };
+}
+
 export function localEvidencePort(
   run: ExecutionRun,
   output: TasksOutput,
@@ -147,8 +196,7 @@ export function localEvidencePort(
           output.upload(ids, Buffer.from(asset.content.data, BASE64));
       output.record({
         operation: "mission.evidence.submit",
-        body: { ...draft, ...run.context() },
-        step: null,
+        body: { ...redactedDraft(draft, output), ...run.context() },
       });
       return ok(ids.evidence_id);
     },
@@ -231,6 +279,9 @@ interface Composed {
   budget: ExecutionBudget;
   io: ChainIo<ImplementHostPorts>;
   env: Readonly<Record<string, string>>;
+  turns: Turns;
+  steps: StepRecord;
+  replay: LocalReplay | null;
 }
 
 async function preparedPhase(
@@ -334,6 +385,7 @@ async function tasksEnd(
   const end = await foundryImplement(input, {
     capabilities: io.capabilities,
     ports: io.ports,
+    steps: composed.steps,
   });
   return foundryEndOf(composed, end, serializedInput(input));
 }
@@ -359,7 +411,7 @@ interface Written {
 }
 
 function resultRecord(target: RunTarget, written: Written) {
-  const { plan } = target;
+  const { plan, replay } = target;
   const { end, checks, exitCode } = written;
   const agent = plan.setup.agents[WORKING_AGENT]!;
   return {
@@ -367,7 +419,7 @@ function resultRecord(target: RunTarget, written: Written) {
     exit_code: exitCode,
     stop: stopRecord(end.stop),
     step: end.step,
-    mode: RunMode.Live,
+    mode: replay === null ? RunMode.Live : RunMode.Replay,
     provider_id: agent.effective_configuration.provider,
     overrides: plan.overrides,
     seed_digest: plan.digest,
@@ -387,11 +439,15 @@ function writeOutputs(composed: Composed, written: Written): void {
     progress: end.result?.progress ?? null,
     current_unit: end.result?.currentUnit?.id ?? null,
     completed_units: end.result?.completedUnits ?? [],
+    units: composed.steps.unitScopes(),
   });
-  output.writeJson(OutputFile.Metrics, metricsOf(output));
+  output.writeJson(OutputFile.Metrics, {
+    ...metricsOf(output),
+    steps: composed.steps.stepTimes(),
+  });
 }
 
-function metricsOf(output: TasksOutput): unknown {
+function metricsOf(output: TasksOutput): object {
   const spans = new Map<
     string,
     {
@@ -432,6 +488,20 @@ function metricsOf(output: TasksOutput): unknown {
   };
 }
 
+function recordedSessions<T extends SessionTrace>(
+  port: SessionPort<T>,
+  turns: Turns,
+): SessionPort<T> {
+  return {
+    async open(request, context) {
+      const opened = await port.open(request, context);
+      const { agent } = opened.session;
+      agent.streamFunction = turns.stream(agent.streamFunction);
+      return opened;
+    },
+  };
+}
+
 function composedOf(input: LocalTasksInput): {
   composed: Composed;
   opened: Set<NativeAgent>;
@@ -448,16 +518,28 @@ function composedOf(input: LocalTasksInput): {
     env,
   );
   const secrets = [
-    ...credentialValues(credential.credential),
+    ...(input.replay === null ? credentialValues(credential.credential) : []),
     ...input.passValues,
   ];
   const knownSecrets = async () => secrets;
+  const stop = new CancellationContext(input.stop);
+  const steps = new StepRecord(output);
+  const turns = new Turns({
+    output,
+    header: {
+      seed_digest: plan.digest,
+      overrides: plan.overrides as TurnsOverrides,
+    },
+    replay: input.replay?.turns ?? null,
+    onDiverged: () =>
+      stop.cancel(new ExecutionStop(EndReason.WorkerStopped, null)),
+  });
   const run = new ExecutionRun({
     claim: plan.claim,
     clients: REFUSING_CLIENTS,
     credentials: { release: async () => {} },
     context: background,
-    stop: input.stop,
+    stop,
     log: (record) => output.log(record),
     telemetry: output.telemetry(),
     workerName: plan.setup.worker_name,
@@ -476,11 +558,10 @@ function composedOf(input: LocalTasksInput): {
   };
   const modelRuntimeFactory: SessionModelFactory = (request) =>
     input.modelRuntimeFactory({ ...request, credential: store });
-  const capabilities = [
-    executionEvidence(input.hostTools),
-    linkUpdates(input.hostTools),
-  ];
-  const sessions = agentPort({
+  const capabilities = input.capabilities.map((capability) =>
+    openWorldCapability(capability, turns),
+  );
+  const agentSessions = agentPort({
     capabilities,
     modelRuntimeFactory,
     knownSecrets,
@@ -490,6 +571,7 @@ function composedOf(input: LocalTasksInput): {
     env,
     hostHome: env.HOME,
   });
+  const sessions = recordedSessions(agentSessions, turns);
   const opened = new Set<NativeAgent>();
   const open = async (
     request: Parameters<typeof openNativeAgent>[0]["request"],
@@ -521,7 +603,11 @@ function composedOf(input: LocalTasksInput): {
       run,
       budget,
       env,
+      turns,
+      steps,
+      replay: input.replay,
       io: {
+        steps,
         run,
         budget,
         capabilities,
@@ -577,6 +663,7 @@ async function disposed(
 interface RunTarget {
   plan: TasksPlan;
   output: TasksOutput;
+  replay: LocalReplay | null;
 }
 
 function endOf(kind: RunEndKind): RunEnd {
@@ -608,6 +695,7 @@ function diagnosticEnd(target: RunTarget, error: Diagnostic): Diagnostic {
       exitCode: TasksExit.Diagnostic,
     }),
     code: error.code,
+    fields: Object.fromEntries(error.fields),
   });
   return error;
 }
@@ -688,6 +776,10 @@ async function endedRun(composed: Composed): Promise<LocalTasksEnd> {
     };
   }
   const end = await tasksEnd(composed, trees);
+  if (composed.turns.failure !== null) throw composed.turns.failure;
+  const { turns } = composed;
+  if (end.end === RunEndKind.Completed && turns.unused()) turns.markUnused();
+  if (turns.diverged !== null) throw replayDiverged(turns.diverged);
   const checks = plan.verify
     ? await verifyRun({
         end,
@@ -695,6 +787,8 @@ async function endedRun(composed: Composed): Promise<LocalTasksEnd> {
         plan,
         env: composed.env,
         until: plan.until,
+        output: output.folder,
+        recorded: composed.replay === null ? null : composed.replay.folder,
       })
     : null;
   const exitCode = exitOf(end, checks);

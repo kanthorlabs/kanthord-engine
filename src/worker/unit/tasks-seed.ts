@@ -1,12 +1,17 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { z } from "zod";
 import {
   agentProviderKindSchema,
+  PromptOrigin,
   promptTemplatesSchema,
   reasoningEffortSchema,
 } from "../../agent/contract.ts";
-import { resolveTemplateSet } from "../../agent/prompt-templates.ts";
+import {
+  resolveTemplateSet,
+  type TemplateSet,
+} from "../../agent/prompt-templates.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import { background } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -32,6 +37,8 @@ export const TasksErrorCode = {
   CredentialExpiring: "cli.worker.tasks.credential_expiring",
   UnitUnknown: "cli.worker.tasks.unit_unknown",
   OutputExists: "cli.worker.tasks.output_exists",
+  ReplayInvalid: "cli.worker.tasks.replay_invalid",
+  ReplayDiverged: "cli.worker.tasks.replay_diverged",
   InternalError: "cli.worker.tasks.internal_error",
 } as const;
 export type TasksErrorCode =
@@ -52,6 +59,8 @@ const WORKING_AGENT = 0;
 const NO_ELAPSED_MS = 0;
 const PROBE_VALUE = "probe";
 const NOT_FOUND = -1;
+const SHA256 = "sha256";
+const HEX = "hex";
 
 const commitSchema = z.string().regex(/^[a-f0-9]{40,64}$/);
 const claimSchema = z
@@ -277,21 +286,33 @@ function withPrompt(agent: SeedAgent, options: TasksOptions): SeedAgent {
   };
 }
 
-async function templatesOf(
-  seed: Seed,
+async function templateSetOf(
   options: TasksOptions,
-): Promise<ExecutionSetup["templates"] | undefined> {
-  if (options.templates === undefined) return seed.setup.templates;
+): Promise<TemplateSet | null> {
+  if (options.templates === undefined) return null;
   try {
-    return (
-      await resolveTemplateSet(
-        resolve(options.cwd, options.templates),
-        background,
-      )
-    ).templates;
+    return await resolveTemplateSet(
+      resolve(options.cwd, options.templates),
+      background,
+    );
   } catch {
     throw optionInvalid("--templates");
   }
+}
+
+function contentDigest(text: string): string {
+  return createHash(SHA256).update(text, "utf8").digest(HEX);
+}
+
+function templateDigests(set: TemplateSet): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(set.origins)
+      .filter(([, origin]) => origin === PromptOrigin.File)
+      .map(([name]) => [
+        name,
+        contentDigest(set.templates[name as keyof TemplateSet["templates"]]),
+      ]),
+  );
 }
 
 function budgetOf(
@@ -317,13 +338,14 @@ function seedMissing(field: string): Diagnostic {
 async function setupOf(
   seed: Seed,
   options: TasksOptions,
+  set: TemplateSet | null,
 ): Promise<ExecutionSetup> {
   const agents = seed.setup.agents.map((agent, index) =>
     index === WORKING_AGENT
       ? withPrompt(withModel(agent, options), options)
       : agent,
   );
-  const templates = await templatesOf(seed, options);
+  const templates = set === null ? seed.setup.templates : set.templates;
   if (templates === undefined) throw seedMissing("setup.templates");
   return {
     ...seed.setup,
@@ -394,13 +416,24 @@ function claimOf(seed: Seed, startedAt: number): MethodClaim {
   };
 }
 
-function overridesOf(options: TasksOptions): Record<string, unknown> {
+interface OverrideFiles {
+  setup: ExecutionSetup;
+  set: TemplateSet | null;
+}
+
+function overridesOf(
+  options: TasksOptions,
+  files: OverrideFiles,
+): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries({
       model: options.model,
       reasoning: options.reasoning,
-      system_prompt: options.systemPrompt === undefined ? undefined : true,
-      templates: options.templates === undefined ? undefined : true,
+      system_prompt:
+        options.systemPrompt === undefined
+          ? undefined
+          : contentDigest(files.setup.agents[WORKING_AGENT]!.prompt.final),
+      templates: files.set === null ? undefined : templateDigests(files.set),
       units: options.units.length ? [...options.units] : undefined,
       budget_turns: options.budgetTurns,
       budget_wall: options.budgetWall,
@@ -416,7 +449,8 @@ export async function tasksPlanOf(
   const { seed, digest: seedDigest } = readSeed(
     resolve(options.cwd, options.seedFolder),
   );
-  const setup = await setupOf(seed, options);
+  const set = await templateSetOf(options);
+  const setup = await setupOf(seed, options, set);
   return {
     seed,
     digest: seedDigest,
@@ -432,6 +466,6 @@ export async function tasksPlanOf(
     ),
     force: options.force,
     verify: options.verify,
-    overrides: overridesOf(options),
+    overrides: overridesOf(options, { setup, set }),
   };
 }

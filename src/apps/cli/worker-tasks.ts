@@ -1,21 +1,29 @@
-import { readSync } from "node:fs";
+import { existsSync, readSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import { isatty } from "node:tty";
 import { type Command, CommanderError } from "commander";
 import { CancellationContext, type Context } from "../../kernel/context.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import {
+  checkFileOptions,
+  checkHeader,
   checkOutputFolder,
   credentialInvalid,
   credentialOf,
   credentialValues,
+  defaultCapabilities,
   defaultModelRuntimeFactory,
   EndReason,
   ExecutionStop,
   knownPassValues,
+  type LocalCredential,
   localHostTools,
   type LocalTasksEnd,
   type LocalTasksInput,
   type ModelRuntimeFactory,
+  readTurns,
+  recordedOptions,
+  replayCredential,
   RunEndKind,
   runTasksLocal,
   tasksDiagnostic,
@@ -23,6 +31,7 @@ import {
   TasksExit,
   type TasksOptions,
   TasksOutput,
+  type TasksPlan,
   tasksPlanOf,
   withoutAmbientCredentials,
 } from "../worker/index.ts";
@@ -41,12 +50,14 @@ export interface TasksCommandIo {
   stdout(text: string): void;
   stderr(text: string): void;
   modelRuntimeFactory: ModelRuntimeFactory;
+  capabilities: typeof defaultCapabilities;
   stop: Context;
   piDirectory: string | null;
 }
 
 export interface TasksRunOptions {
   credentialStdin?: boolean;
+  replay?: string;
   tree: string[];
   passEnv: string[];
   model?: string;
@@ -130,6 +141,72 @@ function printInternalError(io: TasksCommandIo): void {
   io.stderr(`${diagnostic(failed)}${NEWLINE}${diagnosticRows(failed)}`);
 }
 
+const RECORDED_OPTIONS: readonly (keyof TasksRunOptions)[] = [
+  "model",
+  "reasoning",
+  "budgetTurns",
+  "budgetWall",
+  "skipReleaseGate",
+];
+
+function modeInvalid(): Diagnostic {
+  return tasksDiagnostic(
+    TasksErrorCode.ModeInvalid,
+    "worker tasks run: pass exactly one of --replay and --credential-stdin, and no recorded override with --replay.",
+  );
+}
+
+function replayPathOf(options: TasksRunOptions, cwd: string): string | null {
+  const live = !!options.credentialStdin;
+  if (live === (options.replay !== undefined)) throw modeInvalid();
+  if (live) return null;
+  if (
+    options.unit.length ||
+    RECORDED_OPTIONS.some((name) => options[name] !== undefined)
+  )
+    throw modeInvalid();
+  return resolve(cwd, options.replay!);
+}
+
+function realPathOf(path: string): string {
+  const parent = dirname(path);
+  if (existsSync(path) || parent === path) return realpathSync.native(path);
+  return join(realPathOf(parent), basename(path));
+}
+
+function within(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(`${folder}${sep}`);
+}
+
+function checkReplayOutput(folder: string, output: string): void {
+  const recorded = realPathOf(folder);
+  const target = realPathOf(output);
+  if (within(recorded, target) || within(target, recorded))
+    throw tasksDiagnostic(
+      TasksErrorCode.OptionInvalid,
+      "worker tasks run: --output and the folder of the --replay file hold one another.",
+      [["option", "--output"]],
+    );
+}
+
+interface ModeInput {
+  replay: LocalTasksInput["replay"];
+  plan: TasksPlan;
+  io: TasksCommandIo;
+}
+
+function credentialOfMode(input: ModeInput): LocalCredential {
+  const { replay, plan, io } = input;
+  return replay === null
+    ? credentialOf(stdinOf(io), plan)
+    : replayCredential(plan);
+}
+
+function recordedReplay(replayPath: string | null): LocalTasksInput["replay"] {
+  if (replayPath === null) return null;
+  return { turns: readTurns(replayPath), folder: dirname(replayPath) };
+}
+
 async function localEnd(input: LocalTasksInput): Promise<LocalTasksEnd> {
   try {
     return await runTasksLocal(input);
@@ -148,23 +225,34 @@ export async function tasksRun(
   options: TasksRunOptions,
   io: TasksCommandIo,
 ): Promise<TasksExit> {
-  if (!options.credentialStdin)
-    throw tasksDiagnostic(
-      TasksErrorCode.ModeInvalid,
-      "worker tasks run: live mode requires --credential-stdin.",
-    );
+  const replay = recordedReplay(replayPathOf(options, io.cwd));
+  if (replay !== null) checkFileOptions(replay.turns.header, options);
   const plan = await tasksPlanOf(
-    planOptions(seedFolder, options, io.cwd),
+    planOptions(
+      seedFolder,
+      replay === null
+        ? options
+        : { ...options, ...recordedOptions(replay.turns.header) },
+      io.cwd,
+    ),
     Date.now(),
   );
+  if (replay !== null) {
+    checkHeader(replay.turns.header, plan);
+    checkReplayOutput(replay.folder, plan.output);
+  }
   checkOutputFolder(plan.output, plan.force);
   const passed = passedValues(plan.passEnv, io.shellEnv);
   const passValues = knownPassValues(Object.values(passed));
-  const credential = credentialOf(stdinOf(io), plan);
+  const credential = credentialOfMode({ replay, plan, io });
   const env = { ...shellOf(io.shellEnv), ...passed };
   const output = TasksOutput.create(
     plan.output,
-    { credential: credentialValues(credential.credential), passed: passValues },
+    {
+      credential:
+        replay === null ? credentialValues(credential.credential) : [],
+      passed: passValues,
+    },
     io.stderr,
   );
   withoutAmbientCredentials(io.shellEnv, output);
@@ -174,11 +262,14 @@ export async function tasksRun(
     output,
     env,
     passValues,
-    hostTools: localHostTools({
-      output,
-      claim: plan.claim,
-      linkUpdates: plan.seed.link_updates ?? [],
-    }),
+    capabilities: io.capabilities(
+      localHostTools({
+        output,
+        claim: plan.claim,
+        linkUpdates: plan.seed.link_updates ?? [],
+      }),
+    ),
+    replay,
     modelRuntimeFactory: io.modelRuntimeFactory,
     stop: io.stop,
     piDirectory: io.piDirectory,
@@ -243,6 +334,7 @@ async function runAction(seedFolder: string, command: Command): Promise<void> {
       stdout: (text) => void process.stdout.write(text),
       stderr: (text) => void process.stderr.write(text),
       modelRuntimeFactory: defaultModelRuntimeFactory,
+      capabilities: defaultCapabilities,
       stop,
       piDirectory: null,
     });
@@ -271,6 +363,10 @@ export function addWorkerTasksCommands(worker: Command): void {
     .option(
       "--credential-stdin",
       "Read the LLM credential as one JSON object from standard input",
+    )
+    .option(
+      "--replay <turns.jsonl>",
+      "Answer each model request from the turns of a recorded run; read no credential and call no provider",
     )
     .option("--tree <binding_id=path>", "Tree source of a binding", collect, [])
     .option(

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -14,6 +15,7 @@ import { simpleGit } from "simple-git";
 import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { CancellationContext } from "../../kernel/context.ts";
+import { HostTool } from "../../worker/contract.ts";
 import {
   hostEnvironment,
   temporary,
@@ -78,6 +80,11 @@ const RELEASE_GATE_LOOP = "release_gate";
 const TASKS_FAILED = "tasks failed";
 const KEPT_TEXT = "kept";
 const DIAGNOSTIC_END = "diagnostic";
+const UNIT_COMPLETE = "complete";
+
+function sha256Of(text: string): string {
+  return createHash("sha256").update(text, "utf8").digest("hex");
+}
 
 function commandRun(
   fixture: SeedFixture,
@@ -372,8 +379,8 @@ suite("worker tasks run", () => {
       );
       const result = readJson(join(fixture.root, "out"), "result.json");
       assert.deepEqual(result.overrides, {
-        system_prompt: true,
-        templates: true,
+        system_prompt: sha256Of("Local system prompt marker."),
+        templates: { work: sha256Of("Local work template marker.") },
       });
     },
   );
@@ -402,6 +409,108 @@ suite("worker tasks run", () => {
       assert.equal(context.input.until, RELEASE_GATE_LOOP);
       assert.equal(context.result.route, null);
       assert.ok(!existsSync(join(output, "state", "release")));
+    },
+  );
+
+  test(
+    "progress.json holds the last unit scope of each unit",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([writeGood(), fauxAssistantMessage("done")]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const [work] = (fixture.seed.revision as { tasks: { id: string }[] })
+        .tasks;
+      const progress = readJson(join(fixture.root, "out"), "progress.json") as {
+        units: Record<
+          string,
+          { unit: { id: string }; passed: boolean; result: { kind: string } }
+        >;
+      };
+      assert.deepEqual(Object.keys(progress.units), [work!.id]);
+      const unit = progress.units[work!.id]!;
+      assert.equal(unit.unit.id, work!.id);
+      assert.equal(unit.passed, true);
+      assert.equal(unit.result.kind, UNIT_COMPLETE);
+    },
+  );
+
+  test(
+    "metrics.json holds the run time of each step of tasks_prepare and of the tasks phase",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([writeGood(), fauxAssistantMessage("done")]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { skipReleaseGate: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const metrics = readJson(join(fixture.root, "out"), "metrics.json") as {
+        steps: { step: string; ms: number }[];
+      };
+      assert.deepEqual(
+        metrics.steps.map((entry) => entry.step),
+        [
+          "affected.declaration",
+          "setup.entries(live)",
+          "agent.open",
+          "env.setup(live)",
+          "state.open",
+          "units.plan",
+          "budget.check",
+          "unit.enter",
+          "unit.turn",
+          "verify.own",
+          "done_record.put",
+          "unit.leave",
+        ],
+      );
+      assert.ok(metrics.steps.every((entry) => entry.ms >= NO_CALLS));
+    },
+  );
+
+  test(
+    "each outbox entry names the step of its write",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([
+          writeGood(),
+          fauxAssistantMessage(
+            fauxToolCall(HostTool.EvidenceUpload, { path: "file" }),
+            { stopReason: "toolUse" },
+          ),
+          fauxAssistantMessage("done"),
+        ]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { skipReleaseGate: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const outbox = JSON.parse(
+        readFileSync(join(fixture.root, "out", "outbox.json"), "utf8"),
+      ) as { step: string | null }[];
+      assert.deepEqual(
+        outbox.map((entry) => entry.step),
+        ["unit.turn"],
+      );
     },
   );
 

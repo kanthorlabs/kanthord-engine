@@ -110,3 +110,53 @@ test("the CLI evidence port records the operation and the body that the worker e
     REPORT,
   );
 });
+
+test("the CLI evidence port redacts a known secret in the decoded base64 asset content before the outbox record", async (t) => {
+  const secret = "canary-credential-value-0123456789";
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {} as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+    secrets: async () => [],
+  });
+  stopAfter(t, () => run.dispose());
+  const root = temporary(t);
+  const output = TasksOutput.create(
+    join(root, "out"),
+    { credential: [secret], passed: [] },
+    () => {},
+  );
+  const draft: EvidenceDraft = {
+    subject: "coder-report",
+    assets: [
+      {
+        kind: AssetKind.Produced,
+        content: {
+          media_type: "text/markdown",
+          encoding: "base64",
+          data: Buffer.from(`report ${secret}`, "utf8").toString("base64"),
+        },
+      },
+    ],
+  };
+  await localEvidencePort(run, output).submit(
+    draft,
+    new CancellationContext(),
+    { halt: false },
+  );
+  const recorded = JSON.parse(
+    readFileSync(join(root, "out", "outbox.json"), "utf8"),
+  ) as { body: { assets: { content: { data: string } }[] } }[];
+  const decoded = Buffer.from(
+    recorded[0]!.body.assets[0]!.content.data,
+    "base64",
+  ).toString("utf8");
+  assert.ok(decoded.startsWith("report "));
+  assert.ok(!decoded.includes(secret));
+  assert.ok(
+    !JSON.stringify(output.outbox()).includes(
+      Buffer.from(`report ${secret}`, "utf8").toString("base64"),
+    ),
+  );
+});

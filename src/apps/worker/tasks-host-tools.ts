@@ -87,7 +87,6 @@ export function localHostTools(input: LocalHostToolsInput): SessionHostTools {
             },
           ],
         },
-        step: null,
       });
       return {
         ...ids,
@@ -98,7 +97,6 @@ export function localHostTools(input: LocalHostToolsInput): SessionHostTools {
       output.record({
         operation: "worker.execution.link_update.get",
         body: { execution_id: claim.execution_id, ...page },
-        step: null,
       });
       return linkUpdatePage(input.linkUpdates, page.cursor, page.limit);
     },
