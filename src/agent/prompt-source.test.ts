@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { background, CancellationContext } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "./contract.ts";
 import {
   InvalidReason,
-  PROMPT_SOURCE_MAX_BYTES,
   readAgentFile,
   SourceState,
   validateText,

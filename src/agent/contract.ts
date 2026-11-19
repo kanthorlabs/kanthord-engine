@@ -553,14 +553,14 @@ const variantInstruction = z
     (text) => Buffer.byteLength(text, "utf8") <= PROMPT_SOURCE_MAX_BYTES,
     "The instruction exceeds the prompt source size limit.",
   );
-const variantSchema = z.strictObject({
+export const agentVariantSchema = z.strictObject({
   id: identitySchema(AGENT_VARIANT_PREFIX),
   agent_name: z.string().min(1),
   display_name: z.string().min(1),
   instruction: z.string(),
   revision: z.number().int().positive(),
 });
-const variantItemSchema = variantSchema.omit({ instruction: true });
+const variantItemSchema = agentVariantSchema.omit({ instruction: true });
 const agentParams = z.strictObject({ agent_name: z.string().min(1) });
 const revisionBody = z.strictObject({
   expected_revision: z.number().int().positive(),
@@ -911,7 +911,7 @@ export const agentOperations = {
       query: emptyFields,
       body: z.null(),
     }),
-    output: variantSchema,
+    output: agentVariantSchema,
     description: "Get one agent variant with its instruction.",
   },
   "variant.create": {
@@ -930,7 +930,7 @@ export const agentOperations = {
         instruction: variantInstruction,
       }),
     }),
-    output: variantSchema,
+    output: agentVariantSchema,
     description:
       "Create a named role of one Workbench session agent: a display name and an instruction.",
   },
@@ -950,7 +950,7 @@ export const agentOperations = {
         expected_revision: z.number().int().positive(),
       }),
     }),
-    output: variantSchema,
+    output: agentVariantSchema,
     description:
       "Replace the display name and the instruction of an agent variant at the expected revision.",
   },

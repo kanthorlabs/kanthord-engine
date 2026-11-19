@@ -3,11 +3,11 @@ import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { simpleGit } from "simple-git";
-import { InstructionFileState } from "../agent/contract.ts";
 import {
-  InvalidReason,
+  InstructionFileState,
   PROMPT_SOURCE_MAX_BYTES,
-} from "../agent/prompt-source.ts";
+} from "../agent/contract.ts";
+import { InvalidReason } from "../agent/prompt-source.ts";
 import { IdentityKind } from "../kernel/caller.ts";
 import {
   CancellationContext,

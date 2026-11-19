@@ -19,7 +19,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { isObject } from "../kernel/values.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Store } from "../kernel/store.ts";
-import { PROMPT_SOURCE_MAX_BYTES } from "../agent/prompt-source.ts";
+import { PROMPT_SOURCE_MAX_BYTES } from "../agent/contract.ts";
 import { SshIdentitySubjectKind } from "../custody/contract.ts";
 import type { SshIdentitySubject } from "../custody/contract.ts";
 import type { CallerIdentity } from "../kernel/caller.ts";

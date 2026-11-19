@@ -720,6 +720,8 @@ function variantNotFound(variantId: string): OperationError {
   );
 }
 
+type VariantOwned = { variant_id: string | null };
+
 function displayNameOf(agentName: string): string {
   const declaration = getAgentDeclaration(agentName);
   assert.ok(declaration);
@@ -1466,6 +1468,12 @@ export class WorkbenchService implements Service {
     return row;
   }
 
+  private findVariantRow(variantId: string): AgentVariant | null {
+    return this.dependencies.store.transaction((tx) =>
+      this.dependencies.agentVariant(tx, variantId),
+    );
+  }
+
   private promptVariantOf(session: OpenSession): PromptVariant | null {
     if (session.variantId === null) return null;
     const { display_name, instruction } = this.variantRowOf(session.variantId);
@@ -1473,9 +1481,11 @@ export class WorkbenchService implements Service {
   }
 
   private displayNameOfSession(session: OpenSession): string {
-    return session.variantId === null
-      ? displayNameOf(session.agentName)
-      : this.variantRowOf(session.variantId).display_name;
+    const row =
+      session.variantId === null
+        ? null
+        : this.findVariantRow(session.variantId);
+    return row?.display_name ?? displayNameOf(session.agentName);
   }
 
   private async greeting(
@@ -2431,7 +2441,7 @@ export class WorkbenchService implements Service {
     const waiting = this.pendingApprovalOf(host);
     return {
       run_active: active,
-      display_name: active ? displayNameOf(running.agentName) : null,
+      display_name: active ? this.displayNameOfSession(running) : null,
       auto_mode: host.autoMode,
       streaming:
         streaming === undefined ? null : JSON.parse(JSON.stringify(streaming)),
@@ -3356,16 +3366,15 @@ export class WorkbenchService implements Service {
   }
 
   private variantNamesOf(
-    sessions: readonly { variant_id: string | null }[],
+    sessions: readonly VariantOwned[],
   ): ReadonlyMap<string, string> {
     const ids = new Set(sessions.flatMap(({ variant_id }) => variant_id ?? []));
     return this.dependencies.store.transaction(
       (tx) =>
         new Map(
-          [...ids].map((id) => {
+          [...ids].flatMap((id) => {
             const row = this.dependencies.agentVariant(tx, id);
-            assert.ok(row);
-            return [id, row.display_name];
+            return row ? [[id, row.display_name] as const] : [];
           }),
         ),
     );
@@ -3410,9 +3419,10 @@ export class WorkbenchService implements Service {
         scope_requests: this.scopeRequests.count(host.id),
         notice: await this.noticeOf(host.id, caller),
         display_name:
-          host.variant_id === null
-            ? displayNameOf(host.agent_name)
-            : variantNames.get(host.variant_id)!,
+          (host.variant_id === null
+            ? undefined
+            : variantNames.get(host.variant_id)) ??
+          displayNameOf(host.agent_name),
         modified: Math.max(
           host.modified,
           ...participants.map(({ modified }) => modified),
@@ -3484,7 +3494,12 @@ export class WorkbenchService implements Service {
         const file = session.manager.getSessionFile();
         if (file) rmSync(file, { force: true });
       }
-      if (variantId !== undefined)
+      if (
+        variantId !== undefined &&
+        ![...this.sessions.values()].some(
+          (open) => open.variantId === variantId,
+        )
+      )
         removeEmptyVariantDirectory(this.dependencies.stateDirectory, {
           agentName,
           variantId,

@@ -8,8 +8,6 @@ import {
 } from "../kernel/context.ts";
 import { PROMPT_SOURCE_MAX_BYTES } from "./contract.ts";
 
-export { PROMPT_SOURCE_MAX_BYTES };
-
 export const SourceState = {
   Present: "present",
   Absent: "absent",

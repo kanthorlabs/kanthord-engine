@@ -12,13 +12,36 @@ import {
 } from "../../agent/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { createIdempotencyKey, createIdentity } from "../../kernel/identity.ts";
+import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import {
+  completed,
+  createHost,
   fakeMachines,
   gatewayFixture,
+  heldAnswer,
+  invitedProjectIds,
+  sendMessage,
   TEST_PROJECT_ID,
   TEST_WORKER_BINDING,
+  workbenchHarness,
 } from "./test-support.ts";
 
+const identity = testHumanIdentity("kanthord", "Ulrich", "agent-variant");
+const { workbenchFixture } = workbenchHarness(identity);
+const SESSION_TEST_TIMEOUT_MS = 60000;
+const GUEST_NAME = "Mira";
+const STREAM_PATH = "/api/workbench/guest/session/stream";
+const FRAME_END = "\n\n";
+const FRAME_PATTERN = /^event: (\w+)\ndata: (.*)$/s;
+const STATE_EVENT = "state";
+const BASE_CONFIGURATION = {
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
+} as const;
+const ANSWER = "Done.";
+const CATALOG_NAME = "Yumi";
+const NOT_FOUND_INDEX = 0;
 const VALIDATION_FAILED = "gateway.request.validation_failed";
 const UNAUTHORIZED = "gateway.authentication.unauthorized";
 const BASE = "ops@1";
@@ -271,3 +294,146 @@ test("(security) a variant of another agent answers 404 agent.variant.not_found"
   assert.equal(response.status, HttpStatus.NotFound);
   assert.equal((await errorOf(response)).code, AgentErrorCode.VariantNotFound);
 });
+
+type WorkbenchFixture = Awaited<ReturnType<typeof workbenchFixture>>;
+type StateData = { run_active: boolean; display_name: string | null };
+
+async function variantSessionOf(fixture: WorkbenchFixture) {
+  const variant = completed(
+    await fixture.agent["variant.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: BASE,
+          display_name: NIGHT_OPS,
+          instruction: INSTRUCTION,
+        },
+      },
+      fixture.options,
+    ),
+  );
+  const session = completed(
+    await fixture.workbench["session.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: BASE,
+          variant_id: variant.id,
+          ...BASE_CONFIGURATION,
+        },
+      },
+      fixture.options,
+    ),
+  );
+  return { variant, session };
+}
+
+async function nextFrame(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  buffer: { text: string },
+): Promise<{ event: string; data: unknown }> {
+  const decoder = new TextDecoder();
+  for (;;) {
+    const end = buffer.text.indexOf(FRAME_END);
+    if (end >= NOT_FOUND_INDEX) {
+      const block = buffer.text.slice(0, end);
+      buffer.text = buffer.text.slice(end + FRAME_END.length);
+      const match = FRAME_PATTERN.exec(block);
+      if (match) return { event: match[1]!, data: JSON.parse(match[2]!) };
+      continue;
+    }
+    const chunk = await reader.read();
+    assert.equal(chunk.done, false);
+    buffer.text += decoder.decode(chunk.value, { stream: true });
+  }
+}
+
+test(
+  "a running variant session answers the variant display_name on the owner feed and the guest feed",
+  { timeout: SESSION_TEST_TIMEOUT_MS },
+  async (t) => {
+    const held = heldAnswer(ANSWER);
+    const fixture = await workbenchFixture(
+      t,
+      [held.step],
+      undefined,
+      undefined,
+      [BASE],
+    );
+    const { session } = await variantSessionOf(fixture);
+    const invited = completed(
+      await fixture.workbench["invite.create"](
+        {
+          params: { session_id: session.id },
+          query: {},
+          body: {
+            invitee_name: GUEST_NAME,
+            project_ids: await invitedProjectIds(fixture),
+            granted_operations: [],
+          },
+        },
+        fixture.options,
+      ),
+    );
+    const joined = completed(
+      await fixture.workbench["invite.join"](
+        {
+          params: {},
+          query: {},
+          body: { invite_token: invited.invite_token, name: GUEST_NAME },
+        },
+        fixture.options,
+      ),
+    );
+    const controller = new AbortController();
+    t.after(() => controller.abort());
+    const response = await fixture.request(STREAM_PATH, {
+      headers: { authorization: `Bearer ${joined.guest_token}` },
+      signal: controller.signal,
+    });
+    assert.equal(response.status, HttpStatus.OK);
+    const reader = response.body!.getReader();
+    const buffer = { text: "" };
+    completed(await sendMessage(fixture, session.id, "@Yumi who are you?"));
+    let state: StateData | undefined;
+    while (state?.run_active !== true) {
+      const frame = await nextFrame(reader, buffer);
+      if (frame.event === STATE_EVENT) state = frame.data as StateData;
+    }
+    assert.equal(state.display_name, NIGHT_OPS);
+    const host = fixture.workbenchService["sessions"].get(session.id);
+    assert.ok(host);
+    assert.equal(
+      fixture.workbenchService["feedState"](host).display_name,
+      NIGHT_OPS,
+    );
+    held.gate.resolve();
+  },
+);
+
+test(
+  "a list read with a variant session whose row is gone answers the catalog name",
+  { timeout: SESSION_TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await workbenchFixture(t, [], undefined, undefined, [BASE]);
+    const base = await createHost(fixture, BASE);
+    const { variant, session } = await variantSessionOf(fixture);
+    fixture.workbenchService["dependencies"].store.transaction((tx) =>
+      tx.database
+        .prepare("DELETE FROM agent_variant WHERE id = ?")
+        .run(variant.id),
+    );
+    const listed = completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    const item = listed.items.find(({ id }) => id === session.id);
+    assert.equal(item?.display_name, CATALOG_NAME);
+    assert.equal(item?.variant_id, variant.id);
+    assert.ok(listed.items.some(({ id }) => id === base.id));
+  },
+);

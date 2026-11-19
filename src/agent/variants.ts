@@ -1,4 +1,4 @@
-import { z } from "zod";
+import type { z } from "zod";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -8,15 +8,12 @@ import {
   getAgentDeclaration,
   workbenchAgentNames,
 } from "./catalog.ts";
-import { AGENT_VARIANT_PREFIX, AgentErrorCode } from "./contract.ts";
+import {
+  AGENT_VARIANT_PREFIX,
+  AgentErrorCode,
+  agentVariantSchema,
+} from "./contract.ts";
 
-export const agentVariantSchema = z.strictObject({
-  id: z.string(),
-  agent_name: z.string(),
-  display_name: z.string(),
-  instruction: z.string(),
-  revision: z.number().int(),
-});
 export type AgentVariant = z.infer<typeof agentVariantSchema>;
 
 export type AgentVariantItem = Pick<

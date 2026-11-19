@@ -449,6 +449,17 @@ export function parseCase(
   };
 }
 
+function assertSessionVariantBase(value: LoadedCase, agent: string): void {
+  const item = value.variants.find(
+    (variant) => variant.display_name === value.session_variant,
+  );
+  if (item && item.agent_name !== agent)
+    throw new CodedError(
+      CaseErrorCode.Invalid,
+      `The session_variant item names another agent than the subject ${agent}: ${item.agent_name}.`,
+    );
+}
+
 export function loadSuite(
   agent: string,
   ids: readonly string[],
@@ -474,12 +485,14 @@ export function loadSuite(
     .filter(
       (name) => !ids.length || ids.includes(basename(name, CASE_EXTENSION)),
     )
-    .map((name) =>
-      parseCase({
+    .map((name) => {
+      const loaded = parseCase({
         id: basename(name, CASE_EXTENSION),
         text: readFileSync(join(directory, name), "utf8"),
         readFile: (file) =>
           readFileSync(join(directory, FIXTURES_DIRECTORY, file)),
-      }),
-    );
+      });
+      assertSessionVariantBase(loaded, agent);
+      return loaded;
+    });
 }

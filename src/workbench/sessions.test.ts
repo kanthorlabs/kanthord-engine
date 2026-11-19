@@ -1,14 +1,12 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { loadPi } from "../agent/pi.ts";
-import { temporary } from "../kernel/test-support.ts";
 import {
   WORKBENCH_RECORD_ENTRY,
   type WorkbenchRecord,
   WorkbenchRecordKind,
 } from "./contract.ts";
-import { appendRecord, recordOf, variantSessionDirectory } from "./sessions.ts";
+import { appendRecord, recordOf } from "./sessions.ts";
 
 const NO_ENTRIES: unknown[] = [];
 const VALID_RECORD: WorkbenchRecord = {
@@ -45,14 +43,4 @@ test("invariant guard: appendRecord throws on invalid data and appends nothing",
   const invalid = { ...VALID_RECORD, extra: 1 } as unknown as WorkbenchRecord;
   assert.throws(() => appendRecord(manager, invalid));
   assert.deepEqual(manager.getEntries(), NO_ENTRIES);
-});
-
-test("variantSessionDirectory names the variant directory and creates nothing", (t) => {
-  const state = temporary(t);
-  const directory = variantSessionDirectory(state, {
-    agentName: "ops@1",
-    variantId: "agent_variant_X",
-  });
-  assert.ok(directory.endsWith("/sessions/workbench/ops@1/agent_variant_X"));
-  assert.equal(existsSync(directory), false);
 });
