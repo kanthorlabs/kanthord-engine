@@ -192,6 +192,7 @@ async function fixture(t: TestContext, stateDirectory = temporary(t)) {
     invites,
     projectScope,
     stateDirectory,
+    agentVariants: () => [],
     declarationOf: (name: string) => AGENT_DECLARATIONS[name as never],
     projectNames: (ids: readonly string[]) =>
       new Map(ids.map((id) => [id, "alpha"])),

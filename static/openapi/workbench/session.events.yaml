@@ -257,6 +257,10 @@ components:
                     anyOf:
                       - type: string
                       - type: "null"
+                  variant_id:
+                    anyOf:
+                      - type: string
+                      - type: "null"
                   display_name:
                     anyOf:
                       - type: string
@@ -265,6 +269,7 @@ components:
                   - id
                   - text
                   - agent_name
+                  - variant_id
                   - display_name
                 additionalProperties: false
             error_message:

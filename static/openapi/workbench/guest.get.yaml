@@ -9,8 +9,8 @@ pathItem:
       result, no thinking and no configuration. `projects` names the projects of
       the invite. `granted_operations` lists the live grant of the invite with
       the guard class of each id. `mention_names` lists the display names that a
-      guest can mention: the agents that hold no built-in tool. An ended invite
-      answers 401 `gateway.jwt.invite_ended`."
+      guest can mention: the agents that hold no built-in tool and the variants
+      of those agents. An ended invite answers 401 `gateway.jwt.invite_ended`."
     x-access-policy: guest
     x-timeout-ms: 30000
     x-mutation: false

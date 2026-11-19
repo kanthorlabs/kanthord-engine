@@ -8,6 +8,7 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { isString } from "../kernel/values.ts";
+import type { AgentVariantItem } from "../agent/variants.ts";
 import { PromptTemplate, type PromptTemplates } from "../agent/contract.ts";
 import {
   renderTemplate,
@@ -68,6 +69,7 @@ export const RELAY_MAX_BYTES = 65536;
 export interface MentionName {
   agent_name: string;
   display_name: string;
+  variant_id: string | null;
 }
 
 export interface MentionMatch extends MentionName {
@@ -117,27 +119,68 @@ export function leadingMention(
     kind: MentionKind.Known,
     agent_name: matched.agent_name,
     display_name: matched.display_name,
+    variant_id: matched.variant_id,
     rest: body.slice(matched.display_name.length).trimStart(),
   };
 }
 
-function workbenchMentionNames(): MentionName[] {
-  return workbenchAgentNames().map((agentName) => {
+function workbenchMentionNames(
+  tx: Transaction,
+  dependencies: Pick<Dependencies, "agentVariants">,
+): MentionName[] {
+  const catalog = workbenchAgentNames().map((agentName) => {
     const declaration = getAgentDeclaration(agentName);
     if (!declaration) throw new Error(`Undeclared agent ${agentName}.`);
     return {
       agent_name: declaration.agent_name,
       display_name: declaration.display_name,
+      variant_id: null,
     };
   });
+  const variants = dependencies.agentVariants(tx).map((variant) => ({
+    agent_name: variant.agent_name,
+    display_name: variant.display_name,
+    variant_id: variant.id,
+  }));
+  return [...catalog, ...variants];
+}
+
+export interface MentionTarget {
+  agent_name: string;
+  variant_id: string | null;
+}
+
+export function variantNotFound(variantId: string): OperationError {
+  return new OperationError(
+    HttpStatus.NotFound,
+    AgentErrorCode.VariantNotFound,
+    "The agent variant does not exist.",
+    { variant_id: variantId },
+  );
+}
+
+export function validateMention(
+  tx: Transaction,
+  target: MentionTarget,
+  dependencies: Pick<Dependencies, "agentConfiguration" | "agentVariant">,
+): void {
+  if (
+    target.variant_id !== null &&
+    dependencies.agentVariant(tx, target.variant_id) === null
+  )
+    throw variantNotFound(target.variant_id);
+  dependencies.agentConfiguration.validateEntry(tx, target.agent_name, null);
 }
 
 export function resolveMention(
   tx: Transaction,
   text: string,
-  dependencies: Pick<Dependencies, "agentConfiguration">,
+  dependencies: Pick<
+    Dependencies,
+    "agentConfiguration" | "agentVariant" | "agentVariants"
+  >,
 ): MentionMatch | null {
-  const mention = leadingMention(text, workbenchMentionNames());
+  const mention = leadingMention(text, workbenchMentionNames(tx, dependencies));
   if (mention === null) return null;
   if (mention.kind === MentionKind.Unknown)
     throw new OperationError(
@@ -146,10 +189,11 @@ export function resolveMention(
       "Agent not found.",
       { mention: mention.mention },
     );
-  dependencies.agentConfiguration.validateEntry(tx, mention.agent_name, null);
+  validateMention(tx, mention, dependencies);
   return {
     agent_name: mention.agent_name,
     display_name: mention.display_name,
+    variant_id: mention.variant_id,
     rest: mention.rest,
   };
 }
@@ -170,30 +214,60 @@ function holdsBuiltinTool(declaration: AgentDeclaration): boolean {
   return declaration.tools.builtin.length > NO_CHARACTERS;
 }
 
-export function resolveGuestMention(
-  tx: Transaction,
-  text: string,
-  dependencies: Pick<Dependencies, "agentConfiguration" | "declarationOf">,
-): MentionMatch | null {
-  const mention = resolveMention(tx, text, dependencies);
-  if (
-    mention !== null &&
-    holdsBuiltinTool(declared(dependencies.declarationOf, mention.agent_name))
-  )
+function refuseBuiltinToolAgent(
+  declarationOf: DeclarationOf,
+  agentName: string,
+): void {
+  if (holdsBuiltinTool(declared(declarationOf, agentName)))
     throw new OperationError(
       HttpStatus.Conflict,
       WorkbenchErrorCode.GuestAgentRefused,
       "A guest cannot mention an agent that holds a built-in tool.",
-      { agent_name: mention.agent_name },
+      { agent_name: agentName },
     );
+}
+
+type GuestMentionDependencies = Pick<
+  Dependencies,
+  "agentConfiguration" | "agentVariant" | "agentVariants" | "declarationOf"
+>;
+
+export function validateGuestMention(
+  tx: Transaction,
+  target: MentionTarget,
+  dependencies: GuestMentionDependencies,
+): void {
+  validateMention(tx, target, dependencies);
+  refuseBuiltinToolAgent(dependencies.declarationOf, target.agent_name);
+}
+
+export function resolveGuestMention(
+  tx: Transaction,
+  text: string,
+  dependencies: GuestMentionDependencies,
+): MentionMatch | null {
+  const mention = resolveMention(tx, text, dependencies);
+  if (mention !== null)
+    refuseBuiltinToolAgent(dependencies.declarationOf, mention.agent_name);
   return mention;
 }
 
-export function guestMentionNames(declarationOf: DeclarationOf): string[] {
-  return workbenchAgentNames()
+export function guestMentionNames(
+  declarationOf: DeclarationOf,
+  variants: readonly AgentVariantItem[],
+): string[] {
+  const guestAgents = workbenchAgentNames()
     .map((agentName) => declared(declarationOf, agentName))
-    .filter((declaration) => !holdsBuiltinTool(declaration))
-    .map((declaration) => declaration.display_name);
+    .filter((declaration) => !holdsBuiltinTool(declaration));
+  const guestAgentNames = new Set(
+    guestAgents.map(({ agent_name }) => agent_name),
+  );
+  return [
+    ...guestAgents.map(({ display_name }) => display_name),
+    ...variants
+      .filter(({ agent_name }) => guestAgentNames.has(agent_name))
+      .map(({ display_name }) => display_name),
+  ];
 }
 
 export interface Answerer {

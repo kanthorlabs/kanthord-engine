@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { AgentErrorCode } from "../agent/contract.ts";
+import { OperationError } from "../kernel/errors.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import type { Transaction } from "../kernel/store.ts";
 import { PromptTemplate } from "../agent/contract.ts";
 import {
   renderTemplate,
@@ -12,12 +16,27 @@ import {
   mergeEntries,
   RELAY_MAX_BYTES,
   relayText,
+  resolveMention,
 } from "./conversation.ts";
 
 const NAMES = [
-  { agent_name: "software@1", display_name: "Software" },
-  { agent_name: "architect@1", display_name: "Software Architecture" },
-  { agent_name: "re@1", display_name: "RE" },
+  { agent_name: "software@1", display_name: "Software", variant_id: null },
+  {
+    agent_name: "architect@1",
+    display_name: "Software Architecture",
+    variant_id: null,
+  },
+  { agent_name: "re@1", display_name: "RE", variant_id: null },
+];
+
+const VARIANT_NAMES = [
+  { agent_name: "swe@1", display_name: "SWE", variant_id: null },
+  {
+    agent_name: "swe@1",
+    display_name: "SWE Lead",
+    variant_id: "agent_variant_lead",
+  },
+  { agent_name: "ops@1", display_name: "Yumi", variant_id: null },
 ];
 
 test("security: H1 an injected name with a space matches the longest name", () => {
@@ -27,8 +46,64 @@ test("security: H1 an injected name with a space matches the longest name", () =
       kind: MentionKind.Known,
       agent_name: "architect@1",
       display_name: "Software Architecture",
+      variant_id: null,
       rest: "review this",
     },
+  );
+});
+
+test("security: H1 the longest name wins and a failed boundary falls back to a shorter name", () => {
+  assert.deepEqual(leadingMention("@SWE Lead fix it", VARIANT_NAMES), {
+    kind: MentionKind.Known,
+    agent_name: "swe@1",
+    display_name: "SWE Lead",
+    variant_id: "agent_variant_lead",
+    rest: "fix it",
+  });
+  assert.deepEqual(leadingMention("@SWE Leader fix it", VARIANT_NAMES), {
+    kind: MentionKind.Known,
+    agent_name: "swe@1",
+    display_name: "SWE",
+    variant_id: null,
+    rest: "Leader fix it",
+  });
+});
+
+test("security: H1 the boundary is whitespace, the end, or a character outside the name characters", () => {
+  assert.deepEqual(leadingMention("@Yumi, status?", VARIANT_NAMES), {
+    kind: MentionKind.Known,
+    agent_name: "ops@1",
+    display_name: "Yumi",
+    variant_id: null,
+    rest: ", status?",
+  });
+  assert.deepEqual(leadingMention("@Software Architecture\nreview it", NAMES), {
+    kind: MentionKind.Known,
+    agent_name: "architect@1",
+    display_name: "Software Architecture",
+    variant_id: null,
+    rest: "review it",
+  });
+});
+
+test("security: H1 @Guard answers 404 agent.catalog.not_found because guard@1 stays outside the name set", () => {
+  assert.deepEqual(leadingMention("@Guard hello", VARIANT_NAMES), {
+    kind: MentionKind.Unknown,
+    mention: "Guard",
+  });
+  assert.throws(
+    () =>
+      resolveMention({} as Transaction, "@Guard hello", {
+        agentConfiguration: {
+          validateEntry: () => assert.fail("no agent resolved"),
+        } as never,
+        agentVariant: () => null,
+        agentVariants: () => [],
+      }),
+    (error) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.NotFound &&
+      error.code === AgentErrorCode.AgentNotFound,
   );
 });
 

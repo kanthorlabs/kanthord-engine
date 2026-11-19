@@ -444,6 +444,7 @@ export const queuedMessageSchema = z.strictObject({
   id: identitySchema(WORKBENCH_QUEUED_MESSAGE_PREFIX),
   text: z.string(),
   agent_name: z.string().nullable(),
+  variant_id: z.string().nullable(),
   display_name: z.string().nullable(),
 });
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
@@ -1000,7 +1001,7 @@ export const workbenchOperations = {
       run_active: z.boolean(),
     }),
     description:
-      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `granted_operations` lists the live grant of the invite with the guard class of each id. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool. An ended invite answers 401 `gateway.jwt.invite_ended`.",
+      "Read the conversation of the invite of the guest. The conversation comes from the guest token. The entries hold the guest view only: no tool result, no thinking and no configuration. `projects` names the projects of the invite. `granted_operations` lists the live grant of the invite with the guard class of each id. `mention_names` lists the display names that a guest can mention: the agents that hold no built-in tool and the variants of those agents. An ended invite answers 401 `gateway.jwt.invite_ended`.",
   },
   "guest.stream": {
     ...guestOperation,

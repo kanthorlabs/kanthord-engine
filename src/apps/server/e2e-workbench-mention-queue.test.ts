@@ -4,6 +4,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import {
   OPS_AGENT_PROMPT,
   RE_AGENT_PROMPT,
+  SWE_AGENT_PROMPT,
 } from "../../agent/prompt-assets.ts";
 import { AgentErrorCode } from "../../agent/contract.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -14,6 +15,7 @@ import {
 import { testHumanIdentity } from "../../kernel/test-identity.ts";
 import { MessageDelivery } from "../../workbench/contract.ts";
 import {
+  AGENT,
   completed,
   createHost,
   heldAnswer,
@@ -33,6 +35,12 @@ const FIRST_REQUEST = "Which objectives are open?";
 const REVIEW_REQUEST = "@RE check the open objectives.";
 const UNTAGGED_REQUEST = "And what else?";
 const UNKNOWN_REQUEST = "@Guard hi";
+const VARIANT_NAME = "Software Architecture";
+const RENAMED_VARIANT_NAME = "Design Review";
+const VARIANT_INSTRUCTION = "Review the design before any code.";
+const VARIANT_REQUEST = `@${VARIANT_NAME} check the design.`;
+const VARIANT_ANSWER = "The design holds.";
+const VARIANT_NOT_FOUND_MESSAGE = "The agent variant does not exist.";
 const ANSWER = "Two objectives are open.";
 const REVIEW_ANSWER = "RE checked them.";
 const LAST_ANSWER = "RE has nothing else.";
@@ -66,6 +74,7 @@ function promptsOf(fixture: Fixture): (string | undefined)[] {
   return fixture.provider.calls.map(({ systemPrompt }) => {
     if (systemPrompt?.includes(RE_AGENT_PROMPT)) return REVIEW_AGENT;
     if (systemPrompt?.includes(OPS_AGENT_PROMPT)) return OPS;
+    if (systemPrompt?.includes(SWE_AGENT_PROMPT)) return AGENT;
     return undefined;
   });
 }
@@ -106,12 +115,14 @@ test(
         id: mentioned.queued_message_id,
         text: REVIEW_REQUEST,
         agent_name: REVIEW_AGENT,
+        variant_id: null,
         display_name: REVIEW_DISPLAY_NAME,
       },
       {
         id: untagged.queued_message_id,
         text: UNTAGGED_REQUEST,
         agent_name: null,
+        variant_id: null,
         display_name: null,
       },
     ]);
@@ -158,6 +169,7 @@ test(
           id: queued.queued_message_id,
           text: UNTAGGED_REQUEST,
           agent_name: null,
+          variant_id: null,
           display_name: null,
         },
       ],
@@ -238,6 +250,180 @@ test(
     assert.ok(snapshot.error_message);
     assert.equal(snapshot.queue.length, NO_ITEMS);
     assert.deepEqual(promptsOf(fixture), [OPS, OPS]);
+    const items = completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: {}, body: null },
+        fixture.options,
+      ),
+    ).items;
+    assert.deepEqual(items[0]!.participants, []);
+  },
+);
+
+async function newVariant(fixture: Fixture) {
+  return completed(
+    await fixture.agent["variant.create"](
+      {
+        params: {},
+        query: {},
+        body: {
+          agent_name: AGENT,
+          display_name: VARIANT_NAME,
+          instruction: VARIANT_INSTRUCTION,
+        },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+async function disableAgent(fixture: Fixture, agentName: string) {
+  const enablement = completed(
+    await fixture.agent["enablement.get"](
+      { params: { agent_name: agentName }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+  completed(
+    await fixture.agent["enablement.disable"](
+      {
+        params: { agent_name: agentName },
+        query: {},
+        body: { expected_revision: enablement.revision },
+      },
+      fixture.options,
+    ),
+  );
+}
+
+test(
+  "(happy path, variant) a variant item queued during a Yumi run keeps its target through a rename and runs the variant member",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(ANSWER);
+    const { fixture, host } = await runningHost(t, [
+      first.step,
+      async () => fauxAssistantMessage(VARIANT_ANSWER),
+    ]);
+    const variant = await newVariant(fixture);
+    const queued = completed(
+      await sendMessage(fixture, host.id, VARIANT_REQUEST),
+    );
+    assert.equal(queued.agent_name, AGENT);
+    assert.deepEqual((await snapshotOf(fixture, host.id)).queue, [
+      {
+        id: queued.queued_message_id,
+        text: VARIANT_REQUEST,
+        agent_name: AGENT,
+        variant_id: variant.id,
+        display_name: VARIANT_NAME,
+      },
+    ]);
+    completed(
+      await fixture.agent["variant.update"](
+        {
+          params: { variant_id: variant.id },
+          query: {},
+          body: {
+            display_name: RENAMED_VARIANT_NAME,
+            instruction: VARIANT_INSTRUCTION,
+            expected_revision: variant.revision,
+          },
+        },
+        fixture.options,
+      ),
+    );
+    assert.equal(
+      (await snapshotOf(fixture, host.id)).queue[0]!.display_name,
+      RENAMED_VARIANT_NAME,
+    );
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    assert.deepEqual(promptsOf(fixture), [OPS, AGENT]);
+    assert.ok(
+      fixture.provider.calls[1]!.systemPrompt?.includes(VARIANT_INSTRUCTION),
+    );
+    const [participant] = completed(
+      await fixture.workbench["session.list"](
+        { params: {}, query: {}, body: null },
+        fixture.options,
+      ),
+    ).items[0]!.participants;
+    assert.equal(participant!.variant_id, variant.id);
+  },
+);
+
+test(
+  "(security, argument guard) a variant deleted before the start of its queued first mention is dropped with an error and the next item runs",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(ANSWER);
+    const { fixture, host } = await runningHost(t, [
+      first.step,
+      async () => fauxAssistantMessage(LAST_ANSWER),
+    ]);
+    const variant = await newVariant(fixture);
+    completed(await sendMessage(fixture, host.id, VARIANT_REQUEST));
+    completed(await sendMessage(fixture, host.id, UNTAGGED_REQUEST));
+    completed(
+      await fixture.agent["variant.delete"](
+        {
+          params: { variant_id: variant.id },
+          query: {},
+          body: { expected_revision: variant.revision },
+        },
+        fixture.options,
+      ),
+    );
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const snapshot = await snapshotOf(fixture, host.id);
+    assert.equal(snapshot.error_message, VARIANT_NOT_FOUND_MESSAGE);
+    assert.equal(snapshot.queue.length, NO_ITEMS);
+    assert.deepEqual(promptsOf(fixture), [OPS, OPS]);
+  },
+);
+
+test(
+  "(security, argument guard) a variant mention of a disabled swe@1 answers 400 at send and leaves the queue unchanged",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(ANSWER);
+    const { fixture, host } = await runningHost(t, [first.step]);
+    await newVariant(fixture);
+    await disableAgent(fixture, AGENT);
+    failed(
+      await sendMessage(fixture, host.id, VARIANT_REQUEST),
+      HttpStatus.BadRequest,
+      AgentErrorCode.Unavailable,
+    );
+    assert.equal((await snapshotOf(fixture, host.id)).queue.length, NO_ITEMS);
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    failed(
+      await sendMessage(fixture, host.id, VARIANT_REQUEST),
+      HttpStatus.BadRequest,
+      AgentErrorCode.Unavailable,
+    );
+    assert.equal(fixture.provider.calls.length, SINGLE);
+  },
+);
+
+test(
+  "(security, argument guard) a queued variant item whose base is disabled before its start is dropped with an error",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const first = heldAnswer(ANSWER);
+    const { fixture, host } = await runningHost(t, [first.step]);
+    await newVariant(fixture);
+    completed(await sendMessage(fixture, host.id, VARIANT_REQUEST));
+    await disableAgent(fixture, AGENT);
+    first.gate.resolve();
+    await untilIdle(fixture, host.id, t.signal);
+    const snapshot = await snapshotOf(fixture, host.id);
+    assert.ok(snapshot.error_message);
+    assert.equal(snapshot.queue.length, NO_ITEMS);
+    assert.deepEqual(promptsOf(fixture), [OPS]);
     const items = completed(
       await fixture.workbench["session.list"](
         { params: {}, query: {}, body: null },

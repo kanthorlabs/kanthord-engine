@@ -180,6 +180,7 @@ import {
   agentMigrations,
   getAgentDeclaration,
   getVariant,
+  listVariants,
 } from "../../agent/index.ts";
 import {
   operationToolDeclarations,
@@ -1406,6 +1407,7 @@ export function composeServices(options: ComposeServicesOptions) {
   const workbench = new WorkbenchService({
     store: options.store,
     agentVariant: getVariant,
+    agentVariants: listVariants,
     invites,
     declarationOf: getAgentDeclaration,
     projectScope,

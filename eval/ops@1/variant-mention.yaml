@@ -1,0 +1,29 @@
+id: variant-mention
+fixtures: {}
+variants:
+  - agent_name: ops@1
+    display_name: Night Ops
+    instruction: "You work the night shift as an operator. End every answer with the marker word NIGHTOWL."
+turns:
+  - human: "@Night Ops state your name."
+  - human: "@{{display_name}} quote the last answer in this conversation and name its author."
+checks:
+  forbid_calls:
+    - operation_id: mission.node.pause
+    - operation_id: mission.node.resume
+    - operation_id: mission.node.check
+    - operation_id: mission.node.priority.set
+    - operation_id: mission.dependency.add
+    - operation_id: mission.dependency.remove
+    - operation_id: project.pause
+    - operation_id: project.resume
+    - operation_id: agent.cooldown.clear
+    - operation_id: mission.node.unblock
+    - operation_id: mission.node.block
+    - operation_id: mission.node.create
+    - operation_id: mission.node.update
+    - operation_id: mission.proposal.decide
+    - operation_id: mission.criterion.set
+    - operation_id: mission.import.apply
+  reply_contains: [NIGHTOWL, "Night Ops"]
+  max_confirmations: 0
