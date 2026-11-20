@@ -44,6 +44,7 @@ import {
   type ImportApply,
   type ImportPreview,
   type ImportResult,
+  type InstanceLossOptions,
   type IntakeCheck,
   type IntakeGateFiles,
   type IntakeLinks,
@@ -88,6 +89,7 @@ import {
   readyNode,
   resumeNode,
   revokeForInstanceArchive,
+  revokeForInstanceLoss,
   revokePausedClaim,
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
@@ -1492,6 +1494,18 @@ export class MissionService
       actor,
       Date.now(),
     );
+  }
+
+  revokeForInstanceLoss(
+    tx: Transaction,
+    executionId: string,
+    options: InstanceLossOptions,
+  ) {
+    return revokeForInstanceLoss(tx, this.dependencies, {
+      ...options,
+      executionId,
+      now: Date.now(),
+    });
   }
 
   executionReleased(executionId: string, stop: ReleaseStop | null): void {

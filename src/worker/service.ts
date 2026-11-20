@@ -219,6 +219,7 @@ export interface Dependencies {
   instanceArchive: Pick<
     MissionCollaborations,
     | "revokeForInstanceArchive"
+    | "revokeForInstanceLoss"
     | "revokePausedClaim"
     | "executionReleased"
     | "reportExecutionEnds"
@@ -557,6 +558,12 @@ export class WorkerService implements Service {
           executionId,
           instance,
           actor,
+        ),
+      revokeForInstanceLoss: (tx, executionId, options) =>
+        dependencies.instanceArchive.revokeForInstanceLoss(
+          tx,
+          executionId,
+          options,
         ),
       revokePausedClaim: (executionId) =>
         dependencies.instanceArchive.revokePausedClaim(executionId),

@@ -463,6 +463,7 @@ export type ExecutionEnd = (typeof ExecutionEnd)[keyof typeof ExecutionEnd];
 export const RevokeCause = {
   Assessment: "assessment",
   Human: "human",
+  InstanceLost: "instance_lost",
 } as const;
 export const revokeCauseSchema = z.enum(RevokeCause);
 export type RevokeCause = z.infer<typeof revokeCauseSchema>;
@@ -559,6 +560,7 @@ export const FlowStopReason = {
   NoProgress: "no_progress",
   EnvironmentFailed: "environment_failed",
   InstanceArchived: "instance_archived",
+  InstanceLost: "instance_lost",
   WorkerStopped: "worker_stopped",
   HumanPaused: "human_paused",
   Lost: "lost",

@@ -17,9 +17,10 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import { UnreachableReason } from "../tracking/contract.ts";
-import type {
-  ExecutionEnds,
-  MissionCollaborations,
+import {
+  type ExecutionEnds,
+  InstanceLoss,
+  type MissionCollaborations,
 } from "../mission/contract.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
@@ -81,6 +82,9 @@ export const INSTANCE_CONNECTED_LOG = "worker.instance.connected";
 export const INSTANCE_DISCONNECTED_LOG = "worker.instance.disconnected";
 const STOP_ORDER_FAILED = "worker.instance.stop_order_failed";
 const CONNECTION_LOG_FAILED = "worker.instance.connection_log_failed";
+const LOSS_FAILED = "worker.instance.loss_failed";
+const LOSS_ABANDONED = "worker.instance.loss_abandoned";
+const LOSS_RELEASE_ATTEMPT_LIMIT = 5;
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
@@ -111,6 +115,7 @@ export interface InstanceDependencies {
   ) => { execution_id: string } | null;
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
   revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
+  revokeForInstanceLoss: MissionCollaborations["revokeForInstanceLoss"];
   revokePausedClaim: MissionCollaborations["revokePausedClaim"];
   executionReleased: MissionCollaborations["executionReleased"];
   reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
@@ -178,6 +183,8 @@ interface CurrentConnection {
   connected_at: number;
   last_heartbeat_at: number;
   lapsed: boolean;
+  release_retry: InstanceLoss | null;
+  release_failures: number;
 }
 
 interface PreparedKey {
@@ -517,6 +524,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   sweepConnections(): void {
     const now = Date.now();
     for (const [instanceId, current] of this.connections) {
+      if (current.release_retry !== null) {
+        this.releaseLostExecutions(instanceId, current, current.release_retry);
+        continue;
+      }
       if (current.lapsed) continue;
       if (now - current.last_heartbeat_at <= INSTANCE_CONNECTED_WINDOW_MS)
         continue;
@@ -529,7 +540,70 @@ export class WorkerInstances implements WorkerInstanceLookups {
           CONNECTION_LOG_FAILED,
         );
       }
+      this.releaseLostExecutions(
+        instanceId,
+        current,
+        InstanceLoss.HeartbeatLost,
+      );
     }
+  }
+
+  instanceFailed(instanceId: string): void {
+    try {
+      this.releaseExecutions(instanceId, InstanceLoss.PoolFailed);
+    } catch (error) {
+      const current = this.connections.get(instanceId);
+      if (current) {
+        current.release_retry = InstanceLoss.PoolFailed;
+        current.release_failures = 1;
+      }
+      throw error;
+    }
+  }
+
+  private releaseExecutions(instanceId: string, loss: InstanceLoss): void {
+    const ends = this.dependencies.store.transaction((tx) =>
+      this.revokeLostExecutions(tx, instanceId, loss),
+    );
+    this.reportExecutionEnds(ends);
+  }
+
+  private releaseLostExecutions(
+    instanceId: string,
+    current: CurrentConnection,
+    loss: InstanceLoss,
+  ): void {
+    try {
+      this.releaseExecutions(instanceId, loss);
+      current.release_retry = null;
+      current.release_failures = 0;
+    } catch (error) {
+      current.release_failures += 1;
+      const abandoned = current.release_failures >= LOSS_RELEASE_ATTEMPT_LIMIT;
+      current.release_retry = abandoned ? null : loss;
+      this.dependencies.logger.error(
+        { err: asError(error), instance_id: instanceId, loss },
+        abandoned ? LOSS_ABANDONED : LOSS_FAILED,
+      );
+    }
+  }
+
+  private revokeLostExecutions(
+    tx: Transaction,
+    instanceId: string,
+    loss: InstanceLoss,
+  ): ExecutionEnds[] {
+    const instance = readInstanceById(tx, instanceId)?.name;
+    if (instance === undefined) return [];
+    return this.liveExecutionsOf(tx, revisionIdsOf(tx, instance))
+      .filter(({ execution_id }) => this.orderOf(execution_id) === null)
+      .flatMap(({ execution_id }) => {
+        const ends = this.dependencies.revokeForInstanceLoss(tx, execution_id, {
+          instance,
+          loss,
+        });
+        return ends ? [ends] : [];
+      });
   }
 
   private openConnection(
@@ -544,6 +618,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
       connected_at: now,
       last_heartbeat_at: now,
       lapsed: false,
+      release_retry: null,
+      release_failures: 0,
     };
     this.connections.set(instanceId, opened);
     this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, opened);
@@ -551,6 +627,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private renewConnection(instanceId: string, current: CurrentConnection) {
     current.last_heartbeat_at = Date.now();
+    current.release_retry = null;
+    current.release_failures = 0;
     if (!current.lapsed) return;
     current.lapsed = false;
     this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, current);

@@ -273,3 +273,10 @@ test("a disk_low environment stop maps to the infrastructure category", () => {
     attributed(CauseCategory.Infrastructure, CauseSubcategory.DiskLow),
   );
 });
+
+test("an instance_lost stop maps to the infrastructure execution loss", () => {
+  assert.deepEqual(
+    stopCauseOf(ExecutionStopReason.InstanceLost, null, null, QUIET),
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.ExecutionLost),
+  );
+});

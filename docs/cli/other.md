@@ -701,7 +701,15 @@ start removes only the root and the volume of a `server` or `container` instance
 that an archive ended and that no live instance of the same name holds. A root
 or a volume of another name stays. An instance that exits with no stop restarts
 with a backoff under the same client identities. The server logs `instance`
-with the instance name.
+with the instance name. The exit also releases each live execution of the
+instance at once, with the stop `instance_lost` and the detail
+`{ "instance", "loss": "pool_failed" }`. A failed release logs
+`worker.pool.instance_failed_release` and does not stop the restart. The next
+connection checks try the release again, at most 5 attempts in all. A new
+connection or a heartbeat of the restarted instance ends the retry. The
+execution then holds its node until its `expired_at`. The restart
+backoff starts at 1 s, doubles and stops at 300 s. It starts again at 1 s after
+a run of at least 300 s.
 
 Files/effects: validate or create the XDG configuration, data, and state
 directories as needed; read the selected configuration; open/create

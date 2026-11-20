@@ -539,6 +539,7 @@ export function composeServices(options: ComposeServicesOptions) {
     instanceLimit: options.config.worker.server_instance_limit,
     stateDirectory: options.stateDirectory,
     logger: options.logger,
+    instanceFailed: (instance) => worker.instances.instanceFailed(instance.id),
   });
   const missionClient = directClient(missionOperations, invocation);
   const intakeClient = directClient(intakeOperations, invocation);
@@ -925,6 +926,8 @@ export function composeServices(options: ComposeServicesOptions) {
     instanceArchive: {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
+      revokeForInstanceLoss: (...args) =>
+        mission.revokeForInstanceLoss(...args),
       revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
       executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),

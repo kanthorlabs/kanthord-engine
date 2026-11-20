@@ -233,6 +233,7 @@ export function digestsOf(detail: string | null): Record<string, string> {
 
 export const NO_FAILURE_STOPS: readonly ExecutionStopReason[] = [
   ExecutionStopReason.InstanceArchived,
+  ExecutionStopReason.InstanceLost,
   ExecutionStopReason.WorkerStopped,
   ExecutionStopReason.HumanPaused,
 ];

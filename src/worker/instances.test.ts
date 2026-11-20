@@ -34,6 +34,7 @@ import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { HumanActor } from "../kernel/actor.ts";
 import {
   type ExecutionEnds,
+  InstanceLoss,
   type ReleaseStop,
   RevokeCause,
 } from "../mission/contract.ts";
@@ -238,6 +239,7 @@ function instanceFixture(
   const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
   const revoked: string[] = [];
+  const lost: { executionId: string; instance: string; loss: string }[] = [];
   const archivers: { instance: string; actor: HumanActor }[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const released: { executionId: string; stop: ReleaseStop | null }[] = [];
@@ -248,6 +250,7 @@ function instanceFixture(
   const revocation = {
     failure: null as Error | null,
     archiveFailure: null as Error | null,
+    lossFailure: null as Error | null,
     only: null as string | null,
     claims: false,
   };
@@ -321,6 +324,11 @@ function instanceFixture(
         return revocation.claims
           ? { lost: [], revoked: [revokedClaimOf(executionId)] }
           : ANSWERED_ENDS;
+      },
+      revokeForInstanceLoss: (_tx, executionId, options) => {
+        if (revocation.lossFailure) throw revocation.lossFailure;
+        lost.push({ executionId, ...options });
+        return ANSWERED_ENDS;
       },
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
@@ -538,6 +546,7 @@ function instanceFixture(
     scopes,
     unended,
     revoked,
+    lost,
     archivers,
     reports,
     revocation,
@@ -1753,6 +1762,7 @@ async function connectedBusy(
     record,
     registration,
     executionId,
+    connectionId,
     archive,
     work,
     orders,
@@ -2233,4 +2243,204 @@ test("a pause order past the deadline ends a pending archive of its instance whe
   f.worker().instances.sweepStopOrders();
   assert.equal(f.worker().instances.liveInstance(box.record.id), null);
   assert.equal(f.worker().orderOf(box.executionId), null);
+});
+
+const LOSS_FAILED_RECORD = "worker.instance.loss_failed";
+const LOSS_ABANDONED_RECORD = "worker.instance.loss_abandoned";
+const LOSS_ATTEMPT_LIMIT = 5;
+const EXTRA_SWEEPS = 3;
+
+function frozenClock(t: TestContext) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
+  return clock;
+}
+
+test("an instance with a heartbeat older than the window loses its live execution at the next connection sweep", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.HeartbeatLost,
+    },
+  ]);
+  assert.equal(f.reports.length, SINGLE_CALL);
+  assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("a heartbeat exactly as old as the window keeps the execution", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  await connectedBusy(f);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("an execution with a stop order is not revoked by the connection sweep", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("a second connection sweep of the same lapsed connection revokes nothing again", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  await connectedBusy(f);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  f.worker().instances.sweepConnections();
+  assert.equal(f.lost.length, SINGLE_CALL);
+  assert.equal(f.reports.length, SINGLE_CALL);
+});
+
+test("a failed loss revoke logs the error and the sweep continues with the next instance", async (t) => {
+  const clock = frozenClock(t);
+  const { f, records } = loggingFixture(t);
+  const first = await connectedBusy(f);
+  await connectedBusy(f, SECOND_INSTANCE_NAME);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  const failed = records(LOSS_FAILED_RECORD);
+  assert.equal(failed.length, TWO_CALLS);
+  assert.equal(failed[0].level, ERROR_LEVEL);
+  assert.equal(failed[0].instance_id, first.record.id);
+  assert.equal(records(DISCONNECTED_RECORD).length, TWO_CALLS);
+});
+
+test("a failed loss revoke is tried again at the next connection sweep and then stops", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.HeartbeatLost,
+    },
+  ]);
+  f.worker().instances.sweepConnections();
+  assert.equal(f.lost.length, SINGLE_CALL);
+});
+
+test("a failed loss revoke is tried at most the attempt limit and abandoned with one log", async (t) => {
+  const clock = frozenClock(t);
+  const { f, records } = loggingFixture(t);
+  await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  for (let sweep = 0; sweep < LOSS_ATTEMPT_LIMIT + EXTRA_SWEEPS; sweep += 1)
+    f.worker().instances.sweepConnections();
+  assert.equal(records(LOSS_FAILED_RECORD).length, LOSS_ATTEMPT_LIMIT - 1);
+  assert.equal(records(LOSS_ABANDONED_RECORD).length, SINGLE_CALL);
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+});
+
+test("a heartbeat ends the retry of a failed loss revoke", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  f.revocation.lossFailure = null;
+  f.asWorker(box.record.id, INSTANCE);
+  await f.invoke("instance.heartbeat", {
+    connection_id: box.connectionId,
+    connection_name: CONNECTION_NAME,
+  });
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+});
+
+test("a failed pool release is tried again at the next connection sweep with the loss pool_failed", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.PoolFailed,
+    },
+  ]);
+});
+
+test("a new connection of the restarted instance ends the pool_failed retry", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  f.revocation.lossFailure = null;
+  f.asWorker(box.record.id, INSTANCE);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  f.asHuman();
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+});
+
+test("instanceFailed ends the live execution of the instance with the loss pool_failed and reports the ends after the commit", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.instanceFailed(box.record.id);
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.PoolFailed,
+    },
+  ]);
+  assert.equal(f.reports.length, SINGLE_CALL);
+  assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("instanceFailed skips an execution that holds a stop order", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  f.worker().instances.instanceFailed(box.record.id);
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("instanceFailed propagates the error of a failed revoke", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  assert.equal(f.reports.length, NO_CALLS);
 });

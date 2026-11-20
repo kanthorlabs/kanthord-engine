@@ -244,6 +244,7 @@ test("a transition span refuses a count and a limit that do not match its rule",
 
 for (const [cause, status, state] of [
   [RevokeCause.Human, SpanStatus.Error, TraceState.Error],
+  [RevokeCause.InstanceLost, SpanStatus.Error, TraceState.Error],
   [RevokeCause.Assessment, SpanStatus.Ok, TraceState.Ok],
 ] as const) {
   test(`a revocation by ${cause} stores the cause and ends the trace as ${state}`, (t) => {

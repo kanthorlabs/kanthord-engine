@@ -57,7 +57,14 @@ const LAUNCH_FAILURE = "launch refused";
 const LIMIT_MESSAGE = "worker.pool.instance_limit";
 const FAILED_MESSAGE = "worker.pool.instance_failed";
 const CLEANUP_MESSAGE = "worker.pool.cleanup_failed";
-const BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
+const BACKOFF_STEPS = [
+  1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000, 300000,
+];
+const RELEASE_FAILED_MESSAGE = "worker.pool.instance_failed_release";
+const RELEASE_FAILURE = "release refused";
+const ONE_CALL = 1;
+const NO_CALLS = 0;
+const THIRD_FAILURE_DELAY = 4000;
 
 class FakeInstance implements SlotInstance {
   readonly controls: string[] = [];
@@ -161,6 +168,8 @@ function fixture(t: TestContext, options: { instanceLimit?: number } = {}) {
   const driver = new FakeDriver();
   const containerDriver = new FakeDriver(PoolPlacement.Container);
   const records: LogRecord[] = [];
+  const failed: PoolInstance[] = [];
+  const release = { failure: null as Error | null };
   const record = (fields: Record<string, unknown>, message: string) =>
     records.push({ fields, message });
   const logger = { warn: record, error: record } as unknown as Logger;
@@ -177,6 +186,10 @@ function fixture(t: TestContext, options: { instanceLimit?: number } = {}) {
     instanceLimit: options.instanceLimit ?? Number.MAX_SAFE_INTEGER,
     stateDirectory,
     logger,
+    instanceFailed: (instance) => {
+      failed.push(instance);
+      if (release.failure) throw release.failure;
+    },
   });
   stopAfter(t, () => {
     for (const launch of [...driver.launches, ...containerDriver.launches])
@@ -209,6 +222,8 @@ function fixture(t: TestContext, options: { instanceLimit?: number } = {}) {
     driver,
     containerDriver,
     records,
+    failed,
+    release,
     pool,
     instanceOf,
     entryOf,
@@ -409,7 +424,7 @@ test("an exit with no stop restarts the instance with the backoff, under the sam
   assert.equal(failures[0]!.fields.exit_code, FAILURE_CODE);
 });
 
-test("the backoff resets after an instance that stayed alive for 30 s", async (t) => {
+test("the backoff resets after an instance that stayed alive for 300 s", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const f = fixture(t);
   f.pool.start(f.instanceOf("coder-1"), []);
@@ -424,6 +439,63 @@ test("the backoff resets after an instance that stayed alive for 30 s", async (t
   assert.equal(f.driver.launches.length, SECOND_RELAUNCH);
   t.mock.timers.tick(1);
   assert.equal(f.driver.launches.length, THIRD_RELAUNCH);
+});
+
+test("a backoff after an instance that stayed alive for 299 s keeps the grown delay", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture(t);
+  f.pool.start(f.instanceOf("coder-1"), []);
+  await crash(f.driver.instances[0]!);
+  t.mock.timers.tick(POOL_BACKOFF_INITIAL_MS);
+  await crash(f.driver.instances[1]!);
+  t.mock.timers.tick(BACKOFF_STEPS[1]!);
+  assert.equal(f.driver.launches.length, SECOND_RELAUNCH);
+  t.mock.timers.tick(POOL_BACKOFF_MAX_MS - 1);
+  await crash(f.driver.instances[2]!);
+  t.mock.timers.tick(THIRD_FAILURE_DELAY - 1);
+  assert.equal(f.driver.launches.length, SECOND_RELAUNCH);
+  t.mock.timers.tick(1);
+  assert.equal(f.driver.launches.length, THIRD_RELAUNCH);
+});
+
+test("an exit with no stop request calls instanceFailed once with its instance", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture(t);
+  const instance = f.instanceOf("coder-1");
+  f.pool.start(instance, []);
+  assert.equal(f.failed.length, NO_CALLS);
+  await crash(f.driver.instances[0]!);
+  assert.deepEqual(f.failed, [instance]);
+  assert.equal(f.failed.length, ONE_CALL);
+});
+
+test("a throw of instanceFailed is logged and the instance still restarts", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture(t);
+  const failure = new Error(RELEASE_FAILURE);
+  f.release.failure = failure;
+  f.pool.start(f.instanceOf("coder-1"), []);
+  await crash(f.driver.instances[0]!);
+  const logged = f.records.find(
+    (entry) => entry.message === RELEASE_FAILED_MESSAGE,
+  );
+  assert.equal(logged?.fields.err, failure);
+  t.mock.timers.tick(POOL_BACKOFF_INITIAL_MS);
+  assert.equal(f.driver.launches.length, RELAUNCH);
+});
+
+test("a drain restart and a stop of the pool call no instanceFailed", async (t) => {
+  const f = fixture(t);
+  const instance = f.instanceOf("coder-1");
+  f.pool.start(instance, []);
+  f.pool.restart(instance);
+  f.driver.instances[0]!.end(CLEAN_CODE);
+  await flush();
+  assert.equal(f.driver.launches.length, RELAUNCH);
+  const stopped = f.pool.stop();
+  f.driver.instances[1]!.end(CLEAN_CODE);
+  await stopped;
+  assert.deepEqual(f.failed, []);
 });
 
 test("a restart sends the drain control and starts the instance again after the exit with the same client identities", async (t) => {

@@ -11,6 +11,7 @@ import { projectOperations } from "../../project/contract.ts";
 import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { agentOperations } from "../../agent/contract.ts";
 import {
+  InstanceLoss,
   Intent,
   missionOperations,
   NodeState,
@@ -56,6 +57,7 @@ const OPERATION_FAILED_STOP: ReleaseStop = {
 };
 const NO_FAILURE_COUNT_RESET = 1;
 const LOST_FAILURE = 2;
+const NO_FAILURE_ROUTINGS = 0;
 const FIRST_HOLD_FAILURE = 1;
 const HOLD_GROWTH = 2;
 const MILLISECONDS_PER_SECOND = 1000;
@@ -787,6 +789,38 @@ test("a release with no stop ends the failure count", async (t) => {
   assert.equal(routing.mock.calls.at(-1)!.arguments[2], NO_FAILURE_COUNT_RESET);
   const node = await h.node();
   assert.equal(node.state, NodeState.Available);
+});
+
+test("a pool failure of the instance ends its claim with instance_lost and leaves the node Available with no failure count", async (t) => {
+  const h = await setup(t, "direct");
+  const routing = t.mock.method(h.f.mission, "failure");
+  const claim = completed(await h.pull());
+  assert.ok(claim.kind === WorkPullKind.Claimed);
+  const executionId = claim.execution.execution_id;
+  const [instanceName] = instanceNames("general", 1);
+  const instance = completed(
+    await h.call(workerOperations["instance.get"], {
+      params: { instance_name: instanceName! },
+      query: {},
+      body: null,
+    }),
+  );
+  h.f.worker.instances.instanceFailed(instance.id);
+  const execution = completed(await h.get(executionId));
+  assert.equal(execution.claim_state, ClaimState.Finished);
+  assert.deepEqual(execution.stop, {
+    reason: ExecutionStopReason.InstanceLost,
+    code: null,
+    detail: JSON.stringify({
+      instance: instanceName,
+      loss: InstanceLoss.PoolFailed,
+    }),
+  });
+  assert.equal((await h.node()).state, NodeState.Available);
+  assert.equal(routing.mock.calls.length, NO_FAILURE_ROUTINGS);
+  const again = completed(await h.pull());
+  assert.ok(again.kind === WorkPullKind.Claimed);
+  assert.notEqual(again.execution.execution_id, executionId);
 });
 
 test("a stop with no further work answers a validation failure", async (t) => {

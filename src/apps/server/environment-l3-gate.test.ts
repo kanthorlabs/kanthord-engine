@@ -27,7 +27,11 @@ import {
   ENVIRONMENT_DIRECTORY,
   type EnvironmentState,
 } from "../../project/environment-state.ts";
-import { ExecutionStopReason } from "../../scheduler/contract.ts";
+import {
+  ClaimState,
+  ExecutionStopReason,
+  schedulerOperations,
+} from "../../scheduler/contract.ts";
 import { trackingOperations } from "../../tracking/contract.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
 import { until } from "./cli-test-support.ts";
@@ -142,10 +146,6 @@ const SETTLED_STATUSES: readonly EnvironmentStatus[] = [
   EnvironmentStatus.None,
   EnvironmentStatus.Failed,
 ];
-const RELEASE_STOP = {
-  reason: ExecutionStopReason.JudgementInvalid,
-  code: null,
-};
 const REVIEWER = {
   kind: "worker",
   config: { worker: "reviewer@1", worker_instances: [] },
@@ -908,7 +908,17 @@ test(
       async (u) => {
         await rotateSecret(fixture, ROTATED_SECRET);
         const third = await importNode(fixture, project, "implement-3.md");
-        await claimant!.release(claimedExecution, RELEASE_STOP);
+        const lost = await until(
+          () =>
+            call(schedulerOperations.executionGet, {
+              params: { execution_id: claimedExecution },
+              query: {},
+              body: null,
+            }),
+          (found) => found.claim_state !== ClaimState.Running,
+          u.signal,
+        );
+        assert.equal(lost.stop?.reason, ExecutionStopReason.InstanceLost);
         const pulled = await claimant!.claimed([...nodes, third]);
         const workerClient = httpClient(
           workerOperations,

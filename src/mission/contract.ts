@@ -158,6 +158,11 @@ export interface MissionCollaborations {
     instance: string,
     actor: HumanActor,
   ): ExecutionEnds | null;
+  revokeForInstanceLoss(
+    tx: Transaction,
+    executionId: string,
+    options: InstanceLossOptions,
+  ): ExecutionEnds | null;
   revokePausedClaim(executionId: string): RevokedExecution["trace"] | null;
   executionReleased(executionId: string, stop: ReleaseStop | null): void;
   reportExecutionEnds(ends: ExecutionEnds): void;
@@ -175,9 +180,20 @@ export type NodeStates = (
 export const RevokeCause = {
   Assessment: "assessment",
   Human: "human",
+  InstanceLost: "instance_lost",
 } as const;
 export const revokeCauseSchema = z.enum(RevokeCause);
 export type RevokeCause = z.infer<typeof revokeCauseSchema>;
+
+export const InstanceLoss = {
+  HeartbeatLost: "heartbeat_lost",
+  PoolFailed: "pool_failed",
+} as const;
+export type InstanceLoss = (typeof InstanceLoss)[keyof typeof InstanceLoss];
+export interface InstanceLossOptions {
+  instance: string;
+  loss: InstanceLoss;
+}
 
 export const TransitionRule = {
   None: "none",
@@ -221,6 +237,7 @@ export interface ReleaseStop {
     | "no_progress"
     | "environment_failed"
     | "instance_archived"
+    | "instance_lost"
     | "worker_stopped"
     | "human_paused";
   code: string | null;
@@ -462,7 +479,7 @@ export interface WorkerStopOrders {
   sendStopOrder(
     executionId: string,
     runtimeIdentity: string,
-    reason: ReleaseStop["reason"],
+    reason: Exclude<ReleaseStop["reason"], "instance_lost">,
   ): void;
   orderOf(executionId: string): ReleaseStop["reason"] | null;
 }

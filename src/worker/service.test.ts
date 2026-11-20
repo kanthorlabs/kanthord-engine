@@ -184,6 +184,9 @@ const fakeCollaborations = {
     revokeForInstanceArchive: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    revokeForInstanceLoss: () => {
+      throw new Error("UNEXPECTED_COLLABORATION");
+    },
     revokePausedClaim: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -1999,6 +2002,7 @@ function poolFixture(
         state.revoked.push(executionId);
         return { lost: [], revoked: [] };
       },
+      revokeForInstanceLoss: () => null,
       revokePausedClaim: () => null,
       executionReleased: () => {},
       reportExecutionEnds: () => {

@@ -237,6 +237,11 @@ function fixedStopCauseOf(reason: FixedStopReason): FailureCause {
     case ExecutionStopReason.WorkerStopped:
     case ExecutionStopReason.HumanPaused:
       return attributed(CauseCategory.Human, CauseSubcategory.Intervention);
+    case ExecutionStopReason.InstanceLost:
+      return attributed(
+        CauseCategory.Infrastructure,
+        CauseSubcategory.ExecutionLost,
+      );
     case ExecutionStopReason.JudgementInvalid:
     case ExecutionStopReason.ReportAbsent:
       return unattributed([CauseCategory.Model, CauseCategory.Prompt]);
