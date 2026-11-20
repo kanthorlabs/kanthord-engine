@@ -483,3 +483,50 @@ test("the examine evaluation prompt asks for finding_labels and the other evalua
     }).includes("finding_labels"),
   );
 });
+
+const evaluationValues = {
+  tasks: [],
+  tested_input: null,
+  results: [],
+  evidence: null,
+  dependencies: null,
+  affected: null,
+  marker: "kanthord-judgement:",
+  round: { number: 1, review_base: null },
+  prior_findings: [],
+};
+
+const CITATION_RULE =
+  "When the requirement or a task cites a code path or a type for a stated value, shape or code, read that path or type in the checkouts. Compare each statement of the change with it. A statement that differs from the cited code is a blocker with the ground stated. When the cited path is not in the checkouts, the statement is not established.";
+const COMPLETE_VIOLATION_LIST =
+  "When a rule is violated, check every changed file against that rule. List each violation as its own finding, with its file and its place. Never report one example of a rule and leave the other violations out.";
+const REPOSITORY_CODE_RULE =
+  "Check each code rule of a repository prompt against each changed file. For example, a repository prompt can state that a component body holds no business logic. A component body that holds a derivation, a sequence of calls or an error mapping then violates that rule.";
+
+for (const examine of [false, true]) {
+  test(`the evaluation template rendered with examine ${examine} holds the citation rule, the complete violation list and the repository code rule`, () => {
+    const text = renderTemplate(
+      SHIPPED_TEMPLATE_SET.templates,
+      PromptTemplate.Evaluation,
+      { ...evaluationValues, examine },
+    );
+    assert.ok(text.includes(CITATION_RULE));
+    assert.ok(text.includes(COMPLETE_VIOLATION_LIST));
+    assert.ok(text.includes(REPOSITORY_CODE_RULE));
+  });
+}
+
+test("the examine template holds the complete violation list", () => {
+  const text = renderTemplate(
+    SHIPPED_TEMPLATE_SET.templates,
+    PromptTemplate.Examine,
+    {
+      repositories: [],
+      verification: null,
+      dependencies: null,
+      outcomes: null,
+      evidence: null,
+    },
+  );
+  assert.ok(text.includes(COMPLETE_VIOLATION_LIST));
+});
