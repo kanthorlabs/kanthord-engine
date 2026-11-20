@@ -152,10 +152,7 @@ const failNonzeroExit: NonNullable<SimpleGitOptions["errors"]> = (
     ? error
     : (error ?? new Error(`git exited with ${result.exitCode}`));
 
-export async function stageWork(
-  call: GitCall,
-  kept: readonly string[] = [],
-): Promise<string[]> {
+export async function stageWork(call: GitCall): Promise<string[]> {
   assert.ok(call.directory);
   const end = performance.now() + call.deadlineMs;
   const remaining = () => {
@@ -164,7 +161,7 @@ export async function stageWork(
     return duration;
   };
   const { env, directory, context } = call;
-  await addWork(call, kept, remaining);
+  await run(env, directory, ["add", "--all"], context, remaining());
   const { staged, converted } = await stagedChanges(
     env,
     directory,
@@ -183,48 +180,6 @@ export async function stageWork(
     );
   const unchanged = new Set(converted.map(({ path }) => path));
   return staged.filter((path) => !unchanged.has(path));
-}
-
-async function addWork(
-  call: GitCall,
-  kept: readonly string[],
-  remaining: () => number,
-): Promise<void> {
-  const { env, directory, context } = call;
-  if (kept.length === NO_PATHS) {
-    await run(env, directory, ["add", "--all"], context, remaining());
-    return;
-  }
-  const excluded = new Set(kept);
-  const listed = await run(
-    env,
-    directory,
-    [
-      "ls-files",
-      "-z",
-      "--modified",
-      "--deleted",
-      "--others",
-      "--exclude-standard",
-    ],
-    context,
-    remaining(),
-  );
-  const paths = [
-    ...new Set(
-      listed
-        .split(NUL)
-        .filter((path) => path !== NO_VALUE && !excluded.has(path)),
-    ),
-  ];
-  for (const batch of pathBatches(paths))
-    await run(
-      env,
-      directory,
-      [LITERAL_PATHSPECS, "add", "--all", "--", ...batch],
-      context,
-      remaining(),
-    );
 }
 
 export async function commitStaged(
@@ -749,25 +704,6 @@ function statusHeader(status: GitStatus, record: string): void {
   }
 }
 
-export async function diffText(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  from: string,
-  to: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string> {
-  assert.match(from, /^[a-f0-9]{40,64}$/);
-  assert.match(to, /^[a-f0-9]{40,64}$/);
-  return run(
-    env,
-    directory,
-    ["diff", "--no-ext-diff", "--no-textconv", from, to],
-    context,
-    deadlineMs,
-  );
-}
-
 export async function unmergedFiles(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -1042,24 +978,21 @@ export async function mergeRef(
   return conflicts;
 }
 
-export interface MergeConclusion {
-  message: string;
-  kept: readonly string[];
-}
-
 export async function concludeMerge(
   call: GitCall,
-  conclusion: MergeConclusion,
+  message: string,
 ): Promise<string[]> {
-  assert.ok(conclusion.message);
+  assert.ok(message);
   const { env, directory, context } = call;
   const end = performance.now() + call.deadlineMs;
   const remaining = () => end - performance.now();
-  const staged = await stageWork(
-    { env, directory, context, deadlineMs: remaining() },
-    conclusion.kept,
-  );
-  await runCommit(env, directory, conclusion.message, context, remaining());
+  const staged = await stageWork({
+    env,
+    directory,
+    context,
+    deadlineMs: remaining(),
+  });
+  await runCommit(env, directory, message, context, remaining());
   return staged;
 }
 
@@ -1067,11 +1000,11 @@ export async function unmergedPaths(
   call: GitCall,
   files: readonly string[],
 ): Promise<string[]> {
-  assert.ok(files.length > NO_PATHS);
+  const wanted = new Set(files);
   const output = await run(
     call.env,
     call.directory,
-    [LITERAL_PATHSPECS, "ls-files", "-u", "-z", "--", ...files],
+    [LITERAL_PATHSPECS, "ls-files", "-u", "-z"],
     call.context,
     call.deadlineMs,
   );
@@ -1080,7 +1013,8 @@ export async function unmergedPaths(
       output
         .split(NUL)
         .filter((record) => record !== NO_VALUE)
-        .map((record) => record.slice(record.indexOf(TAB) + TAB.length)),
+        .map((record) => record.slice(record.indexOf(TAB) + TAB.length))
+        .filter((path) => wanted.has(path)),
     ),
   ];
 }

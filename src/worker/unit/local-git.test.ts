@@ -29,7 +29,6 @@ import {
   ChangeStatus,
   checkoutDetached,
   conflictMarkerFiles,
-  diffText,
   discardChanges,
   excludeUntracked,
   fetchLocal,
@@ -272,10 +271,8 @@ test("the patch diffs ignore an external diff driver and a textconv of the check
   const base = await commitWork(env, directory, "base", background, 10000);
   assert.ok(base);
   writeFileSync(join(directory, "file.txt"), "new\n");
-  const head = await commitWork(env, directory, "work", background, 10000);
-  assert.ok(head);
+  assert.ok(await commitWork(env, directory, "work", background, 10000));
   const patches = [
-    await diffText(env, directory, base, head, background, 10000),
     await changePatch(env, directory, base, background, 10000),
     await roundPatch(env, directory, base, background, 10000),
   ];

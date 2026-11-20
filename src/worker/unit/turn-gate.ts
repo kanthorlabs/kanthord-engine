@@ -577,10 +577,10 @@ async function concludeConflict(
 ): Promise<Settled> {
   const { context } = conflict.input;
   await refuseMarkers(state, checkout, conflict.merge, context);
-  const paths = await concludeMerge(callOf(state, checkout, context), {
-    message: conflict.merge.message,
-    kept: conflict.merge.markerless,
-  });
+  const paths = await concludeMerge(
+    callOf(state, checkout, context),
+    conflict.merge.message,
+  );
   return { changed: true, paths };
 }
 

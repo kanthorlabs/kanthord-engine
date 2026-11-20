@@ -1394,7 +1394,7 @@
   },
   "src/worker/unit/local-git.ts": {
     "@typescript-eslint/max-params": {
-      "count": 38
+      "count": 37
     }
   },
   "src/worker/unit/method-telemetry.ts": {

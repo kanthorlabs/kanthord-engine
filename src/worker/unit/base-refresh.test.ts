@@ -822,23 +822,32 @@ const MarkerlessKind = {
 } as const;
 type MarkerlessKind = (typeof MarkerlessKind)[keyof typeof MarkerlessKind];
 
+const agentBash = (command: string) =>
+  fauxAssistantMessage(fauxToolCall("bash", { command }), {
+    stopReason: "toolUse",
+  });
+
 const agentGit = (command: string) => [
-  fauxAssistantMessage(
-    fauxToolCall("bash", {
-      command: `git -C web ${command} -- ${MARKERLESS_FILE}`,
-    }),
-    { stopReason: "toolUse" },
-  ),
+  agentBash(`git -C web ${command} -- ${MARKERLESS_FILE}`),
   fauxAssistantMessage("done"),
 ];
 
+interface MarkerlessConflict {
+  kind: MarkerlessKind;
+  marked?: boolean;
+}
+
 async function markerlessOnWeb(
   t: TestContext,
-  kind: MarkerlessKind,
+  conflict: MarkerlessConflict,
   script: Parameters<typeof implementFixture>[2],
 ) {
+  const { kind, marked = false } = conflict;
   const { h, web, webBare } = await fixture(t, script);
-  await baseAdvance(webBare, t, { [MARKERLESS_FILE]: ORIGINAL_SIDE });
+  await baseAdvance(webBare, t, {
+    [MARKERLESS_FILE]: ORIGINAL_SIDE,
+    ...(marked ? { [CONFLICT_FILE]: ORIGINAL_SIDE } : {}),
+  });
   await h.input.transport.fetchBase(
     web.directory,
     BASE_BRANCH,
@@ -854,6 +863,10 @@ async function markerlessOnWeb(
   ]);
   writeFileSync(join(web.directory, MARKERLESS_FILE), NODE_BINARY);
   await simpleGit(web.directory).add(MARKERLESS_FILE);
+  if (marked) {
+    writeFileSync(join(web.directory, CONFLICT_FILE), NODE_SIDE);
+    await simpleGit(web.directory).add(CONFLICT_FILE);
+  }
   await simpleGit(web.directory).commit([
     "feat: node side",
     h.input.claim.node_id,
@@ -867,6 +880,10 @@ async function markerlessOnWeb(
   else {
     writeFileSync(join(clone, MARKERLESS_FILE), BASE_BINARY);
     await base.add(MARKERLESS_FILE);
+  }
+  if (marked) {
+    writeFileSync(join(clone, CONFLICT_FILE), BASE_SIDE);
+    await base.add(CONFLICT_FILE);
   }
   await base.raw([...TEST_IDENTITY, "commit", "-m", "base side"]);
   await base.push("origin", "main");
@@ -885,7 +902,7 @@ async function mergedFile(directory: string): Promise<string> {
 
 for (const kind of Object.values(MarkerlessKind)) {
   test(`regression: a ${kind} conflict that the agent leaves unmerged stops with markers_left and commits no merge`, async (t) => {
-    const { h, web } = await markerlessOnWeb(t, kind, [
+    const { h, web } = await markerlessOnWeb(t, { kind }, [
       fauxAssistantMessage("done"),
     ]);
     const before = web.head;
@@ -899,7 +916,7 @@ for (const kind of Object.values(MarkerlessKind)) {
   });
 
   test(`a ${kind} conflict that the agent keeps with git add gives a merge commit with the node file`, async (t) => {
-    const { h, web } = await markerlessOnWeb(t, kind, agentGit("add"));
+    const { h, web } = await markerlessOnWeb(t, { kind }, agentGit("add"));
     assert.equal(
       await refreshAtRelease(h, workerPorts(h.input, h.run)),
       RefreshResult.Merged,
@@ -918,7 +935,7 @@ for (const kind of Object.values(MarkerlessKind)) {
   });
 
   test(`a ${kind} conflict that the agent deletes with git rm gives a merge commit without the file`, async (t) => {
-    const { h, web } = await markerlessOnWeb(t, kind, agentGit("rm -q"));
+    const { h, web } = await markerlessOnWeb(t, { kind }, agentGit("rm -q"));
     assert.equal(
       await refreshAtRelease(h, workerPorts(h.input, h.run)),
       RefreshResult.Merged,
@@ -931,3 +948,74 @@ for (const kind of Object.values(MarkerlessKind)) {
     assert.equal((await simpleGit(web.directory).status()).isClean(), true);
   });
 }
+
+const KEPT_EDIT = "agent edit after git add";
+
+test("a modify/delete file that the agent untracks with git rm --cached stays in the merge commit and leaves a clean checkout", async (t) => {
+  const { h, web } = await markerlessOnWeb(
+    t,
+    { kind: MarkerlessKind.ModifyDelete },
+    agentGit("rm -q --cached"),
+  );
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Merged,
+  );
+  assert.equal((await mergedFile(web.directory)).trim(), MARKERLESS_FILE);
+  assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+});
+
+test("a modify/delete file that the agent edits after git add goes into the merge commit with the edit and leaves a clean checkout", async (t) => {
+  const { h, web } = await markerlessOnWeb(
+    t,
+    { kind: MarkerlessKind.ModifyDelete },
+    [
+      agentBash(
+        `git -C web add -- ${MARKERLESS_FILE} && printf '${KEPT_EDIT}' > web/${MARKERLESS_FILE}`,
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  );
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Merged,
+  );
+  assert.equal(
+    await simpleGit(web.directory).show([`HEAD:${MARKERLESS_FILE}`]),
+    KEPT_EDIT,
+  );
+  assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+});
+
+for (const [command, kept] of [
+  ["add", true],
+  ["rm -q", false],
+] as const)
+  test(`a merge with a modify/modify and a modify/delete conflict commits the resolved marker file and the git ${command} decision`, async (t) => {
+    const { h, web } = await markerlessOnWeb(
+      t,
+      { kind: MarkerlessKind.ModifyDelete, marked: true },
+      [
+        writeResolved(),
+        agentBash(`git -C web ${command} -- ${MARKERLESS_FILE}`),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    assert.equal(
+      await refreshAtRelease(h, workerPorts(h.input, h.run)),
+      RefreshResult.Merged,
+    );
+    assert.equal(
+      (await parentsOf(web.directory, web.head)).length,
+      TWO_PARENTS,
+    );
+    assert.equal(
+      await simpleGit(web.directory).show([`HEAD:${CONFLICT_FILE}`]),
+      RESOLVED,
+    );
+    assert.equal(
+      (await mergedFile(web.directory)).trim(),
+      kept ? MARKERLESS_FILE : NO_OUTPUT,
+    );
+    assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+  });
