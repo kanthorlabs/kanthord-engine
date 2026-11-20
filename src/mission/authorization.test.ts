@@ -296,10 +296,10 @@ test("a request evidence answers the credential of a pull request and none for a
   assert.equal(push.facts.address.kind, PlatformAddressKind.BranchPush);
 });
 
-test("a request evidence answers the assessed commit for a branch push only", (t) => {
+test("a request evidence answers the assessed commit of a passing assessment", (t) => {
   const h = actionHarness(t);
   h.assess();
-  assert.equal(h.evidence(h.request()).facts.assessed_commit, null);
+  assert.equal(h.evidence(h.request()).facts.assessed_commit, ASSESSED_COMMIT);
   h.policy.action = RepositoryAction.Push;
   const pushId = h.request({
     kind: PlatformAddressKind.BranchPush,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { Logger } from "pino";
 import { z } from "zod";
 import {
   apiKeySecretSchema,
@@ -25,8 +26,10 @@ import {
   type CheckFold,
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
+  type GitHubCall,
   type GitHubFailure,
   type GitHubPlatform,
+  type GitHubTarget,
   GitHubTargetKind,
   type RequiredCheckRead,
 } from "../repository/github.ts";
@@ -65,6 +68,9 @@ const expectedEndStateSchema = z.enum(ExpectedEndState);
 const openPullRequestSchema = z.looseObject({
   state: z.literal(PULL_REQUEST_STATE_OPEN),
   merged: z.literal(false),
+});
+const pullRequestHeadShaSchema = z.looseObject({
+  head: z.looseObject({ sha: z.string() }),
 });
 
 export const GIT_TRANSPORT_CODES: readonly string[] = [
@@ -148,6 +154,7 @@ export interface ActionCheckDependencies {
   custody: IntakeCustody;
   github: GitHubPlatform;
   gitWriter: GitWriter;
+  logger: Pick<Logger, "info">;
 }
 
 interface Hold {
@@ -354,7 +361,7 @@ async function inspectPullRequest(
       })
     : { ok: true as const, value: NO_CHECKS };
   if (!checks.ok) throw platformFailure(checks);
-  return foldBody(
+  const fold = foldBody(
     github,
     answer.value,
     reviews.value,
@@ -362,6 +369,46 @@ async function inspectPullRequest(
     request.expected,
     request.facts.link_trust.actor_ids,
   );
+  if (fold.end_state !== CheckEndState.None) return fold;
+  const landed = await landedTreeCommit(github, call, {
+    target,
+    body: answer.value,
+    testedCommit: request.facts.assessed_commit,
+    baseBranch: request.facts.frozen_action.configuration.base_branch,
+  });
+  return landed === null
+    ? fold
+    : { end_state: CheckEndState.Expected, landed_commits: [landed] };
+}
+
+interface LandedTreeScope {
+  target: GitHubTarget;
+  body: unknown;
+  testedCommit: string | null;
+  baseBranch: string;
+}
+
+async function landedTreeCommit(
+  github: GitHubPlatform,
+  call: GitHubCall,
+  scope: LandedTreeScope,
+): Promise<string | null> {
+  const head = pullRequestHeadShaSchema.safeParse(scope.body);
+  if (
+    !head.success ||
+    scope.testedCommit === null ||
+    head.data.head.sha !== scope.testedCommit
+  )
+    return null;
+  const base = await github.commitTreeOf(call, scope.target, {
+    ref: scope.baseBranch,
+  });
+  const tested = await github.commitTreeOf(call, scope.target, {
+    ref: scope.testedCommit,
+  });
+  if (!base.ok || !tested.ok || base.value.tree !== tested.value.tree)
+    return null;
+  return base.value.sha;
 }
 
 function foldBody(

@@ -44,6 +44,7 @@ import { InstancePlacement } from "../../worker/contract.ts";
 
 const MAIN_REF = "refs/heads/main";
 const SINGLE_INSTANCE = 1;
+const PULL_REQUEST_REPORT_BODY = /^## task_\S+ Greetings\n\ndone$/;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_ITEM = 1;
 const TWO_ITEMS = 2;
@@ -538,6 +539,8 @@ test(
           "1",
         ]);
         assert.equal(actions.items[0]!.resolution, UNRESOLVED);
+        const reportBody = (f.gitHub.calls[0]!.body as { body: string }).body;
+        assert.match(reportBody, PULL_REQUEST_REPORT_BODY);
         assert.deepEqual(f.gitHub.calls, [
           {
             method: "POST",
@@ -546,6 +549,7 @@ test(
               head: `kanthord/${f.gated}`,
               base: "main",
               title: "feat: greetings",
+              body: reportBody,
             },
             token: GITHUB_KEY,
             if_none_match: null,

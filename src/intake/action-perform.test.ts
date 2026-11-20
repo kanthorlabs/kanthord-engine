@@ -255,7 +255,7 @@ function harness(t: TestContext, options: Options) {
   const logger = pino({ enabled: false });
   const perform = (body: Partial<PerformBody> = {}) =>
     performAction(
-      { store, custody: fake.custody, github, gitWriter },
+      { store, custody: fake.custody, github, gitWriter, logger },
       (request) => runOutbound({ store, logger, inFlight }, caller, request),
       caller,
       {
@@ -656,6 +656,7 @@ function replyHarness(t: TestContext) {
         store,
         custody: fake.custody,
         github,
+        logger,
         gitWriter: {
           squashPushFresh: () => assert.fail("A reply pushes nothing."),
           pushSnapshotFresh: () => assert.fail("A reply pushes nothing."),
@@ -886,6 +887,7 @@ function jiraReplyHarness(
           readTokenAccount: unexpected,
           postIssueComment: unexpected,
         } as unknown as GitHubPlatform,
+        logger,
         gitWriter: {
           squashPushFresh: unexpected,
           pushSnapshotFresh: unexpected,
@@ -1080,6 +1082,7 @@ function slackReplyHarness(t: TestContext) {
           readTokenAccount: unexpected,
           postIssueComment: unexpected,
         } as unknown as GitHubPlatform,
+        logger,
         gitWriter: {
           squashPushFresh: unexpected,
           pushSnapshotFresh: unexpected,

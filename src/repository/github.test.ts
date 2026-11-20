@@ -690,6 +690,34 @@ test("pullRequestMergedAt answers false when the pull request merged at another 
   assert.deepEqual(result, { ok: true, value: false });
 });
 
+const COMMIT_PATH = "/repos/octo/widgets/commits/main";
+const UNREADABLE_BODY_MESSAGE = "the GitHub answer holds an unexpected body";
+
+test("commitTreeOf reads the commit of a ref and answers its sha and tree, and an unreadable body fails", async (t) => {
+  const TREE_SHA = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f";
+  const server = await platform(
+    t,
+    answer(200, { sha: HEAD_SHA, commit: { tree: { sha: TREE_SHA } } }),
+  );
+  const github = new GitHubPlatform({ baseUrl: server.baseUrl });
+  const result = await github.commitTreeOf(call(), TARGET, { ref: "main" });
+  assert.deepEqual(result, {
+    ok: true,
+    value: { sha: HEAD_SHA, tree: TREE_SHA },
+  });
+  assert.equal(server.requests[0]?.method, HttpMethod.Get);
+  assert.equal(server.requests[0]?.url, COMMIT_PATH);
+  const unreadable = await platform(
+    t,
+    answer(200, { sha: HEAD_SHA, commit: {} }),
+  );
+  const unreadableResult = await new GitHubPlatform({
+    baseUrl: unreadable.baseUrl,
+  }).commitTreeOf(call(), TARGET, { ref: "main" });
+  assert.ok(!unreadableResult.ok);
+  assert.equal(unreadableResult.message, UNREADABLE_BODY_MESSAGE);
+});
+
 test("listReviewComments answers the body unchanged and a next cursor from the Link header", async (t) => {
   const server = await platform(t, (request, response, count) => {
     const headers: Record<string, string> =

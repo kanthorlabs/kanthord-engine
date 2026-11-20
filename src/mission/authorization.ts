@@ -686,9 +686,8 @@ export function authorizeRequestEvidence(
     ),
   );
   const assessed =
-    address.kind === PlatformAddressKind.BranchPush &&
     currentAssessmentOf(tx, evidence.node_id, evidence.attempt)?.result ===
-      AssessmentResult.Success
+    AssessmentResult.Success
       ? assessedCommitOf(
           tx,
           evidence.node_id,

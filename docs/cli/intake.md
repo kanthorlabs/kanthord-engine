@@ -646,7 +646,24 @@ merges the pull request after it creates the pull request or pushes the snapshot
 to a reused pull request. The merge sends the tested commit as the head guard.
 The merge uses the first method that the repository allows, in the order
 `merge`, `squash`, `rebase`. A refused or failed merge leaves the pull request
-open and changes no answer.
+open and changes no answer, except after a 502 answer.
+
+After a 502 merge answer, before any retry, the merge call reads the commit and
+the tree of the base branch and of the tested commit with
+`GET /repos/{owner}/{repo}/commits/{ref}`. Equal trees mean that the squash
+landed. The merge call then answers the pull request address as a merged answer,
+logs the base head commit at level info, and no retry runs. Different trees keep
+the `unknown_outcome` answer, and its message states that the trees differ. A
+failed tree read keeps the `unknown_outcome` answer, and its message states that
+the tree compare failed. Any other status makes no tree read. The same rule
+holds for `intake.action.merge`.
+
+The check of an open pull request that is ready to merge reads the same trees
+when its head commit is the tested commit of the request evidence. When the
+trees are equal, the check answers `expected` with the base head commit as the
+landed commit, so the node completes and no merge request runs. Different trees
+and a failed read keep the answer `none`. Every other end state makes no tree
+read.
 
 For a `reply` action of a conversation binding of platform `github`,
 `intake.action.perform` runs the outbound operation `github.issue_comment`. The

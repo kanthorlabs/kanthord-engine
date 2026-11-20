@@ -67,6 +67,7 @@ import {
 const SUCCESSFUL_EXIT = 0;
 const ZERO_BYTE = 0;
 const SINGLE_INSTANCE = 1;
+const PULL_REQUEST_REPORT_BODY = /^## task_\S+ Say hello\n\ndone$/;
 const INITIAL_BINDING_VERSION = 1;
 const SINGLE_TURN = 1;
 const SINGLE_ITEM = 1;
@@ -648,6 +649,8 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
             kind: "released",
             furtherWork: false,
           });
+          const reportBody = (gitHub.calls[0]!.body as { body: string }).body;
+          assert.match(reportBody, PULL_REQUEST_REPORT_BODY);
           assert.deepEqual(
             gitHub.calls.map((call) => ({
               method: call.method,
@@ -663,6 +666,7 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
                   head: `kanthord/${C}`,
                   base: "main",
                   title: "feat: say hello",
+                  body: reportBody,
                 },
                 token: "test_methods_github",
               },
