@@ -14,6 +14,7 @@ import { CancellationContext } from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   AssetKind,
+  CODER_REPORT_SUBJECT,
   type Evidence,
   type EvidenceAsset,
   type ReviewRound,
@@ -38,7 +39,6 @@ import {
 } from "./environment-setup.ts";
 import { ExecutionIntent } from "../contract.ts";
 import { AFFECTED_SUBJECT } from "./affected.ts";
-import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
 
 const NO_SNAPSHOTS = 0;

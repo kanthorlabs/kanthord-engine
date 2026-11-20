@@ -29,7 +29,10 @@ import { authorizeClaim, authorizeStorage } from "./authorization.ts";
 export type ContentBound = (tx: Transaction, evidence: EvidenceRow) => boolean;
 const FUNCTION_TYPE = "function";
 const MAX_SIGNINGS = 2;
-const inlineSchema = z.object({ media_type: z.string(), data: z.string() });
+export const inlineSchema = z.object({
+  media_type: z.string(),
+  data: z.string(),
+});
 export const objectContentSchema = z.object({
   location: z.string(),
   size: z.number(),

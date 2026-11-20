@@ -128,6 +128,7 @@ const facts: ActionFacts = {
   reused_address: null,
   merge_address: mergeAddress,
   gate_files: [],
+  report: null,
 };
 
 const branchPushAddress = {

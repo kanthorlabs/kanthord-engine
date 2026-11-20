@@ -1358,6 +1358,7 @@ export type ActionFacts = {
   reused_address: PullRequestAddress | null;
   merge_address: RepositoryPlatformAddress | null;
   gate_files: string[];
+  report: string | null;
 };
 export type RequestFacts = {
   frozen_action: RepositoryFrozenAction;
@@ -1642,6 +1643,7 @@ export const controlResultSchema = z.strictObject({
 export type ControlResult = z.infer<typeof controlResultSchema>;
 export const OBJECT_SIZE_MAX = 5_368_709_120;
 export const INLINE_BYTES_MAX = 5242880;
+export const CODER_REPORT_SUBJECT = "Coder report of the node attempt";
 export const UPLOAD_LIFETIME_MS = 3600000;
 export const CONTENT_ENCODING = "base64";
 const MEDIA_TYPE_MAX = 255;

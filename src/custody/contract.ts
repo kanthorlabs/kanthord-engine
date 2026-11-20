@@ -235,6 +235,7 @@ export type ActionFacts = {
   reused_address: PullRequestAddressFacts | null;
   merge_address: PlatformAddressFacts | null;
   gate_files: string[];
+  report: string | null;
 };
 export type ReplyFrozenActionFacts = {
   key: string;

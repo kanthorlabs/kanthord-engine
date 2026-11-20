@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { ulid } from "ulid";
 import {
   testHumanIdentity,
   testMachineIdentity,
@@ -16,6 +17,7 @@ import type { CallerIdentity } from "../kernel/caller.ts";
 import {
   AssessmentResult,
   AssetKind,
+  CODER_REPORT_SUBJECT,
   ConversationAction,
   ExpectedEndState,
   MISSION_SERVICE_NAME,
@@ -893,6 +895,77 @@ test("a service merge of a push action refuses a pull request address, a changed
       .run(canonicalJSON(h.pullRequest), h.evidenceId),
   );
   refuses(() => h.merge(), "node_mismatch");
+});
+
+const OLDER_REPORT = "The older report.";
+const NEWER_REPORT = "The newer report.";
+const EARLIER_TIME = 1_000;
+const LATER_TIME = 2_000;
+
+function reportHarness(t: TestContext) {
+  const h = actionHarness(t);
+  h.assess();
+  const report = (text: string, time: number, attempt = h.claim.attempt) =>
+    h.store.transaction((tx) => {
+      const evidenceId = `evidence_${ulid(time)}`;
+      insertEvidence(
+        tx,
+        {
+          id: evidenceId,
+          node_id: h.node_id,
+          attempt,
+          subject: CODER_REPORT_SUBJECT,
+          requirement_key: null,
+          end_state: null,
+          verification: null,
+          provenance: canonicalJSON(h.executionActor),
+          created_at: time,
+        },
+        [
+          {
+            id: createIdentity("evidence_asset"),
+            evidence_id: evidenceId,
+            kind: AssetKind.Produced,
+            content: canonicalJSON({
+              media_type: "text/markdown",
+              data: Buffer.from(text).toString("base64"),
+            }),
+            published_at: null,
+            expired_at: null,
+          },
+        ],
+      );
+    });
+  return { ...h, report };
+}
+
+test("a pull request perform holds the text of the newest coder report", (t) => {
+  const h = reportHarness(t);
+  h.report(NEWER_REPORT, LATER_TIME);
+  h.report(OLDER_REPORT, EARLIER_TIME);
+  assert.equal(h.frozen().facts.report, NEWER_REPORT);
+});
+
+test("a coder report of an earlier attempt gives no report", (t) => {
+  const h = reportHarness(t);
+  h.report(OLDER_REPORT, EARLIER_TIME);
+  assert.equal(h.frozen().facts.report, OLDER_REPORT);
+  h.store.transaction((tx) => {
+    closeAttempt(tx, h.node_id, h.claim.attempt, Date.now());
+    openAttempt(tx, h.node_id, h.claim.pinnedRevision, h.executionActor, 1);
+  });
+  h.claim.attempt += 1;
+  h.assess();
+  assert.equal(h.frozen().facts.report, null);
+});
+
+test("a push action and a service merge give no report", (t) => {
+  const h = reportHarness(t);
+  h.report(NEWER_REPORT, LATER_TIME);
+  h.policy.action = RepositoryAction.Push;
+  assert.equal(h.frozen({ key: MERGE_PUSH_KEY }).facts.report, null);
+  const merge = serviceMergeHarness(t);
+  assert.equal(merge.merge().facts.report, null);
 });
 
 const REPLY_RESOURCE = "conversation:github:owner/repo";
