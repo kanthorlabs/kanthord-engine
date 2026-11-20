@@ -20,7 +20,7 @@ import {
   RevisionWrite,
   TransitionRule,
 } from "./contract.ts";
-import { insertFinding } from "./finding-store.ts";
+import { insertFinding, markFindingsFixed } from "./finding-store.ts";
 import {
   attemptRecord,
   blockedContextOf,
@@ -276,31 +276,42 @@ function blockedRuleOf(
   t: TestContext,
   result: AssessmentResult,
   findings: { kind: FindingKind; action: FindingAction }[],
+  earlier: { fixed: boolean } | null = null,
 ) {
   const h = fixture(t);
   return h.store.transaction((tx) => {
     openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
-    const assessment = insertAssessment(tx, {
-      id: createIdentity("assessment"),
-      node_id: h.node_id,
-      attempt: FIRST_ATTEMPT,
-      result,
-      rationale: "Closed",
-      evidence_ids: "[]",
-      dependency_outcome_ids: "[]",
-      tested_input: null,
-      gate_files: null,
-      execution_id: createIdentity("execution"),
-      actor: null,
-      node_revision: FIRST_ATTEMPT,
-      created_at: NOW,
-    });
-    findings.forEach(({ kind, action }, index) =>
-      insertFinding(tx, {
-        id: createIdentity("finding"),
+    const assessmentOf = (
+      assessmentResult: AssessmentResult,
+      createdAt: number,
+    ) =>
+      insertAssessment(tx, {
+        id: createIdentity("assessment"),
         node_id: h.node_id,
-        assessment_id: assessment.id,
-        label: `${kind === FindingKind.Blocker ? "B" : "S"}${index + 1}`,
+        attempt: FIRST_ATTEMPT,
+        result: assessmentResult,
+        rationale: "Closed",
+        evidence_ids: "[]",
+        dependency_outcome_ids: "[]",
+        tested_input: null,
+        gate_files: null,
+        execution_id: createIdentity("execution"),
+        actor: null,
+        node_revision: FIRST_ATTEMPT,
+        created_at: createdAt,
+      });
+    const findingOf = (
+      assessmentId: string,
+      label: string,
+      { kind, action }: { kind: FindingKind; action: FindingAction },
+      route: FindingRoute,
+    ) => {
+      const id = createIdentity("finding");
+      insertFinding(tx, {
+        id,
+        node_id: h.node_id,
+        assessment_id: assessmentId,
+        label,
         kind,
         action,
         task_id: null,
@@ -309,7 +320,7 @@ function blockedRuleOf(
         description: "Description",
         fix: "Fix",
         why: "Why",
-        route: FindingRoute.Report,
+        route,
         fixed_assessment_id: null,
         cause_owner: null,
         created_by: null,
@@ -317,7 +328,31 @@ function blockedRuleOf(
         decision_reason: null,
         decided_by: null,
         decided_at: null,
-      }),
+      });
+      return id;
+    };
+    const earlierAssessment =
+      earlier === null
+        ? null
+        : assessmentOf(AssessmentResult.CriterionNotMet, NOW - 1);
+    const assessment = assessmentOf(result, NOW);
+    if (earlierAssessment !== null && earlier !== null) {
+      const earlierFindingId = findingOf(
+        earlierAssessment.id,
+        "S1",
+        { kind: FindingKind.Suggestion, action: FindingAction.Yes },
+        earlier.fixed ? FindingRoute.Fix : FindingRoute.Report,
+      );
+      if (earlier.fixed)
+        markFindingsFixed(tx, [earlierFindingId], assessment.id);
+    }
+    findings.forEach((finding, index) =>
+      findingOf(
+        assessment.id,
+        `${finding.kind === FindingKind.Blocker ? "B" : "S"}${index + 1}`,
+        finding,
+        FindingRoute.Report,
+      ),
     );
     insertOutcome(tx, {
       id: createIdentity("outcome"),
@@ -382,6 +417,24 @@ test("a node blocked at the rework limit or with a mixed blocker answers rule nu
       { kind: FindingKind.Blocker, action: FindingAction.Person },
     ]),
     null,
+  );
+});
+
+test("a person-only round answers rule null while an earlier action yes finding of the attempt stays open", (t) => {
+  const personBlocker = [
+    { kind: FindingKind.Blocker, action: FindingAction.Person },
+  ];
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, personBlocker, {
+      fixed: false,
+    }),
+    null,
+  );
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, personBlocker, {
+      fixed: true,
+    }),
+    TransitionRule.HumanAcceptance,
   );
 });
 

@@ -1505,6 +1505,10 @@ test("a current success of an examine node blocks it with the rule human_accepta
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Blocked);
   assert.equal(answer.outcome?.result, AssessmentResult.Success);
+  assert.equal(
+    answer.node.blocked_context?.rule,
+    TransitionRule.HumanAcceptance,
+  );
   assert.deepEqual(revokedTransition(h.calls), {
     from: NodeState.Evaluating,
     to: NodeState.Blocked,
@@ -1855,6 +1859,10 @@ test("a criterion-not-met round with only a person blocker blocks the attempt wi
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Blocked);
   assert.equal(answer.outcome?.result, AssessmentResult.CriterionNotMet);
+  assert.equal(
+    answer.node.blocked_context?.rule,
+    TransitionRule.HumanAcceptance,
+  );
   assert.deepEqual(revokedTransition(h.calls), {
     from: NodeState.Evaluating,
     to: NodeState.Blocked,
@@ -1877,6 +1885,10 @@ test("a person-only round with a plan cause blocks the attempt with the rule hum
   });
   assert.ok("state" in answer.node);
   assert.equal(answer.node.state, NodeState.Blocked);
+  assert.equal(
+    answer.node.blocked_context?.rule,
+    TransitionRule.HumanAcceptance,
+  );
   assert.deepEqual(revokedTransition(h.calls), {
     from: NodeState.Evaluating,
     to: NodeState.Blocked,
