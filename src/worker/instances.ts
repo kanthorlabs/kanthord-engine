@@ -907,7 +907,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   }
 
   private dropOrder(executionId: string): void {
+    const order = this.stopOrders.get(executionId);
     this.stopOrders.delete(executionId);
+    const name = order && this.instanceNameOf(order.runtime_identity);
+    if (name) this.dependencies.stopOrdersQueued(name);
     for (const pending of [...this.pendingArchives.values()]) {
       const index = pending.stopping.indexOf(executionId);
       if (index === NOT_FOUND) continue;

@@ -31,6 +31,7 @@ import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { GitStage, GitWriteError } from "../../repository/connector.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
+import { executionBoundary } from "./chain-runner.ts";
 
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
@@ -876,4 +877,50 @@ test("a stop context leaves the cleanup context of the run open", async (t) => {
   const cleanup = run.cleanupContext();
   stopAfter(t, () => cleanup.cancel());
   assert.equal(cleanup.signal.aborted, false);
+});
+
+test("a revoke after a requested stop keeps the requested stop, and the fence and the stop release then read no claim and send no release", async (t) => {
+  const stops = new CancellationContext();
+  const calls: string[] = [];
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {
+      scheduler: {
+        claimGet: async () => {
+          calls.push("claimGet");
+          throw new Error("network down");
+        },
+        executionRelease: async () => {
+          calls.push("executionRelease");
+          return {
+            type: OperationResultType.Completed,
+            status: 200,
+            data: { execution_id: CLAIM.execution_id, ended_at: Date.now() },
+          };
+        },
+      },
+    } as unknown as MethodClients,
+    credentials: {
+      release: async () => {
+        calls.push("credentials");
+      },
+    },
+    context: background,
+    stop: stops,
+  });
+  stopAfter(t, () => run.dispose());
+  stops.cancel(new ExecutionStop(EndReason.WorkerStopped, null));
+  run.revoke(EXECUTION_NOT_RUNNING);
+  const stopped = await executionBoundary(run, async () => {
+    const kept = await run.stopOf(new Error("later"));
+    assert.equal(kept.reason, EndReason.WorkerStopped);
+    assert.equal(await run.fence(run.cleanupContext()), false);
+    throw kept;
+  });
+  assert.deepEqual(stopped, {
+    kind: ExecutionEndKind.Ended,
+    reason: EndReason.Revoked,
+    code: EXECUTION_NOT_RUNNING,
+  });
+  assert.deepEqual(calls, []);
 });

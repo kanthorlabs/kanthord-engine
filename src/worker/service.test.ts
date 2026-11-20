@@ -17,6 +17,7 @@ import {
   type ExecutionSetup,
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
+  INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_HEARTBEAT_INTERVAL_MS,
   InstancePlacement,
   type MissionPromptPins,
@@ -2245,6 +2246,45 @@ test("a revoked stop order of a running server instance reaches the pool host wi
       ],
     ],
   );
+});
+
+const ONE_ORDER_LIST = 1;
+const TWO_ORDER_LISTS = 2;
+
+test("the release of an execution with a revoked order sends the pool host the list of that instance with no order", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  f.worker.executionReleased(POOL_EXECUTION);
+  assert.deepEqual(
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [{ execution_id: POOL_EXECUTION, reason: StopOrderReason.Revoked }],
+      ],
+      [f.nameOf(FIRST_INSTANCE), []],
+    ],
+  );
+});
+
+test("a sweep past the deadline drops a revoked order of a server instance and sends the pool host the list with no order", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  f.worker.instances.sweepStopOrders();
+  assert.equal(f.host.sentStopOrders.length, ONE_ORDER_LIST);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + ONE_ORDER_LIST;
+  t.mock.method(Date, "now", () => later);
+  f.worker.instances.sweepStopOrders();
+  assert.equal(f.worker.orderOf(POOL_EXECUTION), null);
+  assert.deepEqual(f.host.sentStopOrders.at(-1)?.orders, []);
+  assert.equal(f.host.sentStopOrders.length, TWO_ORDER_LISTS);
 });
 
 function busyArchive(f: ReturnType<typeof poolFixture>) {
