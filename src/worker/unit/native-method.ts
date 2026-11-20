@@ -71,6 +71,7 @@ export interface NativeExecutionInput {
   hostTools: SessionHostTools;
   context: Context;
   stop?: Context;
+  revocation?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
   capture?: TasksCapture;

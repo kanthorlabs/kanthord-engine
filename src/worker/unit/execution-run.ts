@@ -109,6 +109,16 @@ function detailWithDigests(
   return JSON.stringify({ ...detailFactsOf(detail), digests });
 }
 
+function revocationLink(
+  revocation: Context,
+  revoke: (code: string | null) => void,
+): Disposable {
+  return addAbortListener(revocation.signal, () => {
+    const reason: unknown = revocation.signal.reason;
+    revoke(reason instanceof ExecutionStop ? reason.code : null);
+  });
+}
+
 export class ExecutionRun {
   readonly claim: MethodClaim;
   readonly clients: MethodClients;
@@ -123,6 +133,7 @@ export class ExecutionRun {
   private settlement: Promise<void> | null = null;
   private verificationTimedOut = false;
   private readonly traceClosers = new Set<(status: SpanStatus) => void>();
+  private readonly revocation: Disposable | null;
 
   constructor(input: {
     claim: MethodClaim;
@@ -130,6 +141,7 @@ export class ExecutionRun {
     credentials: { release(): Promise<void> };
     context: Context;
     stop?: Context;
+    revocation?: Context;
     log?: (record: Record<string, unknown>) => void;
     telemetry?: TelemetrySink;
     workerName?: string;
@@ -154,6 +166,9 @@ export class ExecutionRun {
       input.stop ? joined(input.context, input.stop) : input.context,
       input.claim.expired_at,
     );
+    this.revocation = input.revocation
+      ? revocationLink(input.revocation, (code) => this.revoke(code))
+      : null;
   }
 
   log(msg: string, fields: Record<string, unknown>): void {
@@ -180,6 +195,10 @@ export class ExecutionRun {
 
   onStop(listener: () => void): Disposable {
     return addAbortListener(this.operationContext.signal, listener);
+  }
+
+  revoke(code: string | null = null): void {
+    this.store(this.stopWith(EndReason.Revoked, code, null, null));
   }
 
   onTraceClose(close: (status: SpanStatus) => void): Disposable {
@@ -423,6 +442,7 @@ export class ExecutionRun {
   }
 
   dispose(): void {
+    this.revocation?.[Symbol.dispose]();
     this.operationContext.cancel();
     if (this.spans.faultCount() > NO_TELEMETRY_FAULTS)
       this.log("telemetry faults", { faults: this.spans.faultCount() });

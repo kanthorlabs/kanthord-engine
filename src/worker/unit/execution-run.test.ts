@@ -535,6 +535,26 @@ test("the claim check stops the run as revoked when the server refuses the execu
   );
 });
 
+test("an execution-end answer of the revocation context revokes the run with its code", async (t) => {
+  const revocation = new CancellationContext();
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {} as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+    revocation,
+  });
+  stopAfter(t, () => run.dispose());
+  revocation.cancel(
+    new ExecutionStop(EndReason.Revoked, EXECUTION_PROOF_FAILED),
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(run.operationContext.signal.aborted, true);
+  const stopped = await run.stopOf(new Error("later"));
+  assert.equal(stopped.reason, EndReason.Revoked);
+  assert.equal(stopped.code, EXECUTION_PROOF_FAILED);
+});
+
 const DIGESTS = { "github:acme/engine": "d".repeat(64) };
 
 async function releasedStop(run: ExecutionRun, stop: unknown) {

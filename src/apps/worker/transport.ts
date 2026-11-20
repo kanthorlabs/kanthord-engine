@@ -63,6 +63,41 @@ export function observedTransport(
   };
 }
 
+type ClientCall = (...input: unknown[]) => Promise<OperationResult<unknown>>;
+
+function provedClient<T extends Record<string, Operation>>(
+  operations: T,
+  client: ServiceClient<T>,
+  proved: (result: OperationResult<unknown>) => void,
+): ServiceClient<T> {
+  const callOf = (key: string) => (client as Record<string, ClientCall>)[key]!;
+  return Object.fromEntries(
+    Object.keys(client).map((key) => [
+      key,
+      operations[key]?.requiresExecution
+        ? async (...args: unknown[]) => {
+            const result = await callOf(key)(...args);
+            proved(result);
+            return result;
+          }
+        : (...args: unknown[]) => callOf(key)(...args),
+    ]),
+  ) as ServiceClient<T>;
+}
+
+export function provedTransport(
+  transport: WorkerTransport,
+  proved: (result: OperationResult<unknown>) => void,
+): WorkerTransport {
+  return {
+    gateway: provedClient(gatewayOperations, transport.gateway, proved),
+    worker: provedClient(workerOperations, transport.worker, proved),
+    scheduler: provedClient(schedulerOperations, transport.scheduler, proved),
+    mission: provedClient(missionOperations, transport.mission, proved),
+    tracking: provedClient(trackingOperations, transport.tracking, proved),
+  };
+}
+
 export function portTransport(port: MessagePort): WorkerTransport {
   const call = portCaller(port);
   const client = <T extends Record<string, Operation>>(operations: T) =>
