@@ -670,6 +670,7 @@ Each item holds the instance record, `connection`, `binding_count` and `holder_m
 `holder_mismatch` is true when a binding that lists the instance names a credential with no live copy of the instance sealed to its current key. It is `false` for a `server` or a `container` instance, which uses the copy of the holder `server`.
 
 The server writes one info log record `worker.instance.connected` when an instance opens a connection. It writes the same record when a lapsed connection sends a heartbeat or a connect again. It writes one info log record `worker.instance.disconnected` when the last heartbeat of a connection becomes older than 60 seconds. The server checks every 15 seconds, so the record comes at most 15 seconds after the window ends. Each record holds `instance`, `connection_name` and `last_heartbeat_at`. After a server restart, a connected record of a Gateway request holds `connection_name: null`. An archive that ends the connection writes no `worker.instance.disconnected` record. A new connection replaces the current connection and writes no disconnected record for it. When the server cannot write a disconnected record, it logs `worker.instance.connection_log_failed` and continues.
+When the server writes `worker.instance.disconnected`, it also revokes each live execution of the instance that holds no stop order. The stop is `instance_lost`, the code is `null` and the detail is `{ "instance", "loss": "heartbeat_lost" }`. Mission moves the node to `Available`, or to `Waiting` for a reviewer, and counts no failure. When a revoke fails, the server logs `worker.instance.loss_failed` with `instance_id` and `err`, and continues with the next instance. A lapsed instance that sends a heartbeat again opens no lost execution again.
 
 ### `instance get`
 
@@ -749,6 +750,7 @@ In case 3, `worker.instance.work` answers `stop_orders` with `{ execution_id, re
 A server keeps one order for each execution. A later archive, or a later order for the same execution, keeps the first order and its reason.
 The instance ends when the last execution in `stopping` has released. The server then ends the instance and its registrations, and drops the connection.
 Each order has a deadline of 60 seconds (`INSTANCE_CONNECTED_WINDOW_MS`). After the deadline, the server revokes the execution as in case 2, removes the order, and ends the instance when `stopping` is empty. The server checks the deadlines every 15 seconds. A failure on one order is logged with its execution id, and the server continues with the next order.
+An execution with a stop order keeps this deadline. The revoke of the connection rule skips it.
 While a pending archive exists, the instance starts no new claim. A repeated archive answers the same record with `stopping`, and creates no second pending archive and no second order. `instance rotate` answers `409 worker.instance.in_use` with `details.stopping`.
 The pending archive and the orders live in memory only. A server restart drops them, and a human then repeats the archive.
 
