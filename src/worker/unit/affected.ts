@@ -829,11 +829,25 @@ async function declarationOf(
     remaining(input),
   );
   if (declaration === null || !("error" in declaration)) return declaration;
-  throw environmentStop(EnvironmentFailure.AffectedInvalid, {
+  throw declarationStop({
     binding_id: checkout.binding_id,
     commit: await input.base.commitOf(checkout.name),
-    file: AFFECTED_DECLARATION_FILE,
     error: declaration.error,
+  });
+}
+
+export interface InvalidDeclaration {
+  binding_id: string;
+  commit: string;
+  error: string;
+}
+
+export function declarationStop(invalid: InvalidDeclaration): ExecutionStop {
+  return environmentStop(EnvironmentFailure.AffectedInvalid, {
+    binding_id: invalid.binding_id,
+    commit: invalid.commit,
+    file: AFFECTED_DECLARATION_FILE,
+    error: invalid.error,
   });
 }
 

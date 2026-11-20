@@ -1,4 +1,5 @@
 import { ExecutionBudget } from "./budget.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
@@ -34,6 +35,7 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   anthropicAgent,
   anthropicSetup,
+  declareAffected,
   everyBindingSshAccess,
   fauxAssistantMessage,
   fauxToolCall,
@@ -541,6 +543,80 @@ test("the pinned revision read runs while the workspace branch prepares the chec
     context: background,
   });
   assert.ok(read);
+});
+
+const NO_MODEL_CALLS = 0;
+
+test("an invalid affected declaration at the base stops with environment_failed affected_invalid before the first model call", async (t) => {
+  const h = await implementFixture(t, [task("first", "true")], []);
+  await declareAffected(h, t, " ");
+  const { claim, setup } = h.input;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return complete({});
+      },
+    },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_affected_invalid",
+  }));
+  const provider = scriptedProvider([fauxAssistantMessage("never")]);
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  assert.equal(provider.calls.length, NO_MODEL_CALLS);
+  assert.equal(releases.length, ONE_RELEASE);
+  const { stop } = releases[0] as { stop: { reason: string; code: string } };
+  assert.equal(stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(stop.code, EnvironmentFailure.AffectedInvalid);
 });
 
 const OK_RELEASE = { kind: "released", furtherWork: false };
