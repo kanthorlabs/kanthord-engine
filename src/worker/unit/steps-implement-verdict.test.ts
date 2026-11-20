@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
@@ -197,6 +198,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: h.input.claim.node_id,
+      template: PromptTemplate.CriterionRevision,
+      agent_reason: "nothing again",
     });
     assert.equal(h.provider.calls.length, TWO_TURNS);
   });

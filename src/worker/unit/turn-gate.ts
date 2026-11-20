@@ -4,6 +4,7 @@ import { perCheckout } from "./per-checkout.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   commitMessage,
   commitTypeOf,
@@ -452,6 +453,7 @@ async function violate(
   );
   const detail = await state.ports.secrets.redact(
     String(new Error(violation.detail)),
+    REASON_MAX_LENGTH,
   );
   state.ports.log.log("turn violation", { code: violation.code, detail });
   return detail;

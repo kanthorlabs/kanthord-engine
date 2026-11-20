@@ -26,7 +26,7 @@ chain implement
           step unit.enter                   names the current unit; a planned round resets the unchanged-turn count
           loop revisions                    until the unit passes; scope of the unit
             step unit.turn                  [LLM] port: secrets.redact; Work | TaskRevision | CriterionRevision; gate G in write mode; budget end; stop provider_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
-            step verify.own                 port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit; stop no_progress, operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed
+            step verify.own                 port: releaseTrees.takeBase, secrets.redact; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit; stop no_progress, operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed
           step unit_record.put              port: unitRecords.put; on a pass; the unit record of the checkouts that hold a gate commit of the unit; a failed put ends nothing; stop revoked
           step unit.leave                   notes the final agent text for the coder report; counts the completed unit
         loop release_gate                   one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count

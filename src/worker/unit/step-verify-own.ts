@@ -6,6 +6,7 @@ import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { ImplementPorts } from "./foundry-ports.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import {
+  AGENT_REASON_MAX_LENGTH,
   noProgressDetail,
   NoProgressRule,
   verificationFactsOf,
@@ -34,17 +35,40 @@ const ONE_TURN = 1;
 
 type Verified = NextResult<UnitScope, never> | BudgetEndResult<UnitScope>;
 
-function countUnchangedTurn(state: StepsState, rule: NoProgressRule): void {
+function lastTemplateOf(scope: UnitScope): PromptTemplate {
+  return scope.instruction === null ? PromptTemplate.Work : scope.template;
+}
+
+async function agentReasonOf(
+  state: StepsState,
+): Promise<{ agent_reason?: string }> {
+  const text = state.agent.lastText();
+  if (!text) return {};
+  const redacted = await state.ports.secrets.redact(
+    text,
+    AGENT_REASON_MAX_LENGTH,
+  );
+  return redacted === null ? {} : { agent_reason: redacted.toWellFormed() };
+}
+
+async function countUnchangedTurn(
+  state: StepsState,
+  scope: UnitScope,
+  rule: NoProgressRule,
+): Promise<void> {
   state.unchangedTurns++;
-  if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
-    throw new ExecutionStop(EndReason.NoProgress, null, {
-      detail: noProgressDetail({
-        rule,
-        count: state.unchangedTurns,
-        limit: NO_PROGRESS_LIMIT,
-        verification: state.lastVerification,
-      }),
-    });
+  if (state.unchangedTurns < NO_PROGRESS_LIMIT) return;
+  throw new ExecutionStop(EndReason.NoProgress, null, {
+    detail: noProgressDetail({
+      rule,
+      count: state.unchangedTurns,
+      limit: NO_PROGRESS_LIMIT,
+      verification: state.lastVerification,
+      unit_id: scope.unit.id,
+      template: lastTemplateOf(scope),
+      ...(await agentReasonOf(state)),
+    }),
+  });
 }
 
 function recordTaskVerification(
@@ -74,31 +98,31 @@ function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
   );
 }
 
-function reviseNodeInstruction(
+async function reviseNodeInstruction(
   state: StepsState,
+  scope: UnitScope,
   checked: CheckedRun,
-  ruled: boolean,
-): string {
-  if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+): Promise<string> {
+  if (scope.ruled)
+    await countUnchangedTurn(state, scope, NoProgressRule.VerdictRuleUnmet);
   const instruction = revisionInstructionOf(state, checked);
   state.revisionCount++;
   return instruction;
 }
 
-function verdictTurnRetried(
+async function verdictTurnRetried(
   state: StepsState,
-  unit: TaskContent,
-  unchangedTurns: number,
-): boolean {
-  state.unchangedTurns = unchangedTurns;
+  scope: UnitScope,
+): Promise<boolean> {
+  state.unchangedTurns = scope.unchangedBefore;
   if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
     state.ports.log.log("verdict rule waived for review", {
-      task_id: unit.id,
+      task_id: scope.unit.id,
       commit: headSetOf(state.checkouts),
     });
     return false;
   }
-  countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
+  await countUnchangedTurn(state, scope, NoProgressRule.VerdictRuleUnmet);
   state.revisionCount++;
   return true;
 }
@@ -109,7 +133,7 @@ async function verifyTask(
 ): Promise<Verified> {
   assert.ok(scope.gated);
   if (scope.instruction !== null && !scope.gated.changed())
-    countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
+    await countUnchangedTurn(state, scope, NoProgressRule.UnchangedRevision);
   state.ports.log.log("task committed", {
     task_id: scope.unit.id,
     commit: headSetOf(state.checkouts),
@@ -130,7 +154,7 @@ async function verdictRuleRetried(
   assert.ok(scope.gated);
   if (!scope.ruled) {
     if (scope.revised && !scope.gated.changed())
-      countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
+      await countUnchangedTurn(state, scope, NoProgressRule.UnchangedRevision);
     return false;
   }
   scope.ruled = !(await verdictRuleHolds(state, node.judged));
@@ -139,9 +163,7 @@ async function verdictRuleRetried(
     commit: headSetOf(state.checkouts),
     holds: !scope.ruled,
   });
-  return (
-    scope.ruled && verdictTurnRetried(state, scope.unit, scope.unchangedBefore)
-  );
+  return scope.ruled && (await verdictTurnRetried(state, scope));
 }
 
 async function verifyVerdict(
@@ -154,7 +176,7 @@ async function verifyVerdict(
   scope.passed = recordTaskVerification(state, scope.unit, checked);
   if (scope.passed) return next(scope);
   if (state.agent.budget.exhausted()) return budgetEnd(scope);
-  scope.instruction = reviseNodeInstruction(state, checked, scope.ruled);
+  scope.instruction = await reviseNodeInstruction(state, scope, checked);
   scope.template = PromptTemplate.TaskRevision;
   scope.revised = true;
   return next(scope);
@@ -168,7 +190,7 @@ export const verifyOwn: FoundryStep<
 > = {
   foundry: true,
   id: "verify.own",
-  ports: ["releaseTrees.takeBase"],
+  ports: ["releaseTrees.takeBase", "secrets.redact"],
   deadline: DeadlineKind.Work,
   reads: ["state"],
   writes: ["verificationTimedOut"],

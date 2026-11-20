@@ -7,7 +7,7 @@ import {
   joined,
 } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
-import { redactReason, thrownReason } from "../../kernel/probe.ts";
+import { redactText, thrownReason } from "../../kernel/probe.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   type ClientOptions,
@@ -289,14 +289,14 @@ export class ExecutionRun {
     return thrownReason(error, secrets);
   }
 
-  async redact(text: string): Promise<string | null> {
+  async redact(text: string, limit: number): Promise<string | null> {
     let secrets: readonly string[];
     try {
       secrets = await this.secrets();
     } catch {
       return null;
     }
-    return redactReason(text, secrets);
+    return redactText(text, secrets).slice(0, limit);
   }
 
   private async builtStop(error: unknown): Promise<ExecutionStop> {

@@ -20,6 +20,7 @@ import {
 } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -1094,6 +1095,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
               `The HEAD of checkout ${h.checkouts[0]!.name} is refs/heads/${OTHER_BRANCH}, not refs/heads/${h.nodeBranch}.`,
             ),
           ),
+          REASON_MAX_LENGTH,
         ),
       },
     );
@@ -1115,6 +1117,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
               `The HEAD of checkout ${h.checkouts[0]!.name} is ${OUTSIDE_REF}, not refs/heads/${h.nodeBranch}.`,
             ),
           ),
+          REASON_MAX_LENGTH,
         ),
       },
     );

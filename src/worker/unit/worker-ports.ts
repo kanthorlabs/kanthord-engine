@@ -387,7 +387,7 @@ function unitRecordPort(run: ExecutionRun): UnitRecordPort {
 export function commonPorts(run: ExecutionRun): CommonPorts {
   return {
     telemetry: run.spans,
-    secrets: { redact: (text) => run.redact(text) },
+    secrets: { redact: (text, limit) => run.redact(text, limit) },
     log: { log: (message, fields) => run.log(message, fields) },
   };
 }
