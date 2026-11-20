@@ -20,7 +20,11 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
-import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import {
+  EndReason,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
@@ -39,6 +43,7 @@ import {
   commitWork,
   declareAffected,
   implementFixture as fixture,
+  TEST_SSH_ACCESS as LOCAL_SSH_ACCESS,
   NO_PROVIDER_CALLS,
   ONE_FREE_TREE,
   recordReleases,
@@ -48,6 +53,8 @@ import {
   task,
   transport,
 } from "./test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 
 const ROUTED_LOG = "release failure routed";
 const NO_PUSHES = 0;
@@ -55,6 +62,12 @@ const PARTIAL_HEADER = "feat: partial";
 const STOPPED_HEADER = "feat: stopped";
 const LATE_MAIN_CHANGE = "late main change";
 const BROKEN_CONTENT = "broken";
+const BASE_SIDE_FILE = "base-side";
+const SETUP_DEADLINE_MS = 20000;
+const PLAN_WAIT_TICKS = 50;
+const BESIDE = "beside";
+const MERGE_COMMIT_FIELDS = 3;
+const UNITS_PLANNED = "units planned";
 const FIXED_CONTENT = "fixed";
 
 async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
@@ -93,6 +106,63 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(h.root), false);
     assert.ok(existsSync(h.input.workspaces.nodeKey(h.input.claim.node_id)));
     assert.equal(agentTrees(h.input.workspaces).length, ONE_FREE_TREE);
+  });
+
+  test("the live setup runs on the merged heads beside units.plan, and its stop pushes the merged heads", async (t) => {
+    const marks = temporary(t);
+    const seen = join(marks, "heads");
+    const planned = join(marks, "planned");
+    const armed = join(marks, "armed");
+    const h = await fixture(
+      t,
+      [task("first", "true")],
+      [],
+      undefined,
+      undefined,
+      {
+        source: EnvironmentSource.Detected,
+        document: {
+          postCreateCommand: `test -e '${armed}' || exit 0; git rev-parse HEAD >> '${seen}'; i=0; while [ ! -e '${planned}' ] && [ $i -lt ${PLAN_WAIT_TICKS} ]; do sleep 0.1; i=$((i+1)); done; test -e '${planned}' && echo ${BESIDE} >> '${seen}'; exit 3`,
+        },
+      },
+    );
+    await advanceBase(h, t, "base side", BASE_SIDE_FILE);
+    await transport.fetchBase(
+      h.root,
+      "main",
+      background,
+      SETUP_DEADLINE_MS,
+      LOCAL_SSH_ACCESS,
+    );
+    writeFileSync(armed, "");
+    const log = h.run.log.bind(h.run);
+    t.mock.method(h.run, "log", (...args: Parameters<typeof log>) => {
+      if (args[0] === UNITS_PLANNED) writeFileSync(planned, "");
+      return log(...args);
+    });
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok(end.kind === ExecutionEndKind.Ended);
+    assert.equal(end.reason, EndReason.EnvironmentFailed);
+    const [merged, beside] = readFileSync(seen, "utf8").split("\n");
+    assert.equal(beside, BESIDE);
+    assert.equal(
+      (
+        await simpleGit(h.bare).raw([
+          "rev-list",
+          "--parents",
+          "-n",
+          "1",
+          merged!,
+        ])
+      )
+        .trim()
+        .split(" ").length,
+      MERGE_COMMIT_FIELDS,
+    );
+    assert.equal(
+      (await simpleGit(h.bare).revparse([`refs/heads/${h.nodeBranch}`])).trim(),
+      merged,
+    );
   });
 
   test("implement checkpoints budget-ended work and refuses release after a failed push", async (t) => {

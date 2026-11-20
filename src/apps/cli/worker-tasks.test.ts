@@ -495,23 +495,30 @@ suite("worker tasks run", () => {
       const metrics = readJson(join(fixture.root, "out"), "metrics.json") as {
         steps: { step: string; ms: number }[];
       };
+      const workspaceStatic = [
+        "affected.declaration",
+        "setup.entries(live)",
+        "agent.open",
+      ];
+      const startInputs = ["units.plan", "env.setup(live)"];
+      const steps = metrics.steps.map((entry) => entry.step);
       assert.deepEqual(
-        metrics.steps.map((entry) => entry.step),
-        [
-          "affected.declaration",
-          "setup.entries(live)",
-          "agent.open",
-          "env.setup(live)",
-          "state.open",
-          "units.plan",
-          "budget.check",
-          "unit.enter",
-          "unit.turn",
-          "verify.own",
-          "unit_record.put",
-          "unit.leave",
-        ],
+        steps.splice(0, workspaceStatic.length).sort(),
+        workspaceStatic.sort(),
       );
+      assert.deepEqual(steps.splice(0, 1), ["state.open"]);
+      assert.deepEqual(
+        steps.splice(0, startInputs.length).sort(),
+        startInputs.sort(),
+      );
+      assert.deepEqual(steps, [
+        "budget.check",
+        "unit.enter",
+        "unit.turn",
+        "verify.own",
+        "unit_record.put",
+        "unit.leave",
+      ]);
       assert.ok(metrics.steps.every((entry) => entry.ms >= NO_CALLS));
     },
   );

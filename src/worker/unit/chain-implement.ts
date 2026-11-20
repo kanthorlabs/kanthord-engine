@@ -76,10 +76,19 @@ export function implementWorkspaceNodes(): ChainNode[] {
   return [
     stepNode(inputsReadAttemptEvidence),
     stepNode(workspaceNode),
-    stepNode(setupEntriesLive),
-    stepNode(affectedDeclaration),
-    stepNode(envSetupLive),
+    parallelNode("workspace.static", [
+      soloBranch(stepNode(affectedDeclaration)),
+      soloBranch(stepNode(setupEntriesLive)),
+      soloBranch(stepNode(agentOpenImplement)),
+    ]),
   ];
+}
+
+export function startInputsNode(): ChainNode {
+  return parallelNode("start.inputs", [
+    soloBranch(stepNode(envSetupLive)),
+    soloBranch(stepNode(unitsPlan)),
+  ]);
 }
 
 function prepareFrame(): LoopFrame<true> {
@@ -128,8 +137,8 @@ export function implementInputOf(
     baseHead: state.base,
     affectedTests: state.affectedTests,
     plan: ctx.plan,
-    setupPending: state.setupPending,
-    setupInstruction: state.setupInstruction,
+    setupPending: ctx.setupPending,
+    setupInstruction: ctx.setupInstruction,
     progress: {
       unchangedTurns: state.unchangedTurns,
       lastVerification: state.lastVerification,
@@ -194,15 +203,11 @@ export function implementChain(
   return chain<ImplementHostPorts>(ChainId.Implement, IMPLEMENT_HOST_PORTS)
     .phase(Phase.Prepare)
     .loop("prepare", prepareFrame())
-    .step(agentOpenImplement)
     .step(stateOpen)
     .phase(Phase.Start)
     .loop(
       "start",
-      phaseFrame(Phase.Start, [
-        stepNode(baseRefreshClaim),
-        stepNode(unitsPlan),
-      ]),
+      phaseFrame(Phase.Start, [stepNode(baseRefreshClaim), startInputsNode()]),
     )
     .tasks(implementTasks(runner))
     .phase(Phase.Finish)

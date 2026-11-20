@@ -3,7 +3,12 @@ import type { TaskContent } from "../../mission/contract.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { loopNode, StepKind, stepNode } from "./chain.ts";
-import { implementChain, implementWorkspaceNodes } from "./chain-implement.ts";
+import { implementChain } from "./chain-implement.ts";
+import { affectedDeclaration } from "./step-affected-declaration.ts";
+import { envSetupLive } from "./step-env-setup-host.ts";
+import { inputsReadAttemptEvidence } from "./step-inputs-read-host.ts";
+import { setupEntriesLive } from "./step-setup-entries-host.ts";
+import { workspaceNode } from "./step-workspace-node.ts";
 import { releaseGateFrame, revisionsFrame } from "./foundry-implement.ts";
 import { type ChainIo, runChain, runNodes } from "./chain-runner.ts";
 import type { ExecutionRun } from "./execution-run.ts";
@@ -59,7 +64,14 @@ export function runStepsImplement(
   return runChain(
     implementChain(taskRunner),
     {
-      seed: { ...seedOf(state.input), revision: state.revision, state },
+      seed: {
+        ...seedOf(state.input),
+        revision: state.revision,
+        state,
+        workspace: { root: state.root, checkouts: state.checkouts },
+        setupEntries: state.setup,
+        baseHead: state.base,
+      },
       from: Phase.Start,
     },
     io,
@@ -108,7 +120,13 @@ export async function prepareStepsWorkspace(
   try {
     const { kind, ctx } = await runNodes(
       {
-        nodes: implementWorkspaceNodes(),
+        nodes: [
+          stepNode(inputsReadAttemptEvidence),
+          stepNode(workspaceNode),
+          stepNode(setupEntriesLive),
+          stepNode(affectedDeclaration),
+          stepNode(envSetupLive),
+        ],
         seed: seedOf(input),
       },
       {

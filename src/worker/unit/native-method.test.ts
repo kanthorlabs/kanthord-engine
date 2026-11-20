@@ -343,7 +343,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
 
-test("an agent open that throws after the prepare gives the base head tree back to the command class", async (t) => {
+test("an agent open that throws in the prepare runs no setup and leaves no base head tree", async (t) => {
   const h = await implementFixture(t, [task("first", "true")], []);
   const { claim } = h.input;
   writeFileSync(join(h.root, "node-file"), "node");
@@ -439,7 +439,7 @@ test("an agent open that throws after the prepare gives the base head tree back 
       .trees()
       .filter(({ path }) => basename(dirname(path)) === PoolClass.Command)
       .length,
-    ONE_COMMAND_TREE,
+    NO_COMMAND_TREE,
   );
 });
 
@@ -621,7 +621,7 @@ test("an invalid affected declaration at the base stops with environment_failed 
 
 const OK_RELEASE = { kind: "released", furtherWork: false };
 const NODE_ONLY_SETUP_FAILURE = 'case "$PWD" in */checkouts/*) exit 1;; esac';
-const ONE_COMMAND_TREE = 1;
+const NO_COMMAND_TREE = 0;
 
 async function examineRun(
   t: TestContext,

@@ -15,8 +15,6 @@ export const stateOpen: Step<
   | "setupEntries"
   | "affectedTests"
   | "baseHead"
-  | "setupPending"
-  | "setupInstruction"
   | "agent",
   "state"
 > = {
@@ -31,8 +29,6 @@ export const stateOpen: Step<
     "setupEntries",
     "affectedTests",
     "baseHead",
-    "setupPending",
-    "setupInstruction",
     "agent",
   ],
   writes: ["state"],
@@ -53,8 +49,8 @@ export const stateOpen: Step<
         setup: ctx.setupEntries,
         affectedTests: ctx.affectedTests,
         base: ctx.baseHead,
-        setupPending: ctx.setupPending,
-        setupInstruction: ctx.setupInstruction,
+        setupPending: false,
+        setupInstruction: null,
         verdict: ctx.prior.verdict,
         cleared: ctx.prior.cleared,
         unchangedTurns: 0,

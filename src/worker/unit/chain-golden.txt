@@ -7,15 +7,17 @@ chain implement
         branch workspace
           step inputs.read(attemptEvidence)
           step workspace.node               one coder checkout per binding at the node branch; restore to the read head; stop operation_failed/repository.node_checkout.pending_rebuild, operation_failed/repository.node_branch.missing, operation_failed/repository.connector.git_failed
-          step setup.entries(live)          stop environment_failed/setup_failed
-          step affected.declaration         per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
-          step env.setup(live)              node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
-    step agent.open                         port: agent.open; stop operation_failed
+          [PAR] workspace.static
+            step affected.declaration       per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
+            step setup.entries(live)        stop environment_failed/setup_failed
+            step agent.open                 port: agent.open; stop operation_failed
     step state.open                         the live implement state of the later phases
   phase start
     loop start                              one frame; span worker.phase start
       step base.refresh(claim)              [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
-      step units.plan                       verdict rule, unit records, pending units
+      [PAR] start.inputs
+        step env.setup(live)                on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end; stop environment_failed/setup_failed
+        step units.plan                     verdict rule, unit records, pending units
   phase tasks                               one call: foundryImplement(input, host)
     loop tasks                              one frame; span worker.phase tasks
       loop release_rounds                   until the release gate passes; a routed failure gives the next round
@@ -102,10 +104,12 @@ chain tasks_prepare
   seed claim, setup, workspace, revision, prior
   phase prepare                             runPhase; no onExit, no onStop
     loop tasks_prepare                      one frame; span worker.phase prepare
-      step affected.declaration             per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
-      step setup.entries(live)              stop environment_failed/setup_failed
-      step agent.open                       port: agent.open; stop operation_failed
-      step env.setup(live)                  node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
+      [PAR] workspace.static
+        step affected.declaration           per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
+        step setup.entries(live)            stop environment_failed/setup_failed
+        step agent.open                     port: agent.open; stop operation_failed
       step state.open                       the live implement state of the later phases
-      step units.plan                       verdict rule, unit records, pending units
+      [PAR] start.inputs
+        step env.setup(live)                on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end; stop environment_failed/setup_failed
+        step units.plan                     verdict rule, unit records, pending units
   dispose resources                         by the caller, on every end
