@@ -5,6 +5,7 @@ import { canonicalJSON } from "../kernel/json.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
+  ExecutionIntent,
   type UnitRecord,
   unitRecordSchema,
   WorkerErrorCode,
@@ -13,7 +14,7 @@ import type { Dependencies } from "./service.ts";
 
 type UnitRecordDependencies = Pick<
   Dependencies,
-  "schedulerClaims" | "repositoryBindingIdsOf" | "unitIdsOf"
+  "schedulerClaims" | "repositoryBindingIdsOf" | "unitIdsOf" | "intentOf"
 >;
 
 const storedCommitsSchema = unitRecordSchema.shape.commits;
@@ -67,6 +68,17 @@ export function putUnitRecord(
       claim.runtimeIdentity,
       Date.now(),
     );
+    const intent = dependencies.intentOf(
+      tx,
+      claim.nodeId,
+      claim.pinnedRevision,
+    );
+    if (intent !== ExecutionIntent.Implement)
+      refused(
+        WorkerErrorCode.UnitRecordIntentInvalid,
+        "Only an implement execution writes a unit record.",
+        { intent },
+      );
     if (
       !dependencies
         .unitIdsOf(tx, claim.nodeId, claim.pinnedRevision)

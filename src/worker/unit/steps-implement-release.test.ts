@@ -49,6 +49,7 @@ import {
   transport,
 } from "./test-support.ts";
 
+const ROUTED_LOG = "release failure routed";
 const NO_PUSHES = 0;
 const PARTIAL_HEADER = "feat: partial";
 const STOPPED_HEADER = "feat: stopped";
@@ -541,10 +542,11 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(submitted, []);
   });
 
-  test("a node whose change breaks an unlisted test gets a revision turn, fixes the test and releases", async (t) => {
+  test("a node whose change breaks an unlisted test gets a routed node unit turn, fixes the test, writes no node unit record and releases", async (t) => {
+    const change = task("change", "true");
     const h = await fixture(
       t,
-      [task("change", "true")],
+      [change],
       [
         fauxAssistantMessage(
           fauxToolCall("write", { path: "file", content: BROKEN_CONTENT }),
@@ -571,11 +573,24 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
         data: { evidence: {} },
       }),
     } as unknown as MethodClients["mission"];
+    const routed: unknown[] = [];
+    const log = h.run.log.bind(h.run);
+    h.run.log = (message, fields) => {
+      if (message === ROUTED_LOG) routed.push(fields.task_id);
+      log(message, fields);
+    };
+    const firstHead = h.checkouts[0]!.head;
     assert.deepEqual(await runStepsImplement(h), {
       kind: "released",
       furtherWork: false,
     });
     assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
+    assert.deepEqual(routed, [h.input.claim.node_id]);
+    assert.notEqual(h.checkouts[0]!.head, firstHead);
+    assert.deepEqual(
+      h.input.setup.unit_records.map(({ unit_id }) => unit_id),
+      [change.id],
+    );
     assert.match(
       JSON.stringify(h.provider.calls.at(-1)),
       /The affected test run of repository repo failed/,

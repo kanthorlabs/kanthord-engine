@@ -384,12 +384,13 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     return { h, count };
   }
 
-  test("a verdict unit runs no node command in the live checkout", async (t) => {
+  test("a verdict unit runs no node command in the live checkout, and its pass with a gate commit writes no node unit record", async (t) => {
     const { h, count } = await liveNodeHarness(t, [
       write("verdict"),
       fauxAssistantMessage("addressed"),
       fauxAssistantMessage("never"),
     ]);
+    const judgedHead = h.checkouts[0]!.head;
     recordReleases(h);
     recordEvidence(h);
     assert.deepEqual(
@@ -402,6 +403,13 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(
       readFileSync(count, "utf8").trim().split("\n").length,
       ONE_RUN,
+    );
+    assert.notEqual(h.checkouts[0]!.head, judgedHead);
+    assert.equal(
+      h.input.setup.unit_records.some(
+        ({ unit_id }) => unit_id === h.input.claim.node_id,
+      ),
+      false,
     );
   });
 

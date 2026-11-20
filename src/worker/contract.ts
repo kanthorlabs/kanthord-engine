@@ -1056,6 +1056,7 @@ export const WorkerErrorCode = {
   ExecutionSeedUnavailable: "worker.execution.seed_unavailable",
   UnitRecordUnitUnknown: "worker.unit_record.unit_unknown",
   UnitRecordBindingUnknown: "worker.unit_record.binding_unknown",
+  UnitRecordIntentInvalid: "worker.unit_record.intent_invalid",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -2054,7 +2055,7 @@ export const workerOperations = {
     }),
     output: unitRecordSchema,
     description:
-      "Write the unit record of a passed unit of the node of the live execution: the unit, the digest of its content and the gate commit of each changed checkout. A put replaces the record of the unit.",
+      "Write the unit record of a passed unit of the node of the live implement execution: the unit, the digest of its content and the gate commit of each changed checkout. A put replaces the record of the unit. Refusals: 409 worker.unit_record.intent_invalid, worker.unit_record.unit_unknown and worker.unit_record.binding_unknown.",
   },
   "action.request": {
     service: WORKER_SERVICE_NAME,

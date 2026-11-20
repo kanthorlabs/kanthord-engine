@@ -4919,8 +4919,11 @@ test("import.apply retains stored task order, appends creates in set order and c
   );
 });
 
-test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked", (t) => {
-  const f = importApplyFixture(t);
+test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked, and deletes the unit records of the old node", (t) => {
+  const deleted: string[] = [];
+  const f = importApplyFixture(t, undefined, undefined, {
+    unitRecords: { deleteNode: (_tx, nodeId) => void deleted.push(nodeId) },
+  });
   const first = f.apply(f.request());
   const entries = f.identified(first);
   const old = entries.find((item) => item.filename === IMPLEMENT_FILENAME)!.id!;
@@ -4937,6 +4940,7 @@ test("import.apply same filename without identity retires and replaces the old n
     [replacement],
   );
   assert.deepEqual(result.changes.retired_node_ids, [old]);
+  assert.deepEqual(deleted, [old]);
   assert.deepEqual(
     f.store.database.prepare("PRAGMA foreign_key_check").all(),
     [],

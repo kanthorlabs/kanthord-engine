@@ -5,8 +5,10 @@ pathItem:
     tags:
       - worker
     description: "Write the unit record of a passed unit of the node of the live
-      execution: the unit, the digest of its content and the gate commit of each
-      changed checkout. A put replaces the record of the unit."
+      implement execution: the unit, the digest of its content and the gate
+      commit of each changed checkout. A put replaces the record of the unit.
+      Refusals: 409 worker.unit_record.intent_invalid,
+      worker.unit_record.unit_unknown and worker.unit_record.binding_unknown."
     x-access-policy: client
     x-timeout-ms: 30000
     x-mutation: true
