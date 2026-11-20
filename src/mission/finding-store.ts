@@ -98,6 +98,17 @@ export function readFinding(tx: Transaction, id: string): FindingRow | null {
   );
 }
 
+export function readReportedFindingsOfAssessment(
+  tx: Transaction,
+  assessmentId: string,
+): FindingRow[] {
+  return tx.database
+    .prepare(
+      `SELECT ${FINDING_COLUMNS} FROM mission_finding WHERE assessment_id = ? AND created_by IS NULL`,
+    )
+    .all(assessmentId) as unknown as FindingRow[];
+}
+
 export function listFindings(
   tx: Transaction,
   nodeId: string,

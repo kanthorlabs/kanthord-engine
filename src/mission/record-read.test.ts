@@ -8,6 +8,9 @@ import {
   AssessmentResult,
   AssetKind,
   ClosingEvent,
+  FindingAction,
+  FindingKind,
+  FindingRoute,
   type MissionBindings,
   nodeSchema,
   NodeState,
@@ -15,7 +18,9 @@ import {
   RepositoryAction,
   Resolution,
   RevisionWrite,
+  TransitionRule,
 } from "./contract.ts";
+import { insertFinding } from "./finding-store.ts";
 import {
   attemptRecord,
   blockedContextOf,
@@ -255,6 +260,7 @@ test("blocked node projection includes its attempt-zero human outcome and no req
     assert.equal(context.outcome.id, outcome.id);
     assert.equal(context.outcome.attempt, NO_ATTEMPT);
     assert.deepEqual(context.requests, []);
+    assert.equal(context.rule, null);
     const node = nodeSchema.parse(
       nodeRecord(tx, row, h.bindings, h.dependencies),
     );
@@ -264,6 +270,106 @@ test("blocked node projection includes its attempt-zero human outcome and no req
       [],
     );
   });
+});
+
+function blockedRuleOf(
+  t: TestContext,
+  result: AssessmentResult,
+  findings: { kind: FindingKind; action: FindingAction }[],
+) {
+  const h = fixture(t);
+  return h.store.transaction((tx) => {
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, ACTOR, NOW);
+    const assessment = insertAssessment(tx, {
+      id: createIdentity("assessment"),
+      node_id: h.node_id,
+      attempt: FIRST_ATTEMPT,
+      result,
+      rationale: "Closed",
+      evidence_ids: "[]",
+      dependency_outcome_ids: "[]",
+      tested_input: null,
+      gate_files: null,
+      execution_id: createIdentity("execution"),
+      actor: null,
+      node_revision: FIRST_ATTEMPT,
+      created_at: NOW,
+    });
+    findings.forEach(({ kind, action }, index) =>
+      insertFinding(tx, {
+        id: createIdentity("finding"),
+        node_id: h.node_id,
+        assessment_id: assessment.id,
+        label: `${kind === FindingKind.Blocker ? "B" : "S"}${index + 1}`,
+        kind,
+        action,
+        task_id: null,
+        ground: null,
+        name: "Name",
+        description: "Description",
+        fix: "Fix",
+        why: "Why",
+        route: FindingRoute.Report,
+        fixed_assessment_id: null,
+        cause_owner: null,
+        created_by: null,
+        decision: null,
+        decision_reason: null,
+        decided_by: null,
+        decided_at: null,
+      }),
+    );
+    insertOutcome(tx, {
+      id: createIdentity("outcome"),
+      node_id: h.node_id,
+      result,
+      assessment_id: assessment.id,
+      evidence_ids: "[]",
+      created_at: NOW,
+    });
+    setNodeState(tx, h.node_id, NodeState.Blocked);
+    const row = readNode(tx, h.node_id)!;
+    const context = blockedContextOf(tx, h.bindings, row);
+    const node = nodeSchema.parse(
+      nodeRecord(tx, row, h.bindings, h.dependencies),
+    );
+    assert.deepEqual(node.blocked_context, context);
+    return context.rule;
+  });
+}
+
+test("a blocked examine node with a success outcome answers the rule human_acceptance", (t) => {
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.Success, []),
+    TransitionRule.HumanAcceptance,
+  );
+});
+
+test("a blocked node whose closing assessment holds only person blockers answers human_acceptance", (t) => {
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, [
+      { kind: FindingKind.Blocker, action: FindingAction.Person },
+      { kind: FindingKind.Suggestion, action: FindingAction.Yes },
+    ]),
+    TransitionRule.HumanAcceptance,
+  );
+});
+
+test("a node blocked at the rework limit or with a mixed blocker answers rule null", (t) => {
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, [
+      { kind: FindingKind.Blocker, action: FindingAction.Yes },
+    ]),
+    null,
+  );
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, [
+      { kind: FindingKind.Blocker, action: FindingAction.Person },
+      { kind: FindingKind.Blocker, action: FindingAction.Yes },
+    ]),
+    null,
+  );
+  assert.equal(blockedRuleOf(t, AssessmentResult.CriterionNotMet, []), null);
 });
 
 test("evidence projects every address kind without exposing inline data or storage-only names", (t) => {

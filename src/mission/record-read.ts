@@ -18,6 +18,8 @@ import {
   evidenceSchema,
   type ExecutionAttribution,
   type ExternalAction,
+  FindingAction,
+  FindingKind,
   type MissionBindings,
   NodeState,
   type Outcome,
@@ -26,8 +28,10 @@ import {
   type PauseFacts,
   PauseRule,
   testedInputSchema,
+  TransitionRule,
   verificationSchema,
 } from "./contract.ts";
+import { readReportedFindingsOfAssessment } from "./finding-store.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
 import {
   type AssessmentRow,
@@ -48,6 +52,7 @@ import { type NodeRow, readNode } from "./store.ts";
 import { currencyOf } from "./currency.ts";
 import type { MissionConfig } from "./config.ts";
 
+const NO_BLOCKERS = 0;
 const NO_REQUIRED_ACTIONS = 0;
 const NO_ATTEMPT = 0;
 const NO_LIMIT = 0;
@@ -228,6 +233,29 @@ export function externalActionRecords(
   );
 }
 
+function personOnlyBlockers(tx: Transaction, assessmentId: string): boolean {
+  const blockers = readReportedFindingsOfAssessment(tx, assessmentId).filter(
+    (finding) => finding.kind === FindingKind.Blocker,
+  );
+  return (
+    blockers.length > NO_BLOCKERS &&
+    blockers.every((finding) => finding.action === FindingAction.Person)
+  );
+}
+
+function humanAcceptanceRuleOf(
+  tx: Transaction,
+  current: OutcomeRow,
+): BlockedContext["rule"] {
+  const assessment = readAssessment(tx, current.assessment_id);
+  assert.ok(assessment);
+  const holdsRule =
+    assessment.execution_id !== null &&
+    (current.result === AssessmentResult.Success ||
+      personOnlyBlockers(tx, assessment.id));
+  return holdsRule ? TransitionRule.HumanAcceptance : null;
+}
+
 export function blockedContextOf(
   tx: Transaction,
   bindings: MissionBindings,
@@ -245,6 +273,7 @@ export function blockedContextOf(
         : readRequests(tx, node.id, outcome.attempt).map((row) =>
             evidenceRecord(tx, row),
           ),
+    rule: humanAcceptanceRuleOf(tx, current),
   };
 }
 

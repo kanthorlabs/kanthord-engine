@@ -329,6 +329,7 @@ test(
         ]);
         assert.equal(node.blocked_context?.outcome.id, blockedOutcome);
         assert.deepEqual(node.blocked_context?.requests, []);
+        assert.equal(node.blocked_context?.rule, null);
       },
     );
     await scenario("E01.6 unblock opens exactly the next attempt", async () => {
