@@ -322,6 +322,7 @@ function instanceFixture(
           ? { lost: [], revoked: [revokedClaimOf(executionId)] }
           : ANSWERED_ENDS;
       },
+      revokeForInstanceLoss: unexpected,
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
         return pausedRevocation.answer;

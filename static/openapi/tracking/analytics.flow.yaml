@@ -750,6 +750,7 @@ components:
                   - no_progress
                   - environment_failed
                   - instance_archived
+                  - instance_lost
                   - worker_stopped
                   - human_paused
                   - lost
@@ -768,6 +769,7 @@ components:
                   - no_progress
                   - environment_failed
                   - instance_archived
+                  - instance_lost
                   - worker_stopped
                   - human_paused
                   - lost
@@ -788,6 +790,7 @@ components:
                 - no_progress
                 - environment_failed
                 - instance_archived
+                - instance_lost
                 - worker_stopped
                 - human_paused
                 - lost
@@ -807,6 +810,7 @@ components:
                       - no_progress
                       - environment_failed
                       - instance_archived
+                      - instance_lost
                       - worker_stopped
                       - human_paused
                       - lost
@@ -825,6 +829,7 @@ components:
                     - no_progress
                     - environment_failed
                     - instance_archived
+                    - instance_lost
                     - worker_stopped
                     - human_paused
                     - lost

@@ -10,6 +10,7 @@ import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import {
+  ExecutionStopReason,
   LOSS_SWEEP_INTERVAL_MS,
   QUEUE_LIST_LIMIT_DEFAULT,
   SCHEDULER_SERVICE_NAME,
@@ -561,6 +562,46 @@ test("a revocation writes one root end after the commit and a rolled back revoca
           revoke_cause: RevokeCause.Human,
           stop: null,
           cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+        },
+      ],
+    },
+  ]);
+});
+
+test("a revocation by an instance loss reports the revoke cause, the stop and the failure cause", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  h.store.transaction((tx) => insertExecution(tx, row));
+  const stop = {
+    reason: ExecutionStopReason.InstanceLost,
+    code: null,
+    detail: '{"instance":"relay-a","loss":"pool_failed"}',
+  };
+  const revoked = h.store.transaction((tx) =>
+    h.service.revoke(tx, row.node_id, FIXTURE_NOW, stop),
+  );
+  assert.ok(revoked);
+  const failureCause = attributed(
+    CauseCategory.Infrastructure,
+    CauseSubcategory.ExecutionLost,
+  );
+  h.service.executionRevoked(
+    revoked,
+    RevokeCause.InstanceLost,
+    null,
+    failureCause,
+  );
+  assert.deepEqual(h.telemetry, [
+    {
+      method: EXECUTION_ENDED,
+      arguments: [
+        {
+          trace: executionTrace(row),
+          ended_at: FIXTURE_NOW,
+          end: ExecutionEnd.Revoked,
+          revoke_cause: "instance_lost",
+          stop,
+          cause: failureCause,
         },
       ],
     },

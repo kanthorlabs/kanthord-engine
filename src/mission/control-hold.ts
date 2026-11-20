@@ -2,11 +2,17 @@ import assert from "node:assert/strict";
 import type { Transaction } from "../kernel/store.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   type ExecutionEnds,
   type HumanAct,
   type HumanActor,
+  type InstanceLossOptions,
   NodeState,
   Resolution,
   type Resume,
@@ -278,6 +284,49 @@ export function revokeForInstanceArchive(
       reason: "instance_archived",
       code: null,
       detail: canonicalJSON({ instance, actor: actor.name }),
+    },
+  );
+  assert.ok(claim);
+  if (node.state === NodeState.Paused) return ends;
+  transition(
+    tx,
+    dependencies,
+    requireMission(tx, node.mission_id),
+    node,
+    node.state === NodeState.Executing
+      ? NodeState.Available
+      : NodeState.Waiting,
+    now,
+  );
+  return ends;
+}
+
+export interface InstanceLossRevoke extends InstanceLossOptions {
+  executionId: string;
+  now: number;
+}
+
+export function revokeForInstanceLoss(
+  tx: Transaction,
+  dependencies: Dependencies,
+  revoke: InstanceLossRevoke,
+): ExecutionEnds | null {
+  const { executionId, instance, loss, now } = revoke;
+  const node = claimedNodeOf(tx, dependencies, executionId, now);
+  if (node === null) return null;
+  const ends = executionEnds();
+  const claim = endLiveClaim(
+    tx,
+    dependencies,
+    node,
+    now,
+    RevokeCause.InstanceLost,
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.ExecutionLost),
+    ends,
+    {
+      reason: "instance_lost",
+      code: null,
+      detail: canonicalJSON({ instance, loss }),
     },
   );
   assert.ok(claim);

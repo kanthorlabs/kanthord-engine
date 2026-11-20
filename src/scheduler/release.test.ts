@@ -678,6 +678,30 @@ test("an instance_archived release refuses with stop_unordered and writes nothin
   assert.equal(wake.mock.callCount(), NO_CALLS);
 });
 
+test("an instance_lost release refuses with stop_unordered and writes nothing", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  const wake = t.mock.method(h.service, "wake", () => {});
+  await assert.rejects(
+    h.release(true, {
+      reason: ExecutionStopReason.InstanceLost,
+      code: null,
+    }),
+    (error: unknown) =>
+      error instanceof OperationError &&
+      error.status === HttpStatus.Conflict &&
+      error.code === STOP_UNORDERED &&
+      isDeepStrictEqual(error.details, {
+        execution_id: h.row.execution_id,
+        reason: ExecutionStopReason.InstanceLost,
+      }),
+  );
+  assert.equal(h.read().ended_at, null);
+  assert.equal(h.calls.length, NO_CALLS);
+  assert.equal(h.telemetry.length, NO_CALLS);
+  assert.equal(wake.mock.callCount(), NO_CALLS);
+});
+
 test("executionReleased runs after the commit with the execution id and the stop", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);

@@ -342,6 +342,32 @@ test("an archive row neither counts nor resets the failure count and a null stop
   assert.equal(sequence(null), ONE_LOSS);
 });
 
+test("an instance_lost stop does not count in consecutiveFailures", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const at = (offset: number) =>
+    executionFixture({
+      node_id: node,
+      expired_at: FIXTURE_DEADLINE + 100,
+      created_at: FIXTURE_NOW + offset,
+    });
+  h.store.transaction((tx) => {
+    const first = at(1);
+    insertExecution(tx, first);
+    endExecution(tx, first.execution_id, FIXTURE_NOW + 2, STOP);
+    const lost = at(3);
+    insertExecution(tx, lost);
+    endExecution(tx, lost.execution_id, FIXTURE_NOW + 4, {
+      reason: ExecutionStopReason.InstanceLost,
+      code: null,
+    });
+    const last = at(5);
+    insertExecution(tx, last);
+    endExecution(tx, last.execution_id, FIXTURE_NOW + 6, STOP);
+    assert.equal(consecutiveFailures(tx, last), SECOND_LOSS);
+  });
+});
+
 test("pause facts answer the counts of the count functions and the last stop of the attempt", (t) => {
   const h = schedulerHarness(t);
   const nodeId = createIdentity("node");

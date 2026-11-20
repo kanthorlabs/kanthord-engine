@@ -2,7 +2,18 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { createIdentity } from "../kernel/identity.ts";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
-import { NodeState, RevokeCause, type RevokedExecution } from "./contract.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
+import { ExecutionStopReason } from "../scheduler/contract.ts";
+import {
+  InstanceLoss,
+  NodeState,
+  RevokeCause,
+  type RevokedExecution,
+} from "./contract.ts";
 import { readOpenAttempt } from "./record-store.ts";
 import { setNodeState } from "./store.ts";
 import {
@@ -59,11 +70,27 @@ function fixture(t: TestContext, claim: NodeState) {
     h.store.transaction((tx) =>
       h.service.revokeForInstanceArchive(tx, id, INSTANCE, ACTOR),
     );
+  const revokeLost = (loss: InstanceLoss = InstanceLoss.PoolFailed) =>
+    h.store.transaction((tx) =>
+      h.service.revokeForInstanceLoss(tx, executionId, {
+        instance: INSTANCE,
+        loss,
+      }),
+    );
   const jobs = () =>
     h.calls.filter(
       (call) => call.method === INSERT && call.arguments[1] === h.node_id,
     );
-  return { ...h, executionId, execution, reported, stops, revoke, jobs };
+  return {
+    ...h,
+    executionId,
+    execution,
+    reported,
+    stops,
+    revoke,
+    revokeLost,
+    jobs,
+  };
 }
 
 for (const { claim, after } of KINDS) {
@@ -189,4 +216,51 @@ test("a forced archive of a Paused node with a kept claim revokes it with instan
   assert.equal(ends.revoked[0]!.execution.execution_id, h.executionId);
   assert.equal(h.jobs().length, jobs);
   assert.equal(h.revoke(), null);
+});
+
+test("an instance loss of an Executing node ends the execution with the stop instance_lost and moves the node to Available", (t) => {
+  const h = fixture(t, NodeState.Executing);
+  const failure = t.mock.method(h.service, "failure");
+  const ends = h.revokeLost(InstanceLoss.HeartbeatLost);
+  assert.ok(ends);
+  assert.equal(h.node().state, NodeState.Available);
+  assert.equal(h.stops.length, ONE_CALL);
+  const stop = h.stops[0] as { reason: string; code: null; detail: string };
+  assert.equal(stop.reason, ExecutionStopReason.InstanceLost);
+  assert.equal(stop.code, null);
+  assert.deepEqual(JSON.parse(stop.detail), {
+    instance: INSTANCE,
+    loss: InstanceLoss.HeartbeatLost,
+  });
+  assert.equal(ends.revoked.length, ONE_CALL);
+  assert.equal(ends.revoked[0]!.cause, RevokeCause.InstanceLost);
+  assert.deepEqual(
+    ends.revoked[0]!.failure_cause,
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.ExecutionLost),
+  );
+  assert.equal(failure.mock.callCount(), NO_CALLS);
+});
+
+test("an instance loss of an Evaluating node moves the node to Waiting", (t) => {
+  const h = fixture(t, NodeState.Evaluating);
+  assert.ok(h.revokeLost());
+  assert.equal(h.node().state, NodeState.Waiting);
+});
+
+test("an instance loss of a Paused node revokes the claim and keeps Paused", (t) => {
+  const h = fixture(t, NodeState.Paused);
+  const ends = h.revokeLost();
+  assert.ok(ends);
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(ends.revoked.length, ONE_CALL);
+  assert.equal(h.revokeLost(), null);
+});
+
+test("an instance loss of an execution that ended answers null and keeps the node", (t) => {
+  const h = fixture(t, NodeState.Executing);
+  h.execution.ended_at = ENDED_AT;
+  const before = databaseSnapshot(h.store);
+  assert.equal(h.revokeLost(), null);
+  assert.deepEqual(databaseSnapshot(h.store), before);
+  assert.equal(h.node().state, NodeState.Executing);
 });

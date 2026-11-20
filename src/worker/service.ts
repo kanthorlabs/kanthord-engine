@@ -219,6 +219,7 @@ export interface Dependencies {
   instanceArchive: Pick<
     MissionCollaborations,
     | "revokeForInstanceArchive"
+    | "revokeForInstanceLoss"
     | "revokePausedClaim"
     | "executionReleased"
     | "reportExecutionEnds"
