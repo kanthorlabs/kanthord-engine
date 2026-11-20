@@ -27,6 +27,7 @@ import {
   changedEntries,
   ChangeStatus,
   checkoutDetached,
+  conflictMarkerFiles,
   discardChanges,
   excludeUntracked,
   fetchLocal,
@@ -980,5 +981,27 @@ test("fetchLocal brings an unpushed commit of the source into the tree", async (
   assert.equal(
     await hostGit(directory, ["rev-parse", "refs/kanthord/remotes/main"]),
     at.commit,
+  );
+});
+
+const MAGIC_CONFLICT_FILE = ":!x.txt";
+const MARKED_OTHER_FILE = "other.txt";
+const MARKER_TEXT = "<<<<<<< node\nnode\n=======\nbase\n>>>>>>> base\n";
+const MARKER_DEADLINE_MS = 20000;
+
+test("the marker check reads a conflicted file name literally and reports no file outside the conflicted files", async (t) => {
+  const directory = temporary(t);
+  await simpleGit(directory).init();
+  for (const file of [MAGIC_CONFLICT_FILE, MARKED_OTHER_FILE])
+    writeFileSync(join(directory, file), MARKER_TEXT);
+  assert.deepEqual(
+    await conflictMarkerFiles(
+      env,
+      directory,
+      [MAGIC_CONFLICT_FILE],
+      background,
+      MARKER_DEADLINE_MS,
+    ),
+    [MAGIC_CONFLICT_FILE],
   );
 });

@@ -1212,6 +1212,7 @@ export async function conflictMarkerFiles(
     env,
     directory,
     [
+      LITERAL_PATHSPECS,
       "grep",
       "--no-index",
       "-z",
