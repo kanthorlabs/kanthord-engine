@@ -32,6 +32,7 @@ import {
 const NO_STALLS = 0;
 export const STOP_UNORDERED = "scheduler.execution.stop_unordered";
 const EXECUTION_RELEASED_FAILED = "scheduler.execution.released_hook_failed";
+export const EXECUTION_RELEASED = "scheduler.execution.released";
 
 function reportEnvironmentFailure(
   dependencies: Dependencies,
@@ -214,6 +215,20 @@ export function release(
   });
   assert.ok(released, "a committed release read its execution");
   assert.ok(transition, "a committed release moved its node");
+  const cause =
+    body.stop === null ? null : (body.stop.cause ?? unattributed([]));
+  dependencies.logger.info(
+    {
+      execution_id: executionId,
+      node_id: released.node_id,
+      attempt: released.attempt,
+      further_work: body.further_work,
+      stop_reason: body.stop?.reason ?? null,
+      stop_code: body.stop?.code ?? null,
+      cause,
+    },
+    EXECUTION_RELEASED,
+  );
   dependencies.agentChains.cooldownsChanged(cooldowns);
   dependencies.telemetry.executionEnded({
     trace: executionTrace(released),
@@ -221,7 +236,7 @@ export function release(
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: body.stop,
-    cause: body.stop === null ? null : (body.stop.cause ?? unattributed([])),
+    cause,
   });
   notifyReleased(dependencies, executionId, body.stop);
   dependencies.telemetry.executionTransition(

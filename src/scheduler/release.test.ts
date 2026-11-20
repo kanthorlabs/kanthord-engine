@@ -45,7 +45,7 @@ import {
   heldUntil,
 } from "./settlement.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
-import { STOP_UNORDERED } from "./release.ts";
+import { EXECUTION_RELEASED, STOP_UNORDERED } from "./release.ts";
 
 const WAKE_CALL_COUNT = 1;
 const HOOK_FAILURE = "hook failed";
@@ -547,12 +547,74 @@ test("an executionReleased that throws is logged and the release answers its res
     execution_id: h.row.execution_id,
     ended_at: FIXTURE_NOW,
   });
-  const records = lines.map((line) => JSON.parse(line));
+  const records = lines
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.msg !== EXECUTION_RELEASED);
   assert.equal(records.length, ONE_CALL);
   assert.equal(records[0].execution_id, h.row.execution_id);
   assert.equal(records[0].err.message, HOOK_FAILURE);
   assert.equal(h.telemetry.length, TELEMETRY_RECORDS);
   assert.equal(wake.mock.callCount(), ONE_CALL);
+});
+
+function releaseRecords(h: ReturnType<typeof harness>) {
+  const lines: string[] = [];
+  h.dependencies.logger = pino(
+    { level: "info" },
+    { write: (line) => lines.push(line) },
+  );
+  return () =>
+    lines
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.msg === EXECUTION_RELEASED);
+}
+
+test("a no_progress release writes one released record with its reason and cause", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  const cause = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
+  await h.release(true, {
+    reason: ExecutionStopReason.NoProgress,
+    code: null,
+    cause,
+  });
+  const [record, ...others] = records();
+  assert.equal(others.length, NO_CALLS);
+  assert.equal(record.execution_id, h.row.execution_id);
+  assert.equal(record.node_id, h.row.node_id);
+  assert.equal(record.attempt, h.row.attempt);
+  assert.equal(record.further_work, true);
+  assert.equal(record.stop_reason, ExecutionStopReason.NoProgress);
+  assert.equal(record.stop_code, null);
+  assert.deepEqual(record.cause, JSON.parse(JSON.stringify(cause)));
+});
+
+test("a progress release with no stop writes one released record with a null reason", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  await h.release(true);
+  const [record, ...others] = records();
+  assert.equal(others.length, NO_CALLS);
+  assert.equal(record.further_work, true);
+  assert.equal(record.stop_reason, null);
+  assert.equal(record.stop_code, null);
+  assert.equal(record.cause, null);
+});
+
+test("the released record holds no detail of the stop", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  const detail = "secret command output";
+  await h.release(true, { ...STOP, detail });
+  const [record] = records();
+  assert.equal("detail" in record, false);
+  assert.equal(JSON.stringify(record).includes(detail), false);
 });
 
 const API = "repository:github:acme/api";
