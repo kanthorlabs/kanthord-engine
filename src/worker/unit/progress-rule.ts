@@ -67,13 +67,9 @@ export function cutText(text: string, length: number): string {
 function reasonFitted(facts: NoProgressFacts): NoProgressFacts {
   const overflow = overflowOf(facts);
   if (overflow <= NO_OVERFLOW || facts.agent_reason === undefined) return facts;
-  return {
-    ...facts,
-    agent_reason: cutText(
-      facts.agent_reason,
-      facts.agent_reason.length - overflow,
-    ),
-  };
+  const { agent_reason: reason, ...rest } = facts;
+  const cut = cutText(reason, reason.length - overflow);
+  return cut.length === NO_OVERFLOW ? rest : { ...rest, agent_reason: cut };
 }
 
 function commandFitted(facts: NoProgressFacts): NoProgressFacts {
@@ -113,6 +109,12 @@ function factsOf(detail: string): NoProgressFacts | null {
   }
   const parsed = noProgressFactsSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+export function loggedNoProgressDetail(detail: string): string | undefined {
+  const facts = factsOf(detail);
+  if (facts === null) return undefined;
+  return JSON.stringify({ ...facts, agent_reason: undefined });
 }
 
 function verificationAttributes(verification: VerificationFacts): Attributes {

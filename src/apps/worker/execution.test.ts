@@ -1199,3 +1199,78 @@ test("an execution-end answer of an agent tool call ends the execution as revoke
   assert.equal(release.mock.callCount(), NO_ENTRIES);
   assert.equal(provider.calls.length, ONE_ENTRY);
 });
+
+test("the host log of a no_progress stop holds the stop detail with no agent_reason", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const credential = {
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    credential: { type: "api_key", key: "test_host_key" },
+  };
+  t.mock.method(api.worker, "handover", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: sealEnvelope(
+      deriveHandoverKeys(SECRET).handover,
+      handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+      { items: [credential], ssh_identities: [] },
+    ),
+  }));
+  t.mock.method(api.worker, "execution.setup.get", async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: {
+      execution_id: claim.execution_id,
+      worker_name: "coder@1",
+      agents: [],
+      templates: SHIPPED_TEMPLATES,
+      resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      intent: ExecutionIntent.Implement,
+      repositories: [],
+    },
+  }));
+  const facts = {
+    rule: "unchanged_revision",
+    count: 2,
+    limit: 2,
+    verification: null,
+    unit_id: "task_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    template: "task-revision",
+  };
+  const ends = [
+    JSON.stringify({ ...facts, agent_reason: "the agent text" }),
+    "not a detail",
+  ];
+  const logged: unknown[] = [];
+  for (const detail of ends) {
+    const records: Record<string, unknown>[] = [];
+    await hostExecution(
+      {
+        api,
+        claim,
+        clientSecret: SECRET,
+        context: background,
+        workspaces: WorkspaceRoot.open(temporary(t)),
+        transport: new RepositoryComponent(),
+        modelRuntimeFactory: async () => {
+          throw new Error("Unexpected inference");
+        },
+        hostHome: temporary(t),
+        env: hostEnvironment(),
+        log: (record) => records.push(record),
+      },
+      async () => ({
+        kind: ExecutionEndKind.Released,
+        furtherWork: false,
+        stop: { reason: EndReason.NoProgress, code: null, detail },
+      }),
+    );
+    logged.push(
+      ...records
+        .filter((record) => record.msg === EXECUTION_ENDED)
+        .map((record) => record.detail),
+    );
+  }
+  assert.deepEqual(logged, [JSON.stringify(facts), undefined]);
+});

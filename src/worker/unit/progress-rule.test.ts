@@ -12,7 +12,6 @@ import {
 const LIMIT = 2;
 const SHORT_COMMAND_LENGTH = 1500;
 const LONG_COMMAND_LENGTH = 2048;
-const EMPTY_REASON = "";
 
 function factsWith(command: string) {
   return {
@@ -34,7 +33,7 @@ function factsWith(command: string) {
   };
 }
 
-test("the detail fitting cuts agent_reason before command", () => {
+test("the detail fitting cuts agent_reason before command and drops an agent_reason that the cut leaves empty", () => {
   const short = "c".repeat(SHORT_COMMAND_LENGTH);
   const kept = JSON.parse(noProgressDetail(factsWith(short)));
   assert.equal(kept.verification.command, short);
@@ -44,7 +43,7 @@ test("the detail fitting cuts agent_reason before command", () => {
   const long = "c".repeat(LONG_COMMAND_LENGTH);
   const detail = noProgressDetail(factsWith(long));
   const cut = JSON.parse(detail);
-  assert.equal(cut.agent_reason, EMPTY_REASON);
+  assert.equal(Object.hasOwn(cut, "agent_reason"), false);
   assert.ok(cut.verification.command.length < LONG_COMMAND_LENGTH);
   assert.ok(long.startsWith(cut.verification.command));
   assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);

@@ -14,6 +14,7 @@ import {
   ExecutionStop,
   handedSshAccess,
   isExecutionEnd,
+  loggedNoProgressDetail,
   type ModelRuntimeFactory,
   type NativeExecutionInput,
   releaseSetupRefusal,
@@ -70,10 +71,19 @@ function handoverRefusalOf(error: unknown): Diagnostic | null {
   return error instanceof Diagnostic ? error : null;
 }
 
-function detailOf(result: ExecutionEnd): string | undefined {
-  if (result.kind === ExecutionEndKind.Ended) return result.detail;
-  if (result.kind === ExecutionEndKind.Released) return result.stop?.detail;
+function stopOf(
+  result: ExecutionEnd,
+): { reason: string; detail?: string } | undefined {
+  if (result.kind === ExecutionEndKind.Ended) return result;
+  if (result.kind === ExecutionEndKind.Released) return result.stop;
   return undefined;
+}
+
+function detailOf(result: ExecutionEnd): string | undefined {
+  const stop = stopOf(result);
+  if (stop?.detail === undefined) return undefined;
+  if (stop.reason !== EndReason.NoProgress) return stop.detail;
+  return loggedNoProgressDetail(stop.detail);
 }
 
 function endOf(
