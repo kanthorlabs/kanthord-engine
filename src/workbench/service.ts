@@ -2727,6 +2727,7 @@ export class WorkbenchService implements Service {
       const built = await this.buildRuntime(member, resolved, this.shutdown);
       await this.openAgent(session, built, this.shutdown);
       if (this.phaseEnded(run)) return null;
+      this.applyRunTools(session, runKindOf(launch.item.origin.kind));
       assert.ok(session.agent);
       await session.agent.prompt(message, { expandPromptTemplates: false });
       return this.phaseAnswer(launch, session);
