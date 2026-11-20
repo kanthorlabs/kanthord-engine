@@ -1,3 +1,4 @@
+import { perCheckout } from "./per-checkout.ts";
 import { relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
@@ -129,13 +130,13 @@ export async function fetchAtRelease(
 ): Promise<void> {
   const context = state.agent.budget.cleanupContext(state.cancel);
   try {
-    for (const checkout of state.checkouts) {
+    await perCheckout(state.checkouts, async (checkout) => {
       const fetched = await ports.repository.fetchBase(checkout, {
         context,
         deadline: state.input.claim.expired_at,
       });
       if (fetched.kind === PortResultKind.Failed) throw portStop(fetched);
-    }
+    });
   } finally {
     context.cancel();
   }

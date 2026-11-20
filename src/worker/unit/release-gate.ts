@@ -362,17 +362,18 @@ async function takeReleaseTrees(
   state: StepsState,
   release: ReleaseTrees,
 ): Promise<void> {
-  for (const checkout of state.checkouts) {
-    const taken = await release.ports.releaseTrees.take(
-      checkout,
-      checkout.head,
-      release.call,
-    );
-    if (taken.kind === PortResultKind.Failed) throw portStop(taken);
-    release.trees.push(taken.value);
+  const taken = await Promise.all(
+    state.checkouts.map((checkout) =>
+      release.ports.releaseTrees.take(checkout, checkout.head, release.call),
+    ),
+  );
+  for (const entry of taken)
+    if (entry.kind === PortResultKind.Ok) release.trees.push(entry.value);
+  for (const entry of taken) {
+    if (entry.kind === PortResultKind.Failed) throw portStop(entry);
     release.ports.log.log(TREE_PREPARED, {
       purpose: RELEASE_PURPOSE,
-      source: taken.value.source,
+      source: entry.value.source,
     });
   }
 }

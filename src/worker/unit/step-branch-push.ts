@@ -10,6 +10,7 @@ import { next } from "./step-support.ts";
 import { EndReason } from "./execution-stop.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { sshAccessOf } from "./workspace.ts";
+import { perCheckout } from "./per-checkout.ts";
 
 const STOPS: readonly StopCode[] = [
   "revoked",
@@ -31,7 +32,7 @@ async function pushNodeBranches(
   const { workspaces, transport } = host;
   assert.ok(workspaces && transport, "A push needs a worker host.");
   const remaining = () => state.input.claim.expired_at - Date.now();
-  for (const checkout of state.checkouts) {
+  await perCheckout(state.checkouts, async (checkout) => {
     const key = {
       nodeKey: workspaces.nodeKey(state.input.claim.node_id),
       nodeBranch: state.nodeBranch,
@@ -55,7 +56,7 @@ async function pushNodeBranches(
       sshAccessOf(ctx.sshAccess, checkout.binding_id),
     );
     writePushRecord(key, { confirmed: head, pending: null });
-  }
+  });
 }
 
 export const branchPush: Step<unknown, "state" | "sshAccess", never> = {
