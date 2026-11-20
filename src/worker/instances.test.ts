@@ -171,13 +171,13 @@ const HOLDER_MISMATCH_VIEW: WorkerAgentView = {
 };
 
 const IDLE_POOL_HOST: PoolHost = {
-  prepare: unexpected,
+  prepare: () => {},
   start: unexpected,
   update: unexpected,
   restart: unexpected,
   imageOf: unexpected,
   archive: unexpected,
-  sweep: unexpected,
+  sweep: async () => {},
   stop: async () => {},
   placementStatus: unexpected,
   readSessionEntry: unexpected,
@@ -246,6 +246,7 @@ function instanceFixture(
   const pausedRevocation = {
     revoked: [] as string[],
     answer: null as ExecutionTrace | null,
+    heldRevocations: 0,
   };
   const revocation = {
     failure: null as Error | null,
@@ -327,6 +328,9 @@ function instanceFixture(
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
         return pausedRevocation.answer;
+      },
+      revokeHeldPauses: () => {
+        pausedRevocation.heldRevocations++;
       },
       executionReleased: (executionId, stop) => {
         released.push({ executionId, stop });
@@ -1994,6 +1998,24 @@ test("the first archive transaction ends no instance and the deferred end runs e
   assert.equal(logged[0].actor, ACTOR_NAME);
   assert.equal(logged[0].force, true);
   assert.deepEqual(logged[0].execution_ids, [box.executionId]);
+});
+
+test("a pending archive lost by a server restart completes at startPool: it revokes its claim and ends the instance", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const box = await connectedBusy(f);
+  await box.archive();
+  assert.ok(f.worker().instances.liveInstance(box.record.id));
+  await f.restart();
+  assert.deepEqual(f.revoked, []);
+  f.worker().startPool();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.deepEqual(f.archivers[0]?.instance, INSTANCE);
+  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
+  assert.equal(records(ARCHIVED_RECORD).length, SINGLE_CALL);
+  assert.equal(f.pausedRevocation.heldRevocations, SINGLE_CALL);
+  f.worker().startPool();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.equal(f.pausedRevocation.heldRevocations, SINGLE_CALL);
 });
 
 test("a rotate during a pending archive refuses with in_use and the stopping list", async (t) => {

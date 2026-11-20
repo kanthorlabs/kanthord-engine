@@ -190,6 +190,7 @@ const fakeCollaborations = {
     revokePausedClaim: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    revokeHeldPauses: () => {},
     executionReleased: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -1999,6 +2000,7 @@ function poolFixture(
         return { lost: [], revoked: [] };
       },
       revokePausedClaim: () => null,
+      revokeHeldPauses: () => {},
       executionReleased: () => {},
       reportExecutionEnds: () => {
         state.reported++;

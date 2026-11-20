@@ -224,6 +224,7 @@ export interface Dependencies {
     MissionCollaborations,
     | "revokeForInstanceArchive"
     | "revokePausedClaim"
+    | "revokeHeldPauses"
     | "executionReleased"
     | "reportExecutionEnds"
   >;
@@ -520,6 +521,7 @@ export class WorkerService implements Service {
   private readonly performer: ActionPerformer;
   private readonly pool?: Pool;
   private poolStarted = false;
+  private ordersRecovered = false;
   readonly instances: WorkerInstances;
   readonly machines: WorkerMachines;
   readonly footprint: WorkerFootprint;
@@ -687,13 +689,22 @@ export class WorkerService implements Service {
   }
 
   startPool(): void {
-    if (!this.pool || this.poolStarted) return;
-    this.poolStarted = true;
-    const host = this.dependencies.pool!.host;
-    host.prepare();
-    void host.sweep(this.archivedInstanceNames());
-    this.reconcile();
-    void this.logUnavailableContainerDriver();
+    if (this.pool && !this.poolStarted) {
+      this.poolStarted = true;
+      const host = this.dependencies.pool!.host;
+      host.prepare();
+      void host.sweep(this.archivedInstanceNames());
+      this.reconcile();
+      void this.logUnavailableContainerDriver();
+    }
+    this.recoverLostOrders();
+  }
+
+  private recoverLostOrders(): void {
+    if (this.ordersRecovered) return;
+    this.ordersRecovered = true;
+    this.instances.finishLostArchives();
+    this.dependencies.instanceArchive.revokeHeldPauses();
   }
 
   readSessionEntry(

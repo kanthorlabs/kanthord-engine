@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { z } from "zod";
-import type { HumanActor } from "../kernel/actor.ts";
+import { type HumanActor, humanActorSchema } from "../kernel/actor.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { asError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -54,13 +55,16 @@ import {
   type WorkerInstanceLookups,
 } from "./contract.ts";
 import {
+  type ArchivingInstance,
   countLiveServerInstances,
   endInstance,
   fingerprintTaken,
   insertInstance,
   listInstances,
+  markArchiving,
   nameTaken,
   readArchivedServerInstanceNames,
+  readArchivingInstances,
   readInstanceById,
   readLatestInstance,
   readLiveInstance,
@@ -757,7 +761,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
         pending: null,
         orders: [],
       };
-    if (executions.length && this.reachable(live.id))
+    if (executions.length && this.reachable(live.id)) {
+      markArchiving(tx, live.id, canonicalJSON(actor));
       return {
         record,
         ended: [],
@@ -774,6 +779,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
         },
         orders: executions,
       };
+    }
     const executionEnds = executionIds.flatMap((executionId) => {
       const ends = this.dependencies.revokeForInstanceArchive(
         tx,
@@ -989,6 +995,62 @@ export class WorkerInstances implements WorkerInstanceLookups {
         actor: pending.actor.name,
         force: pending.force,
         execution_ids: pending.execution_ids,
+      },
+      INSTANCE_ARCHIVED_LOG,
+    );
+    this.dependencies.instanceEnded(ended);
+  }
+
+  finishLostArchives(): void {
+    const archiving = this.dependencies.store.transaction((tx) =>
+      readArchivingInstances(tx),
+    );
+    for (const instance of archiving) {
+      if (this.pendingArchives.has(instance.id)) continue;
+      try {
+        this.finishLostArchive(instance);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), instance: instance.name },
+          STOP_ORDER_FAILED,
+        );
+      }
+    }
+  }
+
+  private finishLostArchive(instance: ArchivingInstance): void {
+    const actor = humanActorSchema.parse(JSON.parse(instance.archive_actor));
+    const { executionIds, executionEnds, ended } =
+      this.dependencies.store.transaction((tx) => {
+        const revisions = revisionIdsOf(tx, instance.name);
+        const ids = this.liveExecutionsOf(tx, revisions).map(
+          ({ execution_id }) => execution_id,
+        );
+        return {
+          executionIds: ids,
+          executionEnds: ids.flatMap((executionId) => {
+            const ends = this.dependencies.revokeForInstanceArchive(
+              tx,
+              executionId,
+              instance.name,
+              actor,
+            );
+            return ends ? [ends] : [];
+          }),
+          ended: this.endArchived(tx, instance.id, instance.name, revisions),
+        };
+      });
+    this.footprintOrders.delete(instance.id);
+    this.reportExecutionEnds(executionEnds);
+    this.archiveReleased(executionEnds);
+    this.dropConnection(instance.id);
+    this.dependencies.logger.info(
+      {
+        operation: INSTANCE_ARCHIVED_LOG,
+        instance: instance.name,
+        actor: actor.name,
+        force: true,
+        execution_ids: executionIds,
       },
       INSTANCE_ARCHIVED_LOG,
     );

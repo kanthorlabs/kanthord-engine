@@ -1006,6 +1006,91 @@ test(
 );
 
 test(
+  "a server restart inside the hold of a pause revokes the held claim, and the run does not resume work",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { bare } = await bareRepository(t, "instance-model");
+    const gates = new Gates(join(temporary(t), "gates"));
+    const directory = temporary(t);
+    const stored = {
+      bare,
+      gates,
+      path: join(directory, "kanthord.db"),
+      stateDirectory: join(directory, "state"),
+    };
+    mkdirSync(stored.stateDirectory);
+    let masterKey = "";
+    let projectId = "";
+    let nodeId = "";
+    let claimId = "";
+
+    await t.test(
+      "the first server crashes while a pause holds the claim",
+      async (u) => {
+        const server = await startServer(u, stored);
+        masterKey = server.fixture.masterKey;
+        await provision(server, [FIRST_INSTANCE]);
+        projectId = await server.project("held", [FIRST_INSTANCE]);
+        nodeId = await server.node(projectId, "implement-1.md");
+        server.fixture.worker.startPool();
+        const [claim] = await until(
+          () => server.running(projectId),
+          (items) => items.length === SINGLE_ITEM,
+          u.signal,
+        );
+        claimId = claim!.execution_id;
+        const node = await server.nodeOf(nodeId);
+        const mission = await server.call(missionOperations.get, {
+          params: { project_id: projectId },
+          query: {},
+          body: null,
+        });
+        server.driver.crash();
+        await server.call(missionOperations["node.pause"], {
+          params: { node_id: nodeId },
+          query: {},
+          body: {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: node.state,
+            expected_attempt: node.attempt,
+          },
+        });
+        const [held] = await server.running(projectId);
+        assert.equal(held?.execution_id, claimId);
+      },
+    );
+
+    await t.test(
+      "the second server revokes the held claim at start",
+      async (u) => {
+        const server = await startServer(u, { ...stored, masterKey });
+        const pushes: string[] = [];
+        const push = server.driver.repository.pushNodeBranch;
+        server.driver.repository.pushNodeBranch = (...args) => {
+          pushes.push(args[0]);
+          return push(...args);
+        };
+        server.fixture.worker.startPool();
+        gates.open(FIRST_INSTANCE);
+        const [revoked] = await server.executions(projectId, nodeId);
+        assert.equal(revoked?.execution_id, claimId);
+        assert.equal(revoked?.claim_state, ClaimState.Finished);
+        assert.equal(revoked?.stop?.reason, ExecutionStopReason.HumanPaused);
+        await delay(SETTLE_MS);
+        assert.deepEqual(server.driver.releases, []);
+        assert.deepEqual(pushes, []);
+        assert.equal((await server.nodeOf(nodeId)).state, NodeState.Paused);
+        assert.equal(
+          (await server.executions(projectId, nodeId)).length,
+          SINGLE_ITEM,
+        );
+      },
+    );
+  },
+);
+
+test(
   "a server restart starts each live server instance again under the same client identities and resumes a running execution",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {

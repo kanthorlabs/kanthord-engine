@@ -159,6 +159,7 @@ test("worker instance schema holds only the name revision and fingerprint unique
         { name: "fingerprint", type: "TEXT", notnull: 0, pk: 0 },
         { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "ended_at", type: "INTEGER", notnull: 0, pk: 0 },
+        { name: "archive_actor", type: "TEXT", notnull: 0, pk: 0 },
       ],
     );
     assert.deepEqual(

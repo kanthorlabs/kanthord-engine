@@ -256,3 +256,32 @@ export function listInstances(
     .all(...values)
     .map(record);
 }
+
+export interface ArchivingInstance {
+  id: string;
+  name: string;
+  archive_actor: string;
+}
+
+export function markArchiving(
+  tx: Transaction,
+  instanceId: string,
+  actor: string,
+): void {
+  assert.ok(tx.database.isTransaction);
+  const changed = tx.database
+    .prepare(
+      "UPDATE worker_instance SET archive_actor = ? WHERE id = ? AND ended_at IS NULL",
+    )
+    .run(actor, instanceId).changes;
+  assert.ok(Number(changed) > NO_ROWS);
+}
+
+export function readArchivingInstances(tx: Transaction): ArchivingInstance[] {
+  assert.ok(tx.database.isTransaction);
+  return tx.database
+    .prepare(
+      "SELECT id, name, archive_actor FROM worker_instance WHERE ended_at IS NULL AND archive_actor IS NOT NULL ORDER BY id",
+    )
+    .all() as unknown as ArchivingInstance[];
+}

@@ -17,6 +17,7 @@ import {
 } from "./contract.ts";
 import { Act, ActAttribute } from "./act-telemetry.ts";
 import { ControlError } from "./control.ts";
+import { revokeHeldPauses } from "./control-hold.ts";
 import { insertEvidence, openAttempt, readAttempt } from "./record-store.ts";
 import { insertDependency, insertNode, setNodeState } from "./store.ts";
 import { actCalls, controlHarness, revokedExecution } from "./test-support.ts";
@@ -605,6 +606,18 @@ test("a pause that revokes the claim of an execution with no connection queues o
   });
   assert.deepEqual(sent, []);
   assert.deepEqual(revoked, [[executionId, RUNTIME_IDENTITY, false]]);
+});
+
+test("revokeHeldPauses revokes the kept claim of a Paused node with no stop order and queues revoked, and keeps one with an order", (t) => {
+  const held = pausedClaim(t, NodeState.Paused);
+  held.keep.order = HUMAN_PAUSED;
+  revokeHeldPauses(held.h.dependencies, NOW);
+  assert.deepEqual(held.stops, []);
+  const lost = pausedClaim(t, NodeState.Paused);
+  revokeHeldPauses(lost.h.dependencies, NOW);
+  assert.deepEqual(lost.stops, [{ reason: HUMAN_PAUSED, code: null }]);
+  assert.deepEqual(lost.revoked, [[lost.executionId, RUNTIME_IDENTITY, false]]);
+  assert.equal(lost.keep.live, false);
 });
 
 test("a block of a Paused node with a pending pause stop revokes the claim", async (t) => {

@@ -89,6 +89,7 @@ import {
   readyNode,
   resumeNode,
   revokeForInstanceArchive,
+  revokeHeldPauses,
   revokePausedClaim,
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
@@ -1491,6 +1492,10 @@ export class MissionService
 
   revokePausedClaim(executionId: string) {
     return revokePausedClaim(this.dependencies, executionId, Date.now());
+  }
+
+  revokeHeldPauses(): void {
+    revokeHeldPauses(this.dependencies, Date.now());
   }
 
   reportExecutionEnds(ends: ExecutionEnds): void {

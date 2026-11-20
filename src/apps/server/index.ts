@@ -869,6 +869,7 @@ export function composeServices(options: ComposeServicesOptions) {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
       revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
+      revokeHeldPauses: () => mission.revokeHeldPauses(),
       executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
