@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import { DeadlineKind } from "./chain.ts";
-import type { Step } from "./chain-host.ts";
-import { SetupEnd, setUpHeads } from "./environment-setup.ts";
+import { DeadlineKind, type ExecutionCtx } from "./chain.ts";
+import type { Step, StepIo } from "./chain-host.ts";
+import { SetupEnd, setUpHeads, type SetupResult } from "./environment-setup.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { perCheckout } from "./per-checkout.ts";
+import { restoreCheckout } from "./turn-gate.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
 import { setupCommandsOf } from "./step-env-setup.ts";
 import { SETUP_STOP, setupInputOf } from "./step-setup-entries.ts";
@@ -15,9 +18,55 @@ function testedCommits(testedInput: TestedInput): string[] {
   );
 }
 
+type LiveKeys = "claim" | "setup" | "workspace" | "setupEntries" | "baseHead";
+
+async function restoreHeads(
+  ctx: Readonly<Pick<ExecutionCtx, LiveKeys>>,
+  io: StepIo,
+): Promise<void> {
+  const context = io.run.cleanupContext();
+  try {
+    await perCheckout(ctx.workspace.checkouts, (checkout) =>
+      restoreCheckout(
+        io.host.env,
+        checkout,
+        ctx.claim.node_branch,
+        checkout.head,
+        context,
+        () => ctx.claim.expired_at - Date.now(),
+      ),
+    );
+  } finally {
+    context.cancel();
+  }
+}
+
+function revoked(io: StepIo): boolean {
+  const stored = io.run.operationContext.signal.reason;
+  return stored instanceof ExecutionStop && stored.reason === EndReason.Revoked;
+}
+
+async function setUpLive(
+  ctx: Readonly<Pick<ExecutionCtx, LiveKeys>>,
+  io: StepIo,
+): Promise<SetupResult> {
+  assert.ok(ctx.baseHead);
+  try {
+    return await setUpHeads(
+      setupInputOf(ctx, { ...io, env: io.host.env }),
+      ctx.setupEntries,
+      ctx.baseHead,
+      ctx.workspace.checkouts.map((checkout) => checkout.head),
+    );
+  } catch (error) {
+    if (!revoked(io)) await restoreHeads(ctx, io);
+    throw error;
+  }
+}
+
 export const envSetupLive: Step<
   unknown,
-  "claim" | "setup" | "workspace" | "setupEntries" | "baseHead",
+  LiveKeys,
   "setupPending" | "setupInstruction"
 > = {
   id: "env.setup(live)",
@@ -25,20 +74,17 @@ export const envSetupLive: Step<
   reads: ["claim", "setup", "workspace", "setupEntries", "baseHead"],
   writes: ["setupPending", "setupInstruction"],
   stops: [SETUP_STOP],
-  note: "node failure -> setup instruction of the first unit; budget end",
+  note: "on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end",
   async run(ctx, scope, io) {
-    assert.ok(ctx.baseHead);
-    const result = await setUpHeads(
-      setupInputOf(ctx, { ...io, env: io.host.env }),
-      ctx.setupEntries,
-      ctx.baseHead,
-      ctx.workspace.checkouts.map((checkout) => checkout.head),
-    );
+    const result = await setUpLive(ctx, io);
     io.run.log("environment setup", {
       end: result.end,
       commands: setupCommandsOf(ctx.setupEntries).length,
     });
-    if (result.end === SetupEnd.BudgetEnd) return budgetEnd(scope);
+    if (result.end === SetupEnd.BudgetEnd) {
+      await restoreHeads(ctx, io);
+      return budgetEnd(scope);
+    }
     if (result.end !== SetupEnd.Failed)
       return next(scope, { setupPending: false, setupInstruction: null });
     io.run.log("setup failed on the node head", {

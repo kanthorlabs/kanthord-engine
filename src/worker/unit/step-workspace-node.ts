@@ -6,6 +6,7 @@ import { next, wallDeadlineOf } from "./step-support.ts";
 import { hostInputOf } from "./chain-host.ts";
 import { resolveGitPaths } from "./local-git.ts";
 import { restoreCheckout } from "./turn-gate.ts";
+import { perCheckout } from "./per-checkout.ts";
 import { type NodeCheckout, WorkspaceKind } from "./workspace-layout.ts";
 
 const NO_CHECKOUTS = 0;
@@ -55,26 +56,28 @@ export const workspaceNode: Step<
         WorkspaceKind.Node,
       ),
     );
-    const checkouts: NodeCheckout[] = [];
-    for (const checkout of workspace.checkouts) {
-      const node = Object.assign(checkout, {
-        gitPaths: await resolveGitPaths({
-          env: input.env,
-          directory: checkout.directory,
-          context: io.run.operationContext,
-          deadlineMs: deadline - Date.now(),
-        }),
-      });
-      await restoreCheckout(
-        input.env,
-        node,
-        input.claim.node_branch,
-        node.head,
-        io.run.operationContext,
-        () => deadline - Date.now(),
-      );
-      checkouts.push(node);
-    }
+    const checkouts = await perCheckout(
+      workspace.checkouts,
+      async (checkout): Promise<NodeCheckout> => {
+        const node = Object.assign(checkout, {
+          gitPaths: await resolveGitPaths({
+            env: input.env,
+            directory: checkout.directory,
+            context: io.run.operationContext,
+            deadlineMs: deadline - Date.now(),
+          }),
+        });
+        await restoreCheckout(
+          input.env,
+          node,
+          input.claim.node_branch,
+          node.head,
+          io.run.operationContext,
+          () => deadline - Date.now(),
+        );
+        return node;
+      },
+    );
     return next(scope, { workspace: { ...workspace, checkouts } });
   },
 };

@@ -123,12 +123,6 @@ export interface DependencyRead {
   evidence: Evidence[];
 }
 
-export interface DependencyPort {
-  read(
-    context: CancellationContext,
-  ): Promise<PortResult<DependencyRead> | PortBudgetEnd>;
-}
-
 export interface SecretPort {
   redact(text: string): Promise<string | null>;
 }
@@ -157,13 +151,11 @@ export interface ImplementHostPorts extends ImplementPorts {
 export interface EvaluationPorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
-  dependencies: DependencyPort;
 }
 
 export interface ExaminePorts extends CommonPorts {
   evidence: EvidencePort;
   agent: AgentPort;
-  dependencies: DependencyPort;
 }
 
 type CalledPorts<P> = Omit<P, "telemetry" | "log">;
@@ -194,12 +186,10 @@ export const EVALUATION_PORTS = [
   "secrets.redact",
   "evidence.submit",
   "agent.open",
-  "dependencies.read",
 ] as const satisfies readonly PortNameOf<EvaluationPorts>[];
 
 export const EXAMINE_PORTS = [
   "secrets.redact",
   "evidence.submit",
   "agent.open",
-  "dependencies.read",
 ] as const satisfies readonly PortNameOf<ExaminePorts>[];

@@ -8,6 +8,7 @@ import {
 } from "./workspace-layout.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import { removeRootEntries, restoreCheckout } from "./turn-gate.ts";
+import { perCheckout } from "./per-checkout.ts";
 import type { CancellationContext } from "../../kernel/context.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import type { MethodClaim } from "./execution-stop.ts";
@@ -229,15 +230,16 @@ export async function verifyCommands(
     state.agent.budget.wallDeadlineReached();
   const cleanup = state.agent.budget.cleanupContext(state.cancel);
   try {
-    for (const checkout of state.checkouts)
-      await restoreCheckout(
+    await perCheckout(state.checkouts, (checkout) =>
+      restoreCheckout(
         state.input.env,
         checkout,
         state.nodeBranch,
         checkout.head,
         cleanup,
         () => state.input.claim.expired_at - Date.now(),
-      );
+      ),
+    );
     removeRootEntries(state);
   } finally {
     cleanup.cancel();

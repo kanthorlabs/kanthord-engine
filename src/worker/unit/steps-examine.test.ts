@@ -20,6 +20,7 @@ import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
 import {
   anthropicSetup,
   everyBindingSshAccess,
@@ -106,6 +107,18 @@ test("examine reports its dependencies once and gives its tree back to the pool"
     const empty = async () => completed({ items: [], next_cursor: null });
     const clients = {
       mission: {
+        "execution.pinnedRevision.get": async () => ({
+          type: "completed",
+          status: 200,
+          data: {
+            content: {
+              name: "examine",
+              requirement: "report",
+              criterion: "report",
+              verifications: [],
+            },
+          } as unknown as Revision,
+        }),
         "execution.dependency.list": async () =>
           completed({
             items: [{ id: "dependency", state: scenario.states[reads++] }],
@@ -161,14 +174,6 @@ test("examine reports its dependencies once and gives its tree back to the pool"
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "report",
-          criterion: "report",
-          verifications: [],
-        },
-      } as unknown as Revision,
       new ExecutionBudget({
         ...claim,
         resource_budget: setup.resource_budget,
@@ -197,7 +202,7 @@ test("examine reports its dependencies once and gives its tree back to the pool"
   }
 });
 
-test("B4 examine releases when reads or agent opening consume the wall budget", async (t) => {
+test("B4 examine releases when reads or agent opening consume the wall budget, and a budget end of the reads in prepare carries the stop budget_end/wall_time", async (t) => {
   for (const duringOpen of [false, true]) {
     const setup = anthropicSetup({
       repositories: [],
@@ -222,6 +227,11 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
     let releases = 0;
     const clients = {
       mission: {
+        "execution.pinnedRevision.get": async () => ({
+          type: "completed",
+          status: 200,
+          data: {} as Revision,
+        }),
         "execution.dependency.list": page,
         "execution.dependency.outcome.list": page,
         "execution.dependency.evidence.list": page,
@@ -246,8 +256,8 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
       throw new DeadlineExceeded();
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
-    assert.deepEqual(
-      await runStepsExamine(
+    const end = await executionBoundary(run, () =>
+      runStepsExamine(
         {
           setup,
           claim,
@@ -257,15 +267,20 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
           env: hostEnvironment(),
         },
         run,
-        {} as Revision,
         new ExecutionBudget({
           ...claim,
           resource_budget: setup.resource_budget,
         }),
         open,
       ),
-      { kind: "released", furtherWork: true },
     );
+    assert.ok("furtherWork" in end && end.furtherWork);
+    if (duringOpen) assert.equal("stop" in end, false);
+    else {
+      assert.ok("stop" in end && end.stop);
+      assert.equal(end.stop.reason, EndReason.BudgetEnd);
+      assert.equal(end.stop.code, BudgetLimit.WallTime);
+    }
     assert.equal(releases, EXPECTED_RELEASES);
   }
 });
@@ -291,6 +306,18 @@ test("an examine node that its agent deadline cuts releases with further work an
   const releases: unknown[] = [];
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "report",
+            criterion: "report",
+            verifications: [],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -337,14 +364,6 @@ test("an examine node that its agent deadline cuts releases with further work an
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "report",
-          criterion: "report",
-          verifications: [],
-        },
-      } as unknown as Revision,
       budget,
       open,
     ),
@@ -377,6 +396,11 @@ test("an examine agent open that fails releases with the operation_failed stop",
   }[] = [];
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {} as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -410,7 +434,6 @@ test("an examine agent open that fails releases with the operation_failed stop",
         env: hostEnvironment(),
       },
       run,
-      {} as Revision,
       budget,
       async () => {
         throw new Error("open failed");
@@ -452,6 +475,18 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   const page = async () => completed({ items: [], next_cursor: null });
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: [`pwd > ${output}`],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -504,14 +539,6 @@ test("an examine node with two repository bindings runs from checkouts/ and list
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "examine",
-          criterion: "examine",
-          verifications: [`pwd > ${output}`],
-        },
-      } as unknown as Revision,
       new ExecutionBudget({
         ...claim,
         resource_budget: setup.resource_budget,
@@ -555,6 +582,18 @@ test("an examine verification that the wall deadline cuts gives a later assessme
   });
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: ["sleep 30"],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -602,14 +641,6 @@ test("an examine verification that the wall deadline cuts gives a later assessme
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "examine",
-          criterion: "examine",
-          verifications: ["sleep 30"],
-        },
-      } as unknown as Revision,
       budget,
       open,
     ),

@@ -1,4 +1,3 @@
-import type { Revision } from "../../mission/contract.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import type { ExecutionEnd } from "./execution-stop.ts";
 import type { HostInput } from "./chain-host.ts";
@@ -11,13 +10,12 @@ import { type AgentOpener, examinePorts } from "./worker-ports.ts";
 export function runStepsExamine(
   input: HostInput,
   run: ExecutionRun,
-  revision: Revision,
   budget: ExecutionBudget,
   openAgent: AgentOpener,
 ): Promise<ExecutionEnd> {
   return runChain(
     examineChain(),
-    { seed: { ...seedOf(input), revision } },
+    { seed: seedOf(input) },
     {
       run,
       budget,

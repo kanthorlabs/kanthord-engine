@@ -5,6 +5,8 @@ import {
   ChainId,
   type ChainNode,
   type ChainTasks,
+  namedBranch,
+  parallelNode,
   stepNode,
 } from "./chain.ts";
 import { EndReason } from "./execution-stop.ts";
@@ -16,11 +18,7 @@ import { EVALUATION_PORTS, type EvaluationPorts } from "./foundry-ports.ts";
 import { assessmentSubmit } from "./step-assessment-submit.ts";
 import { assetsPlace } from "./step-assets-place.ts";
 import { envSetupReview } from "./step-env-setup-host.ts";
-import {
-  inputsReadAttemptEvidence,
-  inputsReadReviewRound,
-  inputsReadRevision,
-} from "./step-inputs-read-host.ts";
+import { inputsReadEvaluation } from "./step-inputs-read-host.ts";
 import { setupEntriesReview } from "./step-setup-entries-host.ts";
 import { workspaceReviewSnapshot } from "./step-workspace-review.ts";
 import { Phase } from "./telemetry.ts";
@@ -28,9 +26,13 @@ import { Phase } from "./telemetry.ts";
 export function evaluationPrepareNodes(): ChainNode[] {
   return [
     stepNode(workspaceReviewSnapshot),
-    stepNode(setupEntriesReview),
-    stepNode(envSetupReview),
-    stepNode(assetsPlace),
+    parallelNode("prepare.place", [
+      namedBranch("environment", [
+        stepNode(setupEntriesReview),
+        stepNode(envSetupReview),
+      ]),
+      namedBranch("assets", [stepNode(assetsPlace)]),
+    ]),
   ];
 }
 
@@ -54,6 +56,7 @@ function evaluationTasks(): ChainTasks<EvaluationPorts> {
           setupFailure: ctx.setupFailure,
           placed: ctx.placed,
           reviewRound: ctx.reviewRound,
+          dependencies: ctx.dependencies,
         },
         host,
       );
@@ -66,9 +69,7 @@ function evaluationTasks(): ChainTasks<EvaluationPorts> {
 export function evaluationChain(): Chain<EvaluationPorts> {
   return chain<EvaluationPorts>(ChainId.Evaluation, EVALUATION_PORTS)
     .phase(Phase.Prepare)
-    .step(inputsReadRevision)
-    .step(inputsReadAttemptEvidence)
-    .step(inputsReadReviewRound)
+    .step(inputsReadEvaluation)
     .nodes(evaluationPrepareNodes())
     .tasks(evaluationTasks())
     .phase(Phase.Finish)

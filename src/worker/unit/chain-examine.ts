@@ -4,6 +4,7 @@ import {
   type Chain,
   ChainId,
   type ChainTasks,
+  soloBranch,
   stepNode,
 } from "./chain.ts";
 import { examineTasksNodes, runExamineTasks } from "./foundry-examine.ts";
@@ -12,6 +13,7 @@ import {
   executionRelease,
   executionReleaseFurtherWork,
 } from "./step-execution-release.ts";
+import { inputsReadExamine } from "./step-inputs-read-host.ts";
 import { workspaceReviewBase } from "./step-workspace-review.ts";
 import { Phase } from "./telemetry.ts";
 
@@ -30,6 +32,7 @@ function examineTasks(): ChainTasks<ExaminePorts> {
           setup: ctx.setup,
           revision: ctx.revision,
           reviewWorkspace: ctx.reviewWorkspace,
+          dependencies: ctx.dependencies,
         },
         host,
       );
@@ -42,7 +45,10 @@ function examineTasks(): ChainTasks<ExaminePorts> {
 export function examineChain(): Chain<ExaminePorts> {
   return chain<ExaminePorts>(ChainId.Examine, EXAMINE_PORTS)
     .phase(Phase.Prepare)
-    .step(workspaceReviewBase)
+    .parallel("prepare.inputs", [
+      soloBranch(stepNode(inputsReadExamine)),
+      soloBranch(stepNode(workspaceReviewBase)),
+    ])
     .tasks(examineTasks())
     .phase(Phase.Finish)
     .step(executionRelease)

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { perCheckout } from "./per-checkout.ts";
 import { dirname, join, relative } from "node:path";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import {
@@ -362,17 +363,20 @@ async function takeReleaseTrees(
   state: StepsState,
   release: ReleaseTrees,
 ): Promise<void> {
-  for (const checkout of state.checkouts) {
-    const taken = await release.ports.releaseTrees.take(
+  const taken = await perCheckout(state.checkouts, async (checkout) => {
+    const entry = await release.ports.releaseTrees.take(
       checkout,
       checkout.head,
       release.call,
     );
-    if (taken.kind === PortResultKind.Failed) throw portStop(taken);
-    release.trees.push(taken.value);
+    if (entry.kind === PortResultKind.Ok) release.trees.push(entry.value);
+    return entry;
+  });
+  for (const entry of taken) {
+    if (entry.kind === PortResultKind.Failed) throw portStop(entry);
     release.ports.log.log(TREE_PREPARED, {
       purpose: RELEASE_PURPOSE,
-      source: taken.value.source,
+      source: entry.value.source,
     });
   }
 }

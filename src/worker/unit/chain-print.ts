@@ -8,6 +8,7 @@ import {
   type ChainStep,
   DeadlineKind,
   NodeKind,
+  type ParallelBranch,
   phaseReads,
   SEED_KEYS,
 } from "./chain.ts";
@@ -15,13 +16,14 @@ import { Phase } from "./telemetry.ts";
 
 const INDENT = "  ";
 const NOTE_COLUMN = 44;
+const NOTE_GAP = 1;
 const CHAIN_DEPTH = 1;
 const NODE_DEPTH = 2;
 const NEXT_DEPTH = 1;
 
 function line(depth: number, text: string, note: string): string {
   const head = `${INDENT.repeat(depth)}${text}`;
-  return note ? `${head.padEnd(NOTE_COLUMN)}${note}` : head;
+  return note ? `${head.padEnd(NOTE_COLUMN - NOTE_GAP)} ${note}` : head;
 }
 
 function stepNote(step: ChainStep): string {
@@ -39,15 +41,30 @@ function stepNote(step: ChainStep): string {
   return [...marks, texts.join("; ")].join(" ").trim();
 }
 
+function branchLines(branch: ParallelBranch, depth: number): string[] {
+  if (branch.name === null) return nodeLines(branch.nodes, depth);
+  return [
+    line(depth, `branch ${branch.name}`, ""),
+    ...nodeLines(branch.nodes, depth + NEXT_DEPTH),
+  ];
+}
+
 function nodeLines(nodes: readonly ChainNode[], depth: number): string[] {
-  return nodes.flatMap((node) =>
-    node.kind === NodeKind.Step
-      ? [line(depth, `step ${node.step.id}`, stepNote(node.step))]
-      : [
-          line(depth, `loop ${node.id}`, node.frame.note ?? ""),
-          ...nodeLines(node.frame.body, depth + NEXT_DEPTH),
-        ],
-  );
+  return nodes.flatMap((node) => {
+    if (node.kind === NodeKind.Step)
+      return [line(depth, `step ${node.step.id}`, stepNote(node.step))];
+    if (node.kind === NodeKind.Parallel)
+      return [
+        line(depth, `[PAR] ${node.id}`, ""),
+        ...node.branches.flatMap((branch) =>
+          branchLines(branch, depth + NEXT_DEPTH),
+        ),
+      ];
+    return [
+      line(depth, `loop ${node.id}`, node.frame.note ?? ""),
+      ...nodeLines(node.frame.body, depth + NEXT_DEPTH),
+    ];
+  });
 }
 
 function budgetEndLines(built: Chain): string[] {

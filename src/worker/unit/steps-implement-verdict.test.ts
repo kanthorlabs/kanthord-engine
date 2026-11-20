@@ -531,11 +531,13 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       fauxAssistantMessage("never"),
     ]);
     h.verdict = verdictAt(VERDICT, h.checkouts);
+    const rerun = join(temporary(t), "rerun");
     h.setup = h.setup.map((entry) => ({
       ...entry,
-      environment: { postCreateCommand: "sleep 30" },
+      environment: {
+        postCreateCommand: `case "$PWD" in */checkouts/*) test -e '${rerun}' && sleep 30; touch '${rerun}'; exit 1;; esac`,
+      },
     }));
-    h.setupPending = true;
     h.agent.budget.wallDeadline = () => Date.now() + WALL_DEADLINE_MS;
     const bodies = recordReleases(h);
     recordEvidence(h);

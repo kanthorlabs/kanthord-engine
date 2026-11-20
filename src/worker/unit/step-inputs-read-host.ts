@@ -1,34 +1,32 @@
+import { ExecutionIntent } from "../contract.ts";
 import { DeadlineKind } from "./chain.ts";
 import type { Step } from "./chain-host.ts";
 import {
   readAttemptEvidence,
+  readDependencies,
   readPinnedRevision,
   readPrior,
   readReviewRound,
 } from "./node-reads.ts";
-import { next } from "./step-support.ts";
+import { budgetEnd, budgetMapped, next } from "./step-support.ts";
 
-export const inputsReadRevision: Step<unknown, "claim", "revision"> = {
-  id: "inputs.read(revision)",
-  deadline: DeadlineKind.Work,
-  reads: ["claim"],
-  writes: ["revision"],
-  stops: [],
-  async run(_ctx, scope, io) {
-    return next(scope, { revision: await readPinnedRevision(io.run) });
-  },
-};
-
-export const inputsReadPrior: Step<unknown, "claim" | "setup", "prior"> = {
-  id: "inputs.read(prior)",
+export const inputsReadRevisionPrior: Step<
+  unknown,
+  "claim" | "setup",
+  "revision" | "prior"
+> = {
+  id: "inputs.read(revision, prior)",
   deadline: DeadlineKind.Work,
   reads: ["claim", "setup"],
-  writes: ["prior"],
+  writes: ["revision", "prior"],
   stops: [],
+  note: "reads revision and prior in parallel",
   async run(ctx, scope, io) {
-    return next(scope, {
-      prior: await readPrior(io.run, ctx.setup.repositories),
-    });
+    const [revision, prior] = await Promise.all([
+      readPinnedRevision(io.run),
+      readPrior(io.run, ctx.setup.repositories),
+    ]);
+    return next(scope, { revision, prior });
   },
 };
 
@@ -47,13 +45,55 @@ export const inputsReadAttemptEvidence: Step<
   },
 };
 
-export const inputsReadReviewRound: Step<unknown, "claim", "reviewRound"> = {
-  id: "inputs.read(reviewRound)",
+export const inputsReadEvaluation: Step<
+  unknown,
+  "claim" | "setup",
+  "revision" | "attemptEvidence" | "reviewRound" | "dependencies"
+> = {
+  id: "inputs.read(revision, attemptEvidence, reviewRound, dependencies)",
+  deadline: DeadlineKind.Work,
+  reads: ["claim", "setup"],
+  writes: ["revision", "attemptEvidence", "reviewRound", "dependencies"],
+  stops: [],
+  note: "reads in parallel; dependencies in the examine intent only",
+  async run(ctx, scope, io) {
+    const [revision, attemptEvidence, reviewRound, dependencies] =
+      await Promise.all([
+        readPinnedRevision(io.run),
+        readAttemptEvidence(io.run),
+        readReviewRound(io.run),
+        ctx.setup.intent === ExecutionIntent.Examine
+          ? readDependencies(io.run)
+          : null,
+      ]);
+    return next(scope, {
+      revision,
+      attemptEvidence,
+      reviewRound,
+      dependencies,
+    });
+  },
+};
+
+export const inputsReadExamine: Step<
+  unknown,
+  "claim",
+  "revision" | "dependencies"
+> = {
+  id: "inputs.read(revision, dependencies)",
   deadline: DeadlineKind.Work,
   reads: ["claim"],
-  writes: ["reviewRound"],
+  writes: ["revision", "dependencies"],
   stops: [],
-  async run(_ctx, scope, io) {
-    return next(scope, { reviewRound: await readReviewRound(io.run) });
+  note: "reads in parallel; budget end after the reads",
+  run(_ctx, scope, io) {
+    return budgetMapped(io, scope, async () => {
+      const [revision, dependencies] = await Promise.all([
+        readPinnedRevision(io.run),
+        readDependencies(io.run),
+      ]);
+      if (io.budget.exhausted()) return budgetEnd(scope);
+      return next(scope, { revision, dependencies });
+    });
   },
 };

@@ -1,5 +1,5 @@
 import type { ChainNode, ExecutionCtx, FoundryEnd } from "./chain.ts";
-import { stepNode } from "./chain.ts";
+import { parallelNode, soloBranch, stepNode } from "./chain.ts";
 import type { ExaminePorts } from "./foundry-ports.ts";
 import {
   type FoundryControl,
@@ -10,7 +10,6 @@ import {
 import { agentOpenExamine } from "./step-agent-open.ts";
 import { envSetupExamine } from "./step-env-setup.ts";
 import { examineTurn } from "./step-examine-turn.ts";
-import { inputsReadDependenciesExamine } from "./step-inputs-read.ts";
 import { setupEntriesExamine } from "./step-setup-entries.ts";
 import { verifyNode } from "./step-verify-node.ts";
 
@@ -19,6 +18,7 @@ export const EXAMINE_INPUT_KEYS = [
   "setup",
   "revision",
   "reviewWorkspace",
+  "dependencies",
 ] as const;
 export const EXAMINE_RESULT_KEYS = ["nodeVerification"] as const;
 
@@ -35,9 +35,10 @@ export function examineTasksNodes(): ChainNode[] {
   return [
     stepNode(setupEntriesExamine),
     stepNode(envSetupExamine),
-    stepNode(inputsReadDependenciesExamine),
-    stepNode(agentOpenExamine),
-    stepNode(verifyNode),
+    parallelNode("tasks.inputs", [
+      soloBranch(stepNode(agentOpenExamine)),
+      soloBranch(stepNode(verifyNode)),
+    ]),
     stepNode(examineTurn),
   ];
 }

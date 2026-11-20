@@ -1363,7 +1363,7 @@
   },
   "src/worker/unit/evaluation-input.ts": {
     "@typescript-eslint/max-params": {
-      "count": 3
+      "count": 2
     },
     "kanthord/no-inline-param-type": {
       "count": 1

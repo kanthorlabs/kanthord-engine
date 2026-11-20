@@ -35,6 +35,7 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { openNativeAgent, promptStop } from "./native-agent.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
 import type { ExecutionSetup, HostTools } from "../contract.ts";
@@ -555,13 +556,13 @@ test("the node work and the task work name the affected command of a declaring c
   assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
 });
 
-test("an invalid affected declaration gives no entry and no stop", async (t) => {
-  const current = task("invalid", "true");
-  const first = await implementFixture(t, [current], []);
+test("an invalid affected declaration at the base stops the prepare of the next execution with environment_failed affected_invalid", async (t) => {
+  const first = await implementFixture(t, [task("invalid", "true")], []);
   await declareAffected(first, t, BLANK_COMMAND);
-  const h = await nextExecution(t, first, []);
-  assert.deepEqual(h.affectedTests, []);
-  assert.ok(!taskWork(h, current).text.includes(AFFECTED_SECTION));
+  await assert.rejects(nextExecution(t, first, []), {
+    reason: EndReason.EnvironmentFailed,
+    code: EnvironmentFailure.AffectedInvalid,
+  });
 });
 
 test("native reviewer refuses a scripted write tool", async (t) => {

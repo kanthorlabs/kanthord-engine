@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -249,6 +250,33 @@ function countGit(t: TestContext, h: Fixture): () => string[] {
   h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
   return () =>
     existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+}
+
+function timedStatus(
+  t: TestContext,
+  h: Fixture,
+  log: string,
+  slow: string,
+): string {
+  const bin = temporary(t);
+  const git = (h.input.env.PATH ?? "")
+    .split(delimiter)
+    .map((directory) => join(directory, GIT_BINARY))
+    .find((path) => {
+      try {
+        accessSync(path, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  assert.ok(git);
+  writeFileSync(
+    join(bin, GIT_BINARY),
+    `#!/bin/sh\nif [ "$1" = status ]; then here="$(pwd -P)"; printf 'start %s\\n' "$here" >> '${log}'; if [ "$here" = '${slow}' ]; then sleep 0.6; else sleep 0.1; fi; printf 'end %s\\n' "$here" >> '${log}'; fi\nexec '${git}' "$@"\n`,
+    { mode: WRAPPER_MODE },
+  );
+  return bin;
 }
 
 function countPushes(t: TestContext, h: Fixture): () => number {
@@ -1015,6 +1043,41 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.equal(await headOf(h.root), before);
     assert.equal(existsSync(gitPath(h, "rebase-merge")), false);
+  });
+
+  test("two checkouts run the gate checks at the same time, two violations stop with the code of the lowest checkout index, and the violation restores every checkout", async (t) => {
+    const h = await fixture(t, [], [], undefined, ["first", "second"]);
+    const [first, second] = h.checkouts;
+    assert.ok(first && second);
+    const before = [first.head, second.head];
+    const log = join(temporary(t), "status");
+    const bin = timedStatus(t, h, log, realpathSync(first.directory));
+    h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        mkdirSync(join(first.directory, ".git", "rebase-merge"));
+        await simpleGit(second.directory).checkoutLocalBranch(OTHER_BRANCH);
+      }),
+      { code: TurnViolation.GitInProgress },
+    );
+    const events = readFileSync(log, "utf8").trim().split("\n");
+    assert.deepEqual(
+      events.slice(0, 2).map((event) => event.split(" ")[0]),
+      ["start", "start"],
+    );
+    assert.equal(events[2], `end ${realpathSync(second.directory)}`);
+    assert.equal(
+      existsSync(join(first.directory, ".git", "rebase-merge")),
+      false,
+    );
+    assert.equal(await headOf(first.directory), before[0]);
+    assert.equal(await headOf(second.directory), before[1]);
+    assert.equal(
+      (
+        await simpleGit(second.directory).revparse(["--abbrev-ref", "HEAD"])
+      ).trim(),
+      h.nodeBranch,
+    );
   });
 
   test("a branch switch names the full refs in the branch_changed detail", async (t) => {

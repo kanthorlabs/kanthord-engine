@@ -87,21 +87,23 @@ export async function readDependencies(
     query: cursor === null ? {} : { cursor },
     body: null,
   });
-  const dependencies = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.dependency.list"](input(cursor), options),
-  );
-  const outcomes = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.dependency.outcome.list"](
-      input(cursor),
-      options,
+  const [dependencies, outcomes, evidence] = await Promise.all([
+    readAllPages(run, (cursor, options) =>
+      run.clients.mission["execution.dependency.list"](input(cursor), options),
     ),
-  );
-  const evidence = await readAllPages(run, (cursor, options) =>
-    run.clients.mission["execution.dependency.evidence.list"](
-      input(cursor),
-      options,
+    readAllPages(run, (cursor, options) =>
+      run.clients.mission["execution.dependency.outcome.list"](
+        input(cursor),
+        options,
+      ),
     ),
-  );
+    readAllPages(run, (cursor, options) =>
+      run.clients.mission["execution.dependency.evidence.list"](
+        input(cursor),
+        options,
+      ),
+    ),
+  ]);
   return { dependencies, outcomes, evidence };
 }
 
@@ -307,8 +309,12 @@ export async function readPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
-  const prior = await readUnblockPrior(run, repositories);
-  const updates = await readLinkUpdates(run);
+  const [failed, rework, updates] = await Promise.all([
+    readFailedChecks(run, repositories),
+    readReworkAssessment(run),
+    readLinkUpdates(run),
+  ]);
+  const prior = await unblockPriorOf(run, repositories, { failed, rework });
   if (updates === null) return prior;
   if (prior.verdict === null)
     return {
@@ -348,12 +354,16 @@ async function readRequestedOrClearedPrior(
   };
 }
 
-async function readUnblockPrior(
+interface FirstReads {
+  failed: Verdict | null;
+  rework: Awaited<ReturnType<typeof readReworkAssessment>>;
+}
+
+async function unblockPriorOf(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
+  { failed, rework }: FirstReads,
 ): Promise<Prior> {
-  const failed = await readFailedChecks(run, repositories);
-  const rework = await readReworkAssessment(run);
   const findings = rework ? (await readReviewRound(run)).findings : [];
   const round = rework?.round ?? null;
   if (failed !== null)

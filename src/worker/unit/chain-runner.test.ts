@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   attributed,
   CauseCategory,
   CauseSubcategory,
 } from "../../kernel/cause.ts";
-import { background, CancellationContext } from "../../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  cancelled,
+  type Context,
+} from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { stopAfter } from "../../kernel/test-support.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
@@ -28,6 +34,9 @@ import {
   type Key,
   type LoopFrame,
   loopNode,
+  namedBranch,
+  parallelNode,
+  soloBranch,
   StepKind,
   stepNode,
 } from "./chain.ts";
@@ -49,7 +58,8 @@ import {
 import type { CommonPorts } from "./foundry-ports.ts";
 import { runTasks } from "./foundry.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { Phase } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
+import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 
 const WALL_TIME_MS = 60000;
 const RELEASED: ExecutionEnd = {
@@ -73,6 +83,7 @@ interface Harness {
   trace: string[];
   logs: string[];
   releases: unknown[];
+  records: TelemetryRecord[];
 }
 
 function harness(t: TestContext, stop?: CancellationContext): Harness {
@@ -89,6 +100,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
   };
   const logs: string[] = [];
   const releases: unknown[] = [];
+  const records: TelemetryRecord[] = [];
   const run = new ExecutionRun({
     claim,
     clients: {
@@ -103,6 +115,10 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
     context: background,
     ...(stop === undefined ? {} : { stop }),
     log: (record) => logs.push(String(record.msg)),
+    telemetry: {
+      write: (written) => void records.push(...written),
+      flush: async () => {},
+    },
   });
   stopAfter(t, () => run.dispose());
   const trace: string[] = [];
@@ -125,6 +141,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
     trace,
     logs,
     releases,
+    records,
   };
 }
 
@@ -679,4 +696,267 @@ test("a tasks walk with until ends with completed on entering the named loop", a
   );
   assert.equal(end.kind, FoundryEndKind.Completed);
   assert.deepEqual(h.trace, ["unit"]);
+});
+
+const LATE_CODE = "test.late";
+const SIBLING_ABORT_MS = 2000;
+const GROUP = "group";
+
+interface StepCall {
+  context: Context;
+  ctx: Partial<ExecutionCtx>;
+}
+
+function contextStepOf(
+  h: Harness,
+  id: string,
+  act: Act & { call: (call: StepCall) => Promise<void> },
+): ChainStep {
+  return {
+    ...stepOf(h, id, act),
+    async run(
+      ctx: Partial<ExecutionCtx>,
+      scope: unknown,
+      io: { context: Context },
+    ) {
+      h.trace.push(id);
+      await act.call({ context: io.context, ctx });
+      return {
+        kind: act.kind ?? StepKind.Next,
+        patch: act.patch ?? {},
+        scope,
+      };
+    },
+  };
+}
+
+test("a stop of one parallel branch aborts its siblings, and the first stop in time wins", async (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(
+          contextStepOf(h, "stopper", {
+            call: async () => {
+              await Promise.resolve();
+              throw new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+            },
+          }),
+        ),
+      ),
+      namedBranch("waiter", [
+        stepNode(
+          contextStepOf(h, "waiter", {
+            call: async ({ context }) => {
+              await Promise.race([
+                cancelled(context.signal),
+                delay(SIBLING_ABORT_MS),
+              ]);
+              h.trace.push(
+                context.signal.aborted ? "waiter aborted" : "waiter running",
+              );
+              throw new ExecutionStop(EndReason.OperationFailed, LATE_CODE);
+            },
+          }),
+        ),
+        stepNode(stepOf(h, "after waiter")),
+      ]),
+    ])
+    .step(stepOf(h, "after group"))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  await assert.rejects(
+    runChain(built, { seed: h.seed }, h.io),
+    (error) => error instanceof ExecutionStop && error.code === STOP_CODE,
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "stopper",
+    "waiter",
+    "waiter aborted",
+  ]);
+});
+
+test("a budget end of one parallel branch merges the patch of each branch that ended next, then ends the walk with the budget end", async (t) => {
+  const h = harness(t);
+  const end = await runTasks(
+    {
+      nodes: [
+        parallelNode(GROUP, [
+          soloBranch(
+            stepNode(
+              foundryOf(stepOf(h, "writer", { patch: { setupPending: true } })),
+            ),
+          ),
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "ender", {
+                  kind: StepKind.BudgetEnd,
+                  patch: { setupInstruction: "lost" },
+                  call: async () => {
+                    await new Promise((resolve) => setImmediate(resolve));
+                  },
+                }),
+              ),
+            ),
+          ),
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "waiter", {
+                  call: async ({ context }) => {
+                    await cancelled(context.signal);
+                    h.trace.push("waiter aborted");
+                  },
+                }),
+              ),
+            ),
+          ),
+        ]),
+        stepNode(foundryOf(stepOf(h, "after group"))),
+      ],
+      seed: {},
+      resultOf: (ctx) => ctx,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: null,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.BudgetEnd);
+  assert.equal(end.result.setupPending, true);
+  assert.equal("setupInstruction" in end.result, false);
+  assert.deepEqual(h.trace, ["writer", "ender", "waiter", "waiter aborted"]);
+});
+
+test("a build rejects two parallel branches that write one key", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(stepOf(h, "first", { patch: { setupPending: true } })),
+      ),
+      soloBranch(
+        stepNode(stepOf(h, "second", { patch: { setupPending: false } })),
+      ),
+    ])
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === `parallel ${GROUP}` &&
+      error.rule === ChainRule.ParallelWrite &&
+      error.key === INNER_WRITE,
+  );
+});
+
+test("a step span of a parallel branch has the span that is open at the group start as its parent", async (t) => {
+  const h = harness(t);
+  const spans = h.io.run.spans;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const spanStep = (id: string, work: () => Promise<void>) =>
+    stepNode(
+      foundryOf(
+        contextStepOf(h, id, {
+          call: () =>
+            spans.within(
+              { key: `step:${id}`, operation: SpanOperation.Git },
+              async () => {
+                await work();
+                await spans.within(
+                  { key: `inner:${id}`, operation: SpanOperation.Git },
+                  async () => {},
+                );
+              },
+            ),
+        }),
+      ),
+    );
+  const frame: LoopFrame<true> = {
+    reads: [],
+    init: () => true,
+    body: [
+      parallelNode(GROUP, [
+        soloBranch(spanStep("first", () => held)),
+        soloBranch(
+          spanStep("second", async () => {
+            await Promise.resolve();
+            release();
+          }),
+        ),
+      ]),
+    ],
+    next: () => null,
+    span: () => ({ key: "phase:prepare", operation: SpanOperation.Phase }),
+  };
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .loop("prepare", frame)
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  const parentOf = (key: string) =>
+    h.records.find(
+      (record) =>
+        record.kind === RecordKind.Span &&
+        record.span_id === spans.spanIdOf(key),
+    );
+  const group = spans.spanIdOf("phase:prepare");
+  for (const id of ["first", "second"]) {
+    const step = parentOf(`step:${id}`);
+    const inner = parentOf(`inner:${id}`);
+    assert.ok(
+      step?.kind === RecordKind.Span && inner?.kind === RecordKind.Span,
+    );
+    assert.equal(step.parent_span_id, group);
+    assert.equal(inner.parent_span_id, spans.spanIdOf(`step:${id}`));
+  }
+});
+
+test("regression: a parallel branch that ends next keeps its context alive after the group", async (t) => {
+  const h = harness(t);
+  const kept: Context[] = [];
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(
+          contextStepOf(h, "holder", {
+            call: async ({ context }) => void kept.push(context),
+          }),
+        ),
+      ),
+      soloBranch(stepNode(stepOf(h, "sibling"))),
+    ])
+    .step(
+      stepOf(h, "user", {
+        work: () => assert.equal(kept[0]?.signal.aborted, false),
+      }),
+    )
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "holder",
+    "sibling",
+    "user",
+    "release",
+  ]);
 });

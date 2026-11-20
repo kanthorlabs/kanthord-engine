@@ -190,9 +190,11 @@ function routeHolds(input: VerifyInput): CheckResult {
 }
 
 function stepsOf(nodes: readonly ChainNode[]): ChainStep[] {
-  return nodes.flatMap((node) =>
-    node.kind === NodeKind.Step ? [node.step] : stepsOf(node.frame.body),
-  );
+  return nodes.flatMap((node) => {
+    if (node.kind === NodeKind.Step) return [node.step];
+    if (node.kind === NodeKind.Loop) return stepsOf(node.frame.body);
+    return node.branches.flatMap((branch) => stepsOf(branch.nodes));
+  });
 }
 
 function listed(stop: ExecutionStop, stops: readonly string[]): boolean {

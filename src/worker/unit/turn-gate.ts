@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { PromptTemplate } from "../../agent/contract.ts";
+import { perCheckout } from "./per-checkout.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
@@ -211,31 +212,21 @@ async function runGate(
     },
     async () => {
       if (turn.mode === GateMode.Checkpoint)
-        for (const checkout of state.checkouts)
-          if (
-            operationsOf(
-              await livePaths(
-                callOf(state, checkout, context),
-                checkout.gitPaths,
-              ),
-            ).includes(MERGE_HEAD)
-          )
-            await abortMerge(
-              state.input.env,
-              checkout.directory,
-              context,
-              remainingOf(state)(),
-            );
-      const statuses: GitStatus[] = [];
-      for (const [index, checkout] of state.checkouts.entries()) {
-        const { violation, status } = await inspect(
-          state,
-          checkout,
-          before[index]!,
-          { merge: mergeOf(turn, checkout), context },
+        await perCheckout(state.checkouts, (checkout) =>
+          abortOpenMerge(state, checkout, context),
         );
-        statuses.push(status);
-        if (violation === null) continue;
+      const inspections = await perCheckout(
+        state.checkouts,
+        (checkout, index) =>
+          inspect(state, checkout, before[index]!, {
+            merge: mergeOf(turn, checkout),
+            context,
+          }),
+      );
+      const violation =
+        inspections.find((inspection) => inspection.violation !== null)
+          ?.violation ?? null;
+      if (violation !== null) {
         violated = violation.code;
         const detail = await violate(state, before, violation, context);
         if (turn.violationEnd === ViolationEnd.Restore) return false;
@@ -243,17 +234,19 @@ async function runGate(
           detail,
         });
       }
-      let changed = false;
-      for (const [index, checkout] of state.checkouts.entries()) {
-        const settled = await settleCheckout(state, checkout, {
+      const settled = await perCheckout(state.checkouts, (checkout, index) =>
+        settleCheckout(state, checkout, {
           before: before[index]!,
-          status: statuses[index]!,
+          status: inspections[index]!.status,
           turn,
           context,
-        });
-        if (settled.changed) changed = true;
-        changedPaths.push(...prefixedPaths(state, checkout, settled.paths));
-      }
+        }),
+      );
+      for (const [index, checkout] of state.checkouts.entries())
+        changedPaths.push(
+          ...prefixedPaths(state, checkout, settled[index]!.paths),
+        );
+      const changed = settled.some((entry) => entry.changed);
       removeRootEntries(state);
       return changed;
     },
@@ -423,21 +416,40 @@ function operationViolation(
   return null;
 }
 
+async function abortOpenMerge(
+  state: StepsState,
+  checkout: NodeCheckout,
+  context: Context,
+): Promise<void> {
+  const paths = await livePaths(
+    callOf(state, checkout, context),
+    checkout.gitPaths,
+  );
+  if (operationsOf(paths).includes(MERGE_HEAD))
+    await abortMerge(
+      state.input.env,
+      checkout.directory,
+      context,
+      remainingOf(state)(),
+    );
+}
+
 async function violate(
   state: StepsState,
   before: readonly string[],
   violation: Violation,
   context: Context,
 ): Promise<string | null> {
-  for (const [index, checkout] of state.checkouts.entries())
-    await restoreCheckout(
+  await perCheckout(state.checkouts, (checkout, index) =>
+    restoreCheckout(
       state.input.env,
       checkout,
       state.nodeBranch,
       before[index]!,
       context,
       remainingOf(state),
-    );
+    ),
+  );
   const detail = await state.ports.secrets.redact(
     String(new Error(violation.detail)),
   );

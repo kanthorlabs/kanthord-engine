@@ -11,6 +11,9 @@ import {
   FrameOutcome,
   type LoopFrame,
   loopNode,
+  namedBranch,
+  parallelNode,
+  soloBranch,
   stepNode,
 } from "./chain.ts";
 import {
@@ -44,7 +47,7 @@ import {
 } from "./step-execution-release.ts";
 import {
   inputsReadAttemptEvidence,
-  inputsReadPrior,
+  inputsReadRevisionPrior,
 } from "./step-inputs-read-host.ts";
 import { reportCoder } from "./step-report-coder.ts";
 import { setupEntriesLive } from "./step-setup-entries-host.ts";
@@ -73,16 +76,30 @@ export function implementWorkspaceNodes(): ChainNode[] {
   return [
     stepNode(inputsReadAttemptEvidence),
     stepNode(workspaceNode),
-    stepNode(setupEntriesLive),
-    stepNode(affectedDeclaration),
-    stepNode(envSetupLive),
+    parallelNode("workspace.static", [
+      soloBranch(stepNode(affectedDeclaration)),
+      soloBranch(stepNode(setupEntriesLive)),
+      soloBranch(stepNode(agentOpenImplement)),
+    ]),
   ];
 }
 
-function prepareWorkspaceFrame(): LoopFrame<true> {
+export function startInputsNode(): ChainNode {
+  return parallelNode("start.inputs", [
+    soloBranch(stepNode(envSetupLive)),
+    soloBranch(stepNode(unitsPlan)),
+  ]);
+}
+
+function prepareFrame(): LoopFrame<true> {
   return {
-    ...phaseFrame(Phase.Prepare, implementWorkspaceNodes()),
-    reads: ["revision"],
+    ...phaseFrame(Phase.Prepare, [
+      parallelNode("prepare.inputs", [
+        soloBranch(stepNode(inputsReadRevisionPrior)),
+        namedBranch("workspace", implementWorkspaceNodes()),
+      ]),
+    ]),
+    endReads: ["revision"],
     end: (ctx, _scope, ended) =>
       ended.outcome === FrameOutcome.Next
         ? nodeShapeEnd(ctx.revision)
@@ -120,8 +137,8 @@ export function implementInputOf(
     baseHead: state.base,
     affectedTests: state.affectedTests,
     plan: ctx.plan,
-    setupPending: state.setupPending,
-    setupInstruction: state.setupInstruction,
+    setupPending: ctx.setupPending,
+    setupInstruction: ctx.setupInstruction,
     progress: {
       unchangedTurns: state.unchangedTurns,
       lastVerification: state.lastVerification,
@@ -185,17 +202,12 @@ export function implementChain(
 ): Chain<ImplementHostPorts> {
   return chain<ImplementHostPorts>(ChainId.Implement, IMPLEMENT_HOST_PORTS)
     .phase(Phase.Prepare)
-    .step(inputsReadPrior)
-    .loop("prepare.workspace", prepareWorkspaceFrame())
-    .step(agentOpenImplement)
+    .loop("prepare", prepareFrame())
     .step(stateOpen)
     .phase(Phase.Start)
     .loop(
       "start",
-      phaseFrame(Phase.Start, [
-        stepNode(baseRefreshClaim),
-        stepNode(unitsPlan),
-      ]),
+      phaseFrame(Phase.Start, [stepNode(baseRefreshClaim), startInputsNode()]),
     )
     .tasks(implementTasks(runner))
     .phase(Phase.Finish)

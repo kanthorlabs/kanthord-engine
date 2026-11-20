@@ -11,7 +11,6 @@ import {
   type CheckoutRef,
   type CommandTree,
   type CommonPorts,
-  type DependencyPort,
   type EvaluationPorts,
   type EvidencePort,
   type ExaminePorts,
@@ -35,7 +34,6 @@ import {
 } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
-import { readDependencies } from "./node-reads.ts";
 import { readSetupRecord } from "./setup-record.ts";
 import { endedByBudget } from "./step-support.ts";
 import { mergedBranchesOf, repositoryOf } from "./setup-repository.ts";
@@ -265,6 +263,7 @@ function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
       const git = () => ({ env, directory, context, deadlineMs: remaining() });
       try {
         if (taken.size === NO_TREES) clearBase();
+        taken.add(directory);
         rmSync(directory, { recursive: true, force: true });
         const { source } = await prepareTree({
           pool: workspaces.pool,
@@ -306,9 +305,9 @@ function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
             await scrubTree(git(), head, record?.roots ?? []);
           },
         });
-        taken.add(directory);
         return ok({ binding_id: checkout.binding_id, directory, source });
       } catch (error) {
+        workspaces.removeSafely(directory);
         giveBack(checkout, directory);
         return run.failureOf(error);
       }
@@ -393,31 +392,11 @@ export function commonPorts(run: ExecutionRun): CommonPorts {
   };
 }
 
-function dependencyPort(host: AgentHost): DependencyPort {
-  return {
-    async read() {
-      try {
-        return ok(await readDependencies(host.run));
-      } catch (error) {
-        if (
-          endedByBudget(
-            { budget: host.budget, context: host.run.operationContext },
-            error,
-          )
-        )
-          return { kind: PortResultKind.BudgetEnd };
-        return host.run.failureOf(error);
-      }
-    },
-  };
-}
-
 export function evaluationPorts(host: AgentHost): EvaluationPorts {
   return {
     ...commonPorts(host.run),
     evidence: evidencePort(host.run),
     agent: agentOpenPort(host),
-    dependencies: dependencyPort(host),
   };
 }
 
@@ -426,7 +405,6 @@ export function examinePorts(host: AgentHost): ExaminePorts {
     ...commonPorts(host.run),
     evidence: evidencePort(host.run),
     agent: agentOpenPort(host),
-    dependencies: dependencyPort(host),
   };
 }
 

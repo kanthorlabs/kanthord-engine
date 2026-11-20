@@ -21,7 +21,8 @@ import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { EndReason } from "./execution-stop.ts";
+import { EndReason, portStop } from "./execution-stop.ts";
+import { background } from "../../kernel/context.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { taskWork } from "./steps-implement.ts";
@@ -57,7 +58,7 @@ import { SpanOperation } from "./telemetry.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
-import { TreeSource } from "./foundry-ports.ts";
+import { PortResultKind, TreeSource } from "./foundry-ports.ts";
 import { workerPorts } from "./worker-ports.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -78,6 +79,7 @@ const FLAKY_LOG = "verification flaky";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
+const ABSENT_REPOSITORY = /absent. does not exist/;
 const LEFTOVER = "leftover";
 const STRAY_FILE = "stray";
 const NO_CONFIG = "";
@@ -308,12 +310,15 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [task("timed", "touch transient; sleep 30")],
       [NOTHING],
     );
+    const transient = join(h.checkouts[0]!.directory, "transient");
+    let verifying = false;
     let deadline = Date.now() + 60000;
     h.agent.budget.wallDeadline = () => {
       deadline = Date.now() + 30;
       return deadline;
     };
-    h.agent.budget.exhausted = () => Date.now() >= deadline;
+    h.agent.budget.exhausted = () =>
+      (verifying ||= existsSync(transient)) && Date.now() >= deadline;
     const bodies = recordReleases(h);
     acceptEvidence(h);
     assert.deepEqual(await runStepsImplement(h), {
@@ -961,6 +966,27 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal((await gate).kind, ReleaseGateKind.Routed);
     assert.equal(freeCommandTrees(h).length, ONE_TREE);
     assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release tree take that fails beside a running take leaves the other tree in place, and its stop names its own cause", async (t) => {
+    const h = await fixture(t, [], [], undefined, ["first", "second"]);
+    const [first, second] = h.checkouts;
+    assert.ok(first && second);
+    const { releaseTrees } = workerPorts(h.input, h.run);
+    const call = { context: background, deadline: h.input.claim.expired_at };
+    const [failed, taken] = await Promise.all([
+      releaseTrees.take(
+        { ...first, directory: join(dirname(first.directory), "absent") },
+        first.head,
+        call,
+      ),
+      releaseTrees.take(second, second.head, call),
+    ]);
+    assert.ok(failed?.kind === PortResultKind.Failed);
+    assert.match(portStop(failed).detail ?? "", ABSENT_REPOSITORY);
+    assert.ok(taken?.kind === PortResultKind.Ok);
+    assert.ok(existsSync(join(taken.value.directory, ".git")));
+    await releaseTrees.give(taken.value);
   });
 
   test("a release round after a new commit of the node tests the new head", async (t) => {

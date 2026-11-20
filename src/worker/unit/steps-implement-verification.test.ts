@@ -13,7 +13,22 @@ import { existsSync, readFileSync } from "node:fs";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
-import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
+import {
+  EndReason,
+  type ExecutionEnd,
+  ExecutionEndKind,
+} from "./execution-stop.ts";
+
+function assertSetupStop(end: ExecutionEnd): void {
+  assert.ok(end.kind === ExecutionEndKind.Ended);
+  assert.deepEqual(
+    { reason: end.reason, code: end.code },
+    {
+      reason: EndReason.EnvironmentFailed,
+      code: EnvironmentFailure.SetupFailed,
+    },
+  );
+}
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
@@ -224,7 +239,7 @@ suite(
       assert.equal(existsSync(started), true);
     });
 
-    test("a stored environment runs its setup in the node checkout before the first task verification", async (t) => {
+    test("a stored environment runs its setup in the node checkout in start, before the first task verification", async (t) => {
       const current = task("setup", `test -e ${SETUP_MARKER}`);
       const h = await fixture(
         t,
@@ -238,35 +253,33 @@ suite(
           digest: "d".repeat(64),
         },
       );
-      assert.equal(
-        existsSync(join(h.checkouts[0]!.directory, SETUP_MARKER)),
-        true,
+      const marker = join(h.checkouts[0]!.directory, SETUP_MARKER);
+      assert.equal(existsSync(marker), false);
+      recordReleases(h);
+      acceptEvidence(h);
+      assert.deepEqual(
+        await executionBoundary(h.run, () => runStepsImplement(h)),
+        { kind: ExecutionEndKind.Released, furtherWork: false },
       );
-      assert.deepEqual(await runTask(h, current), {
-        kind: TaskResultKind.Complete,
-        committed: false,
-      });
+      assert.equal(h.provider.calls.length, ONE_TURN);
     });
 
-    test("a setup failure on the base head stops the prepare with environment_failed", async (t) => {
+    test("a setup failure on the base head stops the start with environment_failed", async (t) => {
       const failing = {
         source: EnvironmentSource.Stored,
         document: { postCreateCommand: "exit 5" },
         digest: "d".repeat(64),
       } as const;
-      await assert.rejects(
-        fixture(
-          t,
-          [task("setup", "true")],
-          [fauxAssistantMessage("never")],
-          undefined,
-          undefined,
-          failing,
-        ),
-        {
-          reason: EndReason.EnvironmentFailed,
-          code: EnvironmentFailure.SetupFailed,
-        },
+      const first = await fixture(
+        t,
+        [task("setup", "true")],
+        [fauxAssistantMessage("never")],
+        undefined,
+        undefined,
+        failing,
+      );
+      assertSetupStop(
+        await executionBoundary(first.run, () => runStepsImplement(first)),
       );
       const h = await fixture(t, [task("setup", "true")], []);
       await simpleGit(h.root).raw([
@@ -285,29 +298,26 @@ suite(
         `HEAD:refs/heads/${h.input.claim.node_branch}`,
       ]);
       const state = dirname(h.input.workspaces.root);
-      await assert.rejects(
-        nextExecution(
-          t,
-          {
-            ...h,
-            input: {
-              ...h.input,
-              setup: {
-                ...h.input.setup,
-                repositories: h.input.setup.repositories.map((repository) => ({
-                  ...repository,
-                  environment: failing,
-                })),
-              },
+      const next = await nextExecution(
+        t,
+        {
+          ...h,
+          input: {
+            ...h.input,
+            setup: {
+              ...h.input.setup,
+              repositories: h.input.setup.repositories.map((repository) => ({
+                ...repository,
+                environment: failing,
+              })),
             },
           },
-          [],
-          state,
-        ),
-        {
-          reason: EndReason.EnvironmentFailed,
-          code: EnvironmentFailure.SetupFailed,
         },
+        [],
+        state,
+      );
+      assertSetupStop(
+        await executionBoundary(next.run, () => runStepsImplement(next)),
       );
       assert.equal(
         existsSync(

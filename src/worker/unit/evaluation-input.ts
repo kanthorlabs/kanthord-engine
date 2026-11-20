@@ -7,12 +7,19 @@ import {
   roundFiles,
   roundPatch,
 } from "./local-git.ts";
-import { lstatSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { createWriteStream, lstatSync } from "node:fs";
+import { rm, writeFile } from "node:fs/promises";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { join, relative } from "node:path";
 import { evidencePlacementOf } from "../../agent/review-roots.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
-import { CancellationContext } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  reasonOf,
+} from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   AssetKind,
@@ -43,6 +50,10 @@ import { ROUND_PATCH_SUBJECT, roundPatchName } from "./round-patch.ts";
 import { type AgentOpener, evaluationPorts } from "./worker-ports.ts";
 
 const NO_SNAPSHOTS = 0;
+const NO_FAILURES = 0;
+export const DOWNLOADS_AT_ONCE = 4;
+const ASSET_MODE = 0o600;
+const CREATE_ONLY = "wx";
 const NO_PATCH_BYTES = 0;
 
 function isSupportEvidence(item: Evidence): boolean {
@@ -99,11 +110,16 @@ export function placedOf(evidence: readonly Evidence[]) {
   return null;
 }
 
+interface AssetPlace {
+  directory: string;
+  context: Context;
+  deadline: number;
+}
+
 async function placeAsset(
-  directory: string,
   run: ExecutionRun,
   asset: EvidenceAsset,
-  deadline: number,
+  place: AssetPlace,
 ) {
   const content = await run.call((options) =>
     run.clients.mission["execution.evidence.asset.content.get"](
@@ -118,28 +134,62 @@ async function placeAsset(
       options,
     ),
   );
-  const context = new CancellationContext(run.operationContext, deadline);
+  const context = new CancellationContext(place.context, place.deadline);
+  const assetId = identitySchema("evidence_asset").parse(asset.id);
+  const file = join(place.directory, assetId);
   try {
-    let bytes: Buffer;
-    if ("data" in content) bytes = Buffer.from(content.data, "base64");
-    else {
-      const response = await fetch(content.get_url, { signal: context.signal });
-      if (!response.ok) {
-        await response.body?.cancel();
-        return run.stop(EndReason.OperationFailed);
-      }
-      bytes = Buffer.from(await response.arrayBuffer());
+    if ("data" in content) {
+      await writeFile(file, Buffer.from(content.data, "base64"), {
+        mode: ASSET_MODE,
+        flag: CREATE_ONLY,
+        signal: context.signal,
+      });
+      return assetId;
     }
-    const assetId = identitySchema("evidence_asset").parse(asset.id);
-    await writeFile(join(directory, assetId), bytes, {
-      mode: 0o600,
-      flag: "wx",
-      signal: context.signal,
-    });
+    const response = await fetch(content.get_url, { signal: context.signal });
+    if (!response.ok || response.body === null) {
+      await response.body?.cancel();
+      return run.stop(EndReason.OperationFailed);
+    }
+    try {
+      await pipeline(
+        Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
+        createWriteStream(file, { mode: ASSET_MODE, flags: CREATE_ONLY }),
+        { signal: context.signal },
+      );
+    } catch (error) {
+      await rm(file, { force: true });
+      throw reasonOf(context.signal) ?? error;
+    }
     return assetId;
   } finally {
     context.cancel();
   }
+}
+
+async function placeEach<T, R>(
+  items: readonly T[],
+  work: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  const failures: unknown[] = [];
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length && failures.length === NO_FAILURES) {
+      const index = next;
+      next += 1;
+      try {
+        results[index] = await work(items[index]!);
+      } catch (error) {
+        failures.push(error);
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(DOWNLOADS_AT_ONCE, items.length) }, worker),
+  );
+  if (failures.length > NO_FAILURES) throw failures[0];
+  return results;
 }
 
 const NO_SCOPE: ReviewScope = {
@@ -432,13 +482,14 @@ export interface PlaceInput extends ReviewInputs {
   evidenceIds: readonly string[];
   scope: ReviewScope;
   deadline: number;
+  context: Context;
 }
 
 export async function placeReviewAssets(
   run: ExecutionRun,
   place: PlaceInput,
 ): Promise<PlacedReview> {
-  const { workspace, evidence, round, deadline } = place;
+  const { workspace, evidence, round, deadline, context } = place;
   const evidenceIds = new Set(place.evidenceIds);
   const assets: PlacedAsset[] = [];
   const support = withLatestCoderReport(evidence.filter(isSupportEvidence));
@@ -452,9 +503,11 @@ export async function placeReviewAssets(
   );
   const placement = evidencePlacementOf(workspace);
   ensureDirectory(placement);
-  for (const { evidenceId, asset } of selected) {
-    const name = await placeAsset(placement, run, asset, deadline);
-    const path = relative(workspace.directory, join(placement, name));
+  const names = await placeEach(selected, ({ asset }) =>
+    placeAsset(run, asset, { directory: placement, context, deadline }),
+  );
+  for (const [index, { evidenceId, asset }] of selected.entries()) {
+    const path = relative(workspace.directory, join(placement, names[index]!));
     evidenceIds.add(evidenceId);
     assets.push({ evidence_id: evidenceId, asset_id: asset.id, path });
   }

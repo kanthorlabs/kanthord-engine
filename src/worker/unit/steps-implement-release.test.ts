@@ -512,11 +512,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
       kind: "released",
       furtherWork: false,
     });
-    assert.deepEqual(order, [
-      ...h.checkouts.map((checkout) => `push:${checkout.directory}`),
-      "evidence",
-      "release",
-    ]);
+    const pushes = h.checkouts.map((checkout) => `push:${checkout.directory}`);
+    assert.deepEqual(order.slice(0, pushes.length).sort(), pushes.sort());
+    assert.deepEqual(order.slice(pushes.length), ["evidence", "release"]);
     for (const [index, checkout] of h.checkouts.entries())
       assert.equal(
         (
