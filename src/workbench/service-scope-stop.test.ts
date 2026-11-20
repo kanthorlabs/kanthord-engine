@@ -12,7 +12,8 @@ import { Store } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
 import { testReadOnlyIdentity } from "../kernel/test-identity.ts";
 import { missionOperations } from "../mission/contract.ts";
-import { offerActionTool } from "./actions.ts";
+import { offerActionTool, WORKBENCH_ACTION_TOOL_NAME } from "./actions.ts";
+import { EVIDENCE_READ_TOOL } from "./evidence.ts";
 import {
   AuthorKind,
   WORKBENCH_PROJECT_SCOPE_TEXT,
@@ -32,6 +33,7 @@ import {
   requestOwnerActTool,
   type ScopeRequests,
 } from "./scope-requests.ts";
+import { RunKind } from "./run-tools.ts";
 import { recordOf } from "./sessions.ts";
 import { toolName } from "./tools.ts";
 import { type Dependencies, WorkbenchService } from "./service.ts";
@@ -90,6 +92,7 @@ interface HeldSession {
   run: HeldRun | null;
   autoMode: boolean;
   agent: unknown;
+  tools: { open: string[]; workbench: string[] };
   runError: string | null;
   queuedMessages: unknown[];
   approvals: Map<string, unknown>;
@@ -122,7 +125,7 @@ interface Internals {
     toolCallId: string,
     call: OwnerActCall,
   ): void;
-  applyRunTools(session: HeldSession, guestRun: boolean): void;
+  applyRunTools(session: HeldSession, kind: RunKind): void;
   feedOf(session: HeldSession): {
     open(request: {
       inviteId: string;
@@ -187,6 +190,7 @@ async function fixture(t: TestContext) {
       run: null,
       autoMode: true,
       agent: null,
+      tools: { open: [], workbench: [] },
       runError: null,
       queuedMessages: [],
       approvals: new Map(),
@@ -397,20 +401,75 @@ test("(security) the act never runs in the run", async (t) => {
   assert.equal(f.internals.scopeRequests.count(host.id), SINGLE);
 });
 
-test("(security) the tool names of an owner-started run hold no request_owner_act and a guest-started run holds it", async (t) => {
-  const f = await fixture(t);
+const OPEN_TOOLS = ["read", "mission--node--pause"];
+const UNLISTED_TOOL = "unlisted_workbench_tool";
+const SESSION_WORKBENCH_TOOLS = [
+  WORKBENCH_ACTION_TOOL_NAME,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+  EVIDENCE_READ_TOOL,
+  UNLISTED_TOOL,
+];
+
+function toolSession(f: Awaited<ReturnType<typeof fixture>>) {
   const host = f.host();
-  let active = ["mission--node--pause"];
+  const state = { active: [] as string[] };
+  host.tools = { open: OPEN_TOOLS, workbench: SESSION_WORKBENCH_TOOLS };
   host.agent = {
-    getActiveToolNames: () => active,
+    getActiveToolNames: () => state.active,
     setActiveToolsByName: (names: string[]) => {
-      active = names;
+      state.active = names;
     },
   };
-  f.internals.applyRunTools(host, true);
-  assert.ok(active.includes(WORKBENCH_REQUEST_OWNER_ACT_TOOL));
-  f.internals.applyRunTools(host, false);
-  assert.deepEqual(active, ["mission--node--pause"]);
+  return { host, state };
+}
+
+test("(security) a guest run holds request_owner_act and no offer_action", async (t) => {
+  const f = await fixture(t);
+  const { host, state } = toolSession(f);
+  f.internals.applyRunTools(host, RunKind.Guest);
+  assert.ok(state.active.includes(WORKBENCH_REQUEST_OWNER_ACT_TOOL));
+  assert.ok(!state.active.includes(WORKBENCH_ACTION_TOOL_NAME));
+});
+
+test("(security) an owner run holds offer_action and no request_owner_act", async (t) => {
+  const f = await fixture(t);
+  const { host, state } = toolSession(f);
+  f.internals.applyRunTools(host, RunKind.Owner);
+  assert.ok(state.active.includes(WORKBENCH_ACTION_TOOL_NAME));
+  assert.ok(!state.active.includes(WORKBENCH_REQUEST_OWNER_ACT_TOOL));
+});
+
+test("(security) a guest run after an owner run, and an owner run after a guest run, each hold exactly the tools of their own list", async (t) => {
+  const f = await fixture(t);
+  const { host, state } = toolSession(f);
+  const guestTools = [
+    ...OPEN_TOOLS,
+    WORKBENCH_REQUEST_OWNER_ACT_TOOL,
+    EVIDENCE_READ_TOOL,
+  ];
+  const ownerTools = [
+    ...OPEN_TOOLS,
+    WORKBENCH_ACTION_TOOL_NAME,
+    EVIDENCE_READ_TOOL,
+  ];
+  for (const [kind, expected] of [
+    [RunKind.Owner, ownerTools],
+    [RunKind.Guest, guestTools],
+    [RunKind.Owner, ownerTools],
+    [RunKind.Guest, guestTools],
+  ] as const) {
+    f.internals.applyRunTools(host, kind);
+    assert.deepEqual([...state.active].sort(), [...expected].sort());
+  }
+});
+
+test("(security) a Workbench tool name that no list names is not active in any run kind", async (t) => {
+  const f = await fixture(t);
+  const { host, state } = toolSession(f);
+  for (const kind of Object.values(RunKind)) {
+    f.internals.applyRunTools(host, kind);
+    assert.ok(!state.active.includes(UNLISTED_TOOL));
+  }
 });
 
 test("(security) the run end does not wait on the raise: the raise runs only after the tool result", async (t) => {

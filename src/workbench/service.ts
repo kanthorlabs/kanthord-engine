@@ -118,7 +118,6 @@ import {
   WORKBENCH_QUEUED_MESSAGE_PREFIX,
   WORKBENCH_REJECTION_REASON,
   WORKBENCH_RELAY_ENTRY,
-  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WORKBENCH_SESSION_PREFIX,
   type WorkbenchConfiguration,
   workbenchConfigurationSchema,
@@ -232,6 +231,12 @@ import {
   storedConfiguration,
   variantSessionPlace,
 } from "./sessions.ts";
+import {
+  type RunKind,
+  runKindOf,
+  type SessionTools,
+  toolsOfRunKind,
+} from "./run-tools.ts";
 import {
   createdNodeIds,
   noticeSummary,
@@ -451,6 +456,7 @@ interface OpenSession {
   configuration: WorkbenchConfiguration;
   requester: HumanIdentity | undefined;
   agent: AgentSession | null;
+  tools: SessionTools;
   disposeAgent: () => void;
   queue: Promise<void>;
   run: Run | null;
@@ -783,6 +789,7 @@ function newOpenSession(fields: SessionFields): OpenSession {
     ...fields,
     members: [],
     agent: null,
+    tools: { open: [], workbench: [] },
     ...IDLE_SESSION,
     queuedMessages: [],
     queue: Promise.resolve(),
@@ -1151,15 +1158,10 @@ export class WorkbenchService implements Service {
     if (host) this.notifyOwners(host);
   }
 
-  private applyRunTools(member: OpenSession, guestRun: boolean): void {
+  private applyRunTools(member: OpenSession, kind: RunKind): void {
     const { agent } = member;
     assert.ok(agent);
-    const kept = agent
-      .getActiveToolNames()
-      .filter((name) => name !== WORKBENCH_REQUEST_OWNER_ACT_TOOL);
-    agent.setActiveToolsByName(
-      guestRun ? [...kept, WORKBENCH_REQUEST_OWNER_ACT_TOOL] : kept,
-    );
+    agent.setActiveToolsByName([...toolsOfRunKind(member.tools, kind)]);
   }
 
   private runGrantCovers(host: OpenSession, call: GrantedCall): boolean {
@@ -1671,6 +1673,14 @@ export class WorkbenchService implements Service {
             ),
           ]
         : [];
+      const tools: SessionTools = {
+        open: [...builtin.allowlist, ...operations.map((tool) => tool.name)],
+        workbench: [
+          ...offer.map((tool) => tool.name),
+          ...request.map((tool) => tool.name),
+          ...evidence.map((tool) => tool.name),
+        ],
+      };
       session.secrets = credentialSecrets(credentials, piProviderId(provider));
       const opened = await openSession({
         cwd: session.place.cwd,
@@ -1678,13 +1688,7 @@ export class WorkbenchService implements Service {
         model,
         thinkingLevel: session.configuration.reasoning_effort,
         systemPrompt: prompt,
-        allowlist: [
-          ...builtin.allowlist,
-          ...operations.map((tool) => tool.name),
-          ...offer.map((tool) => tool.name),
-          ...request.map((tool) => tool.name),
-          ...evidence.map((tool) => tool.name),
-        ],
+        allowlist: [...tools.open, ...tools.workbench],
         customTools: [
           ...builtin.customTools,
           ...operations,
@@ -1736,6 +1740,7 @@ export class WorkbenchService implements Service {
       });
       const running = agent;
       session.agent = running;
+      session.tools = tools;
       session.disposeAgent = () => {
         unsubscribeEvents();
         running.dispose();
@@ -2632,7 +2637,7 @@ export class WorkbenchService implements Service {
       await this.openAgent(member, built, item.context);
     }
     assert.ok(member.agent);
-    this.applyRunTools(member, item.origin.kind === AuthorKind.Guest);
+    this.applyRunTools(member, runKindOf(item.origin.kind));
     this.appendAuthor(member, item);
     await this.relay(host, member, item);
     void member.agent
