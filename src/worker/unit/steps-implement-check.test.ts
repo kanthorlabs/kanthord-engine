@@ -31,6 +31,7 @@ import {
   runStepsImplement,
 } from "./steps-implement-host.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
+import { resolveGitPaths } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import {
@@ -261,7 +262,18 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       (await simpleGit(prepared.root).branch()).current,
       restartBranch,
     );
-    const state = { ...h, ...prepared };
+    const checkouts = [];
+    for (const checkout of prepared.checkouts)
+      checkouts.push({
+        ...checkout,
+        gitPaths: await resolveGitPaths({
+          env: h.input.env,
+          directory: checkout.directory,
+          context: background,
+          deadlineMs: DEADLINE_MS,
+        }),
+      });
+    const state = { ...h, ...prepared, checkouts };
     assert.equal(await refreshAtClaim(state), RefreshResult.Merged);
     assert.equal(
       readFileSync(join(prepared.root, "other"), "utf8"),

@@ -48,6 +48,15 @@ function storable(
 
 export class VerificationMemo {
   private readonly entries = new Map<string, MemoEntry>();
+  private readonly trees = new Map<string, string>();
+
+  async treeOf(commit: string, read: () => Promise<string>): Promise<string> {
+    const known = this.trees.get(commit);
+    if (known !== undefined) return known;
+    const tree = await read();
+    this.trees.set(commit, tree);
+    return tree;
+  }
 
   scope(
     context: MemoContext,
@@ -96,12 +105,14 @@ export async function memoScopeOf(
   const trees: string[] = [];
   for (const checkout of state.checkouts)
     trees.push(
-      await treeOf(
-        state.input.env,
-        checkout.directory,
-        checkout.head,
-        state.cancel,
-        state.input.claim.expired_at - Date.now(),
+      await state.memo.treeOf(checkout.head, () =>
+        treeOf(
+          state.input.env,
+          checkout.directory,
+          checkout.head,
+          state.cancel,
+          state.input.claim.expired_at - Date.now(),
+        ),
       ),
     );
   return state.memo.scope(

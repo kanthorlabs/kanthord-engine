@@ -27,7 +27,6 @@ import {
   changedEntries,
   ChangeStatus,
   checkoutDetached,
-  commitWork,
   discardChanges,
   excludeUntracked,
   fetchLocal,
@@ -40,6 +39,7 @@ import {
   treeOf,
 } from "./local-git.ts";
 import { readSetupRecord, writeSetupRecord } from "./setup-record.ts";
+import { commitWork } from "./test-support.ts";
 import { PoolClass, TreePool } from "./tree-pool.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 

@@ -4,8 +4,9 @@ import { DeadlineKind } from "./chain.ts";
 import type { Step } from "./chain-host.ts";
 import { next, wallDeadlineOf } from "./step-support.ts";
 import { hostInputOf } from "./chain-host.ts";
+import { resolveGitPaths } from "./local-git.ts";
 import { restoreCheckout } from "./turn-gate.ts";
-import { WorkspaceKind } from "./workspace-layout.ts";
+import { type NodeCheckout, WorkspaceKind } from "./workspace-layout.ts";
 
 const NO_CHECKOUTS = 0;
 
@@ -54,15 +55,26 @@ export const workspaceNode: Step<
         WorkspaceKind.Node,
       ),
     );
-    for (const checkout of workspace.checkouts)
+    const checkouts: NodeCheckout[] = [];
+    for (const checkout of workspace.checkouts) {
+      const node = Object.assign(checkout, {
+        gitPaths: await resolveGitPaths({
+          env: input.env,
+          directory: checkout.directory,
+          context: io.run.operationContext,
+          deadlineMs: deadline - Date.now(),
+        }),
+      });
       await restoreCheckout(
         input.env,
-        checkout,
+        node,
         input.claim.node_branch,
-        checkout.head,
+        node.head,
         io.run.operationContext,
         () => deadline - Date.now(),
       );
-    return next(scope, { workspace });
+      checkouts.push(node);
+    }
+    return next(scope, { workspace: { ...workspace, checkouts } });
   },
 };

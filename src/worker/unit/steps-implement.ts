@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { Revision, TaskContent } from "../../mission/contract.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import {
+  type NodeCheckout,
   workRepositoriesOf,
   type WorkspaceCheckout,
 } from "./workspace-layout.ts";
@@ -110,7 +111,7 @@ export interface StepsState extends ProgressCtx {
   revision: Revision;
   root: string;
   workspaceKey: string;
-  checkouts: WorkspaceCheckout[];
+  checkouts: NodeCheckout[];
   nodeBranch: string;
   setup: SetupEntry[];
   affectedTests: AffectedTest[];

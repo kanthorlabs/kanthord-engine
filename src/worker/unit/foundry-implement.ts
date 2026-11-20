@@ -15,6 +15,7 @@ import {
 import type { BaseHead, SetupEntry } from "./environment-setup.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import type { CheckoutRef, Commit, ImplementPorts } from "./foundry-ports.ts";
+import type { GitPaths } from "./local-git.ts";
 import { type FoundryControl, type FoundryHost, runTasks } from "./foundry.ts";
 import {
   phaseSpan,
@@ -76,6 +77,7 @@ export interface ImplementInput extends FoundryControl {
   workspaceKey: string;
   checkouts: readonly CheckoutRef[];
   heads: ReadonlyMap<string, Commit>;
+  gitPaths: ReadonlyMap<string, GitPaths>;
   setupEntries: readonly SetupEntry[];
   baseHead: BaseHead;
   affectedTests: readonly AffectedTest[];
@@ -264,8 +266,9 @@ function stateOf(input: ImplementInput, ports: ImplementPorts): StartState {
     workspaceKey: input.workspaceKey,
     checkouts: input.checkouts.map((checkout) => {
       const head = input.heads.get(checkout.binding_id);
-      assert.ok(head !== undefined);
-      return { ...checkout, head };
+      const gitPaths = input.gitPaths.get(checkout.binding_id);
+      assert.ok(head !== undefined && gitPaths !== undefined);
+      return { ...checkout, head, gitPaths };
     }),
     nodeBranch: input.claim.node_branch,
     setup: [...input.setupEntries],

@@ -76,6 +76,8 @@ import type { VerificationFacts } from "./progress-rule.ts";
 import { doneTrailerOf } from "./done-record.ts";
 import { VerificationKind } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
+import { commitStaged, headCommit, stageWork } from "./local-git.ts";
+import type { Context } from "../../kernel/context.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 export {
   scriptedProvider,
@@ -88,6 +90,21 @@ export {
   fauxThinking,
 } from "@earendil-works/pi-ai";
 export * from "../test-support.ts";
+
+const NO_STAGED_PATHS = 0;
+
+export async function commitWork(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  message: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  const call = { env, directory, context, deadlineMs };
+  if ((await stageWork(call)).length === NO_STAGED_PATHS) return null;
+  await commitStaged(call, message);
+  return headCommit(env, directory, context, deadlineMs);
+}
 
 export function scriptedModelRuntime(
   provider: ScriptedProvider,

@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
 import {
+  accessSync,
   appendFileSync,
+  constants,
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
 import {
@@ -33,7 +39,16 @@ import {
   runTask,
 } from "./steps-implement-host.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
-import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
+import {
+  assertInvariant,
+  gatedAgent,
+  GateMode,
+  restoreCheckout,
+  TurnViolation,
+} from "./turn-gate.ts";
+import { operationsOf, readStatus, resolveGitPaths } from "./local-git.ts";
+import { VerificationContext } from "./method-telemetry.ts";
+import { memoScopeOf } from "./verification-memo.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace-layout.ts";
 import {
@@ -77,6 +92,65 @@ const ONE_CHANGED_FILE = 1;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
+const TRACKED_FILE = "file";
+const REWRITTEN_SUBJECT = "rewritten";
+const GIT_BINARY = "git";
+const WRAPPER_MODE = 0o700;
+const INVARIANT_BRANCH = "main";
+const SIDE_BRANCH = "side";
+const STATUS = "status";
+const UNCHANGED_TURN = [STATUS];
+const CHANGED_TURN = [STATUS, "add", "diff", "commit", STATUS];
+const CHANGED_TURN_M = [STATUS, "add", "diff", "hash-object", "commit", STATUS];
+const COMMITTED_TURN = [
+  STATUS,
+  "merge-base",
+  "rev-list",
+  "reset",
+  "add",
+  "diff",
+  "commit",
+  STATUS,
+];
+const COMMITTED_TURN_M = [
+  STATUS,
+  "merge-base",
+  "rev-list",
+  "reset",
+  "add",
+  "diff",
+  "hash-object",
+  "commit",
+  STATUS,
+];
+const CONVERSION_TURN = [
+  STATUS,
+  "add",
+  "diff",
+  "hash-object",
+  "update-index",
+  "commit",
+  STATUS,
+];
+const CONVERSION_ONLY_TURN = [
+  STATUS,
+  "add",
+  "diff",
+  "hash-object",
+  "update-index",
+  STATUS,
+];
+const MOVED_GITDIR = "moved-gitdir";
+const SUBMODULE = "sub";
+const OUTSIDE_REF = `refs/remotes/origin/${OTHER_BRANCH}`;
+const ONE_PUSH = 1;
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
+const RESTORE = ["checkout", "reset", "clean", STATUS];
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -150,6 +224,87 @@ function gateSpan(records: readonly TelemetryRecord[]) {
   const spans = spansOf(records, SpanOperation.Gate);
   assert.equal(spans.length, ONE_GATE_SPAN);
   return spans[0]!;
+}
+
+function countGit(t: TestContext, h: Fixture): () => string[] {
+  const bin = temporary(t);
+  const log = join(bin, "commands");
+  const git = (h.input.env.PATH ?? "")
+    .split(delimiter)
+    .map((directory) => join(directory, GIT_BINARY))
+    .find((path) => {
+      try {
+        accessSync(path, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  assert.ok(git);
+  writeFileSync(
+    join(bin, GIT_BINARY),
+    `#!/bin/sh\nprintf '%s\\n' "$1" >> '${log}'\nexec '${git}' "$@"\n`,
+    { mode: WRAPPER_MODE },
+  );
+  h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
+  return () =>
+    existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+}
+
+function countPushes(t: TestContext, h: Fixture): () => number {
+  let pushes = 0;
+  const push = h.input.transport.pushNodeBranch.bind(h.input.transport);
+  t.mock.method(
+    h.input.transport,
+    "pushNodeBranch",
+    async (...args: Parameters<typeof push>) => {
+      pushes++;
+      return push(...args);
+    },
+  );
+  return () => pushes;
+}
+
+async function commitCrlfFile(h: Fixture): Promise<void> {
+  const git = simpleGit(h.root);
+  await git.raw(["config", "core.autocrlf", "false"]);
+  writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT);
+  await git.add(CRLF_FILE);
+  await git.commit("crlf");
+  writeFileSync(join(h.root, ".gitattributes"), "*.txt text\n");
+  await git.add(".gitattributes");
+  await git.commit("attributes");
+  h.checkouts[0]!.head = await headOf(h.root);
+}
+
+async function invariantRepository(t: TestContext) {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.raw(["init", "-q", "-b", INVARIANT_BRANCH]);
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, TRACKED_FILE), "base\n");
+  await git.add(TRACKED_FILE);
+  await git.commit("base");
+  const call = {
+    env: hostEnvironment(),
+    directory,
+    context: background,
+    deadlineMs: DEADLINE_MS,
+  };
+  const paths = await resolveGitPaths(call);
+  const holds = async () => {
+    assertInvariant(
+      {
+        status: await readStatus(call),
+        operations: operationsOf(paths),
+      },
+      INVARIANT_BRANCH,
+      await headOf(directory),
+    );
+  };
+  await holds();
+  return { directory, git, holds };
 }
 
 async function gatedTurn(
@@ -606,22 +761,30 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("the gate finds a rebase in progress behind a gitdir file", async (t) => {
+  test("the gate finds a rebase in progress behind a gitdir file that the turn writes and pushes the node branch at before", async (t) => {
     const h = await fixture(
       t,
       [task("gitdir", "false")],
       [
-        bash('mkdir "$(git rev-parse --git-path rebase-merge)"'),
+        bash(
+          `mkdir "$(git rev-parse --git-path rebase-merge)" && mv .git ../${MOVED_GITDIR} && printf "gitdir: %s\\n" "$(cd .. && pwd)/${MOVED_GITDIR}" > .git`,
+        ),
         fauxAssistantMessage("left"),
       ],
     );
-    const gitdir = join(temporary(t), "gitdir");
-    renameSync(join(h.root, ".git"), gitdir);
-    writeFileSync(join(h.root, ".git"), `gitdir: ${gitdir}\n`);
+    await commitOnNode(h.root, "earlier unit commit");
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const pushes = countPushes(t, h);
     const bodies = recordReleases(h);
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     violationEnd(end, bodies, TurnViolation.GitInProgress);
-    assert.equal(existsSync(join(gitdir, "rebase-merge")), false);
+    assert.equal(pushes(), ONE_PUSH);
+    assert.equal(await remoteHead(h), before);
+    assert.equal(
+      existsSync(join(dirname(h.root), MOVED_GITDIR, "rebase-merge")),
+      false,
+    );
   });
 
   test("the merge commit takes the template message and not the merge message file", async (t) => {
@@ -692,5 +855,283 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(texts[0]!.startsWith(`${GIT_COMMIT_FAILED}:`));
     assert.ok(texts[0]!.includes(SIGNER_FAILURE));
     assert.deepEqual(spansOf(records, SpanOperation.Git), []);
+  });
+  test("an unchanged turn runs one git status", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    const before = h.checkouts[0]!.head;
+    await gatedTurn(h, t, async () => {});
+    assert.deepEqual(commands(), UNCHANGED_TURN);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("a changed turn with no modified path runs five git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () =>
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE),
+    );
+    assert.deepEqual(commands(), CHANGED_TURN);
+    assert.equal(h.checkouts[0]!.head, await headOf(h.root));
+  });
+
+  test("a changed turn with a modified path runs six git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () =>
+      writeFileSync(join(h.root, TRACKED_FILE), FIXED),
+    );
+    assert.deepEqual(commands(), CHANGED_TURN_M);
+  });
+
+  test("an agent-committed turn with no modified path runs eight git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    const before = h.checkouts[0]!.head;
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
+      await simpleGit(h.root).add(WORK_FILE);
+      await simpleGit(h.root).commit(AGENT_SUBJECT);
+    });
+    assert.deepEqual(commands(), COMMITTED_TURN);
+    assert.equal(await headOf(h.root, "HEAD^"), before);
+  });
+
+  test("an agent-committed turn with a modified path runs nine git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, TRACKED_FILE), FIXED);
+      await simpleGit(h.root).commit(AGENT_SUBJECT, [TRACKED_FILE]);
+    });
+    assert.deepEqual(commands(), COMMITTED_TURN_M);
+  });
+
+  test("a conversion-only path adds one git process to a changed turn", async (t) => {
+    const h = await fixture(t, [], []);
+    await commitCrlfFile(h);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT);
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
+    });
+    assert.deepEqual(commands(), CONVERSION_TURN);
+    assert.equal(
+      (
+        await simpleGit(h.root).raw([
+          "show",
+          "--name-only",
+          "--format=",
+          "HEAD",
+        ])
+      ).trim(),
+      WORK_FILE,
+    );
+  });
+
+  test("an entry with only a worktree-side change takes the slow path and commits nothing", async (t) => {
+    const h = await fixture(t, [], []);
+    await commitCrlfFile(h);
+    const before = h.checkouts[0]!.head;
+    const commands = countGit(t, h);
+    const gated = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () =>
+      writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT),
+    );
+    await gated.prompt(EMPTY_PROMPT);
+    assert.deepEqual(commands(), CONVERSION_ONLY_TURN);
+    assert.equal(gated.changed(), false);
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("the restore after a live verification runs four git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    writeFileSync(join(h.root, TRACKED_FILE), FIXED);
+    writeFileSync(join(h.root, STRAY_FILE), STRAY_FILE);
+    await restoreCheckout(
+      h.input.env,
+      h.checkouts[0]!,
+      h.nodeBranch,
+      h.checkouts[0]!.head,
+      background,
+      () => DEADLINE_MS,
+    );
+    assert.deepEqual(commands(), RESTORE);
+    assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+  });
+
+  test("the verification memo reads the tree id of a commit once", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    assert.deepEqual(commands(), ["rev-parse"]);
+  });
+
+  test("an agent that rewrites the history stops with history_rewritten and leaves the checkout at before", async (t) => {
+    const h = await fixture(t, [], []);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).raw([
+          "commit",
+          "--amend",
+          "--allow-empty",
+          "-m",
+          REWRITTEN_SUBJECT,
+        ]);
+      }),
+      { code: TurnViolation.HistoryRewritten },
+    );
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("a conflict turn that aborts the merge stops with merge_missing", async (t) => {
+    const h = await conflictFixture(t, [
+      bash("git merge --abort"),
+      fauxAssistantMessage("aborted"),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(refreshAtClaim(h), {
+      reason: EndReason.OperationFailed,
+      code: TurnViolation.MergeMissing,
+    });
+    assert.equal(await headOf(h.root), before);
+  });
+
+  test("two violations in one turn stop with the code of the first check", async (t) => {
+    const h = await fixture(t, [], []);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+        mkdirSync(gitPath(h, "rebase-merge"));
+      }),
+      { code: TurnViolation.BranchChanged },
+    );
+    assert.equal(await headOf(h.root), before);
+    assert.equal(existsSync(gitPath(h, "rebase-merge")), false);
+  });
+
+  test("a branch switch names the full refs in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is refs/heads/${OTHER_BRANCH}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+        ),
+      },
+    );
+  });
+
+  test("a HEAD that names a ref outside refs/heads names that ref in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        const git = simpleGit(h.root);
+        await git.raw(["update-ref", OUTSIDE_REF, "HEAD"]);
+        await git.raw(["symbolic-ref", "HEAD", OUTSIDE_REF]);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is ${OUTSIDE_REF}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+        ),
+      },
+    );
+  });
+
+  test("a staged gitlink of a submodule with ignore all leaves the turn unchanged", async (t) => {
+    const h = await fixture(t, [], []);
+    const library = temporary(t);
+    const lib = simpleGit(library);
+    await lib.raw(["init", "-q", "-b", INVARIANT_BRANCH]);
+    writeFileSync(join(library, TRACKED_FILE), TRACKED_FILE);
+    await lib.add(TRACKED_FILE);
+    await lib.raw([...IDENTITY, "commit", "-q", "-m", TRACKED_FILE]);
+    const git = simpleGit(h.root, {
+      unsafe: { allowUnsafeProtocolOverride: true },
+    });
+    await git.raw([
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      library,
+      SUBMODULE,
+    ]);
+    await git.raw([
+      "config",
+      "-f",
+      ".gitmodules",
+      `submodule.${SUBMODULE}.ignore`,
+      "all",
+    ]);
+    await git.raw(["add", "-A"]);
+    await git.commit(SUBMODULE);
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const gated = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      const sub = simpleGit(join(h.root, SUBMODULE));
+      writeFileSync(join(h.root, SUBMODULE, WORK_FILE), WORK_FILE);
+      await sub.add(WORK_FILE);
+      await sub.raw([...IDENTITY, "commit", "-q", "-m", WORK_FILE]);
+      await git.raw(["add", "-A"]);
+    });
+    await gated.prompt(EMPTY_PROMPT);
+    assert.equal(gated.changed(), false);
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("invariant I fails on a staged leftover", async (t) => {
+    const repository = await invariantRepository(t);
+    writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
+    await repository.git.add(WORK_FILE);
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an untracked file", async (t) => {
+    const repository = await invariantRepository(t);
+    writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an unmerged path", async (t) => {
+    const repository = await invariantRepository(t);
+    const { directory, git } = repository;
+    await git.checkoutLocalBranch(SIDE_BRANCH);
+    writeFileSync(join(directory, TRACKED_FILE), SIDE_BRANCH);
+    await git.commit(SIDE_BRANCH, [TRACKED_FILE]);
+    await git.checkout(INVARIANT_BRANCH);
+    writeFileSync(join(directory, TRACKED_FILE), INVARIANT_BRANCH);
+    await git.commit(INVARIANT_BRANCH, [TRACKED_FILE]);
+    await assert.rejects(git.merge([SIDE_BRANCH]));
+    rmSync(join(directory, ".git", "MERGE_HEAD"));
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an operation path", async (t) => {
+    const repository = await invariantRepository(t);
+    mkdirSync(join(repository.directory, ".git", "rebase-merge"));
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 });

@@ -37,6 +37,7 @@ import {
   matchOriginHead,
   matchRemote,
   removeBranches,
+  resolveGitPaths,
 } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { mergedBranchesOf } from "./setup-repository.ts";
@@ -45,8 +46,8 @@ import { excludeScratch } from "./workspace.ts";
 import {
   BASE_DIRECTORY,
   CHECKOUTS_DIRECTORY,
+  type NodeCheckout,
   RELEASE_DIRECTORY,
-  type WorkspaceCheckout,
 } from "./workspace-layout.ts";
 
 export const ORIGIN_DIRECTORY = "origin";
@@ -158,7 +159,7 @@ async function prepareCheckout(
   input: TreeSources,
   repository: ExecutionSetup["repositories"][number],
   call: LocalGitCall,
-): Promise<WorkspaceCheckout> {
+): Promise<NodeCheckout> {
   const { binding_id, name } = repository;
   const mirror = mirrorOf(input.state, binding_id);
   const directory = join(input.state, CHECKOUTS_DIRECTORY, name);
@@ -205,7 +206,13 @@ async function prepareCheckout(
     chmodTree(mirror, LOCKED);
   }, binding_id);
   excludeScratch(directory);
-  return { binding_id, name, directory, head: head! };
+  const gitPaths = await resolveGitPaths({
+    env: call.env,
+    directory,
+    context: call.context,
+    deadlineMs: remaining(call.deadline),
+  });
+  return { binding_id, name, directory, head: head!, gitPaths };
 }
 
 export async function prepareTrees(
@@ -217,7 +224,7 @@ export async function prepareTrees(
       recursive: true,
       mode: PRIVATE_DIRECTORY_MODE,
     });
-  const checkouts: WorkspaceCheckout[] = [];
+  const checkouts: NodeCheckout[] = [];
   for (const repository of input.setup.repositories)
     checkouts.push(await prepareCheckout(input, repository, call));
   return {

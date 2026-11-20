@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { basename, dirname, relative } from "node:path";
+import type { GitPaths } from "./local-git.ts";
 
 export const WORKSPACES_DIRECTORY = "workspaces";
 export const SCRATCH_DIRECTORY = ".kanthord-scratch/";
@@ -26,6 +27,9 @@ export interface WorkspaceCheckout {
   name: string;
   directory: string;
   head: string;
+}
+export interface NodeCheckout extends WorkspaceCheckout {
+  gitPaths: GitPaths;
 }
 export function workspaceKeyOf(
   checkouts: readonly Pick<WorkspaceCheckout, "directory">[],
