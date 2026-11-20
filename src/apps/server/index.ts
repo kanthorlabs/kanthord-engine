@@ -869,6 +869,7 @@ export function composeServices(options: ComposeServicesOptions) {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
       revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
+      revokeHeldPauses: () => mission.revokeHeldPauses(),
       executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
@@ -1192,6 +1193,7 @@ export function composeServices(options: ComposeServicesOptions) {
     workerStopOrders: {
       connected: (...args) => worker.executionConnected(...args),
       sendStopOrder: (...args) => worker.sendStopOrder(...args),
+      sendRevokedOrder: (...args) => worker.sendRevokedOrder(...args),
       orderOf: (...args) => worker.orderOf(...args),
     },
     pauseFacts: {

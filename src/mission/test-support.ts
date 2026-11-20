@@ -123,6 +123,7 @@ export function revokedExecution(
 ): RevokedExecution {
   return {
     execution_id: executionId,
+    runtime_identity: createIdentity("worker_registration"),
     trace: {
       execution_id: executionId,
       project_id: createIdentity("project"),
@@ -176,6 +177,7 @@ export function executionHarness(t: TestContext, identity: CallerIdentity) {
     runtime_identity: claim.runtimeIdentity,
     attempt: claim.attempt,
     pinned_revision: claim.pinnedRevision,
+    ...LIVE_TRACE,
   });
   h.dependencies.executionAttribution.of = () => ({
     client_id: actor.client_id,
@@ -357,6 +359,7 @@ export function keepsClaim(
           runtime_identity: claim.runtimeIdentity,
           attempt: FIRST_REVISION,
           pinned_revision: FIRST_REVISION,
+          ...LIVE_TRACE,
         }
       : null;
   h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
@@ -508,6 +511,8 @@ export function missionHarness(
       },
       sendStopOrder: (...args) =>
         record("workerStopOrders.sendStopOrder", args),
+      sendRevokedOrder: (...args) =>
+        record("workerStopOrders.sendRevokedOrder", args),
       orderOf: (...args) => {
         record("workerStopOrders.orderOf", args);
         return null;
@@ -581,6 +586,12 @@ export function missionHarness(
 }
 
 export const ASSESSED_COMMIT = "a".repeat(40);
+export const LIVE_TRACE = {
+  project_id: "project_live",
+  node_id: "node_live",
+  trace_id: "c".repeat(32),
+  root_span_id: "d".repeat(16),
+};
 export const HARNESS_PLATFORM = "github";
 export const HARNESS_CREDENTIAL = "github";
 export const HARNESS_ACTION_KEY = "repo.pull_request";
@@ -929,6 +940,7 @@ export async function reviewHarness(
       runtime_identity: h.claim.runtimeIdentity,
       attempt: h.claim.attempt,
       pinned_revision: h.claim.pinnedRevision,
+      ...LIVE_TRACE,
     });
   };
   h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {

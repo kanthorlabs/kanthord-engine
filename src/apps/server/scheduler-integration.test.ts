@@ -33,6 +33,7 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import {
+  expireHeldPause,
   FAKE_GITHUB_HOST_KEY_FINGERPRINT,
   FAKE_SSH_CREDENTIAL,
   FAKE_SSH_HOST,
@@ -821,6 +822,7 @@ test("sweep and human revocation defeat an already proved release with one termi
               },
             }),
           );
+        if (!sweep) expireHeldPause(h.f, claim.execution.execution_id);
         return original(input, caller);
       };
       try {

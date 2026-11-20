@@ -315,6 +315,7 @@ export function revoke(
   endExecution(tx, row.execution_id, now, stop);
   return {
     execution_id: row.execution_id,
+    runtime_identity: row.runtime_identity,
     trace: executionTrace(row),
     ended_at: now,
     stop: stop === undefined ? null : storedStopOf(stop),

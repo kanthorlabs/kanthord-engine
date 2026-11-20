@@ -140,6 +140,7 @@ export class ExecutionRun {
   private readonly parent: Context;
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
+  private revokedStop: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
   private verificationTimedOut = false;
   private readonly traceClosers = new Set<(status: SpanStatus) => void>();
@@ -228,12 +229,14 @@ export class ExecutionRun {
   }
 
   revoke(code: string | null = null): void {
-    this.store(this.stopWith(EndReason.Revoked, code, null, null));
+    this.revokedStop ??= this.stopWith(EndReason.Revoked, code, null, null);
+    this.store(this.revokedStop);
   }
 
   async fence(context: Context): Promise<boolean> {
     this.finalStep();
-    if (this.stopped?.reason === EndReason.Revoked) return false;
+    if (this.revokedStop || this.stopped?.reason === EndReason.Revoked)
+      return false;
     let result: OperationResult<{ claim_state: ClaimState }>;
     try {
       result = await this.clients.scheduler.claimGet(
@@ -649,6 +652,12 @@ export class ExecutionRun {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
     this.finalCall();
+    if (this.revokedStop)
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: this.revokedStop.reason,
+        code: this.revokedStop.code,
+      };
     const stop: ReleaseStop = {
       reason,
       code: stopped.code,

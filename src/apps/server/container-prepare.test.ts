@@ -20,6 +20,7 @@ import {
   BindingEntryState,
   ContainerRuntime,
   PoolPlacement,
+  StopOrderReason,
 } from "../../worker/contract.ts";
 import {
   frameEntrySchema,
@@ -710,4 +711,47 @@ test("the init frame carries the entries, a bindings frame changes them and a po
     client_id: "client_identity_other",
     message: call,
   });
+});
+
+const QUEUED_ORDER = {
+  execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  reason: StopOrderReason.Revoked,
+};
+
+test("a stop_orders frame sent before the container starts follows the init frame, and a later list and a stop follow in order", async (t) => {
+  const runtime = framedRuntime(t);
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  stopAfter(t, () => instance.terminate());
+  await gate.asked;
+  instance.stopOrders([QUEUED_ORDER]);
+  gate.answer.resolve("kanthord:test");
+  const [init, queued] = await runtime.framesCount(2);
+  assert.equal(init?.kind, FrameKind.Init);
+  assert.deepEqual(queued, {
+    kind: FrameKind.StopOrders,
+    orders: [QUEUED_ORDER],
+  });
+  instance.stopOrders([]);
+  instance.control(SlotControl.Stop);
+  const frames = await runtime.framesCount(4);
+  assert.deepEqual(frames.slice(2), [
+    { kind: FrameKind.StopOrders, orders: [] },
+    { kind: FrameKind.Control, control: SlotControl.Stop },
+  ]);
+});
+
+test("a stop_orders frame queued after a queued stop spawns no container and the instance ends with no error", async (t) => {
+  const runtime = recordingRuntime(t);
+  const gate = imageGate();
+  const f = hostWith(true, () => ok(), gate.imageFor);
+  const instance = f.driver.launch(launchOf(runtime.environment));
+  await gate.asked;
+  instance.control(SlotControl.Stop);
+  instance.stopOrders([QUEUED_ORDER]);
+  const exit = await instance.exited;
+  assert.equal(exit.code, SUCCESS_CODE);
+  assert.equal(exit.error, null);
+  assert.equal(runtime.spawned(), false);
 });

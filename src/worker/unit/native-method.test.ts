@@ -832,7 +832,7 @@ test("a fence read of an ended claim in finish ends as revoked with no push and 
   assert.equal(pushed, false);
 });
 
-test("a fence read of an ended claim in onStop skips the push and keeps the stored stop", async (t) => {
+test("a fence read of an ended claim in onStop skips the push and the release and ends the run as revoked", async (t) => {
   const { result, calls, pushed } = await watchedImplementRun(t, {
     claimState: "finished",
     script: () => [
@@ -842,11 +842,15 @@ test("a fence read of an ended claim in onStop skips the push and keeps the stor
       }),
     ],
   });
-  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.equal(result.kind, ExecutionEndKind.Ended);
   assert.equal(
-    result.kind === ExecutionEndKind.Released && result.stop?.reason,
-    EndReason.ProviderFailed,
+    result.kind === ExecutionEndKind.Ended && result.reason,
+    EndReason.Revoked,
   );
   assert.equal(calls.filter((call) => call === CLAIM_READ).length, FENCE_READS);
+  assert.equal(
+    calls.filter((call) => call === RELEASE_CALL).length,
+    NO_RELEASES,
+  );
   assert.equal(pushed, false);
 });

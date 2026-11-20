@@ -224,6 +224,7 @@ export interface Dependencies {
     MissionCollaborations,
     | "revokeForInstanceArchive"
     | "revokePausedClaim"
+    | "revokeHeldPauses"
     | "executionReleased"
     | "reportExecutionEnds"
   >;
@@ -464,6 +465,9 @@ export class WorkerService implements Service {
   ): void {
     this.instances.sendStopOrder(executionId, runtimeIdentity, reason);
   }
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void {
+    this.instances.sendRevokedOrder(executionId, runtimeIdentity);
+  }
   orderOf(executionId: string): StopOrderReason | null {
     return this.instances.orderOf(executionId);
   }
@@ -517,6 +521,7 @@ export class WorkerService implements Service {
   private readonly performer: ActionPerformer;
   private readonly pool?: Pool;
   private poolStarted = false;
+  private ordersRecovered = false;
   readonly instances: WorkerInstances;
   readonly machines: WorkerMachines;
   readonly footprint: WorkerFootprint;
@@ -586,6 +591,8 @@ export class WorkerService implements Service {
           this.heartbeatClock.drop(runtimeIdentity);
         this.instancesChanged();
       },
+      stopOrdersQueued: (name) => this.sendPoolStopOrders(name),
+      poolRuns: (instanceId) => this.poolRuns(instanceId),
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
@@ -682,13 +689,22 @@ export class WorkerService implements Service {
   }
 
   startPool(): void {
-    if (!this.pool || this.poolStarted) return;
-    this.poolStarted = true;
-    const host = this.dependencies.pool!.host;
-    host.prepare();
-    void host.sweep(this.archivedInstanceNames());
-    this.reconcile();
-    void this.logUnavailableContainerDriver();
+    if (this.pool && !this.poolStarted) {
+      this.poolStarted = true;
+      const host = this.dependencies.pool!.host;
+      host.prepare();
+      void host.sweep(this.archivedInstanceNames());
+      this.reconcile();
+      void this.logUnavailableContainerDriver();
+    }
+    this.recoverLostOrders();
+  }
+
+  private recoverLostOrders(): void {
+    if (this.ordersRecovered) return;
+    this.ordersRecovered = true;
+    this.instances.finishLostArchives();
+    this.dependencies.instanceArchive.revokeHeldPauses();
   }
 
   readSessionEntry(
@@ -747,6 +763,25 @@ export class WorkerService implements Service {
   async stopPool(): Promise<void> {
     this.poolStarted = false;
     await this.dependencies.pool?.host.stop();
+  }
+
+  private poolRuns(instanceId: string): boolean {
+    return (
+      this.poolStarted &&
+      this.pool!.instances().some((instance) => instance.id === instanceId)
+    );
+  }
+
+  private sendPoolStopOrders(name: string): void {
+    if (!this.poolStarted) return;
+    const instance = this.pool!.instances().find(
+      (candidate) => candidate.name === name,
+    );
+    if (!instance) return;
+    const orders = this.dependencies.store.transaction((tx) =>
+      this.instances.stopOrdersOf(tx, instance.id),
+    );
+    this.dependencies.pool!.host.stopOrders(instance, orders);
   }
 
   bindingsChanged(projectId: string): void {

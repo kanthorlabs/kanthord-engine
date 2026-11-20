@@ -15,7 +15,7 @@ import {
   type ServerFrame,
   serverFrameSchema,
 } from "./frames.ts";
-import { BindingEntryState } from "../../worker/contract.ts";
+import { BindingEntryState, StopOrderReason } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const FRAME_INVALID = "worker.slot.frame_invalid";
@@ -48,6 +48,15 @@ const SERVER_FRAMES: ServerFrame[] = [
   },
   { kind: FrameKind.Control, control: SlotControl.Drain },
   { kind: FrameKind.Control, control: SlotControl.Stop },
+  {
+    kind: FrameKind.StopOrders,
+    orders: [
+      {
+        execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+        reason: StopOrderReason.Revoked,
+      },
+    ],
+  },
   { kind: FrameKind.Ping },
 ];
 

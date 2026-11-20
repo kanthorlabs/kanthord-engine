@@ -103,6 +103,7 @@ function revokedClaimOf(executionId: string): ExecutionEnds["revoked"][number] {
   return {
     execution: {
       execution_id: executionId,
+      runtime_identity: createIdentity("worker_registration"),
       trace: {
         execution_id: executionId,
         project_id: createIdentity("project"),
@@ -170,13 +171,13 @@ const HOLDER_MISMATCH_VIEW: WorkerAgentView = {
 };
 
 const IDLE_POOL_HOST: PoolHost = {
-  prepare: unexpected,
+  prepare: () => {},
   start: unexpected,
   update: unexpected,
   restart: unexpected,
   imageOf: unexpected,
   archive: unexpected,
-  sweep: unexpected,
+  sweep: async () => {},
   stop: async () => {},
   placementStatus: unexpected,
   readSessionEntry: unexpected,
@@ -186,6 +187,7 @@ const IDLE_POOL_HOST: PoolHost = {
   sessionItems: unexpected,
   removeSession: unexpected,
   logItem: unexpected,
+  stopOrders: unexpected,
 };
 
 function unexpected(): never {
@@ -244,6 +246,7 @@ function instanceFixture(
   const pausedRevocation = {
     revoked: [] as string[],
     answer: null as ExecutionTrace | null,
+    heldRevocations: 0,
   };
   const revocation = {
     failure: null as Error | null,
@@ -325,6 +328,9 @@ function instanceFixture(
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
         return pausedRevocation.answer;
+      },
+      revokeHeldPauses: () => {
+        pausedRevocation.heldRevocations++;
       },
       executionReleased: (executionId, stop) => {
         released.push({ executionId, stop });
@@ -1994,6 +2000,24 @@ test("the first archive transaction ends no instance and the deferred end runs e
   assert.deepEqual(logged[0].execution_ids, [box.executionId]);
 });
 
+test("a pending archive lost by a server restart completes at startPool: it revokes its claim and ends the instance", async (t) => {
+  const { f, records } = loggingFixture(t);
+  const box = await connectedBusy(f);
+  await box.archive();
+  assert.ok(f.worker().instances.liveInstance(box.record.id));
+  await f.restart();
+  assert.deepEqual(f.revoked, []);
+  f.worker().startPool();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.deepEqual(f.archivers[0]?.instance, INSTANCE);
+  assert.equal(f.worker().instances.liveInstance(box.record.id), null);
+  assert.equal(records(ARCHIVED_RECORD).length, SINGLE_CALL);
+  assert.equal(f.pausedRevocation.heldRevocations, SINGLE_CALL);
+  f.worker().startPool();
+  assert.deepEqual(f.revoked, [box.executionId]);
+  assert.equal(f.pausedRevocation.heldRevocations, SINGLE_CALL);
+});
+
 test("a rotate during a pending archive refuses with in_use and the stopping list", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);
@@ -2153,6 +2177,40 @@ test("a pause order is connected, raises the work version and appears in the wor
     orders.map((order) => stopOrderEntrySchema.parse(order)),
     [{ execution_id: box.executionId, reason: StopOrderReason.HumanPaused }],
   );
+});
+
+test("worker.instance.work answers a revoked entry for a revoked order", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  const version = f.worker().instances.workVersionOf(INSTANCE);
+  f.worker().sendRevokedOrder(
+    box.executionId,
+    box.registration.runtime_identity,
+  );
+  assert.ok(f.worker().instances.workVersionOf(INSTANCE) > version);
+  const orders = (await box.work()).stop_orders;
+  assert.deepEqual(
+    orders.map((order) => stopOrderEntrySchema.parse(order)),
+    [{ execution_id: box.executionId, reason: StopOrderReason.Revoked }],
+  );
+});
+
+test("a revoked order past the deadline leaves the sweep with no Mission call", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().sendRevokedOrder(
+    box.executionId,
+    box.registration.runtime_identity,
+  );
+  assert.equal(f.worker().orderOf(box.executionId), StopOrderReason.Revoked);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.equal(f.worker().orderOf(box.executionId), null);
+  assert.deepEqual(f.released, []);
+  assert.deepEqual(f.pausedRevocation.revoked, []);
+  assert.deepEqual(f.revoked, []);
+  assert.equal(f.reports.length, NO_CALLS);
 });
 
 test("a pause order past the deadline revokes the paused claim, removes the order and runs the hook for a non-null answer", async (t) => {

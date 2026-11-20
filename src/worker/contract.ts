@@ -1038,6 +1038,7 @@ export interface PoolHost {
     signal: AbortSignal,
   ): Promise<SessionRemovalResult>;
   logItem(instance: PoolInstance): Promise<FootprintItem | null>;
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -1540,6 +1541,7 @@ export const StopOrderReason = {
   InstanceArchived: "instance_archived",
   WorkerStopped: "worker_stopped",
   HumanPaused: "human_paused",
+  Revoked: "revoked",
 } as const;
 export type StopOrderReason =
   (typeof StopOrderReason)[keyof typeof StopOrderReason];

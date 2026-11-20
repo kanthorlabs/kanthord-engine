@@ -202,6 +202,8 @@ export class FakeSlotInstance implements SlotInstance {
     this.changed();
   }
 
+  stopOrders(): void {}
+
   terminate(): void {
     this.exit.resolve(SLOT_EXIT);
   }
@@ -2821,4 +2823,16 @@ export async function provisionNativeServerProject(
     },
   });
   return { id: project.id, instance: instances[0]! };
+}
+
+export function expireHeldPause(
+  fixture: Pick<
+    Awaited<ReturnType<typeof gatewayFixture>>,
+    "mission" | "worker"
+  >,
+  executionId: string,
+): void {
+  fixture.mission.revokePausedClaim(executionId);
+  fixture.mission.executionReleased(executionId, null);
+  fixture.worker.executionReleased(executionId);
 }

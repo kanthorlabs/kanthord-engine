@@ -23,7 +23,8 @@ const createWorkerTables: Migration = (database) => {
       public_key TEXT,
       fingerprint TEXT,
       created_at INTEGER NOT NULL,
-      ended_at INTEGER
+      ended_at INTEGER,
+      archive_actor TEXT
     );
     CREATE UNIQUE INDEX worker_instance_name_revision ON worker_instance (name, revision);
     CREATE UNIQUE INDEX worker_instance_fingerprint ON worker_instance (fingerprint);

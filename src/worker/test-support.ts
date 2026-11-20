@@ -14,6 +14,7 @@ import type {
   SessionRead,
   SessionReadResult,
   SessionRemovalResult,
+  StopOrderEntry,
 } from "./contract.ts";
 import { getWorkerDeclaration, type WorkerDeclaration } from "./catalog.ts";
 
@@ -207,6 +208,13 @@ export class FakePoolHost implements PoolHost {
   readonly unreadableSessions = new Set<string>();
   readonly removedSessions: Array<{ instance: string; execution: string }> = [];
   stderrLog: FootprintItem | null = null;
+  readonly sentStopOrders: Array<{
+    instance: PoolInstance;
+    orders: readonly StopOrderEntry[];
+  }> = [];
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void {
+    this.sentStopOrders.push({ instance, orders });
+  }
   async sessionItems(instance: PoolInstance): Promise<FootprintItem[]> {
     return this.sessions.get(instance.name) ?? [];
   }

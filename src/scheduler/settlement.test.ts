@@ -185,6 +185,7 @@ test("consecutive losses reset after a finished row or revocation and isolate at
     insertExecution(tx, revoked);
     assert.deepEqual(revoke(tx, row.node_id, FIXTURE_DEADLINE + 2), {
       execution_id: revoked.execution_id,
+      runtime_identity: revoked.runtime_identity,
       trace: executionTrace(revoked),
       ended_at: FIXTURE_DEADLINE + 2,
       stop: null,

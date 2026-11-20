@@ -22,11 +22,7 @@ import {
   ExecutionStopReason,
   schedulerOperations,
 } from "../../scheduler/contract.ts";
-import {
-  ExecutionEnd,
-  RevokeCause,
-  trackingOperations,
-} from "../../tracking/contract.ts";
+import { ExecutionEnd, trackingOperations } from "../../tracking/contract.ts";
 import {
   alwaysAvailable,
   BindingEntryState,
@@ -35,6 +31,8 @@ import {
   PoolPlacement,
   RegistrationActivity,
   type RepositoryTransport,
+  type StopOrderEntry,
+  StopOrderReason,
   WorkerErrorCode,
   workerOperations,
 } from "../../worker/contract.ts";
@@ -96,6 +94,8 @@ const HELLO = "hello";
 const GIT_NAME = "Instance Model";
 const GIT_EMAIL = "instance_model@example.invalid";
 const FIRST_VERSION = 1;
+const EXECUTION_ENDED = "execution ended";
+const CLAIM_WATCH_INTERVAL_MS = 60000;
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -138,6 +138,8 @@ interface UnitHost {
   repository: RepositoryTransport;
   runtime(instanceName: string): ModelRuntimeFactory;
   handoverHold(instanceName: string): Promise<void> | undefined;
+  record(line: string): void;
+  released(executionId: string): void;
 }
 
 interface HostedBinding {
@@ -213,6 +215,7 @@ class HostedBindings {
 
 class ModelUnit implements SlotInstance {
   readonly exited: Promise<SlotExit>;
+  readonly orders: StopOrderEntry[] = [];
   ended = false;
   private readonly unit: WorkerUnit;
   private readonly hosted: HostedBindings;
@@ -229,7 +232,7 @@ class ModelUnit implements SlotInstance {
       bindings: this.hosted.initial(wire),
       directories: { data: state, log: state },
       env,
-      log: () => {},
+      log: (line) => host.record(line),
       model_runtime_factory: host.runtime(name),
       repository_transport: host.repository,
     });
@@ -244,6 +247,11 @@ class ModelUnit implements SlotInstance {
 
   bindings(entries: readonly SlotEntry[]): void {
     void this.hosted.apply(threadEntries(entries));
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.orders.push(...orders);
+    this.unit.stopOrders(orders);
   }
 
   terminate(): void {
@@ -262,6 +270,12 @@ class ModelUnit implements SlotInstance {
       await host.handoverHold(name);
       return handover(...args);
     };
+    const release = transport.scheduler.executionRelease;
+    const scheduler: Record<string, unknown> = transport.scheduler;
+    scheduler.executionRelease = (...args: Parameters<typeof release>) => {
+      host.released(args[0].params.execution_id);
+      return release(...args);
+    };
   }
 
   private async run(wire: ThreadEntry[]): Promise<SlotExit> {
@@ -279,6 +293,9 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
   readonly placement = PoolPlacement.Server;
   readonly units = new Map<string, ModelUnit[]>();
   readonly repository: RepositoryTransport;
+  readonly records: Record<string, unknown>[] = [];
+  readonly releases: string[] = [];
+  agentRuns = 0;
   private readonly gates: Gates;
   private readonly holds = new Map<string, Promise<void>>();
 
@@ -312,8 +329,9 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
 
   runtime(instanceName: string): ModelRuntimeFactory {
     const command = `until [ -e "${this.gates.path(instanceName)}" ]; do sleep ${GATE_POLL_SECONDS}; done; printf ${HELLO} > hello.txt`;
-    return (input) =>
-      scriptedModelRuntime(
+    return (input) => {
+      this.agentRuns++;
+      return scriptedModelRuntime(
         scriptedProvider([
           fauxAssistantMessage(fauxToolCall(BASH, { command }), {
             stopReason: TOOL_USE,
@@ -321,6 +339,15 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
           fauxAssistantMessage(DONE),
         ]),
       )(input);
+    };
+  }
+
+  record(line: string): void {
+    this.records.push(JSON.parse(line) as Record<string, unknown>);
+  }
+
+  released(executionId: string): void {
+    this.releases.push(executionId);
   }
 
   handoverHold(instanceName: string): Promise<void> | undefined {
@@ -839,7 +866,7 @@ test(
 );
 
 test(
-  "a forced archive of a busy instance that no binding lists returns its node to Available and stops its thread, and a later claim of another instance takes the node",
+  "a forced archive of a busy instance that no binding lists sends instance_archived through the slot, the run releases with that stop, the node returns to Available, the thread stops, and a later claim of another instance takes the node",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const s = await scenario(t, [FIRST_INSTANCE, SECOND_INSTANCE]);
@@ -862,21 +889,24 @@ test(
     assert.ok(s.driver.launched(FIRST_INSTANCE).every((unit) => unit.ended));
     assert.notEqual((await s.instance(FIRST_INSTANCE)).ended_at, null);
 
-    const [revoked] = await s.executions(project, nodeId);
-    assert.equal(revoked?.execution_id, claim!.execution_id);
-    assert.equal(revoked?.claim_state, ClaimState.Finished);
-    assert.equal(revoked?.stop?.reason, ExecutionStopReason.InstanceArchived);
-    assert.equal(revoked?.stop?.code, null);
-    assert.deepEqual(JSON.parse(revoked?.stop?.detail ?? "null"), {
-      instance: FIRST_INSTANCE,
-      actor: s.fixture.accountId,
-    });
+    assert.deepEqual(s.driver.launched(FIRST_INSTANCE)[0]!.orders, [
+      {
+        execution_id: claim!.execution_id,
+        reason: StopOrderReason.InstanceArchived,
+      },
+    ]);
+    assert.deepEqual(s.driver.releases, [claim!.execution_id]);
+    const [released] = await s.executions(project, nodeId);
+    assert.equal(released?.execution_id, claim!.execution_id);
+    assert.equal(released?.claim_state, ClaimState.Finished);
+    assert.equal(released?.stop?.reason, ExecutionStopReason.InstanceArchived);
+    assert.equal(released?.stop?.code, null);
     const node = await s.nodeOf(nodeId);
     assert.equal(node.state, NodeState.Available);
     assert.equal(node.attempt, attempt);
     const trace = await s.rootOf(claim!.execution_id);
-    assert.equal(trace.root.attributes[END_ATTRIBUTE], ExecutionEnd.Revoked);
-    assert.equal(trace.root.attributes[CAUSE_ATTRIBUTE], RevokeCause.Human);
+    assert.equal(trace.root.attributes[END_ATTRIBUTE], ExecutionEnd.Finished);
+    assert.equal(trace.root.attributes[CAUSE_ATTRIBUTE], undefined);
     assert.deepEqual(
       trace.spans.filter(
         (span) =>
@@ -905,6 +935,157 @@ test(
         s.signal,
       ),
       SECOND_INSTANCE,
+    );
+  },
+);
+
+test(
+  "a pause of a server instance run keeps the claim, sends human_paused through the slot, and the run pushes its checkpoint and releases with human_paused",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const s = await scenario(t, [FIRST_INSTANCE]);
+    const project = await s.project("revoked", [FIRST_INSTANCE]);
+    const nodeId = await s.node(project, "implement-1.md");
+    const pushes: string[] = [];
+    const push = s.driver.repository.pushNodeBranch;
+    s.driver.repository.pushNodeBranch = (...args) => {
+      pushes.push(args[0]);
+      return push(...args);
+    };
+    s.fixture.worker.startPool();
+    const [claim] = await until(
+      () => s.running(project),
+      (items) => items.length === SINGLE_ITEM,
+      s.signal,
+    );
+    const executionId = claim!.execution_id;
+    await until(
+      async () => s.driver.agentRuns,
+      (runs) => runs === SINGLE_ITEM,
+      s.signal,
+    );
+    const node = await s.nodeOf(nodeId);
+    const mission = await s.call(missionOperations.get, {
+      params: { project_id: project },
+      query: {},
+      body: null,
+    });
+    const pausedAt = Date.now();
+    await s.call(missionOperations["node.pause"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: {
+        reason: "hold",
+        expected_mission_version: mission.version,
+        expected_state: node.state,
+        expected_attempt: node.attempt,
+      },
+    });
+    const end = await until(
+      async () =>
+        s.driver.records.find(
+          (record) =>
+            record.msg === EXECUTION_ENDED &&
+            record.execution_id === executionId,
+        ),
+      (record) => record !== undefined,
+      s.signal,
+    );
+    assert.ok(Date.now() - pausedAt < CLAIM_WATCH_INTERVAL_MS);
+    assert.equal(end?.reason, StopOrderReason.HumanPaused);
+    assert.deepEqual(s.driver.launched(FIRST_INSTANCE)[0]!.orders, [
+      { execution_id: executionId, reason: StopOrderReason.HumanPaused },
+    ]);
+    assert.deepEqual(s.driver.releases, [executionId]);
+    assert.equal(pushes.length, SINGLE_ITEM);
+    const [released] = await s.executions(project, nodeId);
+    assert.equal(released?.claim_state, ClaimState.Finished);
+    assert.equal(released?.stop?.reason, ExecutionStopReason.HumanPaused);
+    assert.equal((await s.nodeOf(nodeId)).state, NodeState.Paused);
+  },
+);
+
+test(
+  "a server restart inside the hold of a pause revokes the held claim, and the run does not resume work",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { bare } = await bareRepository(t, "instance-model");
+    const gates = new Gates(join(temporary(t), "gates"));
+    const directory = temporary(t);
+    const stored = {
+      bare,
+      gates,
+      path: join(directory, "kanthord.db"),
+      stateDirectory: join(directory, "state"),
+    };
+    mkdirSync(stored.stateDirectory);
+    let masterKey = "";
+    let projectId = "";
+    let nodeId = "";
+    let claimId = "";
+
+    await t.test(
+      "the first server crashes while a pause holds the claim",
+      async (u) => {
+        const server = await startServer(u, stored);
+        masterKey = server.fixture.masterKey;
+        await provision(server, [FIRST_INSTANCE]);
+        projectId = await server.project("held", [FIRST_INSTANCE]);
+        nodeId = await server.node(projectId, "implement-1.md");
+        server.fixture.worker.startPool();
+        const [claim] = await until(
+          () => server.running(projectId),
+          (items) => items.length === SINGLE_ITEM,
+          u.signal,
+        );
+        claimId = claim!.execution_id;
+        const node = await server.nodeOf(nodeId);
+        const mission = await server.call(missionOperations.get, {
+          params: { project_id: projectId },
+          query: {},
+          body: null,
+        });
+        server.driver.crash();
+        await server.call(missionOperations["node.pause"], {
+          params: { node_id: nodeId },
+          query: {},
+          body: {
+            reason: "hold",
+            expected_mission_version: mission.version,
+            expected_state: node.state,
+            expected_attempt: node.attempt,
+          },
+        });
+        const [held] = await server.running(projectId);
+        assert.equal(held?.execution_id, claimId);
+      },
+    );
+
+    await t.test(
+      "the second server revokes the held claim at start",
+      async (u) => {
+        const server = await startServer(u, { ...stored, masterKey });
+        const pushes: string[] = [];
+        const push = server.driver.repository.pushNodeBranch;
+        server.driver.repository.pushNodeBranch = (...args) => {
+          pushes.push(args[0]);
+          return push(...args);
+        };
+        server.fixture.worker.startPool();
+        gates.open(FIRST_INSTANCE);
+        const [revoked] = await server.executions(projectId, nodeId);
+        assert.equal(revoked?.execution_id, claimId);
+        assert.equal(revoked?.claim_state, ClaimState.Finished);
+        assert.equal(revoked?.stop?.reason, ExecutionStopReason.HumanPaused);
+        await delay(SETTLE_MS);
+        assert.deepEqual(server.driver.releases, []);
+        assert.deepEqual(pushes, []);
+        assert.equal((await server.nodeOf(nodeId)).state, NodeState.Paused);
+        assert.equal(
+          (await server.executions(projectId, nodeId)).length,
+          SINGLE_ITEM,
+        );
+      },
     );
   },
 );

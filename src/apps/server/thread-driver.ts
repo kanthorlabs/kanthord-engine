@@ -2,7 +2,11 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { LogDestination } from "../../kernel/log.ts";
-import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
+import {
+  type PlacementStatus,
+  PoolPlacement,
+  type StopOrderEntry,
+} from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
 import {
   entryPorts,
@@ -102,6 +106,13 @@ class ThreadInstance implements SlotInstance {
       { kind: ThreadMessageKind.Bindings, entries: wire },
       entryPorts(wire),
     );
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.worker.postMessage({
+      kind: ThreadMessageKind.StopOrders,
+      orders: [...orders],
+    });
   }
 
   terminate(): void {

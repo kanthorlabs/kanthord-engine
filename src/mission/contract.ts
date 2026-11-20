@@ -161,6 +161,7 @@ export interface MissionCollaborations {
     actor: HumanActor,
   ): ExecutionEnds | null;
   revokePausedClaim(executionId: string): RevokedExecution["trace"] | null;
+  revokeHeldPauses(): void;
   executionReleased(executionId: string, stop: ReleaseStop | null): void;
   reportExecutionEnds(ends: ExecutionEnds): void;
 }
@@ -229,6 +230,7 @@ export interface ReleaseStop {
 
 export interface RevokedExecution {
   execution_id: string;
+  runtime_identity: string;
   trace: {
     execution_id: string;
     project_id: string;
@@ -246,7 +248,10 @@ export interface FailureHold {
   available_at: number | null;
 }
 
-export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
+export interface EndedExecution extends Omit<
+  RevokedExecution,
+  "stop" | "runtime_identity"
+> {
   transition: NodeTransition;
   hold: FailureHold;
 }
@@ -285,8 +290,12 @@ export interface SchedulerClaims {
   ): {
     execution_id: string;
     runtime_identity: string;
+    project_id: string;
+    node_id: string;
     attempt: number;
     pinned_revision: number;
+    trace_id: string;
+    root_span_id: string;
   } | null;
 }
 
@@ -461,7 +470,8 @@ export interface WorkerStopOrders {
     runtimeIdentity: string,
     reason: ReleaseStop["reason"],
   ): void;
-  orderOf(executionId: string): ReleaseStop["reason"] | null;
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void;
+  orderOf(executionId: string): ReleaseStop["reason"] | "revoked" | null;
 }
 
 export interface PauseFactsRecord {

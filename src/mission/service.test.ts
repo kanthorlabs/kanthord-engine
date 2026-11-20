@@ -107,6 +107,7 @@ import {
   databaseSnapshot,
   executionHarness,
   keptClaimHarness,
+  LIVE_TRACE,
   lostHold,
   lostTransition,
   unexpectedCollaboration,
@@ -199,6 +200,7 @@ test("priority refuses a live claim before changing its node or job", (t) => {
         runtime_identity: "runtime",
         attempt: 1,
         pinned_revision: 1,
+        ...LIVE_TRACE,
       }),
     },
   });
@@ -231,6 +233,7 @@ test("dependency admission settles the dependent before testing its live claim",
               runtime_identity: "runtime",
               attempt: 1,
               pinned_revision: 1,
+              ...LIVE_TRACE,
             }
           : null;
       },
@@ -442,6 +445,7 @@ function makeService(
     workerStopOrders: {
       connected: () => false,
       sendStopOrder: () => undefined,
+      sendRevokedOrder: () => undefined,
       orderOf: () => null,
     },
     pauseFacts: {
@@ -4111,6 +4115,7 @@ test("import dependency additions settle a live dependent and dependency-only ed
               runtime_identity: "runtime",
               attempt: 1,
               pinned_revision: 1,
+              ...LIVE_TRACE,
             }
           : null;
       },

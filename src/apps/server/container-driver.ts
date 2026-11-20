@@ -22,6 +22,7 @@ import {
   type PlacementStatus,
   type PoolEntry,
   PoolPlacement,
+  type StopOrderEntry,
 } from "../../worker/contract.ts";
 import {
   type Bridge,
@@ -29,6 +30,7 @@ import {
   type FrameEntry,
   FrameKind,
   instanceFrameSchema,
+  type ServerFrame,
   writeFrame,
 } from "../worker/frames.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
@@ -180,7 +182,7 @@ class ContainerInstance implements SlotInstance {
   private readonly channels = new Map<string, MessagePort>();
   private entries: readonly SlotEntry[];
   private bridge: Bridge | null = null;
-  private readonly queued: SlotControl["kind"][] = [];
+  private readonly queued: ServerFrame[] = [];
   private readonly waiting = new AbortController();
   private settle: (exit: SlotExit) => void = () => {};
   private settled = false;
@@ -208,9 +210,16 @@ class ContainerInstance implements SlotInstance {
 
   control(kind: SlotControl["kind"]): void {
     this.waiting.abort();
-    if (this.client)
-      writeFrame(this.client.stdin, { kind: FrameKind.Control, control: kind });
-    else this.queued.push(kind);
+    this.send({ kind: FrameKind.Control, control: kind });
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.send({ kind: FrameKind.StopOrders, orders: [...orders] });
+  }
+
+  private send(frame: ServerFrame): void {
+    if (this.client) writeFrame(this.client.stdin, frame);
+    else this.queued.push(frame);
   }
 
   bindings(entries: readonly SlotEntry[]): void {
@@ -394,8 +403,7 @@ class ContainerInstance implements SlotInstance {
       kind: FrameKind.Init,
       entries: frameEntries(this.entries),
     });
-    for (const kind of this.queued.splice(0))
-      writeFrame(client.stdin, { kind: FrameKind.Control, control: kind });
+    for (const frame of this.queued.splice(0)) writeFrame(client.stdin, frame);
     const ping = setInterval(() => {
       writeFrame(client.stdin, { kind: FrameKind.Ping });
     }, PING_INTERVAL_MS);

@@ -3,16 +3,26 @@ import { test } from "node:test";
 import { testHumanIdentity } from "../kernel/test-identity.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { AssessmentResult, MissionErrorCode, NodeState } from "./contract.ts";
+import {
+  AssessmentResult,
+  MissionErrorCode,
+  NodeState,
+  RevokeCause,
+} from "./contract.ts";
 import {
   admitControl,
   closeExternalAttempt,
   ControlError,
   executionEnds,
+  reportEnds,
 } from "./control.ts";
 import { insertAssessment, openAttempt, readAttempt } from "./record-store.ts";
 import { setNodeState } from "./store.ts";
-import { controlHarness, settlesExpired } from "./test-support.ts";
+import {
+  controlHarness,
+  revokedExecution,
+  settlesExpired,
+} from "./test-support.ts";
 
 const NOW = 100;
 const FIRST_ATTEMPT = 1;
@@ -21,6 +31,7 @@ const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const WAKE = "wakeup.wake";
 const ACT = "acts.act";
+const REVOKED_ORDER = "workerStopOrders.sendRevokedOrder";
 
 test("control admission checks retirement and mission before settlement and state", (t) => {
   const h = controlHarness(t, IDENTITY);
@@ -259,3 +270,36 @@ for (const [operation, state, body] of [
     assert.equal(h.calls.at(-1)?.method, WAKE);
   });
 }
+
+test("reportEnds queues one stop order revoked for a human revoke and none for the assessment of the execution itself", (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const human = revokedExecution(createIdentity("execution"), h.node_id, NOW);
+  const assessed = revokedExecution(
+    createIdentity("execution"),
+    h.node_id,
+    NOW,
+  );
+  reportEnds(h.dependencies, {
+    lost: [],
+    revoked: [
+      {
+        execution: human,
+        cause: RevokeCause.Human,
+        transition: null,
+        failure_cause: null,
+      },
+      {
+        execution: assessed,
+        cause: RevokeCause.Assessment,
+        transition: null,
+        failure_cause: null,
+      },
+    ],
+  });
+  assert.deepEqual(
+    h.calls
+      .filter((call) => call.method === REVOKED_ORDER)
+      .map((call) => call.arguments),
+    [[human.execution_id, human.runtime_identity]],
+  );
+});

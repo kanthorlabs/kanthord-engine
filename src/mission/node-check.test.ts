@@ -59,6 +59,7 @@ import { readMission, readNode, setNodeState } from "./store.ts";
 import {
   ASSESSED_COMMIT,
   externalRequestHarness,
+  LIVE_TRACE,
   revokedExecution,
 } from "./test-support.ts";
 
@@ -617,6 +618,7 @@ async function deferredCheckAfter(
           runtime_identity: createIdentity("worker_registration"),
           attempt: FIRST_ATTEMPT,
           pinned_revision: FIRST_ATTEMPT,
+          ...LIVE_TRACE,
         }
       : null;
   h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) => {

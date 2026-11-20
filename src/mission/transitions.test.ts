@@ -40,7 +40,11 @@ import {
   DEFERRED_CHECK_ROUND_LIMIT,
   resumeDeferredChecks,
 } from "./node-check.ts";
-import { controlHarness, unexpectedCollaboration } from "./test-support.ts";
+import {
+  controlHarness,
+  LIVE_TRACE,
+  unexpectedCollaboration,
+} from "./test-support.ts";
 
 const UNIT_RECORDS_DELETED = "unitRecords.deleteNode";
 const NO_STALLS = 0;
@@ -810,6 +814,7 @@ test("a none answer with a live claim calls no merge", async (t) => {
     runtime_identity: createIdentity("runtime"),
     attempt: FIRST_ATTEMPT,
     pinned_revision: FIRST_ATTEMPT,
+    ...LIVE_TRACE,
   });
   h.release();
   await advance(FIRST_ROUND_DELAY_MS);
@@ -1259,6 +1264,7 @@ test("deferred check with a live claim and expected end state writes no end stat
     runtime_identity: createIdentity("runtime"),
     attempt: FIRST_ATTEMPT,
     pinned_revision: FIRST_ATTEMPT,
+    ...LIVE_TRACE,
   });
   h.release();
   await deferredCheckEnds(h.calls, t.signal);

@@ -35,6 +35,7 @@ import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import {
   createInstances,
   enableCoveringAgents,
+  expireHeldPause,
   gatewayFixture,
   humanCaller,
   instanceNames,
@@ -194,6 +195,7 @@ async function setup(t: TestContext) {
     };
   };
   return {
+    fixture,
     human,
     project_id: project.id,
     mission_id: mission.id,
@@ -576,6 +578,7 @@ test(
         query: {},
         body: await o.act(NodeState.Executing, nodeId, PAUSE_REASON),
       });
+      expireHeldPause(h.fixture, paused.execution.execution_id);
       assert.equal((await o.node(nodeId)).state, NodeState.Paused);
       await assertPause();
     });

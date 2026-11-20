@@ -20,6 +20,7 @@ import {
   type SessionRead,
   type SessionReadResult,
   type SessionRemovalResult,
+  type StopOrderEntry,
 } from "../../worker/contract.ts";
 import {
   executionSessionItems,
@@ -55,6 +56,7 @@ export interface WorkerPoolOptions {
 interface Hosted {
   instance: PoolInstance;
   entries: readonly PoolEntry[];
+  orders: readonly StopOrderEntry[];
   pending: boolean;
   running?: SlotInstance;
   ports: Map<string, MessagePort>;
@@ -169,6 +171,7 @@ export class WorkerPool implements PoolHost {
     const hosted: Hosted = {
       instance,
       entries,
+      orders: [],
       pending,
       ports: new Map(),
       requested: null,
@@ -187,6 +190,13 @@ export class WorkerPool implements PoolHost {
     if (!hosted) return;
     hosted.entries = entries;
     hosted.running?.bindings(this.slotEntries(hosted));
+  }
+
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void {
+    const hosted = this.hosted.get(instance.id);
+    if (!hosted) return;
+    hosted.orders = orders;
+    hosted.running?.stopOrders(orders);
   }
 
   restart(instance: PoolInstance): void {
@@ -404,6 +414,7 @@ export class WorkerPool implements PoolHost {
         environment: this.options.environment ?? process.env,
       });
       hosted.running = running;
+      if (hosted.orders.length) running.stopOrders(hosted.orders);
       hosted.failure = null;
       hosted.requested = null;
       hosted.startedAt = Date.now();

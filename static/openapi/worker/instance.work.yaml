@@ -208,6 +208,7 @@ components:
                   - instance_archived
                   - worker_stopped
                   - human_paused
+                  - revoked
             required:
               - execution_id
               - reason

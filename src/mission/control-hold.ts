@@ -210,7 +210,14 @@ export function pauseNode(
         body.reason,
         now,
         controlResult(tx, dependencies, nodeId, null, actor, now),
-        null,
+        {
+          execution_id: live.execution_id,
+          project_id: live.project_id,
+          node_id: live.node_id,
+          attempt: live.attempt,
+          trace_id: live.trace_id,
+          root_span_id: live.root_span_id,
+        },
       ),
       stopOrder: {
         execution_id: live.execution_id,
@@ -317,4 +324,37 @@ export function revokePausedClaim(
   });
   reportEnds(dependencies, ends);
   return ends.revoked[0]?.execution.trace ?? null;
+}
+
+export function revokeHeldPauses(
+  dependencies: Dependencies,
+  now: number,
+): void {
+  const ends = executionEnds();
+  dependencies.store.transaction((tx) => {
+    for (const node of readClaimedNodes(tx)) {
+      if (node.state !== NodeState.Paused) continue;
+      const live = dependencies.schedulerClaims.liveExecutionOf(
+        tx,
+        node.id,
+        now,
+      );
+      if (
+        live === null ||
+        dependencies.workerStopOrders.orderOf(live.execution_id) !== null
+      )
+        continue;
+      endLiveClaim(
+        tx,
+        dependencies,
+        node,
+        now,
+        RevokeCause.Human,
+        null,
+        ends,
+        HUMAN_PAUSED_STOP,
+      );
+    }
+  });
+  reportEnds(dependencies, ends);
 }

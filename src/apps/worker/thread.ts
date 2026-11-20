@@ -48,6 +48,8 @@ async function main(): Promise<void> {
       if (!control.success) return;
       if (control.data.kind === ThreadMessageKind.Bindings)
         void bindings.apply(control.data.entries);
+      else if (control.data.kind === ThreadMessageKind.StopOrders)
+        unit.stopOrders(control.data.orders);
       else if (control.data.kind === ThreadMessageKind.Drain) void unit.drain();
       else void unit.stop();
     });

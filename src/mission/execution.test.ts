@@ -9,7 +9,7 @@ import {
   requireEvaluationClaim,
   requireTextBound,
 } from "./execution.ts";
-import { executionHarness } from "./test-support.ts";
+import { executionHarness, LIVE_TRACE } from "./test-support.ts";
 import { MissionErrorCode, NodeState } from "./contract.ts";
 import { insertNode, setNodeState } from "./store.ts";
 
@@ -35,6 +35,7 @@ test("execution admission derives the pin and actor and rejects ended or foreign
     runtime_identity: h.claim.runtimeIdentity,
     attempt: h.claim.attempt,
     pinned_revision: h.claim.pinnedRevision,
+    ...LIVE_TRACE,
   };
   for (const live of [
     null,

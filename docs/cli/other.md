@@ -942,6 +942,9 @@ runs it, and help does not list it. It takes no option.
   error, so every other output lands in standard error.
 - It creates the `TMPDIR` directory with mode `0700`, then starts the worker
   thread with the operational log on standard error.
+- A `stop_orders` frame holds `orders`, each `{ execution_id, reason }`. It
+  sends the orders to the thread, and the worker unit stops each named
+  execution of its own.
 - A `control` frame sends `drain` or `stop` to the thread. `SIGTERM` and `SIGINT`
   send `stop`. A thread that does not exit within 5 s after a signal is
   terminated.
