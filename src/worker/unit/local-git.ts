@@ -713,7 +713,13 @@ export async function diffText(
 ): Promise<string> {
   assert.match(from, /^[a-f0-9]{40,64}$/);
   assert.match(to, /^[a-f0-9]{40,64}$/);
-  return run(env, directory, ["diff", from, to], context, deadlineMs);
+  return run(
+    env,
+    directory,
+    ["diff", "--no-ext-diff", "--no-textconv", from, to],
+    context,
+    deadlineMs,
+  );
 }
 
 export async function unmergedFiles(
@@ -805,6 +811,8 @@ export async function roundPatch(
       "--diff-merges=remerge",
       "--patch",
       "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
       "--format=fuller",
       `${base}..HEAD`,
       "--",
@@ -826,7 +834,14 @@ export async function changePatch(
   return run(
     env,
     directory,
-    ["diff", "--no-color", `${base}...HEAD`, "--"],
+    [
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      `${base}...HEAD`,
+      "--",
+    ],
     context,
     deadlineMs,
   );
