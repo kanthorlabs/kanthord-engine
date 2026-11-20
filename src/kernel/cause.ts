@@ -54,6 +54,7 @@ export const CauseSubcategory = {
   RepositoryHook: "repository_hook",
   VerificationKilled: "verification_killed",
   Network: "network",
+  DiskLow: "disk_low",
   ExecutionLost: "execution_lost",
   PromptRecord: "prompt_record",
   Intervention: "intervention",
@@ -115,6 +116,7 @@ export const CAUSE_SUBCATEGORIES: Readonly<
   [CauseCategory.Infrastructure]: [
     CauseSubcategory.VerificationKilled,
     CauseSubcategory.Network,
+    CauseSubcategory.DiskLow,
     CauseSubcategory.ExecutionLost,
     CauseSubcategory.PromptRecord,
   ],

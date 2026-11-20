@@ -329,6 +329,7 @@ test(
       [REPOSITORY_ADDRESS]: repo.bare,
       [GATED_ADDRESS]: gatedRepo.bare,
     });
+    let prHead!: string;
     let pr!: {
       kind: "pull_request";
       resource_identity: string;
@@ -524,6 +525,7 @@ test(
           resource_identity: f.bindings.gated!.resource_identity,
           number: f.gitHub.pulls[0]!.number,
         };
+        prHead = f.gitHub.pulls[0]!.head_sha;
         const asset = request.assets[0]!;
         assert.ok(asset.kind === AssetKind.Platform);
         assert.deepEqual(asset.address, pr);
@@ -581,6 +583,22 @@ test(
             if_none_match: null,
             status: 200,
           },
+          {
+            method: "GET",
+            path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100`,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
+          {
+            method: "GET",
+            path: `/repos/owner/gated/commits/${prHead}/statuses?per_page=100&page=1`,
+            body: null,
+            token: GITHUB_KEY,
+            if_none_match: null,
+            status: 200,
+          },
         ]);
       },
     );
@@ -625,6 +643,16 @@ test(
             {
               method: "GET",
               path: GATED_RULES_PATH,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100`,
+              token: GITHUB_KEY,
+            },
+            {
+              method: "GET",
+              path: `/repos/owner/gated/commits/${prHead}/statuses?per_page=100&page=1`,
               token: GITHUB_KEY,
             },
             {

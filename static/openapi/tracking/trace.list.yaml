@@ -515,6 +515,7 @@ components:
                           - repository_hook
                           - verification_killed
                           - network
+                          - disk_low
                           - execution_lost
                           - prompt_record
                           - intervention

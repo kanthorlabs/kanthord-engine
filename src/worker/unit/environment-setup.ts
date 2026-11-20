@@ -8,6 +8,7 @@ import {
   parseEnvironmentText,
   setupScriptsOf,
 } from "../../kernel/devcontainer.ts";
+import { type DiskSpace, freeDiskOf } from "../../kernel/disk.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
 import { redactReason } from "../../kernel/probe.ts";
@@ -100,6 +101,8 @@ export interface SetupInput {
   context: Context;
   deadline: number;
   spans: SpanRecorder | null;
+  diskFreeRatio: number;
+  freeDisk?: (directory: string) => Promise<DiskSpace>;
   exhausted?: () => boolean;
 }
 
@@ -297,10 +300,34 @@ function gitCall(input: SetupInput, entry: SetupEntry): GitCall {
   };
 }
 
+async function assertDiskFree(
+  input: SetupInput,
+  entries: readonly SetupEntry[],
+): Promise<void> {
+  const measure = input.freeDisk ?? freeDiskOf;
+  for (const entry of entries) {
+    const { free_bytes, total_bytes } = await measure(entry.directory);
+    if (free_bytes >= input.diskFreeRatio * total_bytes) continue;
+    throw new ExecutionStop(
+      EndReason.EnvironmentFailed,
+      EnvironmentFailure.DiskLow,
+      redactReason(
+        JSON.stringify({
+          free_bytes,
+          total_bytes,
+          disk_free_ratio: input.diskFreeRatio,
+          directory: entry.directory,
+        }),
+      ),
+    );
+  }
+}
+
 async function setUpEntries(
   input: SetupInput,
   entries: readonly SetupEntry[],
 ): Promise<SetupResult> {
+  await assertDiskFree(input, entries);
   for (const entry of entries) {
     const environmentDigest = environmentDigestOf(entry);
     const kept = await keptRoots(gitCall(input, entry), environmentDigest);

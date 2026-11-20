@@ -83,6 +83,7 @@ type SetupDependencies = Pick<
   | "environmentClaimed"
   | "environmentDigestOf"
   | "environmentOf"
+  | "diskFreeRatio"
   | "missionPromptPins"
   | "promptBase"
 > & {
@@ -438,6 +439,7 @@ async function setupWithin(
       agents,
       templates,
       resource_budget: row.resource_budget ?? declaration.resource_budget,
+      disk_free_ratio: dependencies.diskFreeRatio,
       intent: dependencies.intentOf(tx, claim.nodeId, claim.pinnedRevision),
       repositories,
     });

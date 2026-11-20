@@ -30,6 +30,7 @@ import {
   SetupEnd,
   setupEntries,
   setUpHeads,
+  type SetupInput,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
@@ -96,12 +97,25 @@ function stored(document: Record<string, unknown>): ExecutionEnvironment {
   return { source: EnvironmentSource.Stored, document, digest: DIGEST };
 }
 
-function input() {
+const DISK_FREE_RATIO = 0.1;
+const DISK_TOTAL_BYTES = 1000;
+
+function device(freeBytes: number) {
+  return async () => ({
+    free_bytes: freeBytes,
+    total_bytes: DISK_TOTAL_BYTES,
+  });
+}
+
+function input(overrides: Partial<SetupInput> = {}): SetupInput {
   return {
     env,
     context: background,
     deadline: Date.now() + 30000,
     spans: null,
+    diskFreeRatio: DISK_FREE_RATIO,
+    freeDisk: device(DISK_TOTAL_BYTES),
+    ...overrides,
   };
 }
 
@@ -136,6 +150,63 @@ async function setUp(checkout: string, document: Record<string, unknown>) {
     await setupEntries(input(), [setupCheckout(checkout, stored(document))]),
   );
 }
+
+test("a clone with free disk above the limit runs its setup commands", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const entries = await setupEntries(input(), [
+    setupCheckout(
+      checkout,
+      stored({ postCreateCommand: `touch ${SETUP_MARKER}` }),
+    ),
+  ]);
+  const free = DISK_TOTAL_BYTES * DISK_FREE_RATIO + 1;
+  assert.deepEqual(await runSetup(input({ freeDisk: device(free) }), entries), {
+    end: SetupEnd.Pass,
+  });
+  assert.equal(existsSync(join(checkout, SETUP_MARKER)), true);
+});
+
+test("a clone with free disk equal to the limit runs its setup commands", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const entries = await setupEntries(input(), [
+    setupCheckout(
+      checkout,
+      stored({ postCreateCommand: `touch ${SETUP_MARKER}` }),
+    ),
+  ]);
+  const free = DISK_TOTAL_BYTES * DISK_FREE_RATIO;
+  assert.deepEqual(await runSetup(input({ freeDisk: device(free) }), entries), {
+    end: SetupEnd.Pass,
+  });
+  assert.equal(existsSync(join(checkout, SETUP_MARKER)), true);
+});
+
+test("a clone with free disk below the limit stops with disk_low before any setup command", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const entries = await setupEntries(input(), [
+    setupCheckout(
+      checkout,
+      stored({ postCreateCommand: `touch ${SETUP_MARKER}` }),
+    ),
+  ]);
+  const free = DISK_TOTAL_BYTES * DISK_FREE_RATIO - 1;
+  await assert.rejects(
+    runSetup(input({ freeDisk: device(free) }), entries),
+    (error) => {
+      assert.ok(error instanceof ExecutionStop);
+      assert.equal(error.reason, EndReason.EnvironmentFailed);
+      assert.equal(error.code, EnvironmentFailure.DiskLow);
+      assert.deepEqual(JSON.parse(error.detail ?? ""), {
+        free_bytes: free,
+        total_bytes: DISK_TOTAL_BYTES,
+        disk_free_ratio: DISK_FREE_RATIO,
+        directory: checkout,
+      });
+      return true;
+    },
+  );
+  assert.equal(existsSync(join(checkout, SETUP_MARKER)), false);
+});
 
 const ROOTS_SETUP = {
   postCreateCommand: "mkdir -p deps && echo x > deps/a && echo y > out.txt",

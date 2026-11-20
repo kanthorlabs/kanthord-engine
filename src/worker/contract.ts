@@ -1333,6 +1333,7 @@ export const executionSetupSchema = z.strictObject({
   agents: z.array(agentSetupSchema).min(1),
   templates: promptTemplatesSchema,
   resource_budget: resourceBudgetSchema,
+  disk_free_ratio: z.number().gt(0).lt(1),
   intent: z.enum(ExecutionIntent),
   repositories: z.array(
     z.strictObject({

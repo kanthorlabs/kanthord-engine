@@ -342,6 +342,10 @@ components:
           required:
             - wall_time_ms
           additionalProperties: false
+        disk_free_ratio:
+          type: number
+          exclusiveMinimum: 0
+          exclusiveMaximum: 1
         intent:
           type: string
           enum:
@@ -781,6 +785,7 @@ components:
         - agents
         - templates
         - resource_budget
+        - disk_free_ratio
         - intent
         - repositories
       additionalProperties: false

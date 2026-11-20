@@ -378,6 +378,7 @@ function instanceFixture(
     environmentClaimed: unexpected,
     environmentDigestOf: unexpected,
     environmentOf: unexpected,
+    diskFreeRatio: 0.1,
     workerBindingRowOf: unexpected,
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   attributed,
+  CAUSE_SUBCATEGORIES,
   CauseAssigner,
   CauseCategory,
   CauseSubcategory,
@@ -69,4 +70,14 @@ test("attributed uses the assigner rule by default", () => {
   const cause = attributed(CauseCategory.Plan, CauseSubcategory.Oversized);
   assert.equal(cause.assigner, CauseAssigner.Rule);
   assert.throws(() => attributed(CauseCategory.Plan, CauseSubcategory.Network));
+});
+
+test("disk_low belongs to exactly one category", () => {
+  const owners = Object.entries(CAUSE_SUBCATEGORIES).filter(([, members]) =>
+    members.includes(CauseSubcategory.DiskLow),
+  );
+  assert.deepEqual(
+    owners.map(([category]) => category),
+    [CauseCategory.Infrastructure],
+  );
 });
