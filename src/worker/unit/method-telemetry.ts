@@ -52,7 +52,7 @@ export function phaseSpan(phase: Phase | EndPhase): SpanStart {
 
 export { GitStep } from "./git-step.ts";
 
-export function gitFailure(error: unknown): SpanEnd {
+function gitFailure(error: unknown): SpanEnd {
   const line =
     error instanceof CodedError
       ? `${error.code}: ${error.cause instanceof Error ? error.cause.message : error.message}`

@@ -50,6 +50,8 @@ import { phaseSpan } from "./method-telemetry.ts";
 import { EndPhase, Phase, type SpanEnd } from "./telemetry.ts";
 
 const CHECKPOINT_FAILED = "checkpoint failed";
+const RELEASE_STOP_STEP = { id: "execution.release(stop)" } as const;
+const stopPhases = new WeakMap<ExecutionRun, string>();
 const CAPTURE_FAILED = "tasks capture failed";
 const FIRST_PHASE = 0;
 const UNKNOWN_PHASE = -1;
@@ -238,7 +240,7 @@ function defaultPhaseEnd(_ctx: ExecutionCtx, ended: FrameEnd): SpanEnd {
 function withinPhase(
   walk: Walk,
   phase: SpannedPhase,
-  work: () => Promise<StepKind>,
+  work: (spanId: string) => Promise<StepKind>,
 ): Promise<StepKind> {
   const end = phase.end ?? defaultPhaseEnd;
   return walk.io.run.spans.within(
@@ -405,11 +407,15 @@ async function stopNodes(
 ): Promise<void> {
   const { run } = walk.io;
   walk.ctx.stop = stop;
+  const stopping = { ...walk, stopping: true };
   try {
-    await spannedNodes(
-      { ...walk, stopping: true },
+    await withinPhase(
+      stopping,
       { phase: EndPhase.OnStop, end: null },
-      built.onStop,
+      (spanId) => {
+        stopPhases.set(run, spanId);
+        return hostNodes(stopping, built.onStop, { scope: null });
+      },
     );
   } catch (error) {
     if (!(error instanceof Error)) throw error;
@@ -563,10 +569,25 @@ export async function executionBoundary(
   } catch (error) {
     stopped = await run.stopOf(error);
   }
-  if (stopped.reason !== EndReason.Revoked) return run.releaseStop(stopped);
+  if (stopped.reason !== EndReason.Revoked) {
+    await markReleaseStop(run);
+    return run.releaseStop(stopped);
+  }
   return {
     kind: ExecutionEndKind.Ended,
     reason: stopped.reason,
     code: stopped.code,
   };
+}
+
+async function markReleaseStop(run: ExecutionRun): Promise<void> {
+  const { spans } = run;
+  const parent = stopPhases.get(run);
+  if (parent !== undefined) {
+    markStep(spans, RELEASE_STOP_STEP, { outcome: FrameOutcome.Stop, parent });
+    return;
+  }
+  await spans.within(phaseSpan(EndPhase.OnStop), async () =>
+    markStep(spans, RELEASE_STOP_STEP, { outcome: FrameOutcome.Stop }),
+  );
 }

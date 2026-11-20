@@ -233,7 +233,7 @@ test("examine reports its dependencies once and gives its tree back to the pool"
   }
 });
 
-test("B4 examine releases when reads or agent opening consume the wall budget, and a budget end of the reads in prepare carries the stop budget_end/wall_time", async (t) => {
+test("B4 examine releases with the stop budget_end/wall_time when reads in prepare or the agent opening consume the wall budget", async (t) => {
   for (const duringOpen of [false, true]) {
     const setup = anthropicSetup({
       repositories: [],
@@ -306,17 +306,14 @@ test("B4 examine releases when reads or agent opening consume the wall budget, a
       ),
     );
     assert.ok("furtherWork" in end && end.furtherWork);
-    if (duringOpen) assert.equal("stop" in end, false);
-    else {
-      assert.ok("stop" in end && end.stop);
-      assert.equal(end.stop.reason, EndReason.BudgetEnd);
-      assert.equal(end.stop.code, BudgetLimit.WallTime);
-    }
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.BudgetEnd);
+    assert.equal(end.stop.code, BudgetLimit.WallTime);
     assert.equal(releases, EXPECTED_RELEASES);
   }
 });
 
-test("an examine node that its agent deadline cuts releases with further work and no failure stop", async (t) => {
+test("an examine node that its agent deadline cuts releases with further work and the stop budget_end/wall_time", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -399,8 +396,11 @@ test("an examine node that its agent deadline cuts releases with further work an
       open,
     ),
   );
-  assert.deepEqual(end, { kind: "released", furtherWork: true });
-  assert.deepEqual(releases, [{ further_work: true, stop: null }]);
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.BudgetEnd);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
+  assert.equal(releases.length, EXPECTED_RELEASES);
 });
 
 test("an examine agent open that fails releases with the operation_failed stop", async (t) => {
@@ -649,7 +649,11 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     resource_budget: setup.resource_budget,
   });
   const open = async () =>
-    ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
+    ({
+      budget,
+      instruct: async () => {},
+      completeReply: () => false,
+    }) as unknown as NativeAgent;
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const transport = {
     cloneSnapshot: async (
@@ -661,22 +665,21 @@ test("an examine verification that the wall deadline cuts gives a later assessme
       return "a".repeat(40);
     },
   } as unknown as RepositoryTransport;
-  assert.deepEqual(
-    await runStepsExamine(
-      {
-        setup,
-        claim,
-        workspaces,
-        transport,
-        sshAccess: everyBindingSshAccess,
-        env: hostEnvironment(),
-      },
-      run,
-      budget,
-      open,
-    ),
-    { kind: "released", furtherWork: true },
+  const end = await runStepsExamine(
+    {
+      setup,
+      claim,
+      workspaces,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      env: hostEnvironment(),
+    },
+    run,
+    budget,
+    open,
   );
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
   let stopped: unknown;
   try {
     run.stop(EndReason.AssessmentAbsent);

@@ -86,12 +86,12 @@ chain examine
     [PAR] tasks.inputs
       step agent.open                       port: agent.open; budget end after the open; stop operation_failed
       step verify.node                      node commands at the base heads; skipped with no checkout
-    step examine.turn                       [LLM] port: evidence.submit; Examine; budget end after the turn; submits the report evidence; stop report_absent, provider_failed
+    step examine.turn                       [LLM] port: evidence.submit; Examine; budget end after the turn unless the reply is complete; submits the report evidence; stop report_absent, provider_failed
   phase finish
     step execution.release                  [cleanup] further_work false
   budget_end in prepare: stop budget_end/wall_time
   onExit budget_end, after prepare
-    step execution.release                  [cleanup] further_work true; no stop
+    step execution.release                  [cleanup] further_work true; stop budget_end/<limit>
   onStop not revoked, after prepare         no node
   dispose resources                         on every end
   step execution.release(stop)              [cleanup] on each stop that is not revoked

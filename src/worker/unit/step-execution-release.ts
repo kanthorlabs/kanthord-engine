@@ -27,16 +27,16 @@ export const executionRelease: Step<unknown, "claim", "end"> = {
   },
 };
 
-export const executionReleaseFurtherWork: Step<unknown, "claim", "end"> = {
+export const executionReleaseBudgetLimit: Step<unknown, "claim", "end"> = {
   id: "execution.release",
   deadline: DeadlineKind.Cleanup,
   final: true,
   reads: ["claim"],
   writes: ["end"],
   stops: [],
-  note: "further_work true; no stop",
+  note: "further_work true; stop budget_end/<limit>",
   async run(_ctx, scope, io) {
-    return closed(scope, await io.run.release(true));
+    return closed(scope, await io.run.release(true, io.budget.limit()));
   },
 };
 

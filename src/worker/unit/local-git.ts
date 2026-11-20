@@ -36,6 +36,7 @@ const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
+const TAB = "\t";
 const STATUS_PREFIX_LENGTH = 3;
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
@@ -703,19 +704,6 @@ function statusHeader(status: GitStatus, record: string): void {
   }
 }
 
-export async function diffText(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  from: string,
-  to: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string> {
-  assert.match(from, /^[a-f0-9]{40,64}$/);
-  assert.match(to, /^[a-f0-9]{40,64}$/);
-  return run(env, directory, ["diff", from, to], context, deadlineMs);
-}
-
 export async function unmergedFiles(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -805,6 +793,8 @@ export async function roundPatch(
       "--diff-merges=remerge",
       "--patch",
       "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
       "--format=fuller",
       `${base}..HEAD`,
       "--",
@@ -826,7 +816,14 @@ export async function changePatch(
   return run(
     env,
     directory,
-    ["diff", "--no-color", `${base}...HEAD`, "--"],
+    [
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      `${base}...HEAD`,
+      "--",
+    ],
     context,
     deadlineMs,
   );
@@ -982,14 +979,12 @@ export async function mergeRef(
 }
 
 export async function concludeMerge(
-  env: NodeJS.ProcessEnv,
-  directory: string,
+  call: GitCall,
   message: string,
-  context: Context,
-  deadlineMs: number,
 ): Promise<string[]> {
   assert.ok(message);
-  const end = performance.now() + deadlineMs;
+  const { env, directory, context } = call;
+  const end = performance.now() + call.deadlineMs;
   const remaining = () => end - performance.now();
   const staged = await stageWork({
     env,
@@ -999,6 +994,29 @@ export async function concludeMerge(
   });
   await runCommit(env, directory, message, context, remaining());
   return staged;
+}
+
+export async function unmergedPaths(
+  call: GitCall,
+  files: readonly string[],
+): Promise<string[]> {
+  const wanted = new Set(files);
+  const output = await run(
+    call.env,
+    call.directory,
+    [LITERAL_PATHSPECS, "ls-files", "-u", "-z"],
+    call.context,
+    call.deadlineMs,
+  );
+  return [
+    ...new Set(
+      output
+        .split(NUL)
+        .filter((record) => record !== NO_VALUE)
+        .map((record) => record.slice(record.indexOf(TAB) + TAB.length))
+        .filter((path) => wanted.has(path)),
+    ),
+  ];
 }
 
 export async function rangeCommits(

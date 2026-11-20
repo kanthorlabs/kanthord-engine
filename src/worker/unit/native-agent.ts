@@ -57,6 +57,10 @@ export interface TurnPrompt {
 
 const ASSISTANT_ROLE = "assistant";
 const PROVIDER_ERROR = "error";
+const COMPLETE_REPLY = "stop";
+const TOOL_CALL_PART = "toolCall";
+const TEXT_PART = "text";
+const NO_TEXT = "";
 
 export async function promptStop(
   error: unknown,
@@ -84,6 +88,17 @@ async function providerFailure(
     EndReason.ProviderFailed,
     providerFailureOf(errorMessage),
     { detail: detail || null },
+  );
+}
+
+function isCompleteReply(messages: readonly AgentMessage[]): boolean {
+  const last = messages.findLast(
+    (message): message is AssistantMessage => message.role === ASSISTANT_ROLE,
+  );
+  if (last === undefined || last.stopReason !== COMPLETE_REPLY) return false;
+  if (last.content.some((part) => part.type === TOOL_CALL_PART)) return false;
+  return last.content.some(
+    (part) => part.type === TEXT_PART && part.text.trim() !== NO_TEXT,
   );
 }
 
@@ -225,6 +240,10 @@ function nativeAgent(
       assert.ok(session);
       const text = session.getLastAssistantText();
       return text === undefined ? undefined : redaction.modelOutput(text);
+    },
+    completeReply() {
+      assert.ok(session);
+      return isCompleteReply(session.messages);
     },
     closeTrace(status) {
       if (session) trace?.end(status);

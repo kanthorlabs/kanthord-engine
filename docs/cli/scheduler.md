@@ -490,7 +490,10 @@ No query fields are accepted. The required file supplies the following fields.
   `operation_failed` and the code `repository.node_branch.missing`.
 - A steps execution whose conflict turn leaves a conflict marker aborts the
   merge and stops with `operation_failed` and the code
-  `worker.merge.markers_left`.
+  `worker.merge.markers_left`. A conflicted file with no marker right after
+  the merge, a modify/delete or a binary conflict, gives the same stop while it
+  stays unmerged in the index. The agent resolves it with `git add` or
+  `git rm`.
 - After each agent turn of a steps execution, the worker checks each
   checkout. A turn that leaves a checkout off the node branch, moves its head
   to a commit that does not contain the head before the turn, or leaves a git

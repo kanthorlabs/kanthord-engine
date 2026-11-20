@@ -11,6 +11,7 @@ export interface NativeAgent {
     template: PromptTemplate,
   ): Promise<void>;
   lastText(): string | undefined;
+  completeReply(): boolean;
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   closeTrace(status: SpanStatus): void;

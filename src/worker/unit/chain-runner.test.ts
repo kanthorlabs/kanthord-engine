@@ -84,6 +84,10 @@ const CHECKPOINT_FAILED = "checkpoint failed";
 const CAPTURE_FAILED = "tasks capture failed";
 const DISPOSALS = 2;
 const UNWRITTEN_KEY: Key = "agent";
+const RELEASE_STOP_STEP = "execution.release(stop)";
+const ONE_PHASE_SPAN = 1;
+const ONE_RELEASE = 1;
+const BEFORE_LAST = -1;
 
 interface Harness {
   io: ChainIo;
@@ -425,6 +429,70 @@ test("a budget end writes the step outcome budget_end and the phase on_exit, and
   const failed = spanEnds(stopped.records, SpanOperation.Step)[1]!;
   assert.equal(failed.status, SpanStatus.Error);
   assert.deepEqual(failed.text_ids, []);
+});
+
+function releaseStopSpan(h: Harness) {
+  const start = spanRecords(h, SpanOperation.Step).find(
+    (record) =>
+      record.start_time !== undefined &&
+      record.attributes?.[STEP_ID_ATTRIBUTE] === RELEASE_STOP_STEP,
+  );
+  assert.ok(start);
+  const end = spanEnds(h.records, SpanOperation.Step).find(
+    (record) => record.span_id === start.span_id,
+  );
+  assert.ok(end);
+  const onStop = spanRecords(h, SpanOperation.Phase).filter(
+    (record) =>
+      record.start_time !== undefined &&
+      record.attributes?.[PHASE_ATTRIBUTE] === EndPhase.OnStop,
+  );
+  assert.equal(onStop.length, ONE_PHASE_SPAN);
+  return { start, end, phase: onStop[0]! };
+}
+
+test("a stop writes one worker.step span execution.release(stop) under the on_stop phase span with the outcome stop and no text", async (t) => {
+  const late = harness(t);
+  const lateChain = stoppable(
+    late,
+    stepOf(late, "work", {
+      work: () => late.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+    }),
+  )
+    .onStop([stepNode(stepOf(late, "checkpoint"))])
+    .build();
+  const early = harness(t);
+  const earlyChain = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(
+      stepOf(early, "prepare", {
+        work: () => early.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+      }),
+    )
+    .phase(Phase.Finish)
+    .step(closingStep(early, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  for (const [h, built, phases] of [
+    [late, lateChain, [Phase.Prepare, Phase.Tasks, EndPhase.OnStop]],
+    [early, earlyChain, [Phase.Prepare, EndPhase.OnStop]],
+  ] as const) {
+    const end = await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    );
+    assert.equal(end.kind, ExecutionEndKind.Released);
+    assert.equal(h.releases.length, ONE_RELEASE);
+    assert.deepEqual(phaseSpanNames(h.records), phases);
+    assert.deepEqual(stepSpanOutcomes(h.records).at(BEFORE_LAST), [
+      RELEASE_STOP_STEP,
+      FrameOutcome.Stop,
+    ]);
+    const span = releaseStopSpan(h);
+    assert.equal(span.start.parent_span_id, span.phase.span_id);
+    assert.equal(span.end.status, SpanStatus.Error);
+    assert.deepEqual(span.end.text_ids, []);
+    assert.equal(JSON.stringify(h.records).includes(STOP_CODE), false);
+  }
 });
 
 test("a capture that throws after start logs tasks capture failed, and the chain reaches its final step", async (t) => {

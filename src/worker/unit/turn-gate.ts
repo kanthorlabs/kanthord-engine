@@ -18,7 +18,7 @@ import {
   SpanStatus,
 } from "../../tracking/contract.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
-import { gitFailure } from "./method-telemetry.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import {
   abortMerge,
@@ -44,6 +44,7 @@ import {
   softReset,
   stageWork,
   symbolicHead,
+  unmergedPaths,
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
@@ -78,6 +79,7 @@ const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
 const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
 const PROCESS_COUNT_ATTRIBUTE = "kanthord.git.process_count";
+const ERROR_TYPE_ATTRIBUTE = "error.type";
 const CHANGED_FILES_MAX_BYTES = 16384;
 const PATH_PREFIX_SEPARATOR = ":";
 
@@ -85,6 +87,7 @@ export interface ConflictMerge {
   directory: string;
   commit: string;
   files: readonly string[];
+  markerless: readonly string[];
   message: string;
 }
 export interface OpenMerge extends ConflictMerge {
@@ -187,6 +190,7 @@ export function gatedAgent(
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),
+    completeReply: () => agent.completeReply(),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
     close: () => agent.close(),
@@ -322,15 +326,20 @@ function gateFailure(
   violation: TurnViolation | null,
   processes: GitProcessCount,
 ): (error: unknown) => SpanEnd {
-  return (error) => {
-    const attributes = {
+  return (error) => ({
+    status: SpanStatus.Error,
+    attributes: {
       [PROCESS_COUNT_ATTRIBUTE]: processes.count,
       ...violationAttributes(violation),
-    };
-    if (error instanceof ExecutionStop)
-      return { status: SpanStatus.Error, attributes };
-    return { ...gitFailure(error), attributes };
-  };
+      ...errorTypeAttributes(error),
+    },
+  });
+}
+
+function errorTypeAttributes(error: unknown): Attributes {
+  return error instanceof CodedError
+    ? { [ERROR_TYPE_ATTRIBUTE]: error.code }
+    : {};
 }
 
 function mergeOf(turn: GateTurn, checkout: NodeCheckout): ConflictMerge | null {
@@ -570,11 +579,8 @@ async function concludeConflict(
   const { context } = conflict.input;
   await refuseMarkers(state, checkout, conflict.merge, context);
   const paths = await concludeMerge(
-    state.input.env,
-    checkout.directory,
+    callOf(state, checkout, context),
     conflict.merge.message,
-    context,
-    remainingOf(state)(),
   );
   return { changed: true, paths };
 }
@@ -593,9 +599,31 @@ async function refuseMarkers(
     context,
     remaining(),
   );
-  if (left.length === NO_ENTRIES) return;
+  if (
+    left.length === NO_ENTRIES &&
+    (await unmergedMarkerless(state, checkout, { merge, context })).length ===
+      NO_ENTRIES
+  )
+    return;
   await abortMerge(state.input.env, checkout.directory, context, remaining());
   throw new ExecutionStop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
+}
+
+interface MarkerlessCheck {
+  merge: ConflictMerge;
+  context: Context;
+}
+
+function unmergedMarkerless(
+  state: StepsState,
+  checkout: NodeCheckout,
+  check: MarkerlessCheck,
+): Promise<string[]> {
+  if (check.merge.markerless.length === NO_ENTRIES) return Promise.resolve([]);
+  return unmergedPaths(
+    callOf(state, checkout, check.context),
+    check.merge.markerless,
+  );
 }
 
 export async function restoreCheckout(

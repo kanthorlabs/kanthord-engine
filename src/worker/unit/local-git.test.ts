@@ -25,6 +25,7 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   changedEntries,
+  changePatch,
   ChangeStatus,
   checkoutDetached,
   conflictMarkerFiles,
@@ -36,6 +37,7 @@ import {
   isAncestor,
   mergeBase,
   normaliseGitState,
+  roundPatch,
   scrubTree,
   treeOf,
 } from "./local-git.ts";
@@ -249,6 +251,37 @@ test("merge base answers the fork commit of two branches", async (t) => {
   await assert.rejects(
     mergeBase(env, directory, "--all", "work", background, 10000),
   );
+});
+
+test("the patch diffs ignore an external diff driver and a textconv of the checkout", async (t) => {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.raw(["checkout", "-b", "main"]);
+  const marker = join(directory, "driver-ran");
+  const driver = join(temporary(t), "driver.sh");
+  writeFileSync(driver, `#!/bin/sh\necho DRIVER >> "${marker}"\necho DRIVER\n`);
+  chmodSync(driver, EXECUTABLE_MODE);
+  appendFileSync(
+    join(directory, ".git", "config"),
+    `[diff]\n\texternal = ${driver}\n[diff "x"]\n\ttextconv = ${driver}\n`,
+  );
+  writeFileSync(join(directory, ".gitattributes"), "*.txt diff=x\n");
+  writeFileSync(join(directory, "file.txt"), "old\n");
+  const base = await commitWork(env, directory, "base", background, 10000);
+  assert.ok(base);
+  writeFileSync(join(directory, "file.txt"), "new\n");
+  assert.ok(await commitWork(env, directory, "work", background, 10000));
+  const patches = [
+    await changePatch(env, directory, base, background, 10000),
+    await roundPatch(env, directory, base, background, 10000),
+  ];
+  for (const patch of patches) {
+    assert.match(patch, /^-old$/m);
+    assert.match(patch, /^\+new$/m);
+    assert.equal(patch.includes("DRIVER"), false);
+  }
+  assert.equal(existsSync(marker), false);
 });
 
 test("changed entries list the status of each path of a commit range in git order", async (t) => {

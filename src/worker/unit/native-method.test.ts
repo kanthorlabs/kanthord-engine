@@ -1,5 +1,5 @@
 import { ExecutionBudget } from "./budget.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import { BudgetLimit, EnvironmentFailure } from "../../scheduler/contract.ts";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
@@ -38,6 +38,7 @@ import {
   declareAffected,
   everyBindingSshAccess,
   fauxAssistantMessage,
+  fauxText,
   fauxToolCall,
   implementFixture,
   repositorySetup,
@@ -75,6 +76,7 @@ const RELEASE_CALL = "executionRelease";
 const SESSION_END = "agent.session.end";
 const SESSION_ENTRY = "session_entry";
 const ONE_RELEASE = 1;
+const ONE_TURN = 1;
 async function startedSession(t: TestContext, clients: MethodClients) {
   const setup = anthropicSetup();
   const claim = {
@@ -623,14 +625,20 @@ const OK_RELEASE = { kind: "released", furtherWork: false };
 const NODE_ONLY_SETUP_FAILURE = 'case "$PWD" in */checkouts/*) exit 1;; esac';
 const NO_COMMAND_TREE = 0;
 
+interface ExamineOptions {
+  turns?: number;
+}
+
 async function examineRun(
   t: TestContext,
   script: Parameters<typeof scriptedProvider>[0],
+  options: ExamineOptions = {},
 ) {
   const setup = anthropicSetup({
     intent: ExecutionIntent.Examine,
     repositories: [],
   });
+  if (options.turns !== undefined) setup.resource_budget.turns = options.turns;
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -656,6 +664,7 @@ async function examineRun(
   const page = async () => complete({ items: [], next_cursor: null });
   const order: string[] = [];
   const timeline: string[] = [];
+  const releases: unknown[] = [];
   const clients = {
     mission: {
       "execution.pinnedRevision.get": async () =>
@@ -674,7 +683,8 @@ async function examineRun(
       "evidence.submit": async () => complete({ evidence: {} }),
     },
     scheduler: {
-      executionRelease: async () => {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
         order.push(RELEASE_CALL);
         timeline.push(RELEASE_CALL);
         return complete({});
@@ -721,7 +731,7 @@ async function examineRun(
       flush: async () => {},
     },
   });
-  return { result, provider, order, timeline };
+  return { result, provider, order, timeline, releases };
 }
 
 test("native entry runs an examine report and ends the agent.session span before the release", async (t) => {
@@ -731,6 +741,77 @@ test("native entry runs an examine report and ends the agent.session span before
   assert.deepEqual(result, OK_RELEASE);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
   assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
+});
+
+const EXAMINE_TEXT = "All dependencies completed.";
+const REFUSED_REPLIES = [
+  [
+    "error",
+    fauxAssistantMessage(EXAMINE_TEXT, {
+      stopReason: "error",
+      errorMessage: "terminated",
+    }),
+  ],
+  ["length", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "length" })],
+  ["aborted", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "aborted" })],
+  ["empty stop", fauxAssistantMessage("")],
+  [
+    "tool call",
+    fauxAssistantMessage([
+      fauxText(EXAMINE_TEXT),
+      fauxToolCall("ls", { path: "." }),
+    ]),
+  ],
+] as const;
+
+test("at an exhausted turns budget only a nonempty stop reply with no tool call keeps the examine report", async (t) => {
+  for (const [name, reply] of REFUSED_REPLIES) {
+    const { result, releases } = await examineRun(
+      t,
+      [reply, fauxAssistantMessage(EXAMINE_TEXT)],
+      { turns: ONE_TURN },
+    );
+    assert.equal(result.kind, ExecutionEndKind.Released, name);
+    assert.deepEqual(
+      (
+        releases as {
+          further_work: boolean;
+          stop: { reason: string; code: string };
+        }[]
+      ).map(({ further_work, stop }) => [further_work, stop.reason, stop.code]),
+      [[true, EndReason.BudgetEnd, BudgetLimit.Turns]],
+      name,
+    );
+  }
+  const { result, releases } = await examineRun(
+    t,
+    [fauxAssistantMessage(EXAMINE_TEXT)],
+    { turns: ONE_TURN },
+  );
+  assert.deepEqual(result, OK_RELEASE);
+  assert.deepEqual(releases, [{ further_work: false, stop: null }]);
+});
+
+test("an examine budget end after prepare releases with further_work and the stop budget_end/<limit>", async (t) => {
+  const { result, releases } = await examineRun(
+    t,
+    [
+      fauxAssistantMessage(fauxToolCall("ls", { path: "." }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("All dependencies completed."),
+    ],
+    { turns: ONE_TURN },
+  );
+  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.equal(releases.length, ONE_RELEASE);
+  const body = releases[0] as {
+    further_work: boolean;
+    stop: { reason: string; code: string };
+  };
+  assert.equal(body.further_work, true);
+  assert.equal(body.stop.reason, EndReason.BudgetEnd);
+  assert.equal(body.stop.code, BudgetLimit.Turns);
 });
 
 test("the last session_entry record and the agent.session end reach the sink before the release", async (t) => {
