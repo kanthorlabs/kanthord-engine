@@ -263,6 +263,7 @@ function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
       const git = () => ({ env, directory, context, deadlineMs: remaining() });
       try {
         if (taken.size === NO_TREES) clearBase();
+        taken.add(directory);
         rmSync(directory, { recursive: true, force: true });
         const { source } = await prepareTree({
           pool: workspaces.pool,
@@ -304,9 +305,9 @@ function releaseTreePort(input: HostInput, run: ExecutionRun): ReleaseTreePort {
             await scrubTree(git(), head, record?.roots ?? []);
           },
         });
-        taken.add(directory);
         return ok({ binding_id: checkout.binding_id, directory, source });
       } catch (error) {
+        workspaces.removeSafely(directory);
         giveBack(checkout, directory);
         return run.failureOf(error);
       }
