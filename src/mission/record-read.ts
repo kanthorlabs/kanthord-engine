@@ -20,6 +20,7 @@ import {
   type ExternalAction,
   FindingAction,
   FindingKind,
+  FindingRoute,
   type MissionBindings,
   NodeState,
   type Outcome,
@@ -31,7 +32,10 @@ import {
   TransitionRule,
   verificationSchema,
 } from "./contract.ts";
-import { readReportedFindingsOfAssessment } from "./finding-store.ts";
+import {
+  listFindings,
+  readReportedFindingsOfAssessment,
+} from "./finding-store.ts";
 import { actionStatesOf, requiredActionsOf } from "./frozen-action.ts";
 import {
   type AssessmentRow,
@@ -52,7 +56,7 @@ import { type NodeRow, readNode } from "./store.ts";
 import { currencyOf } from "./currency.ts";
 import type { MissionConfig } from "./config.ts";
 
-const NO_BLOCKERS = 0;
+const NO_ACTION_ITEMS = 0;
 const NO_REQUIRED_ACTIONS = 0;
 const NO_ATTEMPT = 0;
 const NO_LIMIT = 0;
@@ -233,13 +237,31 @@ export function externalActionRecords(
   );
 }
 
-function personOnlyBlockers(tx: Transaction, assessmentId: string): boolean {
-  const blockers = readReportedFindingsOfAssessment(tx, assessmentId).filter(
-    (finding) => finding.kind === FindingKind.Blocker,
+function personOnlyRound(tx: Transaction, assessment: AssessmentRow): boolean {
+  const findings = readReportedFindingsOfAssessment(tx, assessment.id);
+  const earlierOpenActions = listFindings(tx, assessment.node_id, {
+    attempt: assessment.attempt,
+    round: null,
+    route: null,
+    open: true,
+    after: null,
+    count: null,
+  }).filter(
+    (finding) =>
+      finding.assessment_id !== assessment.id &&
+      finding.created_by === null &&
+      finding.route !== FindingRoute.Record &&
+      finding.action === FindingAction.Yes,
   );
   return (
-    blockers.length > NO_BLOCKERS &&
-    blockers.every((finding) => finding.action === FindingAction.Person)
+    assessment.result === AssessmentResult.CriterionNotMet &&
+    earlierOpenActions.length === NO_ACTION_ITEMS &&
+    findings.every((finding) => finding.action !== FindingAction.Yes) &&
+    findings.some(
+      (finding) =>
+        finding.kind === FindingKind.Blocker &&
+        finding.action === FindingAction.Person,
+    )
   );
 }
 
@@ -252,7 +274,7 @@ function humanAcceptanceRuleOf(
   const holdsRule =
     assessment.execution_id !== null &&
     (current.result === AssessmentResult.Success ||
-      personOnlyBlockers(tx, assessment.id));
+      personOnlyRound(tx, assessment));
   return holdsRule ? TransitionRule.HumanAcceptance : null;
 }
 

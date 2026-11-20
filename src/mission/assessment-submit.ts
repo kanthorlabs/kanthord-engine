@@ -224,14 +224,14 @@ function reworkDueOf(facts: ReworkFacts): boolean {
 }
 
 function limitedOf(facts: ReworkFacts): TransitionLimit {
-  if (facts.planDefect)
-    return { rule: TransitionRule.PlanDefect, count: null, limit: null };
   if (
     facts.personOnly ||
     (facts.result === AssessmentResult.Success &&
       facts.intent === Intent.Examine)
   )
     return { rule: TransitionRule.HumanAcceptance, count: null, limit: null };
+  if (facts.planDefect)
+    return { rule: TransitionRule.PlanDefect, count: null, limit: null };
   if (facts.result !== AssessmentResult.CriterionNotMet || facts.requested)
     return null;
   return {

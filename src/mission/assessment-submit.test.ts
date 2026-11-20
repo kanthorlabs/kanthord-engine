@@ -1868,6 +1868,25 @@ test("a criterion-not-met round with only a person blocker blocks the attempt wi
   assert.equal(b1.status, FindingStatus.Open);
 });
 
+test("a person-only round with a plan cause blocks the attempt with the rule human_acceptance", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const answer = await h.submit({
+    ...h.notMet,
+    cause: PLAN_CAUSE,
+    findings: [reviewerFinding("B1", { action: FindingAction.Person })],
+  });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Blocked);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.HumanAcceptance,
+    count: null,
+    limit: null,
+    first_available_at: null,
+  });
+});
+
 test("a criterion-not-met round with a person blocker and a yes blocker reworks below the limit", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   const answer = await h.submit({

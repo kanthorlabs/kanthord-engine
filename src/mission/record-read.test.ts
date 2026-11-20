@@ -349,7 +349,7 @@ test("a blocked node whose closing assessment holds only person blockers answers
   assert.equal(
     blockedRuleOf(t, AssessmentResult.CriterionNotMet, [
       { kind: FindingKind.Blocker, action: FindingAction.Person },
-      { kind: FindingKind.Suggestion, action: FindingAction.Yes },
+      { kind: FindingKind.Suggestion, action: FindingAction.Person },
     ]),
     TransitionRule.HumanAcceptance,
   );
@@ -370,6 +370,19 @@ test("a node blocked at the rework limit or with a mixed blocker answers rule nu
     null,
   );
   assert.equal(blockedRuleOf(t, AssessmentResult.CriterionNotMet, []), null);
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.CriterionNotMet, [
+      { kind: FindingKind.Blocker, action: FindingAction.Person },
+      { kind: FindingKind.Suggestion, action: FindingAction.Yes },
+    ]),
+    null,
+  );
+  assert.equal(
+    blockedRuleOf(t, AssessmentResult.Undetermined, [
+      { kind: FindingKind.Blocker, action: FindingAction.Person },
+    ]),
+    null,
+  );
 });
 
 test("evidence projects every address kind without exposing inline data or storage-only names", (t) => {
