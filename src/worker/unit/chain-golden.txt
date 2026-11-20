@@ -55,9 +55,12 @@ chain evaluation
   phase prepare
     step inputs.read(revision, attemptEvidence, reviewRound, dependencies) reads in parallel; dependencies in the examine intent only
     step workspace.review(snapshot)         review trees and the round scope; stop when a snapshot or the tested input is absent; stop operation_failed, operation_failed/repository.connector.git_failed
-    step setup.entries(review)              stop environment_failed/setup_failed
-    step env.setup(review)                  node failure -> criterion-not-met; budget end; stop environment_failed/setup_failed
-    step assets.place                       support assets and round patches for the reviewer; stop operation_failed
+    [PAR] prepare.place
+      branch environment
+        step setup.entries(review)          stop environment_failed/setup_failed
+        step env.setup(review)              node failure -> criterion-not-met; budget end; stop environment_failed/setup_failed
+      branch assets
+        step assets.place                   support assets and round patches for the reviewer; at most 4 downloads at a time; stop operation_failed
   phase tasks                               one call: foundryEvaluation(input, host)
     loop evaluation                         one frame; span worker.evaluation
       step verify.all(evaluation)           every node and task command; the stop class goes to judgement

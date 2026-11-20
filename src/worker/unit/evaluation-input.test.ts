@@ -40,7 +40,7 @@ import {
   REVIEW_DIRECTORY,
 } from "./workspace-layout.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import { prepareEvaluation } from "./evaluation-input.ts";
+import { DOWNLOADS_AT_ONCE, prepareEvaluation } from "./evaluation-input.ts";
 import { verificationCommands } from "./review-scope.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
@@ -224,6 +224,139 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
         server.close((error) => (error ? reject(error) : resolve())),
       );
     }
+  }
+});
+
+const PLACED_OBJECTS = 6;
+const FIRST_CHUNK = "first chunk ";
+const LAST_CHUNK = "last chunk";
+const HOLD_MS = 50;
+const STREAM_POLL_MS = 10;
+
+test("the reviewer assets download at most 4 at a time and stream each body to its file", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const ids = Array.from({ length: PLACED_OBJECTS }, () =>
+    createIdentity("evidence_asset"),
+  );
+  const evidence = [
+    {
+      id: "support",
+      assets: ids.map((id) => ({
+        id,
+        kind: "object",
+        address: { kind: "object", location: `s3://test/${id}` },
+      })),
+    },
+  ] as Evidence[];
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  let active = 0;
+  let most = 0;
+  let requests = 0;
+  const streamed: boolean[] = [];
+  const server = createServer((request, response) => {
+    const id = (request.url ?? "").slice(1);
+    active += 1;
+    requests += 1;
+    most = Math.max(most, active);
+    response.on("close", () => {
+      active -= 1;
+    });
+    response.writeHead(200);
+    response.write(FIRST_CHUNK);
+    const started = Date.now();
+    const timer = setInterval(() => {
+      const placed = readdirSync(workspaces.root, {
+        recursive: true,
+        encoding: "utf8",
+      }).find((path) => path.endsWith(id));
+      const written =
+        placed !== undefined &&
+        readFileSync(join(workspaces.root, placed), "utf8") === FIRST_CHUNK;
+      const overlapped =
+        most >= DOWNLOADS_AT_ONCE || requests === PLACED_OBJECTS;
+      if (
+        !(written && overlapped) &&
+        Date.now() - started < HOLD_MS * PLACED_OBJECTS
+      )
+        return;
+      clearInterval(timer);
+      streamed.push(written);
+      response.end(LAST_CHUNK);
+    }, STREAM_POLL_MS);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const run = new ExecutionRun({
+    claim,
+    clients: {
+      mission: {
+        "execution.evidence.asset.content.get": async (input: {
+          params: { asset_id: string };
+        }) => ({
+          type: "completed",
+          status: 200,
+          data: {
+            asset_id: input.params.asset_id,
+            address: { kind: "object", location: "s3://test/report" },
+            get_url: `${base}/${input.params.asset_id}`,
+            size: FIRST_CHUNK.length + LAST_CHUNK.length,
+            media_type: "text/plain",
+            expires_at: Date.now() + 60000,
+          },
+        }),
+      },
+    } as unknown as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  try {
+    const result = await prepareEvaluation(
+      {
+        setup,
+        claim,
+        workspaces,
+        transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      ExecutionIntent.Examine,
+      evidence,
+      FIRST_ROUND,
+    );
+    assert.equal(most, DOWNLOADS_AT_ONCE);
+    assert.deepEqual(
+      streamed,
+      ids.map(() => true),
+    );
+    assert.deepEqual(
+      result.reviewBundle.assets.map((asset) => asset.asset_id),
+      ids,
+    );
+    for (const asset of result.reviewBundle.assets)
+      assert.equal(
+        readFileSync(join(result.directory, asset.path), "utf8"),
+        `${FIRST_CHUNK}${LAST_CHUNK}`,
+      );
+    workspaces.release(result.key, result.kind);
+  } finally {
+    run.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
   }
 });
 

@@ -25,7 +25,7 @@ export const assetsPlace: Step<
   ],
   writes: ["placed"],
   stops: ["operation_failed"],
-  note: "support assets and round patches for the reviewer",
+  note: "support assets and round patches for the reviewer; at most 4 downloads at a time",
   async run(ctx, scope, io) {
     return next(scope, {
       placed: await placeReviewAssets(io.run, {
@@ -35,6 +35,7 @@ export const assetsPlace: Step<
         evidenceIds: ctx.reviewScope.evidenceIds,
         scope: ctx.reviewScope.scope,
         deadline: wallDeadlineOf(ctx),
+        context: io.context,
       }),
     });
   },

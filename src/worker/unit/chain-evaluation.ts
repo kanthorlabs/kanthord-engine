@@ -5,6 +5,8 @@ import {
   ChainId,
   type ChainNode,
   type ChainTasks,
+  namedBranch,
+  parallelNode,
   stepNode,
 } from "./chain.ts";
 import { EndReason } from "./execution-stop.ts";
@@ -24,9 +26,13 @@ import { Phase } from "./telemetry.ts";
 export function evaluationPrepareNodes(): ChainNode[] {
   return [
     stepNode(workspaceReviewSnapshot),
-    stepNode(setupEntriesReview),
-    stepNode(envSetupReview),
-    stepNode(assetsPlace),
+    parallelNode("prepare.place", [
+      namedBranch("environment", [
+        stepNode(setupEntriesReview),
+        stepNode(envSetupReview),
+      ]),
+      namedBranch("assets", [stepNode(assetsPlace)]),
+    ]),
   ];
 }
 
