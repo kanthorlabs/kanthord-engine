@@ -810,3 +810,124 @@ test("a modify/delete and an add/add conflict give the base-side deletion and ad
   assert.ok(prompt.includes("new file mode"));
   assert.ok(prompt.includes(`## ${SECOND_FILE}`));
 });
+
+const MARKERLESS_FILE = "markerless.bin";
+const ORIGINAL_SIDE = "original text of the markerless file";
+const NODE_BINARY = Buffer.from([0, 1, 2, 3, 110, 111, 100, 101]);
+const BASE_BINARY = Buffer.from([0, 9, 8, 7, 98, 97, 115, 101]);
+
+const MarkerlessKind = {
+  ModifyDelete: "modify/delete",
+  Binary: "binary",
+} as const;
+type MarkerlessKind = (typeof MarkerlessKind)[keyof typeof MarkerlessKind];
+
+const agentGit = (command: string) => [
+  fauxAssistantMessage(
+    fauxToolCall("bash", {
+      command: `git -C web ${command} -- ${MARKERLESS_FILE}`,
+    }),
+    { stopReason: "toolUse" },
+  ),
+  fauxAssistantMessage("done"),
+];
+
+async function markerlessOnWeb(
+  t: TestContext,
+  kind: MarkerlessKind,
+  script: Parameters<typeof implementFixture>[2],
+) {
+  const { h, web, webBare } = await fixture(t, script);
+  await baseAdvance(webBare, t, { [MARKERLESS_FILE]: ORIGINAL_SIDE });
+  await h.input.transport.fetchBase(
+    web.directory,
+    BASE_BRANCH,
+    background,
+    DEADLINE_MS,
+    sshAccessOf(h.input.sshAccess, web.binding_id),
+  );
+  await simpleGit(web.directory).raw([
+    "merge",
+    "-q",
+    "--no-edit",
+    `origin/${BASE_BRANCH}`,
+  ]);
+  writeFileSync(join(web.directory, MARKERLESS_FILE), NODE_BINARY);
+  await simpleGit(web.directory).add(MARKERLESS_FILE);
+  await simpleGit(web.directory).commit([
+    "feat: node side",
+    h.input.claim.node_id,
+  ]);
+  web.head = await headOf(web.directory);
+  const clone = temporary(t);
+  const base = simpleGit(clone);
+  await base.clone(webBare, clone, ["--branch", "main"]);
+  if (kind === MarkerlessKind.ModifyDelete)
+    await base.raw(["rm", "-q", MARKERLESS_FILE]);
+  else {
+    writeFileSync(join(clone, MARKERLESS_FILE), BASE_BINARY);
+    await base.add(MARKERLESS_FILE);
+  }
+  await base.raw([...TEST_IDENTITY, "commit", "-m", "base side"]);
+  await base.push("origin", "main");
+  return { h, web };
+}
+
+async function mergedFile(directory: string): Promise<string> {
+  return simpleGit(directory).raw([
+    "ls-tree",
+    "--name-only",
+    "HEAD",
+    "--",
+    MARKERLESS_FILE,
+  ]);
+}
+
+for (const kind of Object.values(MarkerlessKind)) {
+  test(`regression: a ${kind} conflict that the agent leaves unmerged stops with markers_left and commits no merge`, async (t) => {
+    const { h, web } = await markerlessOnWeb(t, kind, [
+      fauxAssistantMessage("done"),
+    ]);
+    const before = web.head;
+    await assert.rejects(
+      refreshAtRelease(h, workerPorts(h.input, h.run)),
+      (error) =>
+        error instanceof ExecutionStop && error.code === MERGE_MARKERS_LEFT,
+    );
+    assert.equal(await headOf(web.directory), before);
+    assert.equal(existsSync(join(web.directory, ".git", "MERGE_HEAD")), false);
+  });
+
+  test(`a ${kind} conflict that the agent keeps with git add gives a merge commit with the node file`, async (t) => {
+    const { h, web } = await markerlessOnWeb(t, kind, agentGit("add"));
+    assert.equal(
+      await refreshAtRelease(h, workerPorts(h.input, h.run)),
+      RefreshResult.Merged,
+    );
+    assert.equal(web.head, await headOf(web.directory));
+    assert.equal(
+      (await parentsOf(web.directory, web.head)).length,
+      TWO_PARENTS,
+    );
+    assert.deepEqual(
+      readFileSync(join(web.directory, MARKERLESS_FILE)),
+      NODE_BINARY,
+    );
+    assert.equal((await mergedFile(web.directory)).trim(), MARKERLESS_FILE);
+    assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+  });
+
+  test(`a ${kind} conflict that the agent deletes with git rm gives a merge commit without the file`, async (t) => {
+    const { h, web } = await markerlessOnWeb(t, kind, agentGit("rm -q"));
+    assert.equal(
+      await refreshAtRelease(h, workerPorts(h.input, h.run)),
+      RefreshResult.Merged,
+    );
+    assert.equal(
+      (await parentsOf(web.directory, web.head)).length,
+      TWO_PARENTS,
+    );
+    assert.equal(await mergedFile(web.directory), NO_OUTPUT);
+    assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+  });
+}

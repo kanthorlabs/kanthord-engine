@@ -149,14 +149,15 @@ async function mergeUnder(
       directory,
       commit,
       files: conflicts,
+      markerless: conflicts.filter((file) => !marked.includes(file)),
       message,
     };
     if (await conflictTurn(state, { checkout, base, merge, context })) {
       const left = await markersLeft(state, merge, context);
-      const everyMarked = conflicts.every((file) => marked.includes(file));
       state.openMerge = {
         ...merge,
-        resolved: everyMarked && left.length === NO_FILES,
+        resolved:
+          merge.markerless.length === NO_FILES && left.length === NO_FILES,
       };
       return RefreshResult.BudgetEnd;
     }

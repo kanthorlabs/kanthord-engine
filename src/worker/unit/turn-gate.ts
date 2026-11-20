@@ -44,6 +44,7 @@ import {
   softReset,
   stageWork,
   symbolicHead,
+  unmergedPaths,
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
@@ -86,6 +87,7 @@ export interface ConflictMerge {
   directory: string;
   commit: string;
   files: readonly string[];
+  markerless: readonly string[];
   message: string;
 }
 export interface OpenMerge extends ConflictMerge {
@@ -575,13 +577,10 @@ async function concludeConflict(
 ): Promise<Settled> {
   const { context } = conflict.input;
   await refuseMarkers(state, checkout, conflict.merge, context);
-  const paths = await concludeMerge(
-    state.input.env,
-    checkout.directory,
-    conflict.merge.message,
-    context,
-    remainingOf(state)(),
-  );
+  const paths = await concludeMerge(callOf(state, checkout, context), {
+    message: conflict.merge.message,
+    kept: conflict.merge.markerless,
+  });
   return { changed: true, paths };
 }
 
@@ -599,9 +598,31 @@ async function refuseMarkers(
     context,
     remaining(),
   );
-  if (left.length === NO_ENTRIES) return;
+  if (
+    left.length === NO_ENTRIES &&
+    (await unmergedMarkerless(state, checkout, { merge, context })).length ===
+      NO_ENTRIES
+  )
+    return;
   await abortMerge(state.input.env, checkout.directory, context, remaining());
   throw new ExecutionStop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
+}
+
+interface MarkerlessCheck {
+  merge: ConflictMerge;
+  context: Context;
+}
+
+function unmergedMarkerless(
+  state: StepsState,
+  checkout: NodeCheckout,
+  check: MarkerlessCheck,
+): Promise<string[]> {
+  if (check.merge.markerless.length === NO_ENTRIES) return Promise.resolve([]);
+  return unmergedPaths(
+    callOf(state, checkout, check.context),
+    check.merge.markerless,
+  );
 }
 
 export async function restoreCheckout(

@@ -660,6 +660,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
         directory: h.root,
         commit: base,
         files: ["file"],
+        markerless: [],
         message: MERGE_HEADER,
         resolved: true,
       };
