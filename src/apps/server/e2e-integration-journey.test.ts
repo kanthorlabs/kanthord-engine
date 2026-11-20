@@ -607,7 +607,7 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
     },
   });
   await t.test(
-    "EJ10.6 the examine assessment blocks I for human acceptance",
+    "EJ10.6 the examine assessment blocks I and the person acceptance completes it",
     async () => {
       const assessed = await j.write<{
         node: { state: string };
@@ -627,6 +627,18 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       assert.equal(assessed.node.state, NodeState.Blocked);
       assert.equal(assessed.outcome.result, AssessmentResult.Success);
       assert.equal(await j.state(h.I), NodeState.Blocked);
+      const accepted = await j.write<{
+        node: { state: string };
+        outcome: { result: string };
+      }>(["mission", "node", "override", h.I, "--result", "success"], {
+        reason: "The person accepts I.",
+        expected_mission_version: await h.missionVersion(),
+        expected_state: NodeState.Blocked,
+        expected_attempt: executionContext(x2).attempt,
+      });
+      assert.equal(accepted.node.state, NodeState.Completed);
+      assert.equal(accepted.outcome.result, AssessmentResult.Success);
+      assert.equal(await j.state(h.I), NodeState.Completed);
     },
   );
   await t.test("EJ10.8 the evidence delete removes the object", async () => {

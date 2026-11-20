@@ -750,6 +750,21 @@ test(
           [...assessments.items[0]!.dependency_outcome_ids].sort(),
           [outcomeA, outcomeC].sort(),
         );
+        const mission = await f.cli.read<{ version: number }>([
+          "mission",
+          "get",
+          f.project_id,
+        ]);
+        await f.cli.write(
+          ["mission", "node", "override", f.examine, "--result", "success"],
+          {
+            reason: "The person accepts the examine node.",
+            expected_mission_version: mission.version,
+            expected_state: NodeState.Blocked,
+            expected_attempt: SINGLE_ITEM,
+          },
+        );
+        await waitForNode(f.cli, f.examine, NodeState.Completed, t.signal);
       },
     );
     await t.test(
