@@ -38,6 +38,7 @@ import {
   declareAffected,
   everyBindingSshAccess,
   fauxAssistantMessage,
+  fauxText,
   fauxToolCall,
   implementFixture,
   repositorySetup,
@@ -742,10 +743,49 @@ test("native entry runs an examine report and ends the agent.session span before
   assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
 });
 
-test("a complete examine report at the exact turns budget end keeps the report and releases with no further work and no stop", async (t) => {
+const EXAMINE_TEXT = "All dependencies completed.";
+const REFUSED_REPLIES = [
+  [
+    "error",
+    fauxAssistantMessage(EXAMINE_TEXT, {
+      stopReason: "error",
+      errorMessage: "terminated",
+    }),
+  ],
+  ["length", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "length" })],
+  ["aborted", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "aborted" })],
+  ["empty stop", fauxAssistantMessage("")],
+  [
+    "tool call",
+    fauxAssistantMessage([
+      fauxText(EXAMINE_TEXT),
+      fauxToolCall("ls", { path: "." }),
+    ]),
+  ],
+] as const;
+
+test("at an exhausted turns budget only a nonempty stop reply with no tool call keeps the examine report", async (t) => {
+  for (const [name, reply] of REFUSED_REPLIES) {
+    const { result, releases } = await examineRun(
+      t,
+      [reply, fauxAssistantMessage(EXAMINE_TEXT)],
+      { turns: ONE_TURN },
+    );
+    assert.equal(result.kind, ExecutionEndKind.Released, name);
+    assert.deepEqual(
+      (
+        releases as {
+          further_work: boolean;
+          stop: { reason: string; code: string };
+        }[]
+      ).map(({ further_work, stop }) => [further_work, stop.reason, stop.code]),
+      [[true, EndReason.BudgetEnd, BudgetLimit.Turns]],
+      name,
+    );
+  }
   const { result, releases } = await examineRun(
     t,
-    [fauxAssistantMessage("All dependencies completed.")],
+    [fauxAssistantMessage(EXAMINE_TEXT)],
     { turns: ONE_TURN },
   );
   assert.deepEqual(result, OK_RELEASE);
