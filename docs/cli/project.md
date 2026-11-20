@@ -847,6 +847,7 @@ The environment has these effects:
 - `checks`: the command and the exit code of each check of the last proof.
 - `repairs`: the number of repairs that the proof file of the current digest records, or 0 when no proof file exists.
 - `repairing`: `true` while a repair of the environment runs, else `false`.
+- `review_flow`: `null` when the action of the binding is not `pull_request`. For a `pull_request` binding, `off` when `link_trust` holds no actor id, else `on`. `off` means that no pull request review sends a node back. Set `link_trust.actor_ids` of [Link trust](#link-trust) to turn it on. The field offers the flow, is no proof and does not change the status.
 
 `environment export` prints only the `environment` of `environment show` as JSON indented by two spaces, with a final newline. A user who wants one file for KanthorD and the CI commits that output. KanthorD never commits it. A null `environment` stops the command with `cli.project.environment.export.environment_absent`.
 
