@@ -2394,6 +2394,22 @@ test("a failed pool release is tried again at the next connection sweep with the
   ]);
 });
 
+test("a new connection of the restarted instance ends the pool_failed retry", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  f.revocation.lossFailure = null;
+  f.asWorker(box.record.id, INSTANCE);
+  await f.invoke("instance.connect", { connection_name: CONNECTION_NAME });
+  f.asHuman();
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+});
+
 test("instanceFailed ends the live execution of the instance with the loss pool_failed and reports the ends after the commit", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);
