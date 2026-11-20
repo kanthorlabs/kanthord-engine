@@ -544,3 +544,126 @@ test("plan refuses a recorded version above the list length with incompatible_hi
     store.close();
   }
 });
+
+const CUSTODY_REFUSED_CODE = "system.database.reset.custody_refused";
+const FOREIGN_KEY_REFUSED_CODE = "system.database.reset.foreign_key";
+const PROTECTED_SERVICE = "two";
+const TWO_SERVICES = [{ service: "two", migrations: [createTwo] }];
+const CHANGED_ONE_SERVICES = [
+  { service: "one", migrations: [createOneChanged] },
+];
+
+function twoServiceStore(path = ":memory:"): Store {
+  const store = new Store(path);
+  store.migrate([...ONE_SERVICES, ...TWO_SERVICES]);
+  store.database.exec("INSERT INTO two_first VALUES ('kept')");
+  return store;
+}
+
+test("changedServices answers the changed service and writes nothing", () => {
+  const store = twoServiceStore();
+  try {
+    const before = snapshot(store);
+    assert.deepEqual(
+      store.changedServices([...CHANGED_ONE_SERVICES, ...TWO_SERVICES]),
+      ["one"],
+    );
+    assert.deepEqual(snapshot(store), before);
+  } finally {
+    store.close();
+  }
+});
+
+test("changedServices answers no service when no schema differs", () => {
+  const store = twoServiceStore();
+  try {
+    assert.deepEqual(
+      store.changedServices([...ONE_SERVICES, ...TWO_SERVICES]),
+      [],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("resetServices drops the changed service, keeps the others and migrate rebuilds it", () => {
+  const store = twoServiceStore();
+  try {
+    const services = [...CHANGED_ONE_SERVICES, ...TWO_SERVICES];
+    assert.deepEqual(store.resetServices(services, ["one"], "custody"), [
+      "one_first",
+    ]);
+    assert.deepEqual(store.tableNames(), ["migration", "two_first"]);
+    assert.deepEqual(
+      store.database
+        .prepare("SELECT service FROM migration")
+        .all()
+        .map((row) => row.service),
+      ["two"],
+    );
+    assert.deepEqual(
+      store.database
+        .prepare("SELECT value FROM two_first")
+        .all()
+        .map((row) => row.value),
+      ["kept"],
+    );
+    assert.deepEqual(store.plan(services).pending, [
+      { service: "one", from: 0, to: 1 },
+    ]);
+    store.migrate(services);
+    assert.deepEqual(store.plan(services), { fresh: false, pending: [] });
+  } finally {
+    store.close();
+  }
+});
+
+test("resetServices refuses the protected service and writes nothing", (t) => {
+  const path = join(temporary(t), "kanthord.db");
+  const store = twoServiceStore(path);
+  try {
+    const before = snapshot(store);
+    const refused = refusal(() =>
+      store.resetServices(
+        [...ONE_SERVICES, ...TWO_SERVICES],
+        ["one", PROTECTED_SERVICE],
+        PROTECTED_SERVICE,
+      ),
+    );
+    assert.equal(refused.code, CUSTODY_REFUSED_CODE);
+    assert.deepEqual(refused.fields, [
+      ["path", path],
+      ["service", PROTECTED_SERVICE],
+    ]);
+    assert.deepEqual(snapshot(store), before);
+  } finally {
+    store.close();
+  }
+});
+
+test("resetServices refuses a table of another service that references a dropped table", (t) => {
+  const path = join(temporary(t), "kanthord.db");
+  const referencing = (database: Database) =>
+    database.exec(
+      "CREATE TABLE two_first (value TEXT, parent TEXT REFERENCES one_first(key))",
+    );
+  const services = [
+    ...ONE_SERVICES,
+    { service: "two", migrations: [referencing] },
+  ];
+  const store = new Store(path);
+  try {
+    store.migrate(services);
+    const before = snapshot(store);
+    const refused = refusal(() => store.resetServices(services, ["one"], "x"));
+    assert.equal(refused.code, FOREIGN_KEY_REFUSED_CODE);
+    assert.deepEqual(refused.fields, [
+      ["path", path],
+      ["service", "one"],
+      ["table", "two_first"],
+    ]);
+    assert.deepEqual(snapshot(store), before);
+  } finally {
+    store.close();
+  }
+});
