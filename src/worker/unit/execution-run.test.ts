@@ -489,50 +489,102 @@ test("a lost release answer with a claim read that the server refuses as ended e
   });
 });
 
-test("the claim check stops the run as revoked only on a definite end", async () => {
-  const answers: (() => Promise<OperationResult<unknown>>)[] = [
-    async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: { claim_state: "running" },
-    }),
+function claimAnswer(state: string): () => Promise<OperationResult<unknown>> {
+  return async () => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data: { claim_state: state },
+  });
+}
+
+function fencedRun(answer: () => Promise<OperationResult<unknown>>) {
+  const run = fixture();
+  run.clients.scheduler = {
+    claimGet: answer,
+  } as unknown as MethodClients["scheduler"];
+  return run;
+}
+
+test("the fence lets the push continue on a running claim, another answer and a thrown error", async (t) => {
+  for (const answer of [
+    claimAnswer("running"),
     async () => {
       throw new Error("network down");
     },
-    async () => ({
-      type: OperationResultType.Completed,
-      status: 200,
-      data: { claim_state: "finished" },
+    async (): Promise<OperationResult<unknown>> => ({
+      type: OperationResultType.Failure,
+      status: 500,
+      error: {
+        request_id: "test",
+        error: { code: ERROR, message: "down", details: null },
+      },
     }),
-  ];
-  const run = fixture();
-  run.clients.scheduler = {
-    claimGet: () => answers.shift()!(),
-  } as unknown as MethodClients["scheduler"];
-  await run.checkClaim();
-  await run.checkClaim();
-  await assert.rejects(
-    run.checkClaim(),
-    (error) =>
-      error instanceof ExecutionStop && error.reason === EndReason.Revoked,
-  );
-  await assert.rejects(run.checkClaim(), ExecutionStop);
+    async (): Promise<OperationResult<unknown>> => ({
+      type: OperationResultType.Indeterminate,
+    }),
+  ]) {
+    const run = fencedRun(answer);
+    stopAfter(t, () => run.dispose());
+    assert.equal(await run.fence(run.operationContext), true);
+    assert.equal(run.operationContext.signal.aborted, false);
+  }
 });
 
-test("the claim check stops the run as revoked when the server refuses the execution", async () => {
-  const run = fixture();
-  run.clients.scheduler = {
-    claimGet: async () => ({
+test("the fence revokes the run on a claim that is not running and on an execution-end answer", async (t) => {
+  for (const answer of [
+    claimAnswer("finished"),
+    async (): Promise<OperationResult<unknown>> => ({
       type: OperationResultType.Failure,
       status: 409,
-      error: { error: { code: EXECUTION_NOT_RUNNING, message: "ended" } },
+      error: {
+        request_id: "test",
+        error: { code: EXECUTION_NOT_RUNNING, message: "ended", details: null },
+      },
     }),
+    async (): Promise<OperationResult<unknown>> => ({
+      type: OperationResultType.Failure,
+      status: 403,
+      error: {
+        request_id: "test",
+        error: {
+          code: EXECUTION_PROOF_FAILED,
+          message: "ended",
+          details: null,
+        },
+      },
+    }),
+  ]) {
+    const run = fencedRun(answer);
+    stopAfter(t, () => run.dispose());
+    assert.equal(await run.fence(run.operationContext), false);
+    const stopped = await run.stopOf(new Error("later"));
+    assert.equal(stopped.reason, EndReason.Revoked);
+    assert.equal(run.operationContext.signal.aborted, true);
+  }
+});
+
+test("the fence after a stop reads the claim with the cleanup context and keeps the stored stop", async (t) => {
+  const contexts: AbortSignal[] = [];
+  const run = fencedRun(claimAnswer("finished"));
+  run.clients.scheduler = {
+    claimGet: async (
+      _input: unknown,
+      options: { context: { signal: AbortSignal } },
+    ) => {
+      contexts.push(options.context.signal);
+      return claimAnswer("finished")();
+    },
   } as unknown as MethodClients["scheduler"];
-  await assert.rejects(
-    run.checkClaim(),
-    (error) =>
-      error instanceof ExecutionStop && error.reason === EndReason.Revoked,
+  stopAfter(t, () => run.dispose());
+  const stored = await run.stopOf(
+    new ExecutionStop(EndReason.OperationFailed, ERROR),
   );
+  const cleanup = run.cleanupContext();
+  assert.equal(await run.fence(cleanup), false);
+  assert.deepEqual(contexts, [cleanup.signal]);
+  assert.equal(contexts[0]!.aborted, false);
+  assert.equal(await run.stopOf(new Error("later")), stored);
+  assert.equal(stored.reason, EndReason.OperationFailed);
 });
 
 test("an execution-end answer of the revocation context revokes the run with its code", async (t) => {
@@ -731,7 +783,9 @@ test("a stop context stops the run with the requested stop and a later cancel of
   stopAfter(t, () => run.dispose());
   const requested = new ExecutionStop(EndReason.WorkerStopped, null);
   stops.cancel(requested);
-  const stopped = await run.checkClaim().catch((error: unknown) => error);
+  const stopped = await run
+    .call(async () => assert.fail("A stopped run calls no server."))
+    .catch((error: unknown) => error);
   assert.ok(stopped instanceof ExecutionStop);
   assert.equal(stopped.reason, EndReason.WorkerStopped);
   assert.equal(stopped.code, null);

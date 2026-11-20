@@ -48,6 +48,7 @@ import {
   workspaceRequest,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
+import { CLAIM_WATCH_INTERVAL_MS } from "./claim-watch.ts";
 import { BASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import {
@@ -639,4 +640,161 @@ test("refused execution evidence aborts the agent and prevents later server oper
     assert.equal(aborts, EXPECTED_CALL_COUNT);
     assert.equal(releases, NO_RELEASES);
   }
+});
+
+interface WatchedRun {
+  script: (tick: () => void) => Parameters<typeof scriptedProvider>[0];
+  claimState: string;
+}
+
+async function watchedImplementRun(t: TestContext, run: WatchedRun) {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const tick = () => t.mock.timers.tick(CLAIM_WATCH_INTERVAL_MS);
+  const h = await implementFixture(t, [task("hello", "test -f hello.txt")], []);
+  const { claim, setup } = h.input;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const calls: string[] = [];
+  const counted =
+    (name: string, answer: () => unknown) => async (): Promise<unknown> => {
+      calls.push(name);
+      return answer();
+    };
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+      "evidence.submit": counted("evidence.submit", () =>
+        complete({ evidence: { id: createIdentity("evidence"), assets: [] } }),
+      ),
+    },
+    scheduler: {
+      claimGet: counted(CLAIM_READ, () =>
+        complete({
+          claim_state: run.claimState,
+          ended_at: null,
+          stop: null,
+        }),
+      ),
+      executionRelease: counted(RELEASE_CALL, () =>
+        complete({ execution_id: claim.execution_id, ended_at: Date.now() }),
+      ),
+    },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+      "execution.unit_record.put": async (request: { body: unknown }) =>
+        complete(request.body),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_claim_watch",
+  }));
+  const provider = scriptedProvider(run.script(tick));
+  const result = await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  const branches = await simpleGit().listRemote([
+    "--heads",
+    h.bare,
+    claim.node_branch,
+  ]);
+  return { result, calls, provider, pushed: branches.trim() !== NO_OUTPUT };
+}
+
+const CLAIM_READ = "claimGet";
+const NO_OUTPUT = "";
+const THREE_TURNS = 3;
+const FENCE_READS = 1;
+
+test("a run of three turns reads the claim once per 60 s and once at the push fence", async (t) => {
+  const { result, calls, provider, pushed } = await watchedImplementRun(t, {
+    claimState: "running",
+    script: (tick) => [
+      () => {
+        tick();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", { command: "printf hello > hello.txt" }),
+          { stopReason: "toolUse" },
+        );
+      },
+      () => {
+        tick();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", { command: "test -f hello.txt" }),
+          { stopReason: "toolUse" },
+        );
+      },
+      () => {
+        tick();
+        return fauxAssistantMessage("done");
+      },
+    ],
+  });
+  assert.deepEqual(result, OK_RELEASE);
+  assert.equal(provider.calls.length, THREE_TURNS);
+  assert.equal(
+    calls.filter((call) => call === CLAIM_READ).length,
+    THREE_TURNS + FENCE_READS,
+  );
+  assert.ok(pushed);
+});
+
+test("a claim watch revoke during an agent turn aborts the session in the turn and ends as revoked with no push and no release", async (t) => {
+  const { result, calls, provider, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: (tick) => [
+      () => {
+        tick();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", { command: "sleep 30" }),
+          { stopReason: "toolUse" },
+        );
+      },
+      fauxAssistantMessage("unexpected"),
+    ],
+  });
+  assert.deepEqual(result, {
+    kind: ExecutionEndKind.Ended,
+    reason: EndReason.Revoked,
+    code: null,
+  });
+  assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
+  assert.deepEqual(calls, [CLAIM_READ]);
+  assert.equal(pushed, false);
 });

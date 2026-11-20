@@ -31,6 +31,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
+import { ClaimWatch } from "./claim-watch.ts";
 import type { TasksCapture } from "./tasks-capture.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import type { Chain } from "./chain.ts";
@@ -91,6 +92,7 @@ export async function runNativeExecution(
     secrets,
     environmentDigests: environmentDigestsOf(input.setup.repositories),
   });
+  const watch = new ClaimWatch(run);
   const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
     ...input.claim,
@@ -134,7 +136,6 @@ export async function runNativeExecution(
           budget,
           knownSecrets: secrets,
           context: run.operationContext,
-          turnCheck: () => run.checkClaim(),
         });
         const stop = stopOnEnd(run, native);
         const trace = run.onTraceClose((status) => native.closeTrace(status));
@@ -177,6 +178,7 @@ export async function runNativeExecution(
       );
     });
   } finally {
+    watch.end();
     try {
       for (const agent of [...opened.keys()]) await close(agent);
     } finally {

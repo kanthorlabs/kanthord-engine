@@ -101,10 +101,6 @@ export interface UnitRecordPort {
   ): Promise<PortResult<null>>;
 }
 
-export interface ClaimPort {
-  check(context: CancellationContext): Promise<PortResult<null>>;
-}
-
 export type AgentSession = NativeAgent;
 
 export interface AgentOpenRequest {
@@ -151,7 +147,6 @@ export interface ImplementPorts extends CommonPorts {
   evidence: EvidencePort;
   repository: RepositoryPort;
   releaseTrees: ReleaseTreePort;
-  claim: ClaimPort;
   unitRecords: UnitRecordPort;
 }
 
@@ -187,7 +182,6 @@ export const IMPLEMENT_PORTS = [
   "releaseTrees.takeBase",
   "releaseTrees.give",
   "releaseTrees.giveBase",
-  "claim.check",
   "unitRecords.put",
 ] as const satisfies readonly PortNameOf<ImplementPorts>[];
 

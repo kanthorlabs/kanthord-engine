@@ -607,7 +607,6 @@ function composedOf(input: LocalTasksInput): {
     evidence: localEvidencePort(run, output),
     repository: localRepositoryPort(host),
     releaseTrees: localReleaseTreePort(host),
-    claim: { check: async () => ok(null) },
     unitRecords: localUnitRecordPort(output),
     agent: agentOpenPort({ run, budget, open }),
   };

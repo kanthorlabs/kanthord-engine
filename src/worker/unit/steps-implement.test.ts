@@ -457,25 +457,6 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a revoked claim stops the task loop before the next cycle", async (t) => {
-    const current = task("revoked", "false");
-    const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
-    h.run.clients.scheduler = {
-      claimGet: async () => ({
-        type: "completed",
-        status: 200,
-        data: { claim_state: "finished" },
-      }),
-    } as unknown as MethodClients["scheduler"];
-    const events = t.mock.method(h.run, "log");
-    const stopped = await stopOf(runTask(h, current));
-    assert.equal(stopped.reason, EndReason.Revoked);
-    assert.deepEqual(
-      events.mock.calls.map((call) => call.arguments[0]),
-      ["task started"],
-    );
-  });
-
   test("a provider error reply stops the task with provider_failed and its code", async (t) => {
     const current = task("provider", "false");
     const h = await fixture(
