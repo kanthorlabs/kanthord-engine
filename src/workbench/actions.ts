@@ -125,8 +125,9 @@ type ActionOffer = Extract<
   { kind: typeof WorkbenchRecordKind.ActionOffer }
 >;
 
-function newestLiveRevision(data: unknown): number {
-  const { revisions } = credentialReadSchema.parse(data);
+function newestLiveRevision(
+  revisions: readonly { revision: number; ended_at: number | null }[],
+): number {
   const live = revisions
     .filter(({ ended_at }) => ended_at === null)
     .map(({ revision }) => revision);
@@ -148,8 +149,8 @@ function seenOf(target: ActionTarget, data: unknown): ActionOffer["seen"] {
       return { name, paused: paused_at !== null };
     }
     case ActionTarget.Credential: {
-      const { name } = credentialReadSchema.parse(data);
-      return { name, revision: newestLiveRevision(data) };
+      const { name, revisions } = credentialReadSchema.parse(data);
+      return { name, revision: newestLiveRevision(revisions) };
     }
     case ActionTarget.BindingSet:
       return { version: bindingSetReadSchema.parse(data).version };
