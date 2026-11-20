@@ -46,6 +46,7 @@ export interface Verification {
   }[];
 }
 export const VerificationClass = {
+  BaseFailure: "base_failure",
   BudgetEnd: "budget_end",
   CodeFailure: "code_failure",
   Environment: "environment",
@@ -76,6 +77,9 @@ const SIGNAL_EXIT_LAST = 192;
 const OUTPUT_TAIL_BYTES = 4096;
 const OUTPUT_GRACE_MS = 1000;
 const NO_GROUPS = 0;
+const DIGIT_RUN = /\d+/g;
+const DIGITS_PLACEHOLDER = "0";
+const LINE_BREAK = /\r?\n/;
 export const CommandEnd = {
   Exit: "exit",
   CommandLimit: "command_limit",
@@ -99,6 +103,11 @@ export type CommandObserver = (
   attempt: CommandAttempt,
   execute: () => Promise<CommandRun>,
 ) => Promise<CommandRun>;
+export interface BaseResult {
+  exit_code: number | null;
+  timed_out: boolean;
+  last_line: string;
+}
 export const VERIFICATION_RERUNS = 2;
 const FIRST_RUN = 1;
 const FIRST_RERUN = 2;
@@ -115,13 +124,22 @@ export interface VerificationInput {
   copyRepeated?: boolean;
   reruns?: number;
   exhausted?: () => boolean;
-  baseline?: (command: string) => Promise<number | null>;
+  baseline?: (command: string) => Promise<BaseResult | null>;
   memo?: MemoScope;
   processes?: ProcessSystem;
 }
 
 interface RunInput extends VerificationInput {
   groups: Set<number>;
+}
+
+export function lastLineOf(output: string): string {
+  return (
+    output
+      .split(LINE_BREAK)
+      .map((line) => line.trim())
+      .findLast((line) => line.length > NO_GROUPS) ?? ""
+  );
 }
 
 function outputTail(chunks: Buffer[]): string {
@@ -299,11 +317,35 @@ async function absentOutcome(
 ): Promise<VerificationClass> {
   const unstarted = unstartedClass(input);
   if (unstarted !== null) return unstarted;
-  const exit = await baseline(command);
-  if (exit === null) return VerificationClass.BudgetEnd;
-  return exit === COMMAND_ABSENT_EXIT
+  const base = await baseline(command);
+  if (base === null) return VerificationClass.BudgetEnd;
+  return base.exit_code === COMMAND_ABSENT_EXIT
     ? VerificationClass.Environment
     : VerificationClass.CodeFailure;
+}
+
+function sameLine(head: string, base: string): boolean {
+  return (
+    head.replace(DIGIT_RUN, DIGITS_PLACEHOLDER) ===
+    base.replace(DIGIT_RUN, DIGITS_PLACEHOLDER)
+  );
+}
+
+async function baseOutcome(
+  ran: CommandRun,
+  outcome: VerificationClass,
+  input: VerificationInput,
+): Promise<VerificationClass> {
+  assert.ok(input.baseline);
+  const unstarted = unstartedClass(input);
+  if (unstarted !== null) return unstarted;
+  const base = await input.baseline(ran.result.command);
+  if (base === null) return VerificationClass.BudgetEnd;
+  const same =
+    base.exit_code === ran.result.exit_code &&
+    base.timed_out === ran.result.timed_out &&
+    sameLine(lastLineOf(ran.output), base.last_line);
+  return same ? VerificationClass.BaseFailure : outcome;
 }
 
 async function classifiedCommand(
@@ -325,6 +367,16 @@ async function classifiedCommand(
     return {
       ran,
       outcome: await absentOutcome(command, input, input.baseline),
+      runs: FIRST_RUN,
+    };
+  if (
+    (outcome === VerificationClass.CodeFailure ||
+      outcome === VerificationClass.Timeout) &&
+    input.baseline
+  )
+    return {
+      ran,
+      outcome: await baseOutcome(ran, outcome, input),
       runs: FIRST_RUN,
     };
   if (outcome !== VerificationClass.Infrastructure)
@@ -497,7 +549,26 @@ function timeoutStop(run: VerificationRun): ExecutionStop {
   );
 }
 
+function baseFailedStop(run: VerificationRun): ExecutionStop {
+  const result = run.verification.results.at(-1);
+  assert.ok(result);
+  return new ExecutionStop(
+    EndReason.EnvironmentFailed,
+    EnvironmentFailure.BaseFailed,
+    redactReason(
+      JSON.stringify({
+        index: run.verification.results.length - 1,
+        command: result.command,
+        exit_code: result.exit_code,
+        timed_out: result.timed_out,
+        last_line: lastLineOf(run.outputs.at(-1) ?? ""),
+      }),
+    ),
+  );
+}
+
 export function environmentStop(run: VerificationRun): ExecutionStop | null {
+  if (run.outcome === VerificationClass.BaseFailure) return baseFailedStop(run);
   if (run.outcome === VerificationClass.Timeout) return timeoutStop(run);
   if (run.outcome !== VerificationClass.Environment) return null;
   const result = run.verification.results.at(-1);

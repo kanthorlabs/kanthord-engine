@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   type CooldownChange,
+  EnvironmentFailure,
   environmentFailureSchema,
   type ExecutionRelease,
   type ExecutionRow,
@@ -146,7 +147,8 @@ function recordStop(
       environmentRepositories: null,
     };
   const environmentRepositories =
-    stop.reason === ExecutionStopReason.EnvironmentFailed
+    stop.reason === ExecutionStopReason.EnvironmentFailed &&
+    stop.code !== EnvironmentFailure.BaseFailed
       ? [
           ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
             []),

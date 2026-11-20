@@ -42,6 +42,7 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture as fixture,
+  passingBase,
   recordReleases,
   releasedRoot,
   task,
@@ -520,6 +521,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await pushNodeBranch(h);
     releaseWorkspace(h);
     const prepared = await prepareStepsWorkspace(h.input, h.run);
+    passingBase(t, prepared);
     const before = prepared.checkouts[0]!.head;
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {

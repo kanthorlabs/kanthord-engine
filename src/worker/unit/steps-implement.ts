@@ -916,7 +916,7 @@ async function verifyCommands(
     context: state.run.operationContext,
     env: state.input.env,
     exhausted: () => state.agent.budget.exhausted(),
-    baseline: (command) => state.base.exitOf(command),
+    baseline: (command) => state.base.runOf(command),
   });
   if (run.outcome === VerificationClass.BudgetEnd)
     state.agent.budget.wallDeadlineReached();

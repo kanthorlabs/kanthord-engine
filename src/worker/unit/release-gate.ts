@@ -331,7 +331,7 @@ async function verifyInReleaseClones(
       context: state.run.operationContext,
       env: state.input.env,
       exhausted: () => state.agent.budget.exhausted(),
-      baseline: (command) => state.base.exitOf(command),
+      baseline: (command) => state.base.runOf(command),
       memo: await memoScopeOf(state, VerificationContext.Release, commands),
     });
     const listed = { run, commands, setup: false, affected: null };

@@ -8,6 +8,7 @@ import { identitySchema } from "../kernel/identity.ts";
 import type { Transaction } from "../kernel/store.ts";
 import {
   type EndedExecution,
+  EnvironmentFailure,
   EXECUTION_NOT_RUNNING,
   type ExecutionRow,
   ExecutionStopReason,
@@ -242,6 +243,7 @@ export function countsFailure(stop: ReleaseStop | null): boolean {
   if (isHostFault(stop)) return false;
   if (NO_FAILURE_STOPS.includes(stop.reason)) return false;
   if (isAdvancingStop(stop)) return false;
+  if (stop.code === EnvironmentFailure.BaseFailed) return false;
   return (
     stop.reason !== ExecutionStopReason.EnvironmentFailed ||
     Object.keys(digestsOf(stop.detail ?? null)).length === NO_DIGESTS

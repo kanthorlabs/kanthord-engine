@@ -795,6 +795,21 @@ test("an environment_failed release without digests counts a failure", async (t)
   );
 });
 
+test("a base_failed release counts no failure and calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, {
+    ...ENVIRONMENT_STOP,
+    code: EnvironmentFailure.BaseFailed,
+    detail: JSON.stringify({ command: "false", exit_code: 1 }),
+  });
+  assert.deepEqual(h.failed, []);
+  assert.deepEqual(h.events, ["commit", "wake"]);
+  assert.deepEqual(
+    h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
+    [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW]],
+  );
+});
+
 test("a release that fails in its transaction calls environmentFailed never", async (t) => {
   const h = environmentHarness(t);
   const failure = new Error("Mission refused failure");

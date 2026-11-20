@@ -108,6 +108,8 @@ function providerCauseOf(code: string | null): FailureCause {
 }
 
 function environmentCauseOf(code: string | null): FailureCause {
+  if (code === EnvironmentFailure.BaseFailed)
+    return unattributed([CauseCategory.Environment, CauseCategory.Plan]);
   const subcategory =
     code === null ? undefined : environmentSubcategories[code];
   if (subcategory === undefined) return unattributed([]);

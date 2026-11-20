@@ -200,6 +200,18 @@ test("an operation failure maps by its code", () => {
   assert.deepEqual(operation("scheduler.other.failed"), unattributed([]));
 });
 
+test("an environment failure of base_failed has the suspects environment and plan", () => {
+  assert.deepEqual(
+    stopCauseOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.BaseFailed,
+      null,
+      QUIET,
+    ),
+    unattributed([CauseCategory.Environment, CauseCategory.Plan]),
+  );
+});
+
 test("a no-progress stop reads the timeout from its detail", () => {
   const noProgress = (detail: string | null, signals = QUIET) =>
     stopCauseOf(ExecutionStopReason.NoProgress, null, detail, signals);

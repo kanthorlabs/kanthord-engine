@@ -423,15 +423,37 @@ test("the base rerun runs on the base head after its setup and is cached within 
   const environment = stored({ postCreateCommand: `touch ${SETUP_MARKER}` });
   const { base } = await prepared(setupCheckout(checkout, environment), root);
   const command = `echo run >> ${counter}; test -e ${SETUP_MARKER} && test ! -e node && command-absent-x`;
-  assert.equal(await base.exitOf(command), COMMAND_ABSENT_EXIT);
-  assert.equal(await base.exitOf(command), COMMAND_ABSENT_EXIT);
+  assert.equal((await base.runOf(command))?.exit_code, COMMAND_ABSENT_EXIT);
+  assert.equal((await base.runOf(command))?.exit_code, COMMAND_ABSENT_EXIT);
   assert.equal(readFileSync(counter, "utf8"), ONE_RUN);
   const next = await prepared(
     setupCheckout(checkout, environment),
     join(root, "next"),
   );
-  assert.equal(await next.base.exitOf(command), COMMAND_ABSENT_EXIT);
+  assert.equal(
+    (await next.base.runOf(command))?.exit_code,
+    COMMAND_ABSENT_EXIT,
+  );
   assert.equal(readFileSync(counter, "utf8"), TWO_RUNS);
+});
+
+test("the base run answers the exit code, the timeout flag and the last line and a second call reads the cache", async (t) => {
+  const { root, checkout } = await repository(t, { file: "base" });
+  await commit(checkout, "node", "node");
+  const counter = join(root, "runs");
+  const { base } = await prepared(
+    setupCheckout(checkout, stored({ postCreateCommand: "true" })),
+    root,
+  );
+  const command = `echo run >> ${counter}; echo "download failed: 504"; echo; exit ${FAILED_EXIT}`;
+  const expected = {
+    exit_code: FAILED_EXIT,
+    timed_out: false,
+    last_line: "download failed: 504",
+  };
+  assert.deepEqual(await base.runOf(command), expected);
+  assert.deepEqual(await base.runOf(command), expected);
+  assert.equal(readFileSync(counter, "utf8"), ONE_RUN);
 });
 
 test("a run in the base head runs in the named clone at the base commit with the variables and runs again on a second call", async (t) => {
@@ -496,7 +518,7 @@ test("the base rerun answers no exit when the budget ends in the base setup", as
     { directory: join(root, "base") },
     entries,
   );
-  assert.equal(await base.exitOf("command-absent-x"), null);
+  assert.equal(await base.runOf("command-absent-x"), null);
 });
 
 test("a setup that changes a tracked file only on the node head is a code failure that names the path", async (t) => {
