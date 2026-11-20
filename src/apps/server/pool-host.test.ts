@@ -8,6 +8,7 @@ import { MessagePort } from "node:worker_threads";
 import type { Logger } from "pino";
 import { deriveClientSecret } from "../../gateway/auth/jwt.ts";
 import type { createInvocation } from "../../gateway/index.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import {
   BindingEntryState,
@@ -17,6 +18,8 @@ import {
   type PoolInstance,
   PoolPlacement,
   SessionReadOutcome,
+  type StopOrderEntry,
+  StopOrderReason,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
 import type {
@@ -62,6 +65,7 @@ const BACKOFF_STEPS = [1000, 2000, 4000, 8000, 16000, 30000, 30000];
 class FakeInstance implements SlotInstance {
   readonly controls: string[] = [];
   readonly lists: Array<readonly SlotEntry[]> = [];
+  readonly orders: Array<readonly StopOrderEntry[]> = [];
   terminated = 0;
   readonly exited: Promise<SlotExit>;
   private readonly settle: (exit: SlotExit) => void;
@@ -78,6 +82,10 @@ class FakeInstance implements SlotInstance {
 
   bindings(entries: readonly SlotEntry[]): void {
     this.lists.push(entries);
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.orders.push(orders);
   }
 
   terminate(): void {
@@ -336,6 +344,26 @@ test("a binding write sends the new entry list to the running instance and start
     draining.map(({ state, channel }) => [state, channel]),
     [[BindingEntryState.Draining, null]],
   );
+});
+
+test("a stop order list reaches the slot of its own running instance only", (t) => {
+  const f = fixture(t);
+  const target = f.instanceOf("coder-1");
+  const other = f.instanceOf("coder-2", PoolPlacement.Container);
+  f.pool.start(target, [f.entryOf("a")]);
+  f.pool.start(other, [f.entryOf("b")]);
+  const orders = [
+    StopOrderReason.HumanPaused,
+    StopOrderReason.InstanceArchived,
+    StopOrderReason.Revoked,
+  ].map((reason) => ({
+    execution_id: createIdentity("execution"),
+    reason,
+  }));
+  f.pool.stopOrders(target, orders);
+  f.pool.stopOrders(f.instanceOf("coder-3"), orders);
+  assert.deepEqual(f.driver.instances[0]!.orders, [orders]);
+  assert.deepEqual(f.containerDriver.instances[0]!.orders, []);
 });
 
 test("an archive stops the instance through stop, terminates it after 5 s and removes the slot root and the volume", async (t) => {

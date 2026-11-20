@@ -202,6 +202,8 @@ export class FakeSlotInstance implements SlotInstance {
     this.changed();
   }
 
+  stopOrders(): void {}
+
   terminate(): void {
     this.exit.resolve(SLOT_EXIT);
   }

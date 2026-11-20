@@ -30,6 +30,7 @@ import {
   RegistrationActivity,
   type SessionRead,
   SessionReadOutcome,
+  StopOrderReason,
   WORKER_SERVICE_NAME,
   type WorkerBindingOf,
   type WorkerEntry,
@@ -2222,6 +2223,25 @@ test("an instance create starts one and an archive stops one after the change no
   assert.deepEqual(
     f.host.archived.map(({ name }) => name),
     ["server-0"],
+  );
+});
+
+test("a revoked stop order of a running server instance reaches the pool host with the orders of that instance", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  assert.deepEqual(
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [{ execution_id: POOL_EXECUTION, reason: StopOrderReason.Revoked }],
+      ],
+    ],
   );
 });
 

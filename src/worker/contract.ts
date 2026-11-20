@@ -1038,6 +1038,7 @@ export interface PoolHost {
     signal: AbortSignal,
   ): Promise<SessionRemovalResult>;
   logItem(instance: PoolInstance): Promise<FootprintItem | null>;
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void;
 }
 
 export const WORKER_SERVICE_NAME = "worker";

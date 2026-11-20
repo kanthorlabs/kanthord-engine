@@ -589,6 +589,7 @@ export class WorkerService implements Service {
           this.heartbeatClock.drop(runtimeIdentity);
         this.instancesChanged();
       },
+      stopOrdersQueued: (name) => this.sendPoolStopOrders(name),
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
@@ -750,6 +751,18 @@ export class WorkerService implements Service {
   async stopPool(): Promise<void> {
     this.poolStarted = false;
     await this.dependencies.pool?.host.stop();
+  }
+
+  private sendPoolStopOrders(name: string): void {
+    if (!this.poolStarted) return;
+    const instance = this.pool!.instances().find(
+      (candidate) => candidate.name === name,
+    );
+    if (!instance) return;
+    const orders = this.dependencies.store.transaction((tx) =>
+      this.instances.stopOrdersOf(tx, instance.id),
+    );
+    this.dependencies.pool!.host.stopOrders(instance, orders);
   }
 
   bindingsChanged(projectId: string): void {

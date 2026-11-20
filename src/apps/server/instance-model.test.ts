@@ -35,6 +35,8 @@ import {
   PoolPlacement,
   RegistrationActivity,
   type RepositoryTransport,
+  type StopOrderEntry,
+  StopOrderReason,
   WorkerErrorCode,
   workerOperations,
 } from "../../worker/contract.ts";
@@ -96,6 +98,8 @@ const HELLO = "hello";
 const GIT_NAME = "Instance Model";
 const GIT_EMAIL = "instance_model@example.invalid";
 const FIRST_VERSION = 1;
+const EXECUTION_ENDED = "execution ended";
+const CLAIM_WATCH_INTERVAL_MS = 60000;
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",
@@ -138,6 +142,8 @@ interface UnitHost {
   repository: RepositoryTransport;
   runtime(instanceName: string): ModelRuntimeFactory;
   handoverHold(instanceName: string): Promise<void> | undefined;
+  record(line: string): void;
+  released(executionId: string): void;
 }
 
 interface HostedBinding {
@@ -213,6 +219,7 @@ class HostedBindings {
 
 class ModelUnit implements SlotInstance {
   readonly exited: Promise<SlotExit>;
+  readonly orders: StopOrderEntry[] = [];
   ended = false;
   private readonly unit: WorkerUnit;
   private readonly hosted: HostedBindings;
@@ -229,7 +236,7 @@ class ModelUnit implements SlotInstance {
       bindings: this.hosted.initial(wire),
       directories: { data: state, log: state },
       env,
-      log: () => {},
+      log: (line) => host.record(line),
       model_runtime_factory: host.runtime(name),
       repository_transport: host.repository,
     });
@@ -244,6 +251,11 @@ class ModelUnit implements SlotInstance {
 
   bindings(entries: readonly SlotEntry[]): void {
     void this.hosted.apply(threadEntries(entries));
+  }
+
+  stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.orders.push(...orders);
+    this.unit.stopOrders(orders);
   }
 
   terminate(): void {
@@ -262,6 +274,12 @@ class ModelUnit implements SlotInstance {
       await host.handoverHold(name);
       return handover(...args);
     };
+    const release = transport.scheduler.executionRelease;
+    const scheduler: Record<string, unknown> = transport.scheduler;
+    scheduler.executionRelease = (...args: Parameters<typeof release>) => {
+      host.released(args[0].params.execution_id);
+      return release(...args);
+    };
   }
 
   private async run(wire: ThreadEntry[]): Promise<SlotExit> {
@@ -279,6 +297,9 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
   readonly placement = PoolPlacement.Server;
   readonly units = new Map<string, ModelUnit[]>();
   readonly repository: RepositoryTransport;
+  readonly records: Record<string, unknown>[] = [];
+  readonly releases: string[] = [];
+  agentRuns = 0;
   private readonly gates: Gates;
   private readonly holds = new Map<string, Promise<void>>();
 
@@ -312,8 +333,9 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
 
   runtime(instanceName: string): ModelRuntimeFactory {
     const command = `until [ -e "${this.gates.path(instanceName)}" ]; do sleep ${GATE_POLL_SECONDS}; done; printf ${HELLO} > hello.txt`;
-    return (input) =>
-      scriptedModelRuntime(
+    return (input) => {
+      this.agentRuns++;
+      return scriptedModelRuntime(
         scriptedProvider([
           fauxAssistantMessage(fauxToolCall(BASH, { command }), {
             stopReason: TOOL_USE,
@@ -321,6 +343,15 @@ class ModelThreadDriver implements SlotDriver, UnitHost {
           fauxAssistantMessage(DONE),
         ]),
       )(input);
+    };
+  }
+
+  record(line: string): void {
+    this.records.push(JSON.parse(line) as Record<string, unknown>);
+  }
+
+  released(executionId: string): void {
+    this.releases.push(executionId);
   }
 
   handoverHold(instanceName: string): Promise<void> | undefined {
@@ -906,6 +937,71 @@ test(
       ),
       SECOND_INSTANCE,
     );
+  },
+);
+
+test(
+  "a pause of a server instance run sends the stop order revoked through the slot, and the run ends with no push and no release before its claim watch",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const s = await scenario(t, [FIRST_INSTANCE]);
+    const project = await s.project("revoked", [FIRST_INSTANCE]);
+    const nodeId = await s.node(project, "implement-1.md");
+    const pushes: string[] = [];
+    const push = s.driver.repository.pushNodeBranch;
+    s.driver.repository.pushNodeBranch = (...args) => {
+      pushes.push(args[0]);
+      return push(...args);
+    };
+    s.fixture.worker.startPool();
+    const [claim] = await until(
+      () => s.running(project),
+      (items) => items.length === SINGLE_ITEM,
+      s.signal,
+    );
+    const executionId = claim!.execution_id;
+    await until(
+      async () => s.driver.agentRuns,
+      (runs) => runs === SINGLE_ITEM,
+      s.signal,
+    );
+    const node = await s.nodeOf(nodeId);
+    const mission = await s.call(missionOperations.get, {
+      params: { project_id: project },
+      query: {},
+      body: null,
+    });
+    const pausedAt = Date.now();
+    await s.call(missionOperations["node.pause"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: {
+        reason: "hold",
+        expected_mission_version: mission.version,
+        expected_state: node.state,
+        expected_attempt: node.attempt,
+      },
+    });
+    const end = await until(
+      async () =>
+        s.driver.records.find(
+          (record) =>
+            record.msg === EXECUTION_ENDED &&
+            record.execution_id === executionId,
+        ),
+      (record) => record !== undefined,
+      s.signal,
+    );
+    assert.ok(Date.now() - pausedAt < CLAIM_WATCH_INTERVAL_MS);
+    assert.equal(end?.reason, StopOrderReason.Revoked);
+    assert.deepEqual(s.driver.launched(FIRST_INSTANCE)[0]!.orders, [
+      { execution_id: executionId, reason: StopOrderReason.Revoked },
+    ]);
+    assert.deepEqual(s.driver.releases, []);
+    assert.deepEqual(pushes, []);
+    const [revoked] = await s.executions(project, nodeId);
+    assert.equal(revoked?.claim_state, ClaimState.Finished);
+    assert.equal(revoked?.stop?.reason, ExecutionStopReason.HumanPaused);
   },
 );
 

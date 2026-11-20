@@ -187,6 +187,7 @@ const IDLE_POOL_HOST: PoolHost = {
   sessionItems: unexpected,
   removeSession: unexpected,
   logItem: unexpected,
+  stopOrders: unexpected,
 };
 
 function unexpected(): never {

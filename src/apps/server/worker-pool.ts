@@ -20,6 +20,7 @@ import {
   type SessionRead,
   type SessionReadResult,
   type SessionRemovalResult,
+  type StopOrderEntry,
 } from "../../worker/contract.ts";
 import {
   executionSessionItems,
@@ -187,6 +188,10 @@ export class WorkerPool implements PoolHost {
     if (!hosted) return;
     hosted.entries = entries;
     hosted.running?.bindings(this.slotEntries(hosted));
+  }
+
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void {
+    this.hosted.get(instance.id)?.running?.stopOrders(orders);
   }
 
   restart(instance: PoolInstance): void {

@@ -7,6 +7,7 @@ import type {
   PoolPlacement,
   RuntimeStoreInfo,
   RuntimeUsage,
+  StopOrderEntry,
 } from "../../worker/contract.ts";
 import type { SlotControl } from "../worker/thread-data.ts";
 
@@ -31,6 +32,7 @@ export interface SlotExit {
 export interface SlotInstance {
   control(kind: SlotControl["kind"]): void;
   bindings(entries: readonly SlotEntry[]): void;
+  stopOrders(orders: readonly StopOrderEntry[]): void;
   terminate(): void;
   readonly exited: Promise<SlotExit>;
 }

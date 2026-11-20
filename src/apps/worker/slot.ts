@@ -124,6 +124,11 @@ export class SlotSession {
     if (!this.thread) throw frameInvalid("the first frame is no init frame");
     if (frame.kind === FrameKind.Control)
       this.thread.postMessage({ kind: frame.control });
+    if (frame.kind === FrameKind.StopOrders)
+      this.thread.postMessage({
+        kind: ThreadMessageKind.StopOrders,
+        orders: frame.orders,
+      });
     if (frame.kind === FrameKind.Bindings) this.update(this.thread, frame);
   }
 

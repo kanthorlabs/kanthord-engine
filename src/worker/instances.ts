@@ -124,6 +124,7 @@ export interface InstanceDependencies {
   sessionReadWaitMs: number;
   instanceArchived?: (tx: Transaction, name: string) => void;
   instanceEnded: (ended: readonly string[]) => void;
+  stopOrdersQueued: (name: string) => void;
   logger: Logger;
 }
 
@@ -826,6 +827,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       created_at: Date.now(),
     });
     this.raiseWorkVersion(instance.name);
+    this.dependencies.stopOrdersQueued(instance.name);
   }
 
   stopOrderOf(executionId: string): StopOrderReason | null {
