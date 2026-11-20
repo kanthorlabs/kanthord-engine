@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { spawn } from "node:child_process";
+import { test, type TestContext } from "node:test";
 import {
   CONFIG_VERSION,
   initialConfig,
   loadConfig,
 } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { Store } from "../../kernel/store.ts";
+import { type Migrations, Store } from "../../kernel/store.ts";
 import {
   requirePiTools,
   stopAfter,
@@ -46,7 +47,7 @@ const BEHIND_SERVICE = serverMigrations.find(
 )!;
 const SCHEMA_MISMATCH = /system\.database\.migration\.schema_mismatch/;
 const RESET_INSTRUCTION =
-  /delete kanthord\.db, tracking\.db and their -wal and -shm files in the data directory, and start again/;
+  /run kanthord upgrade --reset-changed; the command rebuilds only the changed services and keeps the credentials and the unchanged services/;
 const olderMigrations = serverMigrations.map((entry) =>
   entry.service === BEHIND_SERVICE.service
     ? { ...entry, migrations: entry.migrations.slice(0, -1) }
@@ -268,7 +269,7 @@ test("upgrade writes each row when it happens, before a later step fails", async
   });
   const written: string[] = [];
   await assert.rejects(
-    upgrade(paths.config, (text) => written.push(text), now),
+    upgrade(paths.config, (text) => written.push(text), { now }),
     (error) =>
       error instanceof Diagnostic &&
       error.code === BACKUP_FAILED &&
@@ -423,4 +424,258 @@ test("upgrade keeps a missing tracking.db missing", async (t) => {
   assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
     DATABASE_FILE,
   ]);
+});
+
+const GATEWAY_STARTED_MESSAGE = "Gateway Service started";
+const WORKBENCH_SERVICE = "workbench";
+const STORED_CREDENTIAL_COUNT = 1;
+const RESET_FLAG = "--reset-changed";
+const CUSTODY_REFUSED = /system\.database\.reset\.custody_refused/;
+const FOREIGN_KEY_REFUSED = /system\.database\.reset\.foreign_key/;
+const SERVE_TIMEOUT_MS = 60000;
+const MASTER_KEY_LINE = /^master_key: (.*)$/m;
+const CREDENTIAL_ROW =
+  "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, created_at) VALUES ('c1', 'name', 'platform', 'holder', 1, x'00', x'00', 0)";
+
+function withExtraText(migrations: Migrations, service: string): Migrations {
+  return migrations.map((entry) =>
+    entry.service === service
+      ? {
+          service,
+          migrations: [
+            (database) => {
+              entry.migrations[0]!(database);
+              database.exec(
+                `CREATE TABLE ${service}_scratch_extra (value TEXT)`,
+              );
+            },
+          ],
+        }
+      : entry,
+  );
+}
+
+async function resetRun(env: NodeJS.ProcessEnv, signal: AbortSignal) {
+  const { code, stdout, stderr } = await runKanthord(
+    ["upgrade", RESET_FLAG],
+    env,
+    signal,
+  );
+  return { status: code, stdout, stderr };
+}
+
+function createDatabase(path: string, migrations: Migrations): Store {
+  const store = new Store(path);
+  store.migrate(migrations);
+  return store;
+}
+
+function keptRows(path: string, excluded: RegExp) {
+  const store = new Store(path);
+  try {
+    const rows = Object.fromEntries(
+      store
+        .tableNames()
+        .filter((name) => !excluded.test(name))
+        .map((name) => [
+          name,
+          store.database.prepare(`SELECT * FROM ${name}`).all(),
+        ]),
+    );
+    return {
+      rows,
+      history: store.database
+        .prepare("SELECT service, version FROM migration ORDER BY 1, 2")
+        .all(),
+    };
+  } finally {
+    store.close();
+  }
+}
+
+async function serveStarts(
+  env: NodeJS.ProcessEnv,
+  t: TestContext,
+): Promise<void> {
+  requirePiTools();
+  const entry = new URL("../../main.ts", import.meta.url).href;
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `process.argv=[process.execPath,'kanthord','serve'];await import(${JSON.stringify(entry)});`,
+    ],
+    {
+      env,
+      stdio: "pipe",
+      signal: AbortSignal.any([
+        t.signal,
+        AbortSignal.timeout(SERVE_TIMEOUT_MS),
+      ]),
+    },
+  );
+  stopAfter(t, () => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
+  const exit = new Promise<number | null>((resolve) =>
+    child.once("exit", resolve),
+  );
+  let stderr = "";
+  await new Promise<void>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("exit", () => reject(new Error(`serve exited: ${stderr}`)));
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+      if (stderr.includes(GATEWAY_STARTED_MESSAGE)) resolve();
+    });
+  });
+  child.kill("SIGTERM");
+  assert.equal(await exit, ExitCode.Success);
+}
+
+test("upgrade --reset-changed rebuilds the changed workbench service and keeps the credential and the other rows", async (t) => {
+  const paths = layout(temporary(t));
+  const config = currentConfig();
+  writePrivate(paths.config, config);
+  const store = createDatabase(
+    paths.database,
+    withExtraText(serverMigrations, "workbench"),
+  );
+  enforceMasterKey(store, MASTER_KEY_LINE.exec(config)![1]!, paths.config);
+  store.database.exec(CREDENTIAL_ROW);
+  store.close();
+  const before = keptRows(paths.database, /^(workbench_|migration$)/);
+
+  const reset = await resetRun(paths.env, t.signal);
+  assert.equal(reset.status, ExitCode.Success, reset.stderr);
+  const workbench = serverMigrations.find(
+    ({ service }) => service === WORKBENCH_SERVICE,
+  )!;
+  assert.match(
+    reset.stdout,
+    new RegExp(
+      `^backup: +${paths.database}\\.bak-\\d{8}T\\d{6}\\n` +
+        "dropped: +workbench_invite\\n" +
+        "dropped: +workbench_scratch_extra\\n" +
+        `migrated: +workbench 0 -> ${workbench.migrations.length}\\n$`,
+    ),
+  );
+  assert.deepEqual(
+    keptRows(paths.database, /^(workbench_|migration$)/),
+    before,
+  );
+  assert.equal(
+    keptRows(paths.database, /^(workbench_|migration$)/).rows.credential
+      ?.length,
+    STORED_CREDENTIAL_COUNT,
+  );
+  const after = new Store(paths.database);
+  assert.deepEqual(after.plan(serverMigrations).pending, []);
+  after.close();
+  await serveStarts(paths.env, t);
+});
+
+test("upgrade --reset-changed refuses a changed custody service and writes nothing", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  createDatabase(
+    paths.database,
+    withExtraText(serverMigrations, "custody"),
+  ).close();
+  const before = keptRows(paths.database, /^$/);
+
+  const refused = await resetRun(paths.env, t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, CUSTODY_REFUSED);
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
+test("upgrade --reset-changed refuses a table that references a dropped table and writes nothing", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const store = createDatabase(
+    paths.database,
+    withExtraText(serverMigrations, "workbench"),
+  );
+  store.database.exec(
+    "CREATE TABLE unowned_reference (invite TEXT REFERENCES workbench_invite(id))",
+  );
+  store.close();
+  const before = keptRows(paths.database, /^$/);
+
+  const refused = await resetRun(paths.env, t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, FOREIGN_KEY_REFUSED);
+  assert.match(refused.stderr, /unowned_reference/);
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
+test("upgrade without --reset-changed refuses a changed migration text and names the reset option", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  createDatabase(
+    paths.database,
+    withExtraText(serverMigrations, "workbench"),
+  ).close();
+
+  const refused = await run(paths.env, "upgrade", t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, SCHEMA_MISMATCH);
+  assert.match(refused.stderr, /kanthord upgrade --reset-changed/);
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+});
+
+test("upgrade --reset-changed on an up-to-date database prints only up_to_date", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  createDatabase(paths.database, serverMigrations).close();
+
+  const result = await resetRun(paths.env, t.signal);
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, `up_to_date:     ${paths.config}\n`);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+});
+
+test("upgrade --reset-changed resets only tracking.db when its migration text changed", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  createDatabase(paths.database, serverMigrations).close();
+  createDatabase(
+    paths.tracking,
+    withExtraText(trackingDatabaseMigrations, "tracking"),
+  ).close();
+
+  const reset = await resetRun(paths.env, t.signal);
+  assert.equal(reset.status, ExitCode.Success, reset.stderr);
+  const backups = [...reset.stdout.matchAll(/^backup: +(.+)$/gm)].map(
+    (match) => match[1]!,
+  );
+  assert.equal(backups.length, TRACKING_BACKUP_ONLY);
+  assert.match(backups[0]!, new RegExp(`${TRACKING_DATABASE_FILE}\\.bak-`));
+  assert.match(reset.stdout, /^dropped: +tracking_scratch_extra$/m);
+  assert.match(reset.stdout, /^migrated: +tracking 0 -> 1$/m);
+  assert.doesNotMatch(reset.stdout, new RegExp(DATABASE_FILE));
+  assert.deepEqual(
+    readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord"))
+      .filter((name) => name.includes(".bak-"))
+      .map((name) => name.split(".bak-")[0]),
+    [TRACKING_DATABASE_FILE],
+  );
+  const store = new Store(paths.tracking);
+  assert.deepEqual(store.plan(trackingDatabaseMigrations).pending, []);
+  store.close();
 });

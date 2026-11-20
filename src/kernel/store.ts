@@ -27,7 +27,7 @@ const SCHEMA_OBJECT_TYPE = 0;
 const SCHEMA_OBJECT_NAME = 1;
 const SCHEMA_OBJECT_COLUMNS = ["type", "name", "tbl_name", "sql"] as const;
 const SCHEMA_MISMATCH_MESSAGE =
-  "the schema of this service differs from its migration text; stop the server, delete kanthord.db, tracking.db and their -wal and -shm files in the data directory, and start again";
+  "the schema of this service differs from its migration text; stop the server and run kanthord upgrade --reset-changed; the command rebuilds only the changed services and keeps the credentials and the unchanged services";
 const EXPECTED_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`;
 const LIVE_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND (name IN (SELECT value FROM json_each(?)) OR tbl_name IN (SELECT value FROM json_each(?)) OR substr(name, 1, length(?) + 1) = ? || '_') ORDER BY type, name`;
 
