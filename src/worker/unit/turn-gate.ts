@@ -190,6 +190,7 @@ export function gatedAgent(
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),
+    completeReply: () => agent.completeReply(),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
     close: () => agent.close(),

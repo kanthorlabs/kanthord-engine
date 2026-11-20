@@ -47,7 +47,7 @@ export const examineTurn: FoundryStep<
   writes: [],
   stops: ["report_absent", "provider_failed"],
   llm: true,
-  note: "Examine; budget end after the turn; submits the report evidence",
+  note: "Examine; budget end after the turn unless the reply is complete; submits the report evidence",
   run(ctx, scope, io) {
     return stopsReturned(scope, () =>
       budgetMapped(io, scope, async () => {
@@ -72,7 +72,8 @@ export const examineTurn: FoundryStep<
           }),
           PromptTemplate.Examine,
         );
-        if (agent.budget.exhausted()) return budgetEnd(scope);
+        if (agent.budget.exhausted() && !agent.completeReply())
+          return budgetEnd(scope);
         const assessment = agent.lastText();
         if (!assessment?.trim())
           return stopped(

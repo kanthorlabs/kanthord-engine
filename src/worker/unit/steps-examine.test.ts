@@ -649,7 +649,11 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     resource_budget: setup.resource_budget,
   });
   const open = async () =>
-    ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
+    ({
+      budget,
+      instruct: async () => {},
+      completeReply: () => false,
+    }) as unknown as NativeAgent;
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const transport = {
     cloneSnapshot: async (

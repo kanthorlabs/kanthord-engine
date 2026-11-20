@@ -742,6 +742,16 @@ test("native entry runs an examine report and ends the agent.session span before
   assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
 });
 
+test("a complete examine report at the exact turns budget end keeps the report and releases with no further work and no stop", async (t) => {
+  const { result, releases } = await examineRun(
+    t,
+    [fauxAssistantMessage("All dependencies completed.")],
+    { turns: ONE_TURN },
+  );
+  assert.deepEqual(result, OK_RELEASE);
+  assert.deepEqual(releases, [{ further_work: false, stop: null }]);
+});
+
 test("an examine budget end after prepare releases with further_work and the stop budget_end/<limit>", async (t) => {
   const { result, releases } = await examineRun(
     t,
