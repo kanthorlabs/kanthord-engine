@@ -12,7 +12,7 @@ chain implement
           step agent.open                   port: agent.open; stop operation_failed
     step state.open                         the live implement state of the later phases
   phase start
-    step base.refresh(claim)                [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+    step base.refresh(claim)                [LLM] port: secrets.redact; per checkout and merged branch: merge, marker check of the conflicted files, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge, resolved only when each conflicted file held a marker at the merge and holds none now; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
     [PAR] start.inputs
       step env.setup(live)                  on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end; stop environment_failed/setup_failed
       step units.plan                       verdict rule, unit records, pending units
@@ -28,7 +28,7 @@ chain implement
         step unit.leave                     notes the final agent text for the coder report; counts the completed unit
       loop release_gate                     one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count
         step base.fetch                     port: repository.fetchBase; base_branch and upstream_branch of each checkout; stop operation_failed/repository.connector.git_failed
-        step base.refresh(release)          [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+        step base.refresh(release)          [LLM] port: secrets.redact; per checkout and merged branch: merge, marker check of the conflicted files, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge, resolved only when each conflicted file held a marker at the merge and holds none now; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
         step release.verify                 port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed, environment_failed/affected_invalid, environment_failed/affected_timeout
         step release.route                  passed -> leave release_rounds; routed -> owner unit, next round
   phase finish
@@ -38,7 +38,7 @@ chain implement
     step execution.release                  [cleanup] further_work false
   budget_end in prepare: stop budget_end/wall_time
   onExit budget_end, after prepare
-    step checkpoint.gate                    [cleanup] aborts the agent; concludes a resolved open merge; aborts each other MERGE_HEAD; commits the partial work of the current unit; stop operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
+    step checkpoint.gate                    [cleanup] aborts the agent; concludes a resolved open merge; aborts each other MERGE_HEAD; commits the partial work of the current unit; stop operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left
     step branch.push                        [cleanup] fence; per checkout; push record around each push; stop revoked, operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
     step execution.release                  [cleanup] further_work true; stop budget_end/<limit> only when no unit completed
   onStop not revoked, after prepare

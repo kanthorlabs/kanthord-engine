@@ -28,6 +28,7 @@ export const checkpointGateExit: Step<unknown, "state", never> = {
   stops: [
     "operation_failed/worker.turn.*",
     "operation_failed/worker.git.commit_failed",
+    "operation_failed/worker.merge.markers_left",
   ],
   note: "aborts the agent; concludes a resolved open merge; aborts each other MERGE_HEAD; commits the partial work of the current unit",
   async run({ state }, scope, io) {

@@ -21,7 +21,6 @@ import {
   type ConflictMerge,
   gatedAgent,
   mergeCommitMessage,
-  type OpenMerge,
 } from "./turn-gate.ts";
 
 const NO_FILES = 0;
@@ -107,6 +106,13 @@ async function mergeUnder(
     () => mergeRef(env, directory, ref, message, context, remaining()),
   );
   if (conflicts.length > NO_FILES) {
+    const marked = await conflictMarkerFiles(
+      env,
+      directory,
+      conflicts,
+      context,
+      remaining(),
+    );
     const merge: ConflictMerge = {
       directory,
       commit,
@@ -127,7 +133,12 @@ async function mergeUnder(
       PromptTemplate.Conflict,
     );
     if (state.agent.budget.exhausted()) {
-      state.openMerge = await checkedMerge(state, merge, context);
+      const left = await markersLeft(state, merge, context);
+      const everyMarked = conflicts.every((file) => marked.includes(file));
+      state.openMerge = {
+        ...merge,
+        resolved: everyMarked && left.length === NO_FILES,
+      };
       return RefreshResult.BudgetEnd;
     }
   } else checkout.head = await headCommit(env, directory, context, remaining());
@@ -140,19 +151,18 @@ async function mergeUnder(
   return RefreshResult.Merged;
 }
 
-async function checkedMerge(
+function markersLeft(
   state: StepsState,
   merge: ConflictMerge,
   context: Context,
-): Promise<OpenMerge> {
-  const left = await conflictMarkerFiles(
+): Promise<string[]> {
+  return conflictMarkerFiles(
     state.input.env,
     merge.directory,
     merge.files,
     context,
     state.input.claim.expired_at - Date.now(),
   );
-  return { ...merge, resolved: left.length === NO_FILES };
 }
 
 export async function fetchAtRelease(

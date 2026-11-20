@@ -385,8 +385,8 @@ HTTP `200` returns the summary fields plus:
   with the `stop`. A failed push still releases with the `stop`. A failed
   release ends the execution with no release.
   At a budget end in a conflict turn, the worker checks the conflict markers
-  once more. When no marker is left and `MERGE_HEAD` holds the merged commit,
-  the checkpoint commits the merge as `<commit_type>: merge <base branch>`.
+  once more. When each conflicted file held a marker at the merge, no marker
+  is left and `MERGE_HEAD` holds the merged commit, the checkpoint commits the merge as `<commit_type>: merge <base branch>`.
   Otherwise the checkpoint aborts the merge. The checkpoint of a stop aborts
   every open merge.
   An evaluation judgement with no valid marker line gets one repair turn. A
