@@ -57,7 +57,7 @@ export interface ChainIo<P extends CommonPorts = CommonPorts> {
 }
 
 interface WalkMarks {
-  step: string | null;
+  stopped: string | null;
 }
 
 interface Walk<P extends CommonPorts = CommonPorts> {
@@ -77,7 +77,7 @@ function walkOf<P extends CommonPorts>(
     io,
     stopping: false,
     cancel: io.run.operationContext,
-    marks: { step: null },
+    marks: { stopped: null },
   };
 }
 
@@ -146,7 +146,6 @@ async function walkStep(
 ): Promise<Walked> {
   const { run } = walk.io;
   const context = stepContext(walk, step);
-  walk.marks.step = step.id;
   walk.io.steps?.started(step.id);
   try {
     const result = await stepResult(walk, step, { context, holder });
@@ -156,6 +155,9 @@ async function walkStep(
       run.noteVerification(walk.ctx.verificationTimedOut);
     if (result.stop !== undefined) throw run.halt(result.stop);
     return result.kind;
+  } catch (error) {
+    walk.marks.stopped ??= step.id;
+    throw error;
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
     walk.io.steps?.ended(step.id, holder.scope);
@@ -444,7 +446,7 @@ export async function runPhase<P extends CommonPorts>(
     return {
       kind: PhaseEndKind.Stop,
       stop,
-      step: walk.marks.step,
+      step: walk.marks.stopped,
       ctx: walk.ctx,
     };
   }

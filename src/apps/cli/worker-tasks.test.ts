@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { suite, test } from "node:test";
 import { simpleGit } from "simple-git";
 import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
@@ -38,6 +38,8 @@ import {
   TasksExit,
 } from "../worker/index.ts";
 import { ExitCode } from "./constants.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import {
   apiKeyInput,
   type CommandRun,
@@ -58,6 +60,24 @@ import { runInProcess } from "./test-support.ts";
 import { stopOnSignal, type TasksCommandIo, tasksRun } from "./worker-tasks.ts";
 
 const PI_ROOT = temporaryDirectory();
+const STOP_CODE_CHECK = 7;
+const AFFECTED_DECLARATION_FILE = ".kanthord/affected-tests.json";
+const FAILED_SETUP = {
+  source: EnvironmentSource.Detected,
+  document: { postCreateCommand: "exit 3" },
+};
+
+async function declareInvalidAffected(fixture: SeedFixture): Promise<void> {
+  const declaration = join(fixture.source, AFFECTED_DECLARATION_FILE);
+  mkdirSync(dirname(declaration));
+  writeFileSync(
+    declaration,
+    JSON.stringify({ version: 1, command: " ", gate_files: [] }),
+  );
+  const git = simpleGit(fixture.source);
+  await git.add(AFFECTED_DECLARATION_FILE);
+  await git.raw([...COMMIT_IDENTITY, "commit", "-q", "-m", "declare"]);
+}
 const COMMIT_IDENTITY = [
   "-c",
   "user.name=Seed",
@@ -476,6 +496,56 @@ suite("worker tasks run", () => {
       assert.equal(unit.result.kind, UNIT_COMPLETE);
     },
   );
+
+  for (const { name, step, code, shape, arrange } of [
+    {
+      name: "an invalid affected declaration at the base, in the first branch of workspace.static",
+      step: "affected.declaration",
+      code: EnvironmentFailure.AffectedInvalid,
+      shape: () => {},
+      arrange: declareInvalidAffected,
+    },
+    {
+      name: "a failed live setup, in the first branch of start.inputs",
+      step: "env.setup(live)",
+      code: EnvironmentFailure.SetupFailed,
+      shape: (seed: Record<string, unknown>) => {
+        (
+          seed.setup as { repositories: { environment: unknown }[] }
+        ).repositories[0]!.environment = FAILED_SETUP;
+      },
+      arrange: async () => {},
+    },
+  ])
+    test(
+      `the stop check passes for a stop of ${name}`,
+      { timeout: TEST_TIMEOUT_MS },
+      async (t) => {
+        const fixture = await seedFixture(t, shape);
+        await arrange(fixture);
+        const run = commandRun(fixture, scriptedProvider([]));
+        const exit = await tasksRun(
+          fixture.seedFolder,
+          runOptions(fixture, { verify: true }),
+          run.io,
+        );
+        assert.equal(exit, TasksExit.Stopped, run.stderr.join(""));
+        const result = readJson(join(fixture.root, "out"), "result.json") as {
+          stop: { reason: string; code: string };
+          step: string;
+          checks: { check: number; applies: boolean; passed: boolean }[];
+        };
+        assert.deepEqual(
+          { reason: result.stop.reason, code: result.stop.code },
+          { reason: EndReason.EnvironmentFailed, code },
+        );
+        assert.equal(result.step, step);
+        assert.deepEqual(
+          result.checks.find(({ check }) => check === STOP_CODE_CHECK),
+          { check: STOP_CODE_CHECK, applies: true, passed: true },
+        );
+      },
+    );
 
   test(
     "metrics.json holds the run time of each step of tasks_prepare and of the tasks phase",
