@@ -7,7 +7,10 @@ import { WORKBENCH_OPENING_TEXT } from "../../workbench/contract.ts";
 import {
   completed,
   createHost,
+  DEFAULT,
+  OFF,
   sendMessage,
+  SONNET,
   untilIdle,
   type WorkbenchFixture,
   workbenchHarness,
@@ -106,6 +109,11 @@ test(
         session_id: host.id,
         agent_name: OPS,
         display_name: OPS_DISPLAY_NAME,
+        configuration: {
+          agent_provider: DEFAULT,
+          model_identifier: SONNET,
+          reasoning_effort: OFF,
+        },
       },
     ]);
     assert.equal(

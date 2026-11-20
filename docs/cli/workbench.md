@@ -57,7 +57,7 @@ The first mention of a member that is not yet a member creates a participant ses
 
 The session answers of `workbench.session.get` and `workbench.session.events` are one merged transcript of the conversation.
 
-- `members` lists `{ session_id, agent_name, display_name }` of every member, the host first, then the participants by creation time.
+- `members` lists `{ session_id, agent_name, display_name, configuration }` of every member, the host first, then the participants by creation time. `configuration` is `{ agent_provider, model_identifier, reasoning_effort }`, the current configuration of the member session. A `workbench.session.configure` call on a participant shows at the next read. The `members` entry of `workbench.guest.get` holds `{ session_id, agent_name, display_name }` and no configuration.
 - Every entry carries `session_id` and `agent_name` of the member file that holds it.
 - `after` of `workbench.session.events` holds one `<session_id>:<entry_id>` pair per member, separated by commas. A member with no pair starts from the first entry. A plain entry id names the host pair, and the participant entries start from the first entry. The answer holds no cursor field; the client builds `after` from the `session_id` and `id` of the entries it holds.
 - `version` is one counter for the whole conversation.

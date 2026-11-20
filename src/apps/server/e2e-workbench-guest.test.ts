@@ -1538,3 +1538,31 @@ test(
     await untilIdle(fixture, host.id, t.signal);
   },
 );
+
+test(
+  "(security) the members entries of workbench.guest.get hold exactly session_id, agent_name and display_name",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, host, joined } = await queuedFixture(t, [
+      fauxAssistantMessage(FIRST_ANSWER),
+    ]);
+    completed(await sendMessage(fixture, host.id, "@RE what is open?"));
+    await untilIdle(fixture, host.id, t.signal);
+    const view = await guestEntries(fixture, joined.token);
+    const owner = completed(
+      await fixture.workbench["session.get"](
+        { params: { session_id: host.id }, query: {}, body: null },
+        fixture.options,
+      ),
+    );
+    assert.equal(view.members.length, owner.members.length);
+    assert.ok(view.members.length > SINGLE);
+    for (const member of view.members)
+      assert.deepEqual(Object.keys(member).sort(), [
+        "agent_name",
+        "display_name",
+        "session_id",
+      ]);
+    for (const member of owner.members) assert.ok("configuration" in member);
+  },
+);

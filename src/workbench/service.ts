@@ -98,6 +98,7 @@ import {
   type GrantedInvite,
   GUARD_AGENT_NAME,
   GuardSummaryCause,
+  type GuestMember,
   MessageDelivery,
   MessageKind,
   type PendingApproval,
@@ -2372,11 +2373,20 @@ export class WorkbenchService implements Service {
     return [...found.values()];
   }
 
+  private guestMembers(host: OpenSession): GuestMember[] {
+    return host.members.map((member) => ({
+      session_id: member.id,
+      agent_name: member.agentName,
+      display_name: this.displayNameOfSession(member),
+    }));
+  }
+
   private conversationMembers(host: OpenSession): ConversationMember[] {
     return host.members.map((member) => ({
       session_id: member.id,
       agent_name: member.agentName,
       display_name: this.displayNameOfSession(member),
+      configuration: { ...member.configuration },
     }));
   }
 
@@ -3042,7 +3052,7 @@ export class WorkbenchService implements Service {
     return {
       session_id: host.id,
       title: host.manager.getSessionName() ?? null,
-      members: this.conversationMembers(host),
+      members: this.guestMembers(host),
       owner_name: invite.invited_by_name,
       projects: this.projectsOf(invite.project_ids),
       granted_operations: grantedView(
