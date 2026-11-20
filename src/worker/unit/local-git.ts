@@ -51,6 +51,10 @@ const DETACHED_BRANCH = "(detached)";
 const RENAMED_ENTRY = "2";
 const UNTRACKED_ENTRY = "?";
 const STATUS_INDEX_COLUMN = 2;
+const STATUS_MODES_START = 3;
+const STATUS_MODES_END = 6;
+const GITLINK_MODE = "160000";
+export const HEAD_OUTSIDE_BRANCHES = "(null)";
 const GIT_DIRECTORY = ".git";
 const LOCK_SUFFIX = ".lock";
 const NO_ENTRIES = 0;
@@ -395,6 +399,17 @@ export async function treeOf(
   return tree;
 }
 
+export async function symbolicHead(call: GitCall): Promise<string | null> {
+  const { matched, output } = await runMatch(
+    call.env,
+    call.directory,
+    ["symbolic-ref", "--quiet", "HEAD"],
+    call.context,
+    call.deadlineMs,
+  );
+  return matched ? output.trim() : null;
+}
+
 export async function containsCommit(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -562,18 +577,16 @@ export async function operationsInProgress(
   );
 }
 
-function assertGitDirectory(directory: string): void {
-  assert.ok(
-    isDirectory(join(directory, GIT_DIRECTORY)),
-    "The git directory of a checkout is a directory.",
-  );
+export async function livePaths(
+  call: GitCall,
+  paths: GitPaths,
+): Promise<GitPaths> {
+  return isDirectory(join(call.directory, GIT_DIRECTORY))
+    ? paths
+    : resolveGitPaths(call);
 }
 
-export function operationsOf(
-  directory: string,
-  paths: GitPaths,
-): GitOperation[] {
-  assertGitDirectory(directory);
+export function operationsOf(paths: GitPaths): GitOperation[] {
   return GIT_OPERATIONS.filter(({ state }) => existsSync(paths[state])).map(
     ({ state }) => state,
   );
@@ -588,7 +601,6 @@ export async function quitOperations(
   call: GitCall,
   paths: GitPaths,
 ): Promise<void> {
-  assertGitDirectory(call.directory);
   const end = performance.now() + call.deadlineMs;
   for (const { state, quit } of GIT_OPERATIONS)
     if (existsSync(paths[state]))
@@ -604,6 +616,7 @@ export async function quitOperations(
 export interface StatusEntry {
   kind: string;
   index: string;
+  gitlink: boolean;
 }
 
 export interface GitStatus {
@@ -637,16 +650,24 @@ export async function readStatus(call: GitCall): Promise<GitStatus> {
       statusHeader(status, record);
       continue;
     }
-    const kind = record.charAt(LETTER_START);
-    if (kind === RENAMED_ENTRY) index++;
-    status.entries.push({
-      kind,
-      index:
-        kind === UNTRACKED_ENTRY ? kind : record.charAt(STATUS_INDEX_COLUMN),
-    });
+    const entry = statusEntry(record);
+    if (entry.kind === RENAMED_ENTRY) index++;
+    status.entries.push(entry);
   }
   assert.ok(status.head !== NO_VALUE);
   return status;
+}
+
+function statusEntry(record: string): StatusEntry {
+  const kind = record.charAt(LETTER_START);
+  if (kind === UNTRACKED_ENTRY) return { kind, index: kind, gitlink: false };
+  const modes = record.split(" ").slice(STATUS_MODES_START, STATUS_MODES_END);
+  return {
+    kind,
+    index: record.charAt(STATUS_INDEX_COLUMN),
+    gitlink:
+      modes.length > NO_ENTRIES && modes.every((mode) => mode === GITLINK_MODE),
+  };
 }
 
 function statusHeader(status: GitStatus, record: string): void {

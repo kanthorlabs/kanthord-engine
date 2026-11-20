@@ -28,7 +28,10 @@ import {
   forceBranch,
   type GitCall,
   type GitOperation,
+  type GitPaths,
   type GitStatus,
+  HEAD_OUTSIDE_BRANCHES,
+  livePaths,
   MERGE_HEAD,
   mergeCommitsSince,
   mergeHeadAt,
@@ -37,6 +40,7 @@ import {
   readStatus,
   softReset,
   stageWork,
+  symbolicHead,
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
@@ -209,9 +213,12 @@ async function runGate(
       if (turn.mode === GateMode.Checkpoint)
         for (const checkout of state.checkouts)
           if (
-            operationsOf(checkout.directory, checkout.gitPaths).includes(
-              MERGE_HEAD,
-            )
+            operationsOf(
+              await livePaths(
+                callOf(state, checkout, context),
+                checkout.gitPaths,
+              ),
+            ).includes(MERGE_HEAD)
           )
             await abortMerge(
               state.input.env,
@@ -330,12 +337,13 @@ async function inspect(
   before: string,
   options: InspectOptions,
 ): Promise<Inspection> {
-  const status = await readStatus(callOf(state, checkout, options.context));
+  const call = () => callOf(state, checkout, options.context);
+  const status = await readStatus(call());
   if (status.branch !== state.nodeBranch)
     return {
       violation: {
         code: TurnViolation.BranchChanged,
-        detail: `The HEAD of checkout ${checkout.name} is ${status.branch ?? DETACHED}, not ${state.nodeBranch}.`,
+        detail: `The HEAD of checkout ${checkout.name} is ${await headRefOf(status, call)}, not refs/heads/${state.nodeBranch}.`,
       },
       status,
     };
@@ -344,9 +352,25 @@ async function inspect(
       ? null
       : await historyViolation(state, checkout, before, options);
   return {
-    violation: history ?? operationViolation(checkout, options.merge),
+    violation:
+      history ??
+      operationViolation(
+        checkout,
+        options.merge,
+        await livePaths(call(), checkout.gitPaths),
+      ),
     status,
   };
+}
+
+async function headRefOf(
+  status: GitStatus,
+  call: () => GitCall,
+): Promise<string> {
+  if (status.branch === null) return DETACHED;
+  if (status.branch !== HEAD_OUTSIDE_BRANCHES)
+    return `refs/heads/${status.branch}`;
+  return (await symbolicHead(call())) ?? DETACHED;
 }
 
 async function historyViolation(
@@ -381,11 +405,12 @@ async function historyViolation(
 function operationViolation(
   checkout: NodeCheckout,
   merge: ConflictMerge | null,
+  paths: GitPaths,
 ): Violation | null {
-  const operations = operationsOf(checkout.directory, checkout.gitPaths).filter(
+  const operations = operationsOf(paths).filter(
     (operation) => merge === null || operation !== MERGE_HEAD,
   );
-  if (merge !== null && mergeHeadAt(checkout.gitPaths) !== merge.commit)
+  if (merge !== null && mergeHeadAt(paths) !== merge.commit)
     return {
       code: TurnViolation.MergeMissing,
       detail: `Checkout ${checkout.name} holds no open merge of ${merge.commit}.`,
@@ -457,7 +482,9 @@ async function settleCheckout(
   assertInvariant(
     {
       status: after,
-      operations: operationsOf(checkout.directory, checkout.gitPaths),
+      operations: operationsOf(
+        await livePaths(callOf(state, checkout, context), checkout.gitPaths),
+      ),
     },
     state.nodeBranch,
     settled.changed ? after.head : before,
@@ -535,14 +562,15 @@ export async function restoreCheckout(
     context,
     deadlineMs: remaining(),
   });
-  await quitOperations(call(), checkout.gitPaths);
+  const paths = await livePaths(call(), checkout.gitPaths);
+  await quitOperations(call(), paths);
   await forceBranch(env, directory, branch, target, context, remaining());
   await discardChanges(env, directory, context, remaining());
   checkout.head = target;
   assertInvariant(
     {
       status: await readStatus(call()),
-      operations: operationsOf(directory, checkout.gitPaths),
+      operations: operationsOf(paths),
     },
     branch,
     target,
@@ -559,9 +587,9 @@ export function assertInvariant(
   assert.equal(facts.status.head, head);
   assert.ok(
     facts.status.entries.every(
-      ({ kind, index }) =>
+      ({ kind, index, gitlink }) =>
         (kind === ORDINARY_ENTRY || kind === RENAMED_ENTRY) &&
-        index === UNCHANGED_INDEX,
+        (index === UNCHANGED_INDEX || gitlink),
     ),
   );
   assert.deepEqual(facts.operations, []);

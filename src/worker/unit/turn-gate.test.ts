@@ -7,11 +7,10 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import {
   hostEnvironment,
@@ -141,6 +140,16 @@ const CONVERSION_ONLY_TURN = [
   "update-index",
   STATUS,
 ];
+const MOVED_GITDIR = "moved-gitdir";
+const SUBMODULE = "sub";
+const OUTSIDE_REF = `refs/remotes/origin/${OTHER_BRANCH}`;
+const ONE_PUSH = 1;
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
 const RESTORE = ["checkout", "reset", "clean", STATUS];
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
@@ -242,6 +251,20 @@ function countGit(t: TestContext, h: Fixture): () => string[] {
     existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
 }
 
+function countPushes(t: TestContext, h: Fixture): () => number {
+  let pushes = 0;
+  const push = h.input.transport.pushNodeBranch.bind(h.input.transport);
+  t.mock.method(
+    h.input.transport,
+    "pushNodeBranch",
+    async (...args: Parameters<typeof push>) => {
+      pushes++;
+      return push(...args);
+    },
+  );
+  return () => pushes;
+}
+
 async function commitCrlfFile(h: Fixture): Promise<void> {
   const git = simpleGit(h.root);
   await git.raw(["config", "core.autocrlf", "false"]);
@@ -274,7 +297,7 @@ async function invariantRepository(t: TestContext) {
     assertInvariant(
       {
         status: await readStatus(call),
-        operations: operationsOf(directory, paths),
+        operations: operationsOf(paths),
       },
       INVARIANT_BRANCH,
       await headOf(directory),
@@ -738,23 +761,30 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("the gate stops with operation_failed when the git directory of a checkout is a gitdir file", async (t) => {
+  test("the gate finds a rebase in progress behind a gitdir file that the turn writes and pushes the node branch at before", async (t) => {
     const h = await fixture(
       t,
       [task("gitdir", "false")],
       [
-        bash('mkdir "$(git rev-parse --git-path rebase-merge)"'),
+        bash(
+          `mkdir "$(git rev-parse --git-path rebase-merge)" && mv .git ../${MOVED_GITDIR} && printf "gitdir: %s\\n" "$(cd .. && pwd)/${MOVED_GITDIR}" > .git`,
+        ),
         fauxAssistantMessage("left"),
       ],
     );
-    const gitdir = join(temporary(t), "gitdir");
-    renameSync(join(h.root, ".git"), gitdir);
-    writeFileSync(join(h.root, ".git"), `gitdir: ${gitdir}\n`);
-    recordReleases(h);
+    await commitOnNode(h.root, "earlier unit commit");
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const pushes = countPushes(t, h);
+    const bodies = recordReleases(h);
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
-    assert.ok("stop" in end);
-    assert.equal(end.stop?.reason, EndReason.OperationFailed);
-    assert.equal(end.stop?.code, null);
+    violationEnd(end, bodies, TurnViolation.GitInProgress);
+    assert.equal(pushes(), ONE_PUSH);
+    assert.equal(await remoteHead(h), before);
+    assert.equal(
+      existsSync(join(dirname(h.root), MOVED_GITDIR, "rebase-merge")),
+      false,
+    );
   });
 
   test("the merge commit takes the template message and not the merge message file", async (t) => {
@@ -987,17 +1017,102 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(gitPath(h, "rebase-merge")), false);
   });
 
+  test("a branch switch names the full refs in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is refs/heads/${OTHER_BRANCH}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+        ),
+      },
+    );
+  });
+
+  test("a HEAD that names a ref outside refs/heads names that ref in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        const git = simpleGit(h.root);
+        await git.raw(["update-ref", OUTSIDE_REF, "HEAD"]);
+        await git.raw(["symbolic-ref", "HEAD", OUTSIDE_REF]);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is ${OUTSIDE_REF}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+        ),
+      },
+    );
+  });
+
+  test("a staged gitlink of a submodule with ignore all leaves the turn unchanged", async (t) => {
+    const h = await fixture(t, [], []);
+    const library = temporary(t);
+    const lib = simpleGit(library);
+    await lib.raw(["init", "-q", "-b", INVARIANT_BRANCH]);
+    writeFileSync(join(library, TRACKED_FILE), TRACKED_FILE);
+    await lib.add(TRACKED_FILE);
+    await lib.raw([...IDENTITY, "commit", "-q", "-m", TRACKED_FILE]);
+    const git = simpleGit(h.root, {
+      unsafe: { allowUnsafeProtocolOverride: true },
+    });
+    await git.raw([
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      library,
+      SUBMODULE,
+    ]);
+    await git.raw([
+      "config",
+      "-f",
+      ".gitmodules",
+      `submodule.${SUBMODULE}.ignore`,
+      "all",
+    ]);
+    await git.raw(["add", "-A"]);
+    await git.commit(SUBMODULE);
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const gated = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      const sub = simpleGit(join(h.root, SUBMODULE));
+      writeFileSync(join(h.root, SUBMODULE, WORK_FILE), WORK_FILE);
+      await sub.add(WORK_FILE);
+      await sub.raw([...IDENTITY, "commit", "-q", "-m", WORK_FILE]);
+      await git.raw(["add", "-A"]);
+    });
+    await gated.prompt(EMPTY_PROMPT);
+    assert.equal(gated.changed(), false);
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
   test("invariant I fails on a staged leftover", async (t) => {
     const repository = await invariantRepository(t);
     writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
     await repository.git.add(WORK_FILE);
-    await assert.rejects(repository.holds());
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 
   test("invariant I fails on an untracked file", async (t) => {
     const repository = await invariantRepository(t);
     writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
-    await assert.rejects(repository.holds());
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 
   test("invariant I fails on an unmerged path", async (t) => {
@@ -1011,12 +1126,12 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await git.commit(INVARIANT_BRANCH, [TRACKED_FILE]);
     await assert.rejects(git.merge([SIDE_BRANCH]));
     rmSync(join(directory, ".git", "MERGE_HEAD"));
-    await assert.rejects(repository.holds());
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 
   test("invariant I fails on an operation path", async (t) => {
     const repository = await invariantRepository(t);
     mkdirSync(join(repository.directory, ".git", "rebase-merge"));
-    await assert.rejects(repository.holds());
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 });
