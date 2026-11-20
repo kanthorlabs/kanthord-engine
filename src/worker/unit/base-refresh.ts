@@ -3,14 +3,18 @@ import { relative } from "node:path";
 import type { Context } from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
-import { renderTemplate } from "../../agent/prompt-templates.ts";
+import { renderTemplate, templateUses } from "../../agent/prompt-templates.ts";
 import {
   commitOf,
   conflictMarkerFiles,
+  type GitCall,
   headCommit,
   isAncestor,
+  mergeBase,
   mergeRef,
   nodeSideBodies,
+  rangeFileDiff,
+  rangeLog,
 } from "./local-git.ts";
 import { implementRepositoriesOf, type StepsState } from "./steps-implement.ts";
 import { mergedBranchesOf } from "./setup-repository.ts";
@@ -40,15 +44,31 @@ export const RefreshResult = {
 } as const;
 export type RefreshResult = (typeof RefreshResult)[keyof typeof RefreshResult];
 
+export const BASE_CHANGES = "base_changes";
+export const BASE_CHANGES_MAX_BYTES = 16384;
+export const BASE_CHANGES_CUT = `The base-side changes stop here because they are larger than ${BASE_CHANGES_MAX_BYTES} bytes.`;
+const BASE_COMMITS_HEADING = "Base commits since the merge base:";
+const BASE_DIFF_HEADING = "Base diff since the merge base:";
+const FILE_HEADING = "## ";
+const LINE_END = "\n";
+const LINE_END_BYTES = 1;
+const NO_BYTES = 0;
+const NO_TEXT = "";
+
+export interface ConflictPrompt {
+  binding: string;
+  directory: string;
+  base_branch: string;
+  base_changes?: string;
+}
+
 export function conflictInstruction(
   templates: PromptTemplates,
-  conflict: { binding: string; directory: string; base_branch: string },
+  conflict: ConflictPrompt,
   files: readonly string[],
 ): string {
   return renderTemplate(templates, PromptTemplate.Conflict, {
-    binding: conflict.binding,
-    directory: conflict.directory,
-    base_branch: conflict.base_branch,
+    ...conflict,
     files: files.join(", "),
   });
 }
@@ -160,13 +180,17 @@ async function conflictTurn(
 ): Promise<void> {
   const { checkout, base, merge } = turn;
   await noteConflictOwners(state, turn);
+  const templates = state.input.setup.templates;
+  const prompt: ConflictPrompt = {
+    binding: checkout.name,
+    directory: relative(state.root, merge.directory) || ".",
+    base_branch: base,
+  };
   const instruction = conflictInstruction(
-    state.input.setup.templates,
-    {
-      binding: checkout.name,
-      directory: relative(state.root, merge.directory) || ".",
-      base_branch: base,
-    },
+    templates,
+    templateUses(templates[PromptTemplate.Conflict], BASE_CHANGES)
+      ? { ...prompt, base_changes: await baseChanges(state, turn) }
+      : prompt,
     merge.files,
   );
   await measuredConflict(state, merge.files.length, () =>
@@ -176,6 +200,62 @@ async function conflictTurn(
       PromptTemplate.Conflict,
     ),
   );
+}
+
+interface KeptLines {
+  lines: string[];
+  bytes: number;
+}
+
+async function baseChanges(
+  state: StepsState,
+  turn: ConflictTurn,
+): Promise<string> {
+  const { merge, context } = turn;
+  const call = (): GitCall => ({
+    env: state.input.env,
+    directory: merge.directory,
+    context,
+    deadlineMs: state.input.claim.expired_at - Date.now(),
+  });
+  const from = await mergeBase(
+    state.input.env,
+    merge.directory,
+    "HEAD",
+    merge.commit,
+    context,
+    call().deadlineMs,
+  );
+  const kept: KeptLines = { lines: [], bytes: NO_BYTES };
+  for (const file of merge.files) {
+    const range = { from, to: merge.commit, file };
+    const section = [
+      `${FILE_HEADING}${file}`,
+      BASE_COMMITS_HEADING,
+      ...linesOf(await rangeLog(call(), range)),
+      BASE_DIFF_HEADING,
+      ...linesOf(await rangeFileDiff(call(), range)),
+    ];
+    if (!keepWithinLimit(kept, section))
+      return [...kept.lines, BASE_CHANGES_CUT].join(LINE_END);
+  }
+  return kept.lines.join(LINE_END);
+}
+
+function linesOf(output: string): string[] {
+  const text = output.trimEnd();
+  return text === NO_TEXT ? [] : text.split(LINE_END);
+}
+
+function keepWithinLimit(kept: KeptLines, lines: readonly string[]): boolean {
+  const cutBytes = Buffer.byteLength(BASE_CHANGES_CUT);
+  for (const line of lines) {
+    const bytes = Buffer.byteLength(line) + LINE_END_BYTES;
+    if (kept.bytes + bytes + cutBytes > BASE_CHANGES_MAX_BYTES) return false;
+    kept.lines.push(line);
+    kept.bytes += bytes;
+  }
+  return true;
 }
 
 async function noteConflictOwners(

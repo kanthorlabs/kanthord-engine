@@ -141,3 +141,15 @@ export function renderTemplate(
     );
   }
 }
+
+export function templateUses(text: string, variable: string): boolean {
+  assert.ok(variable);
+  const names = new Set<string>();
+  const visitor = new Handlebars.Visitor();
+  visitor.PathExpression = (path) => {
+    const [head] = path.parts;
+    if (head !== undefined) names.add(head);
+  };
+  visitor.accept(handlebars.parse(text));
+  return names.has(variable);
+}

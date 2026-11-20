@@ -1346,9 +1346,6 @@
   "src/worker/unit/base-refresh.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "kanthord/no-inline-param-type": {
-      "count": 1
     }
   },
   "src/worker/unit/budget.ts": {

@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import {
+  renderTemplate,
+  resolveTemplateSet,
+  SHIPPED_TEMPLATES,
+} from "../../agent/prompt-templates.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { temporary } from "../../kernel/test-support.ts";
 import type { Revision } from "../../mission/contract.ts";
 import {
+  BASE_CHANGES_CUT,
+  BASE_CHANGES_MAX_BYTES,
   refreshAtClaim,
   refreshAtRelease,
   RefreshResult,
@@ -463,4 +473,152 @@ test("the release gate after a conflict counts no failed command when no owner u
   assert.deepEqual(ownerFacts(records), [
     { failed: false, count: NO_FAILURES },
   ]);
+});
+
+const CANDIDATE_FOLDER = fileURLToPath(
+  new URL("../../../static/prompt/candidate", import.meta.url),
+);
+const SECOND_FILE = "second-conflicted.txt";
+const BASE_ONLY_FILE = "base-only-change.txt";
+const MERGE_INTRO = "The merge of origin/";
+const LONG_DIFF_LINES = 2000;
+const USER_ROLE = "user";
+const STRING_TYPE = "string";
+const CUT_LINE = /^\+line \d+ of the long base change$/;
+
+async function useCandidate(h: Awaited<ReturnType<typeof fixture>>["h"]) {
+  const set = await resolveTemplateSet(CANDIDATE_FOLDER, background);
+  h.input.setup.templates = set.templates;
+}
+
+function conflictPromptOf(provider: { calls: { messages: unknown[] }[] }) {
+  const texts = JSON.stringify(provider.calls[0]!.messages);
+  const parsed = JSON.parse(texts) as {
+    role: string;
+    content: string | { type: string; text?: string }[];
+  }[];
+  const found = parsed
+    .filter((message) => message.role === USER_ROLE)
+    .flatMap((message) =>
+      typeof message.content === STRING_TYPE
+        ? [message.content as string]
+        : (message.content as { text?: string }[]).flatMap((part) =>
+            part.text ? [part.text] : [],
+          ),
+    )
+    .find((text) => text.startsWith(MERGE_INTRO));
+  assert.ok(found);
+  return found;
+}
+
+async function baseAdvance(
+  bare: string,
+  t: TestContext,
+  files: Readonly<Record<string, string>>,
+) {
+  const clone = temporary(t);
+  const git = simpleGit(clone);
+  await git.clone(bare, clone, ["--branch", "main"]);
+  for (const [path, content] of Object.entries(files))
+    writeFileSync(join(clone, path), content);
+  await git.add(Object.keys(files));
+  await git.raw([...TEST_IDENTITY, "commit", "-m", "base change of the files"]);
+  await git.push("origin", "main");
+}
+
+test("the candidate Conflict template holds the base-side log and diff of each conflicted file and of no other file", async (t) => {
+  const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
+  await useCandidate(h);
+  for (const file of [CONFLICT_FILE, SECOND_FILE])
+    writeFileSync(join(web.directory, file), NODE_SIDE);
+  const git = simpleGit(web.directory);
+  await git.add([CONFLICT_FILE, SECOND_FILE]);
+  await git.commit("feat: node side");
+  web.head = await headOf(web.directory);
+  await baseAdvance(webBare, t, {
+    [CONFLICT_FILE]: BASE_SIDE,
+    [SECOND_FILE]: BASE_SIDE,
+    [BASE_ONLY_FILE]: BASE_SIDE,
+  });
+  await assert.rejects(
+    refreshAtRelease(h, workerPorts(h.input, h.run)),
+    ExecutionStop,
+  );
+  const prompt = conflictPromptOf(h.provider);
+  for (const file of [CONFLICT_FILE, SECOND_FILE]) {
+    assert.ok(prompt.includes(`## ${file}`));
+    assert.ok(prompt.includes(`+++ b/${file}`));
+  }
+  assert.ok(prompt.includes("base change of the files"));
+  assert.ok(prompt.includes(`+${BASE_SIDE}`));
+  assert.equal(prompt.includes(BASE_ONLY_FILE), false);
+});
+
+test("the base-side changes of the candidate template stop on a line edge at the byte limit and state the cut", async (t) => {
+  const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
+  await useCandidate(h);
+  writeFileSync(join(web.directory, CONFLICT_FILE), NODE_SIDE);
+  const git = simpleGit(web.directory);
+  await git.add(CONFLICT_FILE);
+  await git.commit("feat: node side");
+  web.head = await headOf(web.directory);
+  const long = Array.from(
+    { length: LONG_DIFF_LINES },
+    (_, index) => `line ${index} of the long base change`,
+  ).join("\n");
+  await baseAdvance(webBare, t, { [CONFLICT_FILE]: long });
+  await assert.rejects(
+    refreshAtRelease(h, workerPorts(h.input, h.run)),
+    ExecutionStop,
+  );
+  const prompt = conflictPromptOf(h.provider);
+  const changes = prompt.slice(prompt.indexOf(`## ${CONFLICT_FILE}`));
+  assert.ok(Buffer.byteLength(changes) <= BASE_CHANGES_MAX_BYTES);
+  assert.ok(changes.endsWith(`\n${BASE_CHANGES_CUT}`));
+  const lines = changes.split("\n");
+  assert.match(lines.at(-2)!, CUT_LINE);
+});
+
+test("the shipped Conflict template runs no base-side git process and renders the prompt of the shipped variables", async (t) => {
+  const { h, web } = await conflictOnWeb(t, [fauxAssistantMessage("done")]);
+  const log = join(temporary(t), "git.log");
+  const bin = temporary(t);
+  const git = execFileSync("sh", ["-c", "command -v git"], {
+    env: h.input.env,
+    encoding: "utf8",
+  }).trim();
+  writeFileSync(
+    join(bin, "git"),
+    `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec '${git}' "$@"\n`,
+  );
+  chmodSync(join(bin, "git"), 0o755);
+  h.input.env = { ...h.input.env, PATH: `${bin}:${h.input.env.PATH}` };
+  await assert.rejects(
+    refreshAtRelease(h, workerPorts(h.input, h.run)),
+    ExecutionStop,
+  );
+  const calls = readFileSync(log, "utf8").split("\n");
+  assert.ok(calls.some((call) => call.startsWith("merge --no-edit")));
+  assert.equal(
+    calls.some(
+      (call) =>
+        call.startsWith("log --format=%h %s") ||
+        (call.startsWith("diff ") && call.includes(" -- ")) ||
+        /^merge-base HEAD [0-9a-f]{40}/.test(call),
+    ),
+    false,
+  );
+  assert.equal(
+    conflictPromptOf(h.provider),
+    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Conflict, {
+      binding: web.name,
+      directory: "web",
+      base_branch: BASE_BRANCH,
+      files: CONFLICT_FILE,
+    }),
+  );
+  assert.equal(
+    h.input.setup.templates[PromptTemplate.Conflict],
+    SHIPPED_TEMPLATES[PromptTemplate.Conflict],
+  );
 });

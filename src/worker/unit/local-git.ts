@@ -1021,6 +1021,43 @@ export async function rangeCommits(
     .filter((line) => line !== NO_VALUE);
 }
 
+export interface FileRange {
+  from: string;
+  to: string;
+  file: string;
+}
+
+function rangeArgs(range: FileRange): string[] {
+  assert.match(range.from, COMMIT_PATTERN);
+  assert.match(range.to, COMMIT_PATTERN);
+  assert.ok(range.file);
+  return [range.from, range.to, "--", range.file];
+}
+
+export function rangeLog(call: GitCall, range: FileRange): Promise<string> {
+  const [from, to, ...path] = rangeArgs(range);
+  return run(
+    call.env,
+    call.directory,
+    ["log", "--format=%h %s", `${from}..${to}`, ...path],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export function rangeFileDiff(
+  call: GitCall,
+  range: FileRange,
+): Promise<string> {
+  return run(
+    call.env,
+    call.directory,
+    ["diff", "--no-color", ...rangeArgs(range)],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
 export interface NodeSideTouch {
   merged: string;
   files: readonly string[];
