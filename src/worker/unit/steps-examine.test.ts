@@ -15,6 +15,7 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
@@ -661,6 +662,118 @@ test("an examine verification that the wall deadline cuts gives a later assessme
       CauseCategory.Model,
     ]),
   );
+});
+
+test("a budget end in env.setup(examine) of prepare releases with further work and the stop budget_end/wall_time", async (t) => {
+  const setup = anthropicSetup({
+    repositories: [
+      {
+        ...repositorySetup(),
+        environment: {
+          source: EnvironmentSource.Stored,
+          document: { postCreateCommand: "sleep 30" },
+          digest: "d".repeat(64),
+        },
+      },
+    ],
+    resource_budget: { turns: 200, wall_time_ms: WALL_TIME_MS },
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: [],
+          },
+        } as unknown as Revision,
+      }),
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return { type: "completed", status: 200, data: {} };
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  stopAfter(t, () => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  const open = async () => assert.fail("The prepare ends before the agent.");
+  const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
+  const transport = {
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      const git = simpleGit(directory);
+      await git.init();
+      await git.raw([
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "base",
+      ]);
+      return (await git.revparse(["HEAD"])).trim();
+    },
+  } as unknown as RepositoryTransport;
+  const end = await executionBoundary(run, () =>
+    runStepsExamine(
+      {
+        setup,
+        claim,
+        workspaces,
+        transport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      budget,
+      open,
+    ),
+  );
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.BudgetEnd);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
+  assert.equal(releases.length, EXPECTED_RELEASES);
 });
 
 test("an examine checkout resolves origin/<upstream_branch>", async (t) => {

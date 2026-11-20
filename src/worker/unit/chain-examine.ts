@@ -4,6 +4,7 @@ import {
   type Chain,
   ChainId,
   type ChainTasks,
+  namedBranch,
   soloBranch,
   stepNode,
 } from "./chain.ts";
@@ -13,7 +14,9 @@ import {
   executionRelease,
   executionReleaseFurtherWork,
 } from "./step-execution-release.ts";
+import { envSetupExamine } from "./step-env-setup.ts";
 import { inputsReadExamine } from "./step-inputs-read-host.ts";
+import { setupEntriesExamine } from "./step-setup-entries.ts";
 import { workspaceReviewBase } from "./step-workspace-review.ts";
 import { Phase } from "./telemetry.ts";
 
@@ -47,7 +50,11 @@ export function examineChain(): Chain<ExaminePorts> {
     .phase(Phase.Prepare)
     .parallel("prepare.inputs", [
       soloBranch(stepNode(inputsReadExamine)),
-      soloBranch(stepNode(workspaceReviewBase)),
+      namedBranch("workspace", [
+        stepNode(workspaceReviewBase),
+        stepNode(setupEntriesExamine),
+        stepNode(envSetupExamine),
+      ]),
     ])
     .tasks(examineTasks())
     .phase(Phase.Finish)

@@ -83,10 +83,11 @@ chain examine
   phase prepare
     [PAR] prepare.inputs
       step inputs.read(revision, dependencies) reads in parallel; budget end after the reads
-      step workspace.review(base)           one tree per binding at its base head; stop operation_failed/repository.connector.git_failed
+      branch workspace
+        step workspace.review(base)         one tree per binding at its base head; stop operation_failed/repository.connector.git_failed
+        step setup.entries(examine)         stop environment_failed/setup_failed
+        step env.setup(examine)             budget end; stop environment_failed/setup_failed
   phase tasks                               one call: foundryExamine(input, host)
-    step setup.entries(examine)             stop environment_failed/setup_failed
-    step env.setup(examine)                 budget end; stop environment_failed/setup_failed
     [PAR] tasks.inputs
       step agent.open                       port: agent.open; budget end after the open; stop operation_failed
       step verify.node                      node commands at the base heads; skipped with no checkout

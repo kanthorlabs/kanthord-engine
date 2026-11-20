@@ -8,9 +8,7 @@ import {
   runTasks,
 } from "./foundry.ts";
 import { agentOpenExamine } from "./step-agent-open.ts";
-import { envSetupExamine } from "./step-env-setup.ts";
 import { examineTurn } from "./step-examine-turn.ts";
-import { setupEntriesExamine } from "./step-setup-entries.ts";
 import { verifyNode } from "./step-verify-node.ts";
 
 export const EXAMINE_INPUT_KEYS = [
@@ -33,8 +31,6 @@ export type ExamineResult = Partial<
 
 export function examineTasksNodes(): ChainNode[] {
   return [
-    stepNode(setupEntriesExamine),
-    stepNode(envSetupExamine),
     parallelNode("tasks.inputs", [
       soloBranch(stepNode(agentOpenExamine)),
       soloBranch(stepNode(verifyNode)),
