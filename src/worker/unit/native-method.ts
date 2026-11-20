@@ -31,6 +31,7 @@ import type {
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
+import { ClaimWatch } from "./claim-watch.ts";
 import type { TasksCapture } from "./tasks-capture.ts";
 import { readPinnedRevision } from "./node-reads.ts";
 import type { Chain } from "./chain.ts";
@@ -71,6 +72,7 @@ export interface NativeExecutionInput {
   hostTools: SessionHostTools;
   context: Context;
   stop?: Context;
+  revocation?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
   capture?: TasksCapture;
@@ -120,6 +122,7 @@ export async function runNativeExecution(
     hostHome: input.hostHome,
   });
   try {
+    using watch = new ClaimWatch(run);
     return await executionBoundary(run, async () => {
       await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
@@ -133,7 +136,6 @@ export async function runNativeExecution(
           budget,
           knownSecrets: secrets,
           context: run.operationContext,
-          turnCheck: () => run.checkClaim(),
         });
         const stop = stopOnEnd(run, native);
         const trace = run.onTraceClose((status) => native.closeTrace(status));

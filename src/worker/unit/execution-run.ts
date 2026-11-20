@@ -80,6 +80,16 @@ export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   );
 }
 
+export function isRevokeAnswer(
+  result: OperationResult<{ claim_state: ClaimState }>,
+): boolean {
+  return (
+    (result.type === OperationResultType.Completed &&
+      result.data.claim_state !== ClaimState.Running) ||
+    isExecutionEnd(result)
+  );
+}
+
 export function endsExecution(error: unknown): error is CodedError {
   return (
     error instanceof CodedError &&
@@ -109,6 +119,16 @@ function detailWithDigests(
   return JSON.stringify({ ...detailFactsOf(detail), digests });
 }
 
+function revocationLink(
+  revocation: Context,
+  revoke: (code: string | null) => void,
+): Disposable {
+  return addAbortListener(revocation.signal, () => {
+    const reason: unknown = revocation.signal.reason;
+    revoke(reason instanceof ExecutionStop ? reason.code : null);
+  });
+}
+
 export class ExecutionRun {
   readonly claim: MethodClaim;
   readonly clients: MethodClients;
@@ -123,6 +143,8 @@ export class ExecutionRun {
   private settlement: Promise<void> | null = null;
   private verificationTimedOut = false;
   private readonly traceClosers = new Set<(status: SpanStatus) => void>();
+  private readonly finalListeners = new Set<() => void>();
+  private readonly revocation: Disposable | null;
 
   constructor(input: {
     claim: MethodClaim;
@@ -130,6 +152,7 @@ export class ExecutionRun {
     credentials: { release(): Promise<void> };
     context: Context;
     stop?: Context;
+    revocation?: Context;
     log?: (record: Record<string, unknown>) => void;
     telemetry?: TelemetrySink;
     workerName?: string;
@@ -154,6 +177,9 @@ export class ExecutionRun {
       input.stop ? joined(input.context, input.stop) : input.context,
       input.claim.expired_at,
     );
+    this.revocation = input.revocation
+      ? revocationLink(input.revocation, (code) => this.revoke(code))
+      : null;
   }
 
   log(msg: string, fields: Record<string, unknown>): void {
@@ -180,6 +206,50 @@ export class ExecutionRun {
 
   onStop(listener: () => void): Disposable {
     return addAbortListener(this.operationContext.signal, listener);
+  }
+
+  onFinalStep(listener: () => void): Disposable {
+    this.finalListeners.add(listener);
+    return {
+      [Symbol.dispose]: () => void this.finalListeners.delete(listener),
+    };
+  }
+
+  private finalStep(): void {
+    for (const listener of [...this.finalListeners]) {
+      this.finalListeners.delete(listener);
+      listener();
+    }
+  }
+
+  private finalCall(): void {
+    this.revocation?.[Symbol.dispose]();
+    this.finalStep();
+  }
+
+  revoke(code: string | null = null): void {
+    this.store(this.stopWith(EndReason.Revoked, code, null, null));
+  }
+
+  async fence(context: Context): Promise<boolean> {
+    this.finalStep();
+    if (this.stopped?.reason === EndReason.Revoked) return false;
+    let result: OperationResult<{ claim_state: ClaimState }>;
+    try {
+      result = await this.clients.scheduler.claimGet(
+        {
+          params: { execution_id: this.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        { context, idempotencyKey: createIdempotencyKey() },
+      );
+    } catch {
+      return true;
+    }
+    if (!isRevokeAnswer(result)) return true;
+    this.revoke();
+    return false;
   }
 
   onTraceClose(close: (status: SpanStatus) => void): Disposable {
@@ -380,34 +450,6 @@ export class ExecutionRun {
     return { kind: PortResultKind.Failed, code, message: code ?? result.type };
   }
 
-  async checkClaim(): Promise<void> {
-    this.requireActive();
-    let result: OperationResult<{ claim_state: ClaimState }>;
-    try {
-      result = await this.clients.scheduler.claimGet(
-        {
-          params: { execution_id: this.claim.execution_id },
-          query: {},
-          body: null,
-        },
-        {
-          context: this.operationContext,
-          idempotencyKey: createIdempotencyKey(),
-        },
-      );
-    } catch {
-      this.requireActive();
-      return;
-    }
-    this.requireActive();
-    if (
-      (result.type === OperationResultType.Completed &&
-        result.data.claim_state !== ClaimState.Running) ||
-      isExecutionEnd(result)
-    )
-      this.stop(EndReason.Revoked);
-  }
-
   async settleCredentials(): Promise<void> {
     this.requireActive();
     this.settlement ??= this.credentials.release();
@@ -423,6 +465,7 @@ export class ExecutionRun {
   }
 
   dispose(): void {
+    this.revocation?.[Symbol.dispose]();
     this.operationContext.cancel();
     if (this.spans.faultCount() > NO_TELEMETRY_FAULTS)
       this.log("telemetry faults", { faults: this.spans.faultCount() });
@@ -443,6 +486,7 @@ export class ExecutionRun {
   }
 
   async submitAssessment(nodeId: string, body: AssessmentBody) {
+    this.finalCall();
     await this.settleCredentials();
     this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
@@ -477,6 +521,7 @@ export class ExecutionRun {
     budgetEnd: BudgetLimit | null = null,
   ): Promise<ExecutionEnd> {
     assert.ok(budgetEnd === null || furtherWork);
+    this.finalCall();
     const stop: ReleaseStop | null =
       budgetEnd === null
         ? null
@@ -603,6 +648,7 @@ export class ExecutionRun {
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
+    this.finalCall();
     const stop: ReleaseStop = {
       reason,
       code: stopped.code,

@@ -78,6 +78,7 @@ const CLEAN_OUTPUT = "";
 const BARE_VALUE = "true";
 const NO_CALLS = 0;
 const ZERO_BYTE = 0;
+const CLAIM_WATCH_INTERVAL_MS = 60000;
 const CLAIM_LENGTH_MS = 3600000;
 const START_TOLERANCE_MS = 60000;
 const SLOW_WRITER_MS = 500;
@@ -217,6 +218,32 @@ suite("worker tasks run", () => {
         end: RunEndKind.Completed,
         exit_code: TasksExit.Success,
       });
+    },
+  );
+
+  test(
+    "a standalone run starts no claim watch and makes no claim read",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const intervals = t.mock.method(globalThis, "setInterval");
+      const fixture = await seedFixture(t);
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      assert.deepEqual(
+        intervals.mock.calls.filter(
+          (call) => call.arguments[1] === CLAIM_WATCH_INTERVAL_MS,
+        ),
+        [],
+      );
     },
   );
 

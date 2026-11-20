@@ -7,10 +7,12 @@ import { headCommit } from "./local-git.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { readPushRecord, writePushRecord } from "./push-record.ts";
 import { next } from "./step-support.ts";
+import { EndReason } from "./execution-stop.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { sshAccessOf } from "./workspace.ts";
 
 const STOPS: readonly StopCode[] = [
+  "revoked",
   "operation_failed/repository.connector.git_failed",
   "operation_failed/repository.node_branch.taken",
 ];
@@ -62,8 +64,10 @@ export const branchPush: Step<unknown, "state" | "sshAccess", never> = {
   reads: ["state", "sshAccess"],
   writes: [],
   stops: STOPS,
-  note: "per checkout; push record around each push",
+  note: "fence; per checkout; push record around each push",
   async run(ctx, scope, io) {
+    if (!(await io.run.fence(io.context)))
+      return io.run.stop(EndReason.Revoked);
     await withinGit(io.spans, GitStep.Push, () =>
       pushNodeBranches(ctx, io.host, io.context),
     );
@@ -77,8 +81,9 @@ export const branchPushStop: Step<unknown, "state" | "sshAccess", never> = {
   reads: ["state", "sshAccess"],
   writes: [],
   stops: [],
-  note: "per checkout; no worker.git span; a failure logs checkpoint failed",
+  note: "fence; per checkout; no worker.git span; a failure logs checkpoint failed",
   async run(ctx, scope, io) {
+    if (!(await io.run.fence(io.context))) return next(scope);
     await pushNodeBranches(ctx, io.host, io.context);
     return next(scope);
   },

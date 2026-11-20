@@ -11,6 +11,7 @@ import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
+  ExecutionStop,
   handedSshAccess,
   isExecutionEnd,
   type ModelRuntimeFactory,
@@ -23,7 +24,7 @@ import {
 import { completed, HandoverRefused, takeHandover } from "./handover.ts";
 import type { CopyKeys } from "./copy-keys.ts";
 import { retryIndeterminate } from "./api.ts";
-import type { WorkerTransport } from "./transport.ts";
+import { provedTransport, type WorkerTransport } from "./transport.ts";
 import { uploadEvidence } from "./evidence-upload.ts";
 import { relaySigner } from "./ssh-relay.ts";
 import { HttpTelemetrySink } from "./telemetry-sink.ts";
@@ -110,12 +111,12 @@ type HostStep = Diagnostic | null | typeof SETUP_UNAVAILABLE;
 interface HostExecutionState {
   handover?: HandedOver;
   sshAccess?: Map<string, SshAccess>;
-  revoked: boolean;
 }
 
 interface HostRun {
   input: HostExecutionInput;
   context: CancellationContext;
+  revocation: CancellationContext;
   telemetry: HttpTelemetrySink;
   state: HostExecutionState;
   execute: typeof runNativeExecution;
@@ -142,12 +143,6 @@ function hostToolCaller(run: HostRun) {
     if (signal?.aborted) abort();
     try {
       return await work(callContext);
-    } catch (error) {
-      if (endsExecution(error)) {
-        run.state.revoked = true;
-        run.context.cancel();
-      }
-      throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
       callContext.cancel();
@@ -230,6 +225,7 @@ function executeSetup(
     credentials: handover.credentials,
     sshAccess: run.state.sshAccess,
     context: run.context,
+    revocation: run.revocation,
     telemetry: run.telemetry,
     hostTools: hostToolsOf(run),
   });
@@ -267,7 +263,7 @@ async function executeHandedOver(
 
 function failureOf(run: HostRun, error: unknown): HostStep {
   const { input } = run;
-  if (run.state.revoked || endsExecution(error)) return null;
+  if (endsExecution(error)) return null;
   if (
     error instanceof HandoverRefused &&
     error.code.startsWith(GATEWAY_CODE_PREFIX)
@@ -286,21 +282,39 @@ function failureOf(run: HostRun, error: unknown): HostStep {
   );
 }
 
-export async function hostExecution(
+function provedInput(
   input: HostExecutionInput,
+  revocation: CancellationContext,
+): HostExecutionInput {
+  return {
+    ...input,
+    api: provedTransport(input.api, (result) => {
+      if (isExecutionEnd(result) && result.type === OperationResultType.Failure)
+        revocation.cancel(
+          new ExecutionStop(EndReason.Revoked, result.error.error.code),
+        );
+    }),
+  };
+}
+
+export async function hostExecution(
+  hostInput: HostExecutionInput,
   execute = runNativeExecution,
 ): Promise<HostStep> {
-  assert.ok(input.claim.execution_id);
-  assert.ok(input.clientSecret);
+  assert.ok(hostInput.claim.execution_id);
+  assert.ok(hostInput.clientSecret);
   const context = new CancellationContext(
-    input.context,
-    input.claim.expired_at,
+    hostInput.context,
+    hostInput.claim.expired_at,
   );
+  const revocation = new CancellationContext();
+  const input = provedInput(hostInput, revocation);
   const run: HostRun = {
     input,
     context,
+    revocation,
     execute,
-    state: { revoked: false },
+    state: {},
     telemetry: new HttpTelemetrySink({
       executionId: input.claim.execution_id,
       send: (request, options) =>
@@ -315,7 +329,6 @@ export async function hostExecution(
       return endOf(input, context, await releaseRefusal(run, taken));
     run.state.handover = taken;
     const result = await executeHandedOver(run, taken);
-    if (run.state.revoked) return null;
     return endOf(input, context, result);
   } catch (error) {
     return failureOf(run, error);

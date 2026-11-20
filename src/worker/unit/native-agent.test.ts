@@ -69,7 +69,6 @@ import { SessionReadOutcome } from "../contract.ts";
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PROVIDER_CALL_COUNT = 3;
-const CALLS_BEFORE_FAILED_CHECK = 1;
 const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
@@ -106,7 +105,6 @@ async function fixture(
   hostTools: HostTools = unusedHostTools,
   options: {
     prepare?: (workspace: string, hostHome: string) => void;
-    turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
     sessionRoot?: false | string;
   } = {},
@@ -164,7 +162,6 @@ async function fixture(
     knownSecrets,
     budget,
     context,
-    turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
   });
   stopAfter(t, () => agent.close());
   return {
@@ -741,29 +738,6 @@ test("native instructions preserve pinned work and persist the session and last 
     sessionMessages(h).map((message) => (message as { role: string }).role),
     ["system", "user", "assistant", "user", "assistant"],
   );
-});
-
-test("a failed turn check ends the prompt before the next model call", async (t) => {
-  const h = await fixture(
-    t,
-    [
-      tool("write", { path: "first.txt", content: CONTENT }),
-      tool("write", { path: "second.txt", content: CONTENT }),
-      fauxAssistantMessage("done"),
-    ],
-    {},
-    unusedHostTools,
-    {
-      turnCheck: async (context) => {
-        context.cancel();
-        throw new Error("claim revoked");
-      },
-    },
-  );
-  await h.agent.prompt(WORK);
-  assert.ok(existsSync(join(h.workspace, "first.txt")));
-  assert.equal(existsSync(join(h.workspace, "second.txt")), false);
-  assert.equal(h.provider.calls.length, CALLS_BEFORE_FAILED_CHECK);
 });
 
 const AUTH_FAILED = "llm.auth.failed";

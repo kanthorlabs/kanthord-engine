@@ -153,7 +153,6 @@ function implementPortsOf(ports: ImplementHostPorts): ImplementPorts {
     evidence: ports.evidence,
     repository: ports.repository,
     releaseTrees: ports.releaseTrees,
-    claim: ports.claim,
     unitRecords: ports.unitRecords,
   };
 }

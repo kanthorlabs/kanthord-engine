@@ -22,10 +22,17 @@ import type { Diagnostic } from "../../kernel/errors.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import {
   EndReason,
+  ExecutionEndKind,
   ExecutionStop,
   type NativeExecutionInput,
   WorkspaceRoot,
 } from "../../worker/unit/index.ts";
+import {
+  fauxAssistantMessage,
+  fauxToolCall,
+  scriptedModelRuntime,
+  scriptedProvider,
+} from "../../worker/unit/test-support.ts";
 import { RepositoryComponent } from "../../repository/index.ts";
 import type { ExecutionSetup } from "../../worker/contract.ts";
 import { httpTransport } from "./transport.ts";
@@ -36,12 +43,25 @@ import { Backoff, BACKOFF_INITIAL_MS } from "./api.ts";
 import { ChainLevel } from "../../agent/contract.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import { ExecutionIntent } from "../../worker/contract.ts";
-import { TEST_SSH_PUBLIC_KEY } from "../../worker/test-support.ts";
+import {
+  anthropicAgent,
+  anthropicSetup,
+  TEST_SSH_PUBLIC_KEY,
+} from "../../worker/test-support.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { DEFAULT_SSH_PORT } from "../../repository/sshd-test-support.ts";
 
 const SECRET = Buffer.alloc(32, 7).toString("base64");
+const EXECUTION_NOT_RUNNING_CODE = "scheduler.execution.not_running";
+const EXECUTION_ENDED = "execution ended";
+
+function revokedCodeOf(revocation: { signal: AbortSignal }): string | null {
+  const reason: unknown = revocation.signal.reason;
+  assert.ok(reason instanceof ExecutionStop);
+  assert.equal(reason.reason, EndReason.Revoked);
+  return reason.code;
+}
 const SESSION_ROOT = "/test/session-root";
 const NO_ENTRIES = 0;
 const ONE_ENTRY = 1;
@@ -257,16 +277,21 @@ test("host takes handover before setup and method, discards on every method end"
           let aborted = false;
           held = native.sshAccess;
           assert.equal(held.size, ONE_ENTRY);
-          const cancellation = addAbortListener(native.context.signal, () => {
-            aborted = true;
-          });
+          assert.ok(native.revocation);
+          const cancellation = addAbortListener(
+            native.revocation.signal,
+            () => {
+              aborted = true;
+            },
+          );
           try {
             await assert.rejects(
               native.hostTools(workspace).evidenceUpload("a.txt", undefined),
               { code },
             );
             assert.ok(aborted);
-            assert.ok(native.context.signal.aborted);
+            assert.equal(revokedCodeOf(native.revocation), code);
+            assert.equal(native.context.signal.aborted, false);
             return { kind: "released", furtherWork: false };
           } finally {
             cancellation[Symbol.dispose]();
@@ -330,7 +355,8 @@ test("host takes handover before setup and method, discards on every method end"
             .linkUpdateList({ limit: LINK_UPDATE_PAGE_LIMIT }, undefined),
           { code },
         );
-        assert.ok(native.context.signal.aborted);
+        assert.ok(native.revocation);
+        assert.equal(revokedCodeOf(native.revocation), code);
         return { kind: "released", furtherWork: false };
       }),
       null,
@@ -1069,4 +1095,107 @@ test("a stop context reaches the execution with the given stop and keeps the con
   assert.equal(await hosted, null);
   context.cancel();
   assert.deepEqual(seen, [{ reason: requested, contextOpen: true }]);
+});
+
+test("an execution-end answer of an agent tool call ends the execution as revoked with no release", async (t) => {
+  const api = httpTransport("http://127.0.0.1:1");
+  const claim = testClaim();
+  const credential = {
+    credential_id: "credential_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    provider_id: "anthropic",
+    credential: { type: "api_key", key: "test_host_key" },
+  };
+  const complete = (data: unknown) => ({
+    type: OperationResultType.Completed,
+    status: 200,
+    data,
+  });
+  const page = async () => complete({ items: [], next_cursor: null });
+  t.mock.method(api.worker, "handover", async () =>
+    complete(
+      sealEnvelope(
+        deriveHandoverKeys(SECRET).handover,
+        handoverAad(claim.execution_id, claim.claimant.runtime_identity),
+        { items: [credential], ssh_identities: [] },
+      ),
+    ),
+  );
+  t.mock.method(api.worker, "execution.setup.get", async () =>
+    complete(
+      anthropicSetup({
+        execution_id: claim.execution_id,
+        intent: ExecutionIntent.Examine,
+        agents: [anthropicAgent({ credential_id: credential.credential_id })],
+      }),
+    ),
+  );
+  t.mock.method(api.mission, "execution.pinnedRevision.get", async () =>
+    complete({
+      content: {
+        name: "examine",
+        requirement: "report",
+        criterion: "report",
+        verifications: [],
+        bindings: [],
+      },
+    }),
+  );
+  for (const operation of [
+    "execution.dependency.list",
+    "execution.dependency.outcome.list",
+    "execution.dependency.evidence.list",
+  ] as const)
+    t.mock.method(api.mission, operation, page);
+  t.mock.method(api.tracking, "telemetryWrite", async () => complete({}));
+  t.mock.method(api.worker, "execution.link_update.get", async () => ({
+    type: OperationResultType.Failure,
+    status: 409,
+    error: {
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      error: {
+        code: EXECUTION_NOT_RUNNING_CODE,
+        message: "Ended",
+        details: null,
+      },
+    },
+  }));
+  const release = t.mock.method(api.scheduler, "executionRelease", async () =>
+    complete({}),
+  );
+  const provider = scriptedProvider([
+    fauxAssistantMessage(fauxToolCall("link_update_list", {}), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage("unexpected"),
+  ]);
+  const records: Record<string, unknown>[] = [];
+  assert.equal(
+    await hostExecution({
+      api,
+      claim,
+      clientSecret: SECRET,
+      context: background,
+      workspaces: WorkspaceRoot.open(temporary(t)),
+      transport: new RepositoryComponent(),
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      hostHome: temporary(t),
+      env: hostEnvironment(),
+      log: (record) => records.push(record),
+    }),
+    null,
+  );
+  assert.deepEqual(
+    records.filter((record) => record.msg === EXECUTION_ENDED),
+    [
+      {
+        msg: EXECUTION_ENDED,
+        execution_id: claim.execution_id,
+        kind: ExecutionEndKind.Ended,
+        reason: EndReason.Revoked,
+        code: EXECUTION_NOT_RUNNING_CODE,
+      },
+    ],
+  );
+  assert.equal(release.mock.callCount(), NO_ENTRIES);
+  assert.equal(provider.calls.length, ONE_ENTRY);
 });

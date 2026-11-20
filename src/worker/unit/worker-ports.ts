@@ -9,7 +9,6 @@ import {
   type AgentPort,
   type AgentSession,
   type CheckoutRef,
-  type ClaimPort,
   type CommandTree,
   type CommonPorts,
   type DependencyPort,
@@ -386,19 +385,6 @@ function unitRecordPort(run: ExecutionRun): UnitRecordPort {
   };
 }
 
-function claimPort(run: ExecutionRun): ClaimPort {
-  return {
-    async check() {
-      try {
-        await run.checkClaim();
-        return ok(null);
-      } catch (error) {
-        return run.failureOf(error);
-      }
-    },
-  };
-}
-
 export function commonPorts(run: ExecutionRun): CommonPorts {
   return {
     telemetry: run.spans,
@@ -460,7 +446,6 @@ export function workerPorts(
     evidence: evidencePort(run),
     repository: repositoryPort(input, run),
     releaseTrees: releaseTreePort(input, run),
-    claim: claimPort(run),
     unitRecords: unitRecordPort(run),
   };
 }

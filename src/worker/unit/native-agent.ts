@@ -48,7 +48,6 @@ export interface NativeAgentInput {
   budget: ExecutionBudget;
   knownSecrets: KnownSecrets;
   context: Context;
-  turnCheck?: () => Promise<void>;
 }
 export interface TurnPrompt {
   template: PromptTemplate;
@@ -170,7 +169,6 @@ function nativeAgent(
   const { budget, knownSecrets: secrets } = input;
   const { context, pins, redaction, trace } = opened;
   const { templates } = input.request.setup;
-  const turnCheck = input.turnCheck ?? (async () => {});
   const recordSend = (work: WorkPrompt, template: PromptTemplate) =>
     record({
       template,
@@ -181,11 +179,6 @@ function nativeAgent(
   const finishTurn = opened.session.agent.finishTurn;
   opened.session.agent.finishTurn = async (turn, signal) => {
     if (budget.exhaustedAfterTurn()) return { action: "end" };
-    try {
-      await turnCheck();
-    } catch {
-      return { action: "end" };
-    }
     return (await finishTurn?.(turn, signal)) ?? undefined;
   };
   const settle = async (text: string) => {
