@@ -1762,6 +1762,7 @@ async function connectedBusy(
     record,
     registration,
     executionId,
+    connectionId,
     archive,
     work,
     orders,
@@ -2316,6 +2317,63 @@ test("a failed loss revoke logs the error and the sweep continues with the next 
   assert.equal(failed[0].level, ERROR_LEVEL);
   assert.equal(failed[0].instance_id, first.record.id);
   assert.equal(records(DISCONNECTED_RECORD).length, TWO_CALLS);
+});
+
+test("a failed loss revoke is tried again at the next connection sweep and then stops", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.HeartbeatLost,
+    },
+  ]);
+  f.worker().instances.sweepConnections();
+  assert.equal(f.lost.length, SINGLE_CALL);
+});
+
+test("a heartbeat ends the retry of a failed loss revoke", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  f.revocation.lossFailure = null;
+  f.asWorker(box.record.id, INSTANCE);
+  await f.invoke("instance.heartbeat", {
+    connection_id: box.connectionId,
+    connection_name: CONNECTION_NAME,
+  });
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+});
+
+test("a failed pool release is tried again at the next connection sweep with the loss pool_failed", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.PoolFailed,
+    },
+  ]);
 });
 
 test("instanceFailed ends the live execution of the instance with the loss pool_failed and reports the ends after the commit", async (t) => {

@@ -704,7 +704,7 @@ with a backoff under the same client identities. The server logs `instance`
 with the instance name. The exit also releases each live execution of the
 instance at once, with the stop `instance_lost` and the detail
 `{ "instance", "loss": "pool_failed" }`. A failed release logs
-`worker.pool.instance_failed_release` and does not stop the restart. The restart
+`worker.pool.instance_failed_release`, does not stop the restart and is tried again at the next connection check. The restart
 backoff starts at 1 s, doubles and stops at 300 s. It starts again at 1 s after
 a run of at least 300 s.
 

@@ -181,6 +181,7 @@ interface CurrentConnection {
   connected_at: number;
   last_heartbeat_at: number;
   lapsed: boolean;
+  release_retry: InstanceLoss | null;
 }
 
 interface PreparedKey {
@@ -520,6 +521,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   sweepConnections(): void {
     const now = Date.now();
     for (const [instanceId, current] of this.connections) {
+      if (current.release_retry !== null) {
+        this.releaseLostExecutions(instanceId, current, current.release_retry);
+        continue;
+      }
       if (current.lapsed) continue;
       if (now - current.last_heartbeat_at <= INSTANCE_CONNECTED_WINDOW_MS)
         continue;
@@ -532,12 +537,22 @@ export class WorkerInstances implements WorkerInstanceLookups {
           CONNECTION_LOG_FAILED,
         );
       }
-      this.releaseLostExecutions(instanceId);
+      this.releaseLostExecutions(
+        instanceId,
+        current,
+        InstanceLoss.HeartbeatLost,
+      );
     }
   }
 
   instanceFailed(instanceId: string): void {
-    this.releaseExecutions(instanceId, InstanceLoss.PoolFailed);
+    try {
+      this.releaseExecutions(instanceId, InstanceLoss.PoolFailed);
+    } catch (error) {
+      const current = this.connections.get(instanceId);
+      if (current) current.release_retry = InstanceLoss.PoolFailed;
+      throw error;
+    }
   }
 
   private releaseExecutions(instanceId: string, loss: InstanceLoss): void {
@@ -547,10 +562,16 @@ export class WorkerInstances implements WorkerInstanceLookups {
     this.reportExecutionEnds(ends);
   }
 
-  private releaseLostExecutions(instanceId: string): void {
+  private releaseLostExecutions(
+    instanceId: string,
+    current: CurrentConnection,
+    loss: InstanceLoss,
+  ): void {
     try {
-      this.releaseExecutions(instanceId, InstanceLoss.HeartbeatLost);
+      this.releaseExecutions(instanceId, loss);
+      current.release_retry = null;
     } catch (error) {
+      current.release_retry = loss;
       this.dependencies.logger.error(
         { err: asError(error), instance_id: instanceId },
         LOSS_FAILED,
@@ -588,6 +609,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       connected_at: now,
       last_heartbeat_at: now,
       lapsed: false,
+      release_retry: null,
     };
     this.connections.set(instanceId, opened);
     this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, opened);
@@ -595,6 +617,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   private renewConnection(instanceId: string, current: CurrentConnection) {
     current.last_heartbeat_at = Date.now();
+    current.release_retry = null;
     if (!current.lapsed) return;
     current.lapsed = false;
     this.logConnection(INSTANCE_CONNECTED_LOG, instanceId, current);
