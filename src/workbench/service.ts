@@ -63,6 +63,7 @@ import {
   redactionSummary,
   type SensitiveTextRedaction,
 } from "../agent/hooks/sensitive-text-redaction.ts";
+import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import {
   toolApproval,
@@ -1693,6 +1694,7 @@ export class WorkbenchService implements Service {
         ],
         hostHome,
         hooks: [
+          checkoutConfinement(session.place.cwd),
           toolApproval({
             approve: async (call, signal) => {
               if (call.toolName === EVIDENCE_READ_TOOL)

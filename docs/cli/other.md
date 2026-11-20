@@ -693,6 +693,10 @@ directories as needed; read the selected configuration; open/create
 `kanthord.db` and its SQLite `-wal`/`-shm` sidecars in the data directory; and
 append/create `kanthord.log` in the state directory when `log.destination` is
 `file`. Private files/directories follow the `0600`/`0700` ownership rules.
+A Linux host that runs a Workbench agent with `bash` needs `bubblewrap`, `socat`
+and `ripgrep` on `PATH`, because the bash runs in a sandbox. A macOS host needs
+`ripgrep` (`rg`) on `PATH`. Without these packages every Workbench bash call
+fails.
 The cache directory has no current server-owned output. The server writes
 neither its configuration nor `cli.yaml` and issues no JWT. Future file owners,
 including Tracking storage, need their own implemented lifecycle.
