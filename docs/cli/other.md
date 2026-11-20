@@ -32,7 +32,7 @@ not a fifth global command.
 1. `kanthord config init [--gateway-allowed-host <host>]... [--gateway-bind <address>] [--gateway-base-path <path>] [--config <path>]` — implemented; local, no route.
 2. `kanthord config validate [--config <path>]` — implemented; local, no route.
 3. `kanthord config show [--config <path>]` — implemented; local, no route.
-4. `kanthord upgrade [--config <path>]` — implemented; local, no route.
+4. `kanthord upgrade [--config <path>] [--reset-changed]` — implemented; local, no route.
 5. `kanthord serve [server] [--config <path>]` — implemented; local application
    startup, no outbound API route. Opens the server's HTTP listener.
 6. `kanthord serve worker [--instance <name>] [--endpoint <url>]` — implemented; local
@@ -592,7 +592,7 @@ already loaded configuration.
 ### `upgrade`
 
 ```text
-kanthord upgrade [--config <path>]
+kanthord upgrade [--config <path>] [--reset-changed]
 ```
 
 **Implemented; route/access: none, local filesystem and database.** Bring the
@@ -605,6 +605,14 @@ directory to the versions of this binary. Stop the server before this command.
   `src/config/steps.ts`. Step 1 renames `mission.consecutive_loss_limit`,
   `gateway.token_version` and `gateway.token_lifetime`.
 - The database version is the migration history of each service.
+- `--reset-changed` is a dev reset. It drops and rebuilds only the services
+  whose live schema differs from their migration text. Every other service
+  keeps its rows. The reset never drops a custody table: a changed `custody`
+  migration text fails with `system.database.reset.custody_refused`. A table
+  outside the reset services that references a dropped table fails with
+  `system.database.reset.foreign_key` and names each dependent table. Without
+  `--reset-changed`, the command keeps the steps below and refuses a changed
+  migration text with `system.database.migration.schema_mismatch`.
 
 The command runs in this order:
 
@@ -619,10 +627,13 @@ The command runs in this order:
    newer than the binary fails with
    `system.database.migration.incompatible_history`. A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
+   With `--reset-changed`, the command finds the changed services of each file
+   instead, and checks the reset refusals of each file with a changed service.
    A `master_key` that differs from the one in `kanthord.db` fails with
    `system.config.master_key_mismatch`. The command checks both files and the
    master key before it writes a backup or a change.
-3. If nothing changes, print `up_to_date: <path>` and write nothing.
+3. If nothing changes, print `up_to_date: <path>` and write nothing. With
+   `--reset-changed`, a changed service counts as a change.
 4. Write the configuration backup `<path>.bak-<timestamp>` with one UTC
    timestamp when a configuration step applies. Print `backup: <path>`.
 5. Take `kanthord.db`, then `tracking.db`. For each file with a pending
@@ -630,7 +641,11 @@ The command runs in this order:
    directory and print `backup: <path>`. Then apply the pending migrations of
    that file, one transaction for each migration. Print
    `migrated: <service> <a> -> <b>` for each service. An existing backup path
-   fails the command.
+   fails the command. With `--reset-changed`, a file with a changed service
+   also gets the backup. Before the migrations, the command drops the tables of
+   each changed service in one transaction, deletes the migration history of
+   that service and prints `dropped: <table>` for each dropped table, in drop
+   order. The migrations then rebuild the service from its migration text.
 6. Replace the configuration file atomically. Print
    `renamed: <old key> -> <new key>` for each rename,
    `removed: <key>` for each removed key, then
@@ -1284,8 +1299,10 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `system.database.migration.duplicate_service`    | Two migration lists claim the same service name.                                                                                                                                                                                                                                                                                                                   | serve server                                                               |
 | local           | `system.database.backup_failed`                  | The database backup cannot be written, or its path exists.                                                                                                                                                                                                                                                                                                         | upgrade                                                                    |
 | local           | `system.database.migration.incompatible_history` | Stored migrations differ from the daemon migration list.                                                                                                                                                                                                                                                                                                           | serve server, upgrade                                                      |
-| local           | `system.database.migration.schema_mismatch`      | The schema of a recorded service differs from its migration text. Delete `kanthord.db`, `tracking.db` and their `-wal` and `-shm` files.                                                                                                                                                                                                                           | serve server, upgrade                                                      |
+| local           | `system.database.migration.schema_mismatch`      | The schema of a recorded service differs from its migration text. Run `kanthord upgrade --reset-changed`: it rebuilds only the changed services and keeps the credentials and the unchanged services.                                                                                                                                                              | serve server, upgrade                                                      |
 | local           | `system.database.migration.pending`              | A database with a recorded migration has a pending migration. Run `kanthord upgrade`.                                                                                                                                                                                                                                                                              | serve server                                                               |
+| local           | `system.database.reset.custody_refused`          | The migration text of the `custody` service changed. The reset never drops a custody table.                                                                                                                                                                                                                                                                        | upgrade                                                                    |
+| local           | `system.database.reset.foreign_key`              | A table outside the reset services references a table that the reset drops. The error names each dependent table.                                                                                                                                                                                                                                                  | upgrade                                                                    |
 | local           | `system.config.master_key_mismatch`              | `master_key` does not match the database. Restore the configuration file that created it, or the matching backup.                                                                                                                                                                                                                                                  | serve server                                                               |
 | local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                                                                                                                                                                                                                                                                          | serve server                                                               |
 | local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                                                                                                                                                                                                                                                                      | config init, serve server, auth jwt generate --output                      |
