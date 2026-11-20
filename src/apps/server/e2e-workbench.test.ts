@@ -3702,6 +3702,7 @@ test("(happy path) offer_action on a rotated credential records its newest live 
   target.id = await rotatedCredential(fixture);
   const entries = await offerOnce(t, fixture, session.id);
   assertSetupRecord(entries, CREDENTIAL_ROTATE, SETUP_CREDENTIAL, {
+    name: SETUP_CREDENTIAL,
     revision: SECOND_REVISION,
   });
 });

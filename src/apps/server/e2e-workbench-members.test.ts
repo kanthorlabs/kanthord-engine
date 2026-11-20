@@ -30,6 +30,7 @@ import {
   completed,
   createHost,
   DEFAULT,
+  HAIKU,
   OFF,
   sendMessage,
   SONNET,
@@ -60,6 +61,7 @@ const DOWNLOAD_OPERATION = "mission.evidence.asset.content.download";
 const MESSAGE_ENTRY = "message";
 const USER_ROLE = "user";
 const QUEUED_MESSAGE_ID = "workbench_queued_message_01ARZ3NDEKTSV4RRFFQ69G5FAV";
+const LOW = "low" as const;
 const NO_ITEMS = 0;
 const SINGLE = 1;
 const TWO_RUNS = 2;
@@ -965,5 +967,77 @@ test(
     );
     assert.equal(fixture.provider.calls.length, NO_ITEMS);
     completed(await deleteVariant(fixture, variant));
+  },
+);
+
+async function readHost(fixture: Fixture, hostId: string) {
+  return completed(
+    await fixture.workbench["session.get"](
+      { params: { session_id: hostId }, query: {}, body: null },
+      fixture.options,
+    ),
+  );
+}
+
+test(
+  "(happy path, configuration) get and the events answer list the host and the participant, each with the configuration of its session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await conversationFixture(t, [
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    const participant = await participantOf(fixture, host.id);
+    const read = await readHost(fixture, host.id);
+    const events = await pollMembers(fixture, host.id);
+    assert.deepEqual(read.members, events.members);
+    assert.deepEqual(
+      read.members.map(({ session_id }) => session_id),
+      [host.id, participant.id],
+    );
+    assert.deepEqual(read.members[0]!.configuration, CONFIGURATION);
+    assert.deepEqual(read.members[1]!.configuration, CONFIGURATION);
+  },
+);
+
+test(
+  "(happy path, configure) configure on the participant id changes the participant configuration at the next get and keeps the host configuration",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture } = await conversationFixture(t, [
+      fauxAssistantMessage(ANSWER),
+    ]);
+    const host = await createHost(fixture, OPS);
+    completed(await sendMessage(fixture, host.id, MENTION_REQUEST));
+    await untilIdle(fixture, host.id, t.signal);
+    const participant = await participantOf(fixture, host.id);
+    const changed = {
+      agent_provider: DEFAULT,
+      model_identifier: HAIKU,
+      reasoning_effort: LOW,
+    };
+    assert.deepEqual(
+      completed(
+        await fixture.workbench["session.configure"](
+          {
+            params: { session_id: participant.id },
+            query: {},
+            body: changed,
+          },
+          fixture.options,
+        ),
+      ),
+      changed,
+    );
+    for (const { members } of [
+      await readHost(fixture, host.id),
+      await pollMembers(fixture, host.id),
+    ]) {
+      assert.deepEqual(members[0]!.configuration, CONFIGURATION);
+      assert.equal(members[1]!.session_id, participant.id);
+      assert.deepEqual(members[1]!.configuration, changed);
+    }
   },
 );

@@ -8,7 +8,12 @@ import { temporary } from "../kernel/test-support.ts";
 import { gatewayOperations, HEALTHCHECK_OK } from "./contract.ts";
 import { HealthStatus } from "../kernel/service.ts";
 import { workerOperations } from "../worker/contract.ts";
-import { emptyInput, OperationRegistry } from "../kernel/operation.ts";
+import { HttpStatus } from "../kernel/http.ts";
+import {
+  emptyInput,
+  type Operation,
+  OperationRegistry,
+} from "../kernel/operation.ts";
 import { emitOpenAPIFiles, writeOpenAPI } from "./openapi.ts";
 
 const PROJECT_PATH_REFERENCE = "./openapi/project/read.yaml#/pathItem";
@@ -119,6 +124,28 @@ test("OpenAPI projection of a guest operation declares bearer security", () => {
     pathItem: { get: { security: unknown } };
   };
   assert.deepEqual(item.pathItem.get.security, [{ bearerAuth: [] }]);
+});
+
+function responseStatuses(operation: Operation): string[] {
+  const files = emitOpenAPIFiles([operation]);
+  const file = Object.values(files).find((item) => "pathItem" in item) as {
+    pathItem: { get: { responses: Record<string, unknown> } };
+  };
+  return Object.keys(file.pathItem.get.responses);
+}
+
+test("an operation with errors 502 answers a 502 Error response next to every fixed error status", () => {
+  const fixed = [400, 401, 403, 404, 409, 413, 415, 500, 503, 504];
+  const withBadGateway = responseStatuses({
+    ...gatewayOperations.liveness,
+    errors: [HttpStatus.BadGateway],
+  });
+  for (const status of [...fixed, HttpStatus.BadGateway])
+    assert.ok(withBadGateway.includes(String(status)), String(status));
+  const without = responseStatuses(gatewayOperations.liveness);
+  for (const status of fixed)
+    assert.ok(without.includes(String(status)), String(status));
+  assert.ok(!without.includes(String(HttpStatus.BadGateway)));
 });
 
 const apiOperations = { ...gatewayOperations, ...workerOperations };

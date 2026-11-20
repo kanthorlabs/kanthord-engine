@@ -198,6 +198,10 @@ const actionSeenSchema = z.union([
     attempt: z.number().int().nonnegative(),
   }),
   z.strictObject({ name: z.string(), paused: z.boolean() }),
+  z.strictObject({
+    name: z.string(),
+    revision: z.number().int().positive(),
+  }),
   z.strictObject({ revision: z.number().int().positive() }),
   z.strictObject({ version: z.number().int().positive() }),
 ]);
@@ -327,10 +331,15 @@ export const memberEntrySchema = sessionEntrySchema.extend({
 });
 export type MemberEntry = z.infer<typeof memberEntrySchema>;
 
-export const conversationMemberSchema = z.strictObject({
+export const guestMemberSchema = z.strictObject({
   session_id: z.string(),
   agent_name: z.string(),
   display_name: z.string(),
+});
+export type GuestMember = z.infer<typeof guestMemberSchema>;
+
+export const conversationMemberSchema = guestMemberSchema.extend({
+  configuration: workbenchConfigurationSchema,
 });
 export type ConversationMember = z.infer<typeof conversationMemberSchema>;
 
@@ -992,7 +1001,7 @@ export const workbenchOperations = {
     output: z.strictObject({
       session_id: identitySchema(WORKBENCH_SESSION_PREFIX),
       title: z.string().nullable(),
-      members: z.array(conversationMemberSchema),
+      members: z.array(guestMemberSchema),
       owner_name: z.string(),
       projects: z.array(inviteProjectSchema),
       granted_operations: z.array(grantedOperationSchema),

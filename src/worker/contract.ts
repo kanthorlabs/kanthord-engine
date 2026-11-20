@@ -1913,6 +1913,7 @@ export const workerOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
+    errors: [HttpStatus.UnprocessableEntity],
     input: z.strictObject({
       params: z.strictObject({ execution_id: identitySchema("execution") }),
       query: emptyFields,
@@ -1956,6 +1957,7 @@ export const workerOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
+    errors: [HttpStatus.BadGateway],
     input: z.strictObject({
       params: z.strictObject({ execution_id: identitySchema("execution") }),
       query: emptyFields,
@@ -2008,6 +2010,7 @@ export const workerOperations = {
     mutation: false,
     body: false,
     status: HttpStatus.OK,
+    errors: [HttpStatus.BadGateway],
     input: z.strictObject({
       params: z.strictObject({ execution_id: identitySchema("execution") }),
       query: emptyFields,
@@ -2031,6 +2034,7 @@ export const workerOperations = {
     secret: true,
     body: true,
     status: HttpStatus.OK,
+    errors: [HttpStatus.UnprocessableEntity],
     input: z.strictObject({
       params: emptyFields,
       query: emptyFields,
