@@ -559,6 +559,7 @@ export const intakeOperations = {
     path: "/api/intake/inbound",
     body: true,
     status: INBOUND_CREATED_STATUS,
+    errors: [HttpStatus.UnprocessableEntity],
     input: z.strictObject({
       params: z.strictObject({}),
       query: z.strictObject({}),
@@ -747,6 +748,7 @@ export const intakeOperations = {
   "action.check": {
     ...serviceOperation,
     id: "intake.action.check",
+    errors: [HttpStatus.BadGateway],
     path: "/api/intake/action/check",
     input: z.strictObject({
       params: z.strictObject({}),
@@ -779,6 +781,7 @@ export const intakeOperations = {
   "link.read": {
     ...serviceOperation,
     id: "intake.link.read",
+    errors: [HttpStatus.BadGateway],
     path: "/api/intake/link/read",
     input: z.strictObject({
       params: z.strictObject({}),
@@ -802,6 +805,7 @@ export const intakeOperations = {
   "action.perform": {
     ...performOperation,
     id: "intake.action.perform",
+    errors: [HttpStatus.UnprocessableEntity],
     path: "/api/intake/execution/:execution_id/action/perform",
     input: z.strictObject({
       params: z.strictObject({ execution_id: identitySchema("execution") }),
@@ -891,6 +895,7 @@ export const intakeOperations = {
   "storage.check": {
     ...executionStorageReadOperation,
     id: "intake.storage.check",
+    errors: [HttpStatus.BadGateway],
     path: "/api/intake/execution/:execution_id/storage/asset/:asset_id/check",
     input: readInput(
       z.strictObject({
@@ -927,6 +932,7 @@ export const intakeOperations = {
     mutation: false,
     body: true,
     id: "intake.execution.gate_files.read",
+    errors: [HttpStatus.BadGateway],
     path: "/api/intake/execution/:execution_id/gate_files",
     input: z.strictObject({
       params: z.strictObject({ execution_id: identitySchema("execution") }),
@@ -961,6 +967,7 @@ export const intakeOperations = {
     body: false,
     status: HttpStatus.NoContent,
     id: "intake.storage.delete",
+    errors: [HttpStatus.BadGateway],
     path: "/api/intake/storage/asset/:asset_id",
     input: readInput(
       z.strictObject({ asset_id: identitySchema("evidence_asset") }),

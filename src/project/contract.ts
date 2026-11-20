@@ -1236,6 +1236,7 @@ export const projectOperations = {
   "bindingSet.write": {
     ...writeOperation,
     id: "project.bindingSet.write",
+    errors: [HttpStatus.UnprocessableEntity],
     method: HttpMethod.Put,
     path: "/api/project/:project_id/binding-set",
     input: z.strictObject({
@@ -1308,6 +1309,7 @@ export const projectOperations = {
   "binding.environment.get": {
     ...readOperation,
     id: "project.binding.environment.get",
+    errors: [HttpStatus.UnprocessableEntity],
     method: HttpMethod.Get,
     path: "/api/project/:project_id/binding/:binding_id/environment",
     timeoutMs: REPOSITORY_FILES_ROUTE_TIMEOUT_MS,
@@ -1329,6 +1331,7 @@ export const projectOperations = {
   "binding.environment.set": {
     ...writeOperation,
     id: "project.binding.environment.set",
+    errors: [HttpStatus.UnprocessableEntity],
     method: HttpMethod.Put,
     path: "/api/project/:project_id/binding/:binding_id/environment",
     timeoutMs: BINDING_VERIFY_TIMEOUT_MS,

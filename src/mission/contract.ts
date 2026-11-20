@@ -2379,6 +2379,7 @@ export const missionOperations = {
     id: "mission.evidence.delete",
     method: HttpMethod.Delete,
     status: HttpStatus.NoContent,
+    errors: [HttpStatus.BadGateway],
     path: "/api/mission/evidence/:evidence_id",
     input: z.strictObject({
       params: z.strictObject({ evidence_id: identitySchema("evidence") }),
@@ -2394,6 +2395,7 @@ export const missionOperations = {
     id: "mission.evidence.asset.delete",
     method: HttpMethod.Delete,
     status: HttpStatus.NoContent,
+    errors: [HttpStatus.BadGateway],
     path: "/api/mission/evidence/asset/:asset_id",
     input: z.strictObject({
       params: z.strictObject({ asset_id: identitySchema("evidence_asset") }),
@@ -2406,6 +2408,7 @@ export const missionOperations = {
   "node.check": {
     ...writeOperation,
     id: "mission.node.check",
+    errors: [HttpStatus.BadGateway],
     projectScope: ProjectScopeRule.Target,
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/check",
@@ -2422,6 +2425,7 @@ export const missionOperations = {
     ...writeOperation,
     access: AccessPolicy.Service,
     id: "mission.delivery.admit",
+    errors: [HttpStatus.BadGateway],
     method: HttpMethod.Post,
     path: "/api/mission/delivery/admit",
     input: z.strictObject({
@@ -2458,6 +2462,7 @@ export const missionOperations = {
     access: AccessPolicy.Client,
     requiresExecution: true,
     id: "mission.assessment.submit",
+    errors: [HttpStatus.BadGateway],
     method: HttpMethod.Post,
     path: "/api/mission/node/:node_id/assessment",
     input: z.strictObject({
@@ -2484,6 +2489,7 @@ export const missionOperations = {
   "evidence.asset.content.download": {
     ...readOperation,
     id: "mission.evidence.asset.content.download",
+    errors: [HttpStatus.BadGateway],
     method: HttpMethod.Get,
     path: "/api/mission/evidence/asset/:asset_id/content/download",
     lifetime: OperationLifetime.Stream,
@@ -2582,6 +2588,7 @@ export const missionOperations = {
     access: AccessPolicy.Client,
     requiresExecution: true,
     id: "mission.evidence.asset.complete",
+    errors: [HttpStatus.BadGateway],
     method: HttpMethod.Post,
     path: "/api/mission/evidence/asset/:asset_id/complete",
     input: z.strictObject({
