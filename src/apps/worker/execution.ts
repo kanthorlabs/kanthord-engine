@@ -42,6 +42,7 @@ export interface HostExecutionInput {
   env: NodeJS.ProcessEnv;
   context: Context;
   stop?: Context;
+  revocation?: CancellationContext;
   sessionRoot?: string;
   capture?: NativeExecutionInput["capture"];
   log(record: Record<string, unknown>): void;
@@ -307,7 +308,7 @@ export async function hostExecution(
     hostInput.context,
     hostInput.claim.expired_at,
   );
-  const revocation = new CancellationContext();
+  const revocation = hostInput.revocation ?? new CancellationContext();
   const input = provedInput(hostInput, revocation);
   const run: HostRun = {
     input,

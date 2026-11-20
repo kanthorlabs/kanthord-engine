@@ -535,6 +535,8 @@ const STOPPED_CONTENT = "stopped";
 const WORKER_STOPPED = "worker_stopped";
 const INSTANCE_ARCHIVED = "instance_archived";
 const HUMAN_PAUSED = "human_paused";
+const REVOKED = "revoked";
+const EXECUTION_ENDED = "execution ended";
 const RELEASE_WAIT_MS = 30000;
 const LIVE_STOP = "worker.stop.execution_live";
 const REVIEWER = "reviewer@1";
@@ -597,6 +599,8 @@ async function liveStopUnit(
   const releases: unknown[] = [];
   const released = Promise.withResolvers<void>();
   const assessments: unknown[] = [];
+  const records: Record<string, unknown>[] = [];
+  const pulledAgain = Promise.withResolvers<void>();
   let pulls = 0;
   const content = {
     name: "node",
@@ -641,7 +645,10 @@ async function liveStopUnit(
     },
     scheduler: {
       workPull: async (_input: unknown, call: { context?: Context }) => {
-        if (++pulls > FIRST_PULL) return cancelled(call.context);
+        if (++pulls > FIRST_PULL) {
+          pulledAgain.resolve();
+          return cancelled(call.context);
+        }
         return completed({ kind: WorkPullKind.Claimed, execution: claim });
       },
       claimGet: async () => completed({ claim_state: "running" }),
@@ -706,7 +713,7 @@ async function liveStopUnit(
     bindings: [{ transport, client_secret: secret }],
     directories: directoriesOf(env),
     env,
-    log: () => {},
+    log: (line) => records.push(JSON.parse(line) as Record<string, unknown>),
     model_runtime_factory: scriptedModelRuntime(provider),
     repository_transport: {
       ...localTransport,
@@ -744,6 +751,8 @@ async function liveStopUnit(
     releases,
     released: released.promise,
     assessments,
+    records,
+    pulledAgain: pulledAgain.promise,
   };
 }
 
@@ -828,6 +837,29 @@ test(
     );
     assert.equal(await live.unit.stop(), null);
     assert.equal(await live.running, null);
+  },
+);
+
+test(
+  "a revoked stop order ends the live execution as revoked with no push and no release",
+  { timeout: RELEASE_WAIT_MS * 2 },
+  async (t) => {
+    const live = await liveStopUnit(t, { evaluation: false });
+    live.unit.stopOrders([
+      { execution_id: live.claim.execution_id, reason: REVOKED },
+    ]);
+    live.resume();
+    await live.pulledAgain;
+    assert.deepEqual(live.events, []);
+    assert.deepEqual(
+      live.records
+        .filter((record) => record.msg === EXECUTION_ENDED)
+        .map(({ reason }) => reason),
+      [REVOKED],
+    );
+    assert.equal(await live.unit.stop(), null);
+    assert.equal(await live.running, null);
+    assert.deepEqual(live.events, ["deregister"]);
   },
 );
 

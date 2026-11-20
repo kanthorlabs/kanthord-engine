@@ -113,7 +113,14 @@ interface Execution {
   entry: Entry;
   context: CancellationContext;
   stopWith(stop: ExecutionStop): void;
+  revoke(): void;
   task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
+}
+
+interface ExecutionContexts {
+  context: Context;
+  stop: Context;
+  revocation: CancellationContext;
 }
 
 export class WorkerUnit {
@@ -250,9 +257,11 @@ export class WorkerUnit {
   stopOrders(orders: readonly StopOrderEntry[]): void {
     const execution = this.execution;
     if (!this.executionLive || !execution) return;
-    for (const order of orders)
-      if (order.execution_id === execution.claim.execution_id)
-        execution.stopWith(new ExecutionStop(order.reason, null));
+    for (const order of orders) {
+      if (order.execution_id !== execution.claim.execution_id) continue;
+      if (order.reason === EndReason.Revoked) execution.revoke();
+      else execution.stopWith(new ExecutionStop(order.reason, null));
+    }
   }
 
   private async reportFootprint(
@@ -661,7 +670,12 @@ export class WorkerUnit {
     const context = new CancellationContext(background, claim.expired_at);
     if (this.shutdown.signal.aborted) context.cancel();
     const stops = new CancellationContext();
-    const task = this.execute(entry, claim, context, stops)
+    const revocation = new CancellationContext();
+    const task = this.execute(entry, claim, {
+      context,
+      stop: stops,
+      revocation,
+    })
       .then((result) => {
         if (result === null || result === SETUP_UNAVAILABLE) {
           this.executionLive = false;
@@ -675,6 +689,8 @@ export class WorkerUnit {
       entry,
       context,
       stopWith: (stop) => stops.cancel(stop),
+      revoke: () =>
+        revocation.cancel(new ExecutionStop(EndReason.Revoked, null)),
       task,
     };
   }
@@ -682,8 +698,7 @@ export class WorkerUnit {
   private async execute(
     entry: Entry,
     claim: ExecutionRecord,
-    context: Context,
-    stop: Context,
+    { context, stop, revocation }: ExecutionContexts,
   ): Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE> {
     return hostExecution({
       claim,
@@ -698,6 +713,7 @@ export class WorkerUnit {
       env: this.options.env,
       context,
       stop,
+      revocation,
       sessionRoot: executionSessionRoot(this.options.directories.data),
       capture: captureOf(this.options.env, this.options.directories.data),
       log: (record) => this.logRecord(record),

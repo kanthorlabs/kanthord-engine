@@ -442,6 +442,7 @@ function makeService(
     workerStopOrders: {
       connected: () => false,
       sendStopOrder: () => undefined,
+      sendRevokedOrder: () => undefined,
       orderOf: () => null,
     },
     pauseFacts: {

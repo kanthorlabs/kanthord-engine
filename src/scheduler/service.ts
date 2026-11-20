@@ -28,6 +28,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
+import type { StopOrderReason } from "../worker/contract.ts";
 import {
   ExecutionEnd,
   type ExecutionTelemetry,
@@ -60,7 +61,6 @@ import {
   type EndedExecution,
   type EnvironmentGate,
   EXECUTION_IDENTITY_PREFIX,
-  type ExecutionStopReason,
   type Job,
   JOB_IDENTITY_PREFIX,
   LOSS_SWEEP_INTERVAL_MS,
@@ -199,7 +199,7 @@ export interface Dependencies {
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;
   logger: Logger;
-  stopOrderOf(executionId: string): ExecutionStopReason | null;
+  stopOrderOf(executionId: string): StopOrderReason | null;
   executionReleased(executionId: string, stop: ReleaseStop | null): void;
   archiving(tx: Transaction, runtimeIdentity: string): boolean;
   health?: HealthRegistry;

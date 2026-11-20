@@ -464,6 +464,9 @@ export class WorkerService implements Service {
   ): void {
     this.instances.sendStopOrder(executionId, runtimeIdentity, reason);
   }
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void {
+    this.instances.sendRevokedOrder(executionId, runtimeIdentity);
+  }
   orderOf(executionId: string): StopOrderReason | null {
     return this.instances.orderOf(executionId);
   }

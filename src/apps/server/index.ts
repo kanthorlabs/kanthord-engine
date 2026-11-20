@@ -1192,6 +1192,7 @@ export function composeServices(options: ComposeServicesOptions) {
     workerStopOrders: {
       connected: (...args) => worker.executionConnected(...args),
       sendStopOrder: (...args) => worker.sendStopOrder(...args),
+      sendRevokedOrder: (...args) => worker.sendRevokedOrder(...args),
       orderOf: (...args) => worker.orderOf(...args),
     },
     pauseFacts: {

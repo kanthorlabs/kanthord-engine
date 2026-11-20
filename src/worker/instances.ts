@@ -841,15 +841,32 @@ export class WorkerInstances implements WorkerInstanceLookups {
     runtimeIdentity: string,
     reason: StopOrderReason,
   ): void {
-    const name = this.dependencies.store.transaction((tx) => {
-      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
-    });
+    const name = this.instanceNameOf(runtimeIdentity);
     assert.ok(name, "a stop order names a registration of an instance");
     this.queueStopOrder(
       { name },
       { execution_id: executionId, runtime_identity: runtimeIdentity, reason },
     );
+  }
+
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void {
+    const name = this.instanceNameOf(runtimeIdentity);
+    if (!name) return;
+    this.queueStopOrder(
+      { name },
+      {
+        execution_id: executionId,
+        runtime_identity: runtimeIdentity,
+        reason: StopOrderReason.Revoked,
+      },
+    );
+  }
+
+  private instanceNameOf(runtimeIdentity: string): string | undefined {
+    return this.dependencies.store.transaction((tx) => {
+      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
+    });
   }
 
   stopOrdersOf(

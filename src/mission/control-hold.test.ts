@@ -500,6 +500,7 @@ function pausedClaim(
   const executionId = createIdentity("execution");
   const keep = { live: true, connected: true, order: null as string | null };
   const sent: unknown[][] = [];
+  const revoked: unknown[][] = [];
   const stops: unknown[] = [];
   h.dependencies.schedulerClaims.liveExecutionOf = () =>
     keep.live
@@ -513,7 +514,10 @@ function pausedClaim(
   h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
     stops.push(stop);
     keep.live = false;
-    return revokedExecution(executionId, nodeId, now);
+    return {
+      ...revokedExecution(executionId, nodeId, now),
+      runtime_identity: RUNTIME_IDENTITY,
+    };
   };
   h.dependencies.workerStopOrders.connected = () => keep.connected;
   h.dependencies.workerStopOrders.orderOf = () =>
@@ -521,15 +525,21 @@ function pausedClaim(
   h.dependencies.workerStopOrders.sendStopOrder = (...args) => {
     sent.push([...args, h.store.database.isTransaction]);
   };
+  h.dependencies.workerStopOrders.sendRevokedOrder = (...args) => {
+    revoked.push([...args, h.store.database.isTransaction]);
+  };
   h.store.transaction((tx) => {
     openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
     setNodeState(tx, h.node_id, state);
   });
-  return { h, executionId, keep, sent, stops };
+  return { h, executionId, keep, sent, revoked, stops };
 }
 
 test("a pause of a connected execution keeps the claim and sends one stop order after the commit", async (t) => {
-  const { h, executionId, sent, stops } = pausedClaim(t, NodeState.Executing);
+  const { h, executionId, sent, revoked, stops } = pausedClaim(
+    t,
+    NodeState.Executing,
+  );
   const result = await h.invoke("node.pause", {
     params: { node_id: h.node_id },
     query: {},
@@ -544,6 +554,7 @@ test("a pause of a connected execution keeps the claim and sends one stop order 
   assert.deepEqual(sent, [
     [executionId, RUNTIME_IDENTITY, HUMAN_PAUSED, false],
   ]);
+  assert.deepEqual(revoked, []);
 });
 
 test("a pause rolled back sends no stop order", async (t) => {
@@ -579,6 +590,21 @@ test("a pause of an execution with no connection revokes the claim at once with 
     ONE_ACT,
   );
   assert.deepEqual(sent, []);
+});
+
+test("a pause that revokes the claim of an execution with no connection queues one stop order revoked after the commit", async (t) => {
+  const { h, executionId, keep, sent, revoked } = pausedClaim(
+    t,
+    NodeState.Executing,
+  );
+  keep.connected = false;
+  await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  assert.deepEqual(sent, []);
+  assert.deepEqual(revoked, [[executionId, RUNTIME_IDENTITY, false]]);
 });
 
 test("a block of a Paused node with a pending pause stop revokes the claim", async (t) => {

@@ -248,11 +248,6 @@
       "count": 1
     }
   },
-  "src/apps/worker/unit.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/config/convict.d.ts": {
     "kanthord/no-inline-param-type": {
       "count": 3

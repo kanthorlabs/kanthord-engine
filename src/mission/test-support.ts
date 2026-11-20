@@ -123,6 +123,7 @@ export function revokedExecution(
 ): RevokedExecution {
   return {
     execution_id: executionId,
+    runtime_identity: createIdentity("worker_registration"),
     trace: {
       execution_id: executionId,
       project_id: createIdentity("project"),
@@ -508,6 +509,8 @@ export function missionHarness(
       },
       sendStopOrder: (...args) =>
         record("workerStopOrders.sendStopOrder", args),
+      sendRevokedOrder: (...args) =>
+        record("workerStopOrders.sendRevokedOrder", args),
       orderOf: (...args) => {
         record("workerStopOrders.orderOf", args);
         return null;

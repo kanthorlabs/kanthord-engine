@@ -103,6 +103,7 @@ function revokedClaimOf(executionId: string): ExecutionEnds["revoked"][number] {
   return {
     execution: {
       execution_id: executionId,
+      runtime_identity: createIdentity("worker_registration"),
       trace: {
         execution_id: executionId,
         project_id: createIdentity("project"),
