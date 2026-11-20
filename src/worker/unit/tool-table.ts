@@ -10,10 +10,10 @@ import type { PiCodingAgent } from "../../agent/pi.ts";
 import { HostTool, type HostTools } from "../contract.ts";
 import { evidenceUploadTool, linkUpdateListTool } from "./host-tools.ts";
 export { ToolSource } from "../../agent/contract.ts";
-import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import {
   type BashProcess,
+  bashSandbox,
   processBashOperations,
   type ShellConfig,
 } from "../../agent/bash-process.ts";

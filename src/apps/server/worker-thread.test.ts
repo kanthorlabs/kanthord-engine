@@ -168,6 +168,9 @@ test("(security) a slot thread gets a deny_read list of the server environment t
   };
   const server = directories(serverEnv);
   const slotRoot = join(server.state, "workers", "slot-a");
+  const siblingRoot = join(server.state, "workers", "slot-b");
+  mkdirSync(siblingRoot, { recursive: true });
+  mkdirSync(slotRoot, { recursive: true });
   const launch = {
     instance: {},
     entries: [],
@@ -182,6 +185,8 @@ test("(security) a slot thread gets a deny_read list of the server environment t
   assert.ok(data.deny_read.includes(join(server.data, "kanthord.db")));
   assert.ok(data.deny_read.includes(join(server.state, "pi")));
   assert.ok(data.deny_read.includes("~/.config/kanthord-eval"));
+  assert.ok(data.deny_read.includes(siblingRoot));
+  assert.ok(!data.deny_read.includes(slotRoot));
   for (const path of [join(slot.state, "workspaces"), join(slotRoot, "tmp")])
     assert.deepEqual(
       data.deny_read.filter(

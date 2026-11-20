@@ -4,7 +4,7 @@ import type { Provider } from "@earendil-works/pi-ai";
 import type { LlmProvider } from "../../llm/provider.ts";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { hostDenyRead } from "../../agent/bash-sandbox.ts";
+import { hostDenyRead } from "../../agent/bash-process.ts";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import {

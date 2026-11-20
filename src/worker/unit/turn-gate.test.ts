@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { bashSandbox } from "../../agent/bash-process.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";

@@ -11,7 +11,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
-import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { bashSandbox } from "../../agent/bash-process.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";

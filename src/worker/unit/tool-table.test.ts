@@ -8,7 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
-import { bashSandbox, createBashSandbox } from "../../agent/bash-sandbox.ts";
+import { bashSandbox, createBashSandbox } from "../../agent/bash-process.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   pidsIn,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   SandboxManager,
@@ -16,6 +17,7 @@ const WORKERS_DIRECTORY = "workers";
 const LOG_FILE = "kanthord.log";
 const PROJECTS_DIRECTORY = "projects";
 const ENVIRONMENTS_DIRECTORY = "environments";
+const MISSING_ENTRY = "ENOENT";
 const PARENT_SEGMENT = "..";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 
@@ -69,6 +71,19 @@ function withoutAncestors(
   );
 }
 
+function siblingRoots(workers: string, root: string): string[] {
+  if (!isWithin(workers, root)) return [];
+  const own = relative(workers, root).split(sep)[0];
+  try {
+    return readdirSync(workers)
+      .filter((name) => name !== own)
+      .map((name) => join(workers, name));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === MISSING_ENTRY) return [];
+    throw error;
+  }
+}
+
 export function hostDenyRead(
   env: NodeJS.ProcessEnv,
   scope: DenyReadScope = {},
@@ -89,9 +104,11 @@ export function hostDenyRead(
     "~/.config/kanthord-eval",
     "~/.pi/agent",
   ];
-  return scope.root === undefined
-    ? denyRead
-    : withoutAncestors(denyRead, [scope.root]);
+  if (scope.root === undefined) return denyRead;
+  return [
+    ...withoutAncestors(denyRead, [scope.root]),
+    ...siblingRoots(join(place.state, WORKERS_DIRECTORY), scope.root),
+  ];
 }
 
 function filesystemOf(
