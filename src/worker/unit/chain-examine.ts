@@ -12,7 +12,7 @@ import { examineTasksNodes, runExamineTasks } from "./foundry-examine.ts";
 import { EXAMINE_PORTS, type ExaminePorts } from "./foundry-ports.ts";
 import {
   executionRelease,
-  executionReleaseFurtherWork,
+  executionReleaseBudgetLimit,
 } from "./step-execution-release.ts";
 import { envSetupExamine } from "./step-env-setup.ts";
 import { inputsReadExamine } from "./step-inputs-read-host.ts";
@@ -61,7 +61,7 @@ export function examineChain(): Chain<ExaminePorts> {
     .step(executionRelease)
     .budgetEnd({
       kind: BudgetEndKind.Exit,
-      nodes: [stepNode(executionReleaseFurtherWork)],
+      nodes: [stepNode(executionReleaseBudgetLimit)],
     })
     .build();
 }

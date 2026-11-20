@@ -91,7 +91,7 @@ chain examine
     step execution.release                  [cleanup] further_work false
   budget_end in prepare: stop budget_end/wall_time
   onExit budget_end, after prepare
-    step execution.release                  [cleanup] further_work true; no stop
+    step execution.release                  [cleanup] further_work true; stop budget_end/<limit>
   onStop not revoked, after prepare         no node
   dispose resources                         on every end
   step execution.release(stop)              [cleanup] on each stop that is not revoked
