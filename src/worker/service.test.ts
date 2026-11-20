@@ -138,6 +138,7 @@ const fakeCollaborations = {
   environmentOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  diskFreeRatio: 0.1,
   workerBindingRowOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { simpleGit } from "simple-git";
 import { setTimeout as delay } from "node:timers/promises";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -26,7 +27,7 @@ import {
 import { ExecutionStopReason, WorkPullKind } from "../../scheduler/contract.ts";
 import { fakeContainerHost } from "./container-fakes-test-support.ts";
 import { until } from "./cli-test-support.ts";
-import { humanCaller } from "./test-support.ts";
+import { bareRepository, humanCaller } from "./test-support.ts";
 import {
   awaitStatus,
   bindingsOf,
@@ -36,6 +37,7 @@ import {
   type Fixture,
   gateFixture,
   importNode,
+  localRepositoryFiles,
   NO_ITEMS,
   recordingSlotDriver,
   SINGLE_SLOT,
@@ -47,6 +49,7 @@ import {
 
 const TEST_TIMEOUT_MS = 120000;
 const SETTLE_WAIT_MS = 10000;
+const NO_BRANCHES = "";
 const SECOND_SLOT = 2;
 const SECOND_SLOT_INDEX = 1;
 const FAILING_SETUP = "false";
@@ -385,6 +388,52 @@ test(
         const secondGate = await otherClient.blocked();
         await secondGate.cancel();
       },
+    );
+  },
+);
+
+test(
+  "a host target reaches ready only after the push probe passed",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const environment = fakeEnvironmentRuntime();
+    const { bare } = await bareRepository(t, "environment_gate");
+    const probes: string[] = [];
+    const local = localRepositoryFiles(bare, probes);
+    const held = Promise.withResolvers<void>();
+    const fixture = await gateFixture(t, {
+      fakeSlots: true,
+      environmentRuntime: environment.runtime,
+      repositoryFiles: {
+        ...local,
+        probePush: async (...input) => {
+          await held.promise;
+          await local.probePush(...input);
+        },
+      },
+    });
+    const project = await createProject(fixture, {
+      name: "environment-gate-probe",
+      placement: "server",
+      instanceCount: SINGLE_SLOT,
+    });
+    await setEnvironment(fixture, project.id, FIXED_ENVIRONMENT);
+    await awaitStatus(t, fixture, project.id, EnvironmentStatus.Proving);
+    assert.deepEqual(probes, []);
+    assert.equal(
+      environment.calls.some((call) => call.method === HOST_PROOF_METHOD),
+      false,
+    );
+    held.resolve();
+    await awaitStatus(t, fixture, project.id, EnvironmentStatus.Ready);
+    assert.equal(probes.length, SINGLE_SLOT);
+    assert.match(probes[0]!, /^kanthord\/preflight-.+/);
+    assert.ok(
+      environment.calls.some((call) => call.method === HOST_PROOF_METHOD),
+    );
+    assert.equal(
+      await simpleGit(bare).raw(["for-each-ref", "refs/heads/kanthord"]),
+      NO_BRANCHES,
     );
   },
 );

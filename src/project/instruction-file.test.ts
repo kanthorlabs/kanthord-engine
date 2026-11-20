@@ -143,6 +143,7 @@ const realFiles: RepositoryFiles = {
     readFilesAtCommit(address, commit, paths, maxBytes, context, ms, ssh),
   listFilesAtCommit: async () => assert.fail("Unexpected list."),
   readObjectIds: async () => assert.fail("Unexpected object read."),
+  probePush: async () => {},
   cloneSnapshot: async () => assert.fail("Unexpected clone."),
 };
 

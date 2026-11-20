@@ -455,6 +455,7 @@ async function setUpReview(
     context: run.operationContext,
     deadline,
     spans: run.spans,
+    diskFreeRatio: input.setup.disk_free_ratio,
   };
   const setup = await setupEntries(
     setupInput,

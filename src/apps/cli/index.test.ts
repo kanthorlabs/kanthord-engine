@@ -462,6 +462,7 @@ const ENVIRONMENT_STATE = {
   checks: [],
   repairs: 0,
   repairing: false,
+  review_flow: "off",
 };
 const STORED_ENVIRONMENT = { image: "debian", postCreateCommand: "make setup" };
 const BINDING_SET_ANSWER = {
@@ -511,7 +512,13 @@ function environmentCommand(t: TestContext, endpoint: string, args: string[]) {
 }
 
 test("project environment list reads the states of a project", async (t) => {
-  const answer = { items: [ENVIRONMENT_STATE] };
+  const answer = {
+    items: [
+      ENVIRONMENT_STATE,
+      { ...ENVIRONMENT_STATE, binding_name: "docs-repo", review_flow: "on" },
+      { ...ENVIRONMENT_STATE, binding_name: "push-repo", review_flow: null },
+    ],
+  };
   const { endpoint, seen } = await environmentServer(t, answer);
   const result = await environmentCommand(t, endpoint, ["list", PROJECT_ID]);
   assert.equal(result.status, ExitCode.Success, result.stderr);
@@ -523,6 +530,12 @@ test("project environment list reads the states of a project", async (t) => {
     },
   ]);
   assert.deepEqual(JSON.parse(result.stdout), answer);
+  assert.deepEqual(
+    JSON.parse(result.stdout).items.map(
+      (item: { review_flow: string | null }) => item.review_flow,
+    ),
+    ["off", "on", null],
+  );
 });
 
 test("project environment rebuild posts with no body and prints the state", async (t) => {

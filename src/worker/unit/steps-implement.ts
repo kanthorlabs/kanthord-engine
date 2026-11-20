@@ -729,6 +729,7 @@ export async function prepareStepsWorkspace(
     context: run.operationContext,
     deadline,
     spans: run.spans,
+    diskFreeRatio: input.setup.disk_free_ratio,
   };
   let base: BaseHead | null = null;
   try {
@@ -856,6 +857,7 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
       context: state.run.operationContext,
       deadline: state.agent.budget.wallDeadline(),
       spans: state.run.spans,
+      diskFreeRatio: state.input.setup.disk_free_ratio,
       exhausted: () => state.agent.budget.exhausted(),
     },
     state.setup,

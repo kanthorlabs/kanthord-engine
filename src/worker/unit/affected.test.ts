@@ -247,6 +247,8 @@ async function fixture(
     context: background,
     deadline: Date.now() + FIXTURE_DEADLINE_MS,
     spans: null,
+    diskFreeRatio: 0.1,
+    freeDisk: async () => ({ free_bytes: 1000, total_bytes: 1000 }),
   };
   const entries = await setupEntries(setup, [
     {

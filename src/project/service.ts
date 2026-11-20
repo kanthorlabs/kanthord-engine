@@ -13,6 +13,7 @@ import {
 import type { Store, Transaction } from "../kernel/store.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { shippedAsset } from "../kernel/assets.ts";
+import { freeDiskOf } from "../kernel/disk.ts";
 import type { NodeBodyOf } from "../mission/contract.ts";
 import {
   background,
@@ -102,6 +103,7 @@ import {
   ENVIRONMENT_SECRET_PLATFORM,
   ENVIRONMENT_SECRET_VARIABLE,
   ENVIRONMENT_SECRETS_MAX,
+  EnvironmentStatus,
   GITHUB_ACTOR_ID_PATTERN,
   GitHubAction,
   INBOX_HANDLE_PATTERN,
@@ -132,6 +134,7 @@ import {
   type RepositoryPolicy,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
+  ReviewFlow,
   type SchedulerWakeup,
   SSH_CREDENTIAL_PLATFORM,
   type StalePin,
@@ -308,6 +311,25 @@ function refuseRepositoryLinkTrust(
   if (config.platform !== RepositoryPlatform.GitHub)
     refuseLinkTrust(binding, LinkTrustReason.PlatformUnsupported);
   refuseInvalidLinkTrust(binding, config.link_trust);
+}
+function actionPolicyOf(config: typeof repositoryConfigSchema._output) {
+  const action = config.strategy.action;
+  return {
+    action: action?.name ?? null,
+    landing: action?.landing ?? Landing.Human,
+    ignored_checks: action?.ignored_checks ?? [],
+  };
+}
+function reviewFlowOf(
+  config: typeof repositoryConfigSchema._output,
+): ReviewFlow | null {
+  if (config.strategy.action?.name !== GitHubAction.PullRequest) return null;
+  const actorIds = isObject(config.link_trust)
+    ? (config.link_trust as Record<string, unknown>)[LinkTrustField.ActorIds]
+    : undefined;
+  return Array.isArray(actorIds) && actorIds.length > EMPTY_LENGTH
+    ? ReviewFlow.On
+    : ReviewFlow.Off;
 }
 function refuseInbox(binding: string, field: string, reason: string): never {
   throw new OperationError(
@@ -802,6 +824,7 @@ export interface Dependencies {
   config: ProjectConfig;
   operationalStore: Store;
   stateDirectory: string;
+  diskFreeRatio: number;
   hostHome?: string;
   createMission: CreateMission;
   nodeBodyOf: NodeBodyOf;
@@ -964,6 +987,9 @@ export class ProjectService implements Service, ProjectBindings {
         this.environments.resolveGroup(bindingId, target, context),
       baseCommitOf: (bindingId, context) =>
         this.environments.baseCommitOf(bindingId, context),
+      probePush: (...input) => this.environments.probePush(...input),
+      freeDisk: () => freeDiskOf(this.stateDirectory),
+      diskFreeRatio: dependencies.diskFreeRatio,
       runtime: dependencies.environmentRuntime,
       proofs,
       secrets: new EnvironmentSecrets({
@@ -1066,6 +1092,7 @@ export class ProjectService implements Service, ProjectBindings {
       ),
     );
     registry.register(projectOperations.resume, ({ params }, caller) => {
+      this.requireProvenEnvironments(params.project_id);
       const record = caller.commit((tx) =>
         this.projectRecord(resumeProject(tx, params.project_id)),
       );
@@ -2101,8 +2128,7 @@ export class ProjectService implements Service, ProjectBindings {
       ...(config.strategy.upstream_branch !== undefined && {
         upstream_branch: config.strategy.upstream_branch,
       }),
-      action: config.strategy.action?.name ?? null,
-      landing: config.strategy.action?.landing ?? Landing.Human,
+      ...actionPolicyOf(config),
       prompts: config.prompts ?? {},
       environment: currentEnvironmentOf(tx, binding),
       repository_environment: noStoredEnvironment(tx, binding.project_id),
@@ -2172,6 +2198,44 @@ export class ProjectService implements Service, ProjectBindings {
     assert.ok(group, "A readable binding belongs to the current binding set.");
     return targetOf(group, facts);
   }
+  private requireProvenEnvironments(projectId: string): void {
+    const paused = this.operationalStore.transaction(
+      (tx) => requireProject(tx, projectId).paused_at !== null,
+    );
+    if (!paused) return;
+    const { repositories } = this.bindingFactsOf(projectId);
+    const identities = repositories.map((group) => group.resource_identity);
+    if (this.onboarding.environmentsClaimable(projectId, identities)) return;
+    const states = this.onboarding.states(projectId);
+    const environments = repositories.flatMap((group) => {
+      const state = states.find(
+        (candidate) => candidate.resource_identity === group.resource_identity,
+      );
+      const status = state?.status ?? EnvironmentStatus.Pending;
+      if (
+        status === EnvironmentStatus.None ||
+        status === EnvironmentStatus.Ready
+      )
+        return [];
+      return [
+        {
+          binding_name: group.binding_name,
+          status,
+          class:
+            status === EnvironmentStatus.Failed
+              ? (state?.failure?.class ?? null)
+              : null,
+        },
+      ];
+    });
+    throw new OperationError(
+      HttpStatus.Conflict,
+      ProjectErrorCode.EnvironmentNotReady,
+      "A repository binding holds an environment that is not proven.",
+      { environments },
+    );
+  }
+
   private bindingFactsOf(projectId: string): BindingFacts {
     return this.operationalStore.transaction((tx) => {
       const bindings = Array.from(
@@ -2183,14 +2247,16 @@ export class ProjectService implements Service, ProjectBindings {
             (binding) =>
               kindOf(binding.resource_identity) === BindingKind.Repository,
           )
-          .map((binding) => ({
-            binding_id: binding.id,
-            binding_name: binding.name,
-            resource_identity: binding.resource_identity,
-            environment_secrets:
-              repositoryConfigSchema.parse(binding.config)
-                .environment_secrets ?? {},
-          })),
+          .map((binding) => {
+            const config = repositoryConfigSchema.parse(binding.config);
+            return {
+              binding_id: binding.id,
+              binding_name: binding.name,
+              resource_identity: binding.resource_identity,
+              environment_secrets: config.environment_secrets ?? {},
+              review_flow: reviewFlowOf(config),
+            };
+          }),
         workers: bindings
           .filter(
             (binding) =>

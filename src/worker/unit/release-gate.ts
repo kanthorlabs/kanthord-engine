@@ -275,6 +275,7 @@ async function setUpReleaseClones(
       context: state.run.operationContext,
       deadline: state.agent.budget.wallDeadline(),
       spans: state.run.spans,
+      diskFreeRatio: state.input.setup.disk_free_ratio,
       exhausted: () => state.agent.budget.exhausted(),
     },
     clones,

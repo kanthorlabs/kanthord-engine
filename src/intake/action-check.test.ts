@@ -16,13 +16,17 @@ import {
   MISSION_SERVICE_NAME,
   PlatformAddressKind,
 } from "../mission/contract.ts";
-import { HostKeyErrorCode } from "../repository/contract.ts";
+import {
+  HostKeyErrorCode,
+  RepositoryErrorCode,
+} from "../repository/contract.ts";
 import {
   CheckEndState,
   ExpectedEndState,
   GITHUB_RESULT_CODE_PREFIX,
   GitHubPlatform,
 } from "../repository/github.ts";
+import { GitStage, GitWriteError } from "../repository/index.ts";
 import type {
   BranchCommitInput,
   GitWriter,
@@ -30,7 +34,7 @@ import type {
   SshAccess,
 } from "../repository/index.ts";
 import { SshAgentErrorCode } from "../repository/ssh-agent.ts";
-import { checkAction } from "./action-check.ts";
+import { checkAction, GIT_PUSH_REFUSED, gitFailure } from "./action-check.ts";
 import {
   OutboundOperation,
   OutboundRequestState,
@@ -80,6 +84,7 @@ function requestFacts(
   address: RequestFacts["address"],
   humanLanding = false,
   trustedActorIds: string[] = [],
+  ignoredChecks: string[] = [],
 ): RequestFacts {
   return {
     frozen_action: {
@@ -107,6 +112,7 @@ function requestFacts(
     assessed_commit:
       address.kind === PlatformAddressKind.BranchPush ? ASSESSED : null,
     link_trust: { actor_ids: trustedActorIds },
+    ignored_checks: ignoredChecks,
   };
 }
 
@@ -150,6 +156,7 @@ function harness(
     landing?: Landing;
     checksFailure?: ResultClassValue;
     reviews?: unknown[];
+    checks?: { pending: string[]; failed: string[] };
     sshFacts?: { binding_id: string; address: string };
   },
 ) {
@@ -186,6 +193,7 @@ function harness(
     status: null,
     message: "refused",
   });
+  const checkReads: (readonly string[])[] = [];
   const pullRequest = new GitHubPlatform();
   const github = {
     getSettledPullRequest: async () =>
@@ -196,10 +204,17 @@ function harness(
       ok: true as const,
       value: options.reviews ?? [],
     }),
-    getRequiredChecks: async () =>
-      options.reviews === undefined
+    getRequiredChecks: async (
+      ...input: Parameters<GitHubPlatform["getRequiredChecks"]>
+    ) => {
+      checkReads.push(input[2].ignoredChecks);
+      return options.reviews === undefined
         ? refusal(options.checksFailure ?? ResultClass.FinalRefusal)
-        : { ok: true as const, value: SETTLED_CHECKS },
+        : {
+            ok: true as const,
+            value: { ...SETTLED_CHECKS, ...options.checks },
+          };
+    },
     foldPullRequest: (
       ...input: Parameters<GitHubPlatform["foldPullRequest"]>
     ) => pullRequest.foldPullRequest(...input),
@@ -224,6 +239,7 @@ function harness(
     knownHosts,
     landings,
     landingInputs,
+    checkReads,
     check,
     sshRequests,
   };
@@ -390,6 +406,17 @@ test("a change request of a bot never answers the end state other", async (t) =>
   );
 });
 
+test("a node check of an open pull request with a failed run that the rules do not require answers no merged end", async (t) => {
+  const h = harness(t, {
+    facts: requestFacts(pullRequestAddress, false, [], ["lint"]),
+    credential: "github",
+    reviews: [],
+    checks: { pending: [], failed: ["e2e"] },
+  });
+  assert.equal((await h.check()).end_state, CheckEndState.ChecksFailed);
+  assert.deepEqual(h.checkReads, [["lint"]]);
+});
+
 const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const REPLY_ATTEMPT = 1;
 const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
@@ -455,4 +482,24 @@ test("a reply evidence check answers none while its outbound request is pending"
   });
   assert.deepEqual(h.sshRequests(), []);
   assert.equal(h.materials.length, NO_MATERIALS);
+});
+
+test("a push refused for the missing workflow scope answers final_refusal that names the workflow scope", () => {
+  const detail =
+    "refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope";
+  const answer = gitFailure(
+    new GitWriteError(
+      GitStage.Push,
+      new Diagnostic(RepositoryErrorCode.GitFailed, "push: git failed.", {
+        cause: new Error(`push: git exited with 1: ${detail}`),
+      }),
+    ),
+  );
+  assert.ok(!answer.ok);
+  assert.equal(answer.class, ResultClass.FinalRefusal);
+  assert.equal(answer.code, GIT_PUSH_REFUSED);
+  assert.equal(
+    answer.message,
+    `The binding credential has no \`workflow\` scope: ${detail}`,
+  );
 });

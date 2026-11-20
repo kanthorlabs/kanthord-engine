@@ -91,6 +91,7 @@ test("implement override validates its attempt repository pin after the current 
     base_branch: "main",
     action: null,
     landing: "human",
+    ignored_checks: [],
   });
   h.store.transaction((tx) => {
     tx.database
@@ -741,6 +742,7 @@ function landingHarness(
     base_branch: "main",
     action: bindingOf(bindingId).action,
     landing: "human",
+    ignored_checks: [],
   });
   const addressOf = (kind: PlatformAddressKind) =>
     kind === PlatformAddressKind.BranchPush

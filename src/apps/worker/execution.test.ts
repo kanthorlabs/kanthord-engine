@@ -87,6 +87,7 @@ test("host takes handover before setup and method, discards on every method end"
     ],
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    disk_free_ratio: 0.1,
     intent: ExecutionIntent.Implement,
     repositories: [
       {
@@ -421,6 +422,7 @@ test("host builds the SSH access of each repository from the handover and leaves
       agents: [],
       templates: SHIPPED_TEMPLATES,
       resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      disk_free_ratio: 0.1,
       intent: ExecutionIntent.Implement,
       repositories: [
         {
@@ -518,6 +520,7 @@ test("host builds a relay SSH access for a repository whose handover holds no SS
       agents: [],
       templates: SHIPPED_TEMPLATES,
       resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      disk_free_ratio: 0.1,
       intent: ExecutionIntent.Implement,
       repositories: [
         {
@@ -1028,6 +1031,7 @@ test("a stop context reaches the execution with the given stop and keeps the con
       agents: [],
       templates: SHIPPED_TEMPLATES,
       resource_budget: { turns: 200, wall_time_ms: 7200000 },
+      disk_free_ratio: 0.1,
       intent: ExecutionIntent.Implement,
       repositories: [],
     },

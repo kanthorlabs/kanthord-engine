@@ -61,6 +61,7 @@ import {
 } from "./instruction-file.ts";
 
 export const ENVIRONMENT_CLONE_TIMEOUT_MS = 300000;
+const PREFLIGHT_BRANCH_PREFIX = "kanthord/preflight-";
 export const EnvironmentErrorCode = {
   Invalid: "project.environment.invalid",
   KeyRefused: "project.environment.key_refused",
@@ -77,6 +78,11 @@ export interface GroupResolution {
   document: Environment | null;
   files: RepositoryFile[];
   reason?: string;
+}
+export interface BindingProbeInput {
+  bindingId: string;
+  commit: string;
+  runId: string;
 }
 interface ProbedResolution {
   resolution: GroupResolution;
@@ -598,6 +604,26 @@ export class ProjectEnvironments {
       directory,
       context,
       ENVIRONMENT_CLONE_TIMEOUT_MS,
+      ssh,
+    );
+  }
+
+  async probePush(input: BindingProbeInput, context: Context): Promise<void> {
+    const { bindingId, commit, runId } = input;
+    const config = this.dependencies.store.transaction((tx) => {
+      const binding = readBindingRevision(tx, bindingId);
+      assert.ok(binding);
+      return repositoryConfigSchema.parse(binding.config);
+    });
+    const { address, ssh } = this.access(bindingId, config);
+    await this.dependencies.repositoryFiles.probePush(
+      {
+        address,
+        baseCommit: commit,
+        branch: `${PREFLIGHT_BRANCH_PREFIX}${runId}`,
+        deadlineMs: ENVIRONMENT_CLONE_TIMEOUT_MS,
+      },
+      context,
       ssh,
     );
   }

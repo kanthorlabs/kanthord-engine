@@ -65,6 +65,7 @@ test("Mission proves live claim, node, open attempt and binding before granting 
     base_branch: "main",
     action: RepositoryAction.PullRequest,
     landing: "human",
+    ignored_checks: [],
   });
   h.store.transaction((tx) =>
     setNodeState(tx, h.node_id, NodeState.Evaluating),
@@ -719,6 +720,18 @@ test("a request evidence answers the link_trust of the repository binding revisi
   assert.deepEqual(h.evidence(pullRequestId).facts.link_trust, {
     actor_ids: TRUSTED_ACTOR_IDS,
   });
+});
+
+test("a request evidence answers the ignored checks of the repository binding revision", (t) => {
+  const h = actionHarness(t);
+  const pullRequestId = h.request();
+  assert.deepEqual(h.evidence(pullRequestId).facts.ignored_checks, []);
+  const policyOf = h.dependencies.bindings.repositoryPolicyOf;
+  h.dependencies.bindings.repositoryPolicyOf = (tx, id) => {
+    const policy = policyOf(tx, id);
+    return policy === null ? policy : { ...policy, ignored_checks: ["e2e"] };
+  };
+  assert.deepEqual(h.evidence(pullRequestId).facts.ignored_checks, ["e2e"]);
 });
 
 const TRUSTED_ACTOR_IDS = ["9", "10"];

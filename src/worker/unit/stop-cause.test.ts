@@ -8,6 +8,7 @@ import {
 } from "../../kernel/cause.ts";
 import {
   BudgetLimit,
+  EnvironmentFailure,
   ExecutionStopReason,
   ProviderFailure,
 } from "../../scheduler/contract.ts";
@@ -222,4 +223,16 @@ test("a budget end and an absent assessment use the signal when the detail names
       timedOut,
     );
   }
+});
+
+test("a disk_low environment stop maps to the infrastructure category", () => {
+  assert.deepEqual(
+    stopCauseOf(
+      ExecutionStopReason.EnvironmentFailed,
+      EnvironmentFailure.DiskLow,
+      null,
+      QUIET,
+    ),
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.DiskLow),
+  );
 });

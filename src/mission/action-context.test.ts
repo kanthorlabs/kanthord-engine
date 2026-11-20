@@ -58,6 +58,7 @@ function harness(t: TestContext) {
     base_branch: "main",
     action: RepositoryAction.PullRequest,
     landing: "human",
+    ignored_checks: [],
   });
   const read = (attempt = FIRST_ATTEMPT) =>
     h.store.transaction((tx) =>

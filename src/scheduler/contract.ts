@@ -80,6 +80,7 @@ export const EnvironmentFailure = {
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
   VerificationTimeout: "verification_timeout",
+  DiskLow: "disk_low",
 } as const;
 export type EnvironmentFailure =
   (typeof EnvironmentFailure)[keyof typeof EnvironmentFailure];

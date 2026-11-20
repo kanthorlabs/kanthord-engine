@@ -168,6 +168,8 @@ components:
                         - command_absent
                         - affected_invalid
                         - affected_timeout
+                        - push_refused
+                        - disk_low
                     - type: "null"
                 origin:
                   type: string
@@ -234,6 +236,13 @@ components:
           maximum: 9007199254740991
         repairing:
           type: boolean
+        review_flow:
+          anyOf:
+            - type: string
+              enum:
+                - on
+                - off
+            - type: "null"
       required:
         - binding_id
         - binding_name
@@ -251,4 +260,5 @@ components:
         - checks
         - repairs
         - repairing
+        - review_flow
       additionalProperties: false

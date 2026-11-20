@@ -56,6 +56,7 @@ export interface MissionBindings {
     base_branch: string;
     action: "pull_request" | "push" | null;
     landing: "human" | "kanthord";
+    ignored_checks: string[];
   } | null;
   conversationPolicyOf(
     tx: Transaction,
@@ -1364,6 +1365,7 @@ export type RequestFacts = {
   human_landing: boolean;
   assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
+  ignored_checks: string[];
 };
 export type ReplyActionFacts = {
   frozen_action: ReplyFrozenAction;

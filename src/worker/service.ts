@@ -251,6 +251,7 @@ export interface Dependencies {
     projectId: string,
     resourceIdentity: string,
   ): { source: EnvironmentSource; document: Environment } | null;
+  diskFreeRatio: number;
   instanceIssuer: InstanceIssuer;
   workerBindingRowOf: WorkerBindingRowOf;
   repositoryPolicyOf: RepositoryPolicyOf;

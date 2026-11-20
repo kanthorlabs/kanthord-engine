@@ -27,6 +27,7 @@ import {
 } from "../kernel/git-environment.ts";
 import {
   type CheckoutResult,
+  type ProbePushInput,
   type PushRecord,
   RepositoryErrorCode,
   type RepositoryFile,
@@ -1040,6 +1041,42 @@ async function pushSnapshotWith(
       git(["push", "origin", `${input.commit}:refs/heads/${input.branch}`]),
     );
   });
+}
+
+export async function probePush(
+  input: ProbePushInput,
+  context: Context,
+  ssh: SshAccess,
+): Promise<void> {
+  const { address, baseCommit, branch, deadlineMs } = input;
+  assert.match(baseCommit, COMMIT_PATTERN);
+  assert.ok(!branch.startsWith(OPTION_PREFIX));
+  const deadlineAt = Date.now() + deadlineMs;
+  const ref = `refs/heads/${branch}`;
+  await beforePush(() =>
+    withAccess(ssh, context, deadlineMs, (agent) =>
+      inFreshDirectory(freshWriteDirectory, async (directory) => {
+        const git = gitIn(directory, context, deadlineAt, "probe push", agent);
+        await atStage(GitStage.BeforePush, async () => {
+          await cloneWith(
+            address,
+            directory,
+            context,
+            remainingMs(deadlineAt),
+            agent,
+          );
+          await git(["check-ref-format", "--branch", branch]);
+          await git(["fetch", "origin", baseCommit]);
+        });
+        await atStage(GitStage.Push, () =>
+          git(["push", "origin", `${baseCommit}:${ref}`]),
+        );
+        await atStage(GitStage.Push, () =>
+          git(["push", "origin", "--delete", ref]),
+        );
+      }),
+    ),
+  );
 }
 
 export async function landedOn(

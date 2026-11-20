@@ -35,6 +35,7 @@ import {
   InstructionFileState,
 } from "../agent/contract.ts";
 import {
+  type ProbePushInput,
   type RepositoryFile,
   SSH_AGENT_CLEANUP_TIMEOUT_MS,
   type SshAccess,
@@ -121,6 +122,7 @@ export const ConversationPlatform = {
 export type ConversationPlatform =
   (typeof ConversationPlatform)[keyof typeof ConversationPlatform];
 export const LINK_TRUST_ACTORS_MAX = 32;
+export const IGNORED_CHECKS_MAX = 32;
 export const GITHUB_ACTOR_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 export const CONVERSATION_REPOSITORY_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
 export const JIRA_SITE_PATTERN =
@@ -193,6 +195,7 @@ export const ProjectErrorCode = {
   ProjectNotFound: "project.project.not_found",
   BindingNotFound: "project.binding.not_found",
   EnvironmentRunActive: "project.environment.run_active",
+  EnvironmentNotReady: "project.environment.not_ready",
   VersionConflict: "project.binding_set.version_conflict",
   DuplicateResource: "project.bindings.duplicate_resource",
   RepositoryAddressInvalid: "project.bindings.repository.address_invalid",
@@ -348,6 +351,10 @@ export const repositoryConfigSchema = z.strictObject({
             }),
           ]),
           landing: z.enum(Landing).optional(),
+          ignored_checks: z
+            .array(z.string().min(1))
+            .max(IGNORED_CHECKS_MAX)
+            .optional(),
         })
         .refine(
           (action) =>
@@ -356,6 +363,15 @@ export const repositoryConfigSchema = z.strictObject({
           {
             path: ["landing"],
             message: "Only a pull_request action holds a landing choice.",
+          },
+        )
+        .refine(
+          (action) =>
+            action.ignored_checks === undefined ||
+            action.name === GitHubAction.PullRequest,
+          {
+            path: ["ignored_checks"],
+            message: "Only a pull_request action holds ignored checks.",
           },
         )
         .optional(),
@@ -725,6 +741,11 @@ export type RepositoryFiles = {
     deadlineMs: number,
     ssh: SshAccess,
   ): Promise<string>;
+  probePush(
+    input: ProbePushInput,
+    context: Context,
+    ssh: SshAccess,
+  ): Promise<void>;
 };
 export type RepositoryBindingIdsOf = (
   tx: Transaction,
@@ -852,6 +873,7 @@ export type RepositoryPolicy = {
   upstream_branch?: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   landing: Landing;
+  ignored_checks: string[];
   prompts: BindingPrompts;
   environment: Environment | null;
   repository_environment: boolean;
@@ -969,10 +991,19 @@ export const EnvironmentFailureClass = {
   CommandAbsent: "command_absent",
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
+  PushRefused: "push_refused",
+  DiskLow: "disk_low",
 } as const;
 export type EnvironmentFailureClass =
   (typeof EnvironmentFailureClass)[keyof typeof EnvironmentFailureClass];
 export const environmentFailureClassSchema = z.enum(EnvironmentFailureClass);
+
+export const ReviewFlow = {
+  On: "on",
+  Off: "off",
+} as const;
+export type ReviewFlow = (typeof ReviewFlow)[keyof typeof ReviewFlow];
+export const reviewFlowSchema = z.enum(ReviewFlow);
 
 export const MAX_CHECKS = 32;
 
@@ -1010,6 +1041,7 @@ export const environmentStateSchema = z.strictObject({
   checks: z.array(checkResultSchema).max(MAX_CHECKS),
   repairs: z.int().min(0),
   repairing: z.boolean(),
+  review_flow: reviewFlowSchema.nullable(),
 });
 export type EnvironmentState = z.infer<typeof environmentStateSchema>;
 

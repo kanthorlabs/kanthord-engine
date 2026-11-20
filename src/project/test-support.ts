@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { setTimeout } from "node:timers/promises";
 import type { EnvironmentAgent } from "./environment-agent.ts";
 import type { EnvironmentProbeRunner } from "./environment-probe-contract.ts";
 import { type EnvironmentRuntime, ProofOutcome } from "./environment-state.ts";
@@ -11,6 +12,8 @@ const PENDING_SECONDS = 900;
 const SEEDED_FAILURE_COMMAND = "pnpm install";
 const SEEDED_FAILURE_TAIL = "pnpm: command failed";
 const SEEDED_FAILURE_EXIT_CODE = 1;
+const SETTLE_ATTEMPTS = 200;
+const SETTLE_POLL_MS = 25;
 const SEEDED_DIGEST = "seeded-digest";
 const SEEDED_COMMIT = "seeded-commit";
 const SEEDED_PENDING_REASON = "The repository read has not completed.";
@@ -61,7 +64,11 @@ async function settledRecord(
       candidate.project_id === projectId && candidate.binding_id === bindingId,
   );
   assert.ok(record, "The binding holds an environment record.");
-  return record;
+  for (let attempt = 0; attempt < SETTLE_ATTEMPTS; attempt++) {
+    if (record.step === null && record.run_started_at === null) return record;
+    await setTimeout(SETTLE_POLL_MS);
+  }
+  assert.fail("The environment run did not end.");
 }
 
 export async function seedEnvironmentFailed(

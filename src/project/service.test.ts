@@ -78,6 +78,7 @@ import {
   EnvironmentSource,
   FollowsType,
   GitHubAction,
+  IGNORED_CHECKS_MAX,
   InboxField,
   InboxInvalidReason,
   INSTANCE_COUNT_MAX,
@@ -100,6 +101,7 @@ import {
   RepositoryPlatform,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
+  ReviewFlow,
   SSH_CREDENTIAL_PLATFORM,
   STORAGE_PLATFORM,
   SuitePassState,
@@ -160,6 +162,7 @@ import {
   writeBindingSet,
 } from "./store.ts";
 
+const DISK_FREE_RATIO = 0.1;
 const ACCOUNT = "alice";
 const DISPLAY_NAME = "Alice";
 const PROJECT_NAME = "alpha";
@@ -416,6 +419,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     },
     operationalStore: store,
     stateDirectory,
+    diskFreeRatio: DISK_FREE_RATIO,
     health,
     wakeup: {
       wake: (projectId) => {
@@ -436,6 +440,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
       readFilesAtCommit: unexpected,
       listFilesAtCommit: async () => [],
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     verifyRepositoryCredential: unexpected,
@@ -5576,6 +5581,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       base_branch: original.config.strategy.base_branch,
       action: GitHubAction.PullRequest,
       landing: Landing.Human,
+      ignored_checks: [],
       prompts,
       environment: null,
       repository_environment: true,
@@ -6150,6 +6156,7 @@ function environmentReadFixture(
         if (behavior.resolveFails) throw new Error("fetch failed");
         return paths.map((_path, index) => `${TREE_PREFIX}${index}`);
       },
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
     ...overrides,
@@ -6307,6 +6314,7 @@ function instructionRepositoryFiles(
     },
     listFilesAtCommit: unexpected,
     readObjectIds: unexpected,
+    probePush: async () => {},
     cloneSnapshot: unexpected,
   };
   return { repositoryFiles, reads, heads };
@@ -6500,6 +6508,7 @@ test("a write reads the instruction files of two changed bindings in parallel un
       },
       listFilesAtCommit: unexpected,
       readObjectIds: unexpected,
+      probePush: async () => {},
       cloneSnapshot: unexpected,
     },
   });
@@ -6772,6 +6781,83 @@ test("a pull request strategy holds a landing choice and other actions refuse on
   assert.equal(strategy(GitHubAction.PullRequest).success, true);
   assert.equal(strategy(GitHubAction.Push, Landing.KanthorD).success, false);
   assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
+});
+
+test("a binding set write with ignored checks on a push action refuses at the strategy action path", () => {
+  const withAction = (name: string, ignored_checks: string[]) => ({
+    ...repositoryBinding(),
+    config: {
+      ...repositoryBinding().config,
+      strategy: {
+        base_branch: "main",
+        action: {
+          name,
+          follows: { type: FollowsType.AssessmentPassed },
+          ignored_checks,
+        },
+      },
+    },
+  });
+  assert.deepEqual(
+    schemaIssues({
+      [REPOSITORY_NAME]: withAction(GitHubAction.Push, ["e2e"]),
+    }),
+    [
+      {
+        code: CUSTOM_ISSUE,
+        path: [
+          "body",
+          "bindings",
+          REPOSITORY_NAME,
+          "config",
+          "strategy",
+          "action",
+          "ignored_checks",
+        ],
+      },
+    ],
+  );
+  const accepted = projectOperations["bindingSet.write"].input.safeParse({
+    params: { project_id: "project" },
+    query: EMPTY_QUERY,
+    body: {
+      version: BINDING_SET_INITIAL_VERSION,
+      bindings: {
+        [REPOSITORY_NAME]: withAction(GitHubAction.PullRequest, ["e2e"]),
+      },
+    },
+  });
+  assert.equal(accepted.success, true);
+  const tooMany = Array.from(
+    { length: IGNORED_CHECKS_MAX + 1 },
+    (_, index) => `check-${index}`,
+  );
+  assert.equal(
+    schemaIssues({
+      [REPOSITORY_NAME]: withAction(GitHubAction.PullRequest, tooMany),
+    }).length,
+    ONE_CALL,
+  );
+});
+
+test("the repository policy answers the ignored checks of the binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = repositoryBinding();
+    original.config.strategy.action = {
+      name: GitHubAction.PullRequest,
+      follows: { type: FollowsType.AssessmentPassed },
+      ignored_checks: ["e2e", "docs"],
+    };
+    const bound = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: original,
+    }).bindings[REPOSITORY_NAME]!;
+    assert.deepEqual(
+      f.project.repositoryPolicyOf(tx, bound.id)?.ignored_checks,
+      ["e2e", "docs"],
+    );
+  });
 });
 
 const WRITABLE: Partial<Dependencies> = { custodySuitability: () => {} };
@@ -7602,7 +7688,7 @@ test("Project answers the environment methods through the onboarding component",
   );
   const rebuilt = await f.project.rebuildEnvironment(projectId, bindingId);
   assert.equal(rebuilt.binding_id, bindingId);
-  assert.equal(rebuilt.status, EnvironmentStatus.None);
+  assert.equal(rebuilt.status, EnvironmentStatus.Proving);
 });
 
 const ENVIRONMENT_LIST = projectOperations["environment.list"];
@@ -7630,6 +7716,7 @@ function loggedRuntime(overrides: Partial<EnvironmentRuntime> = {}): {
 }
 
 function untilAborted(signal: AbortSignal): Promise<never> {
+  signal.throwIfAborted();
   return new Promise((_resolve, reject) =>
     signal.addEventListener("abort", () => reject(signal.reason), {
       once: true,
@@ -7874,4 +7961,211 @@ for (const [key, body] of [
       identity: testServiceIdentity(FOOTPRINT_SERVICE),
     });
     assert.deepEqual(answer, { removed: 0, absent: 1, refused: [] });
+  });
+
+const NOT_READY_STATUSES = [
+  EnvironmentStatus.Pending,
+  EnvironmentStatus.Building,
+  EnvironmentStatus.Proving,
+  EnvironmentStatus.Failed,
+] as const;
+const RESUME_PARAMS = (projectId: string) => ({ project_id: projectId });
+
+function refusedNotReady(
+  f: ReturnType<typeof fixture>,
+  projectId: string,
+  environments: Array<{
+    binding_name: string;
+    status: EnvironmentStatus;
+    class: string | null;
+  }>,
+) {
+  refuses(
+    () => f.invoke("resume", null, RESUME_PARAMS(projectId)),
+    HttpStatus.Conflict,
+    ProjectErrorCode.EnvironmentNotReady,
+    { environments },
+  );
+  assert.notEqual(
+    f.invoke("get", null, RESUME_PARAMS(projectId)).paused_at,
+    null,
+  );
+}
+
+function environmentIn(
+  t: TestContext,
+  status: (typeof NOT_READY_STATUSES)[number],
+) {
+  if (status === EnvironmentStatus.Building) return imageGroupFixture(t, false);
+  if (status === EnvironmentStatus.Proving)
+    return environmentReadFixture(
+      t,
+      { texts: [DEVCONTAINER_TEXT] },
+      {
+        ...WRITABLE,
+        environmentRuntime: loggedRuntime({
+          proveOnHost: async (_input, signal) => untilAborted(signal),
+        }).runtime,
+      },
+    );
+  return environmentReadFixture(
+    t,
+    status === EnvironmentStatus.Pending ? { resolveFails: true } : {},
+    WRITABLE,
+  );
+}
+
+test("a paused project whose environments are none resumes and clears paused_at", async (t) => {
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  const params = RESUME_PARAMS(saved.project_id);
+  f.invoke("pause", null, params);
+  await untilTrue(() =>
+    f.project.environmentsClaimable(saved.project_id, [identityOf(f, saved)]),
+  );
+  assert.equal(
+    f.project.environmentStates(saved.project_id)[0]?.status,
+    EnvironmentStatus.None,
+  );
+  assert.equal(f.invoke("resume", null, params).paused_at, null);
+});
+
+test("a paused project whose environments are ready resumes and clears paused_at", async (t) => {
+  const { f, params } = imageGroupFixture(t, true);
+  await untilTrue(
+    () =>
+      f.project.environmentStates(params.project_id)[NO_ITEMS]?.status ===
+      EnvironmentStatus.Ready,
+  );
+  f.invoke("pause", null, RESUME_PARAMS(params.project_id));
+  assert.equal(
+    f.invoke("resume", null, RESUME_PARAMS(params.project_id)).paused_at,
+    null,
+  );
+});
+
+for (const status of NOT_READY_STATUSES) {
+  test(`a paused project with a ${status} environment answers 409 environment not_ready and stays paused`, async (t) => {
+    const { f, saved } = environmentIn(t, status);
+    const identity = identityOf(f, saved);
+    f.invoke("pause", null, RESUME_PARAMS(saved.project_id));
+    f.project.environmentClaimed(saved.project_id, identity);
+    if (status === EnvironmentStatus.Failed) {
+      await untilTrue(() =>
+        f.project.environmentsClaimable(saved.project_id, [identity]),
+      );
+      const digest = f.project.environmentDigestOf(saved.project_id, identity);
+      assert.ok(digest);
+      f.project.environmentFailed({
+        project_id: saved.project_id,
+        execution_id: "execution_1",
+        resource_identities: [identity],
+        stop: { code: EnvironmentFailureClass.SetupFailed, detail: "failed" },
+        digests: { [identity]: digest },
+      });
+    } else
+      await untilTrue(
+        () =>
+          f.project.environmentStates(saved.project_id)[NO_ITEMS]?.status ===
+            status ||
+          (status === EnvironmentStatus.Pending &&
+            f.project.environmentStates(saved.project_id).length === ONE_CALL),
+      );
+    refusedNotReady(f, saved.project_id, [
+      {
+        binding_name: REPOSITORY_NAME,
+        status,
+        class:
+          status === EnvironmentStatus.Failed
+            ? EnvironmentFailureClass.SetupFailed
+            : null,
+      },
+    ]);
+  });
+}
+
+test("a repository binding with no record yet answers pending and the refusal triggers the record", async (t) => {
+  const { f, saved, resolveCalls } = environmentReadFixture(t, {}, WRITABLE);
+  const params = RESUME_PARAMS(saved.project_id);
+  f.invoke("pause", null, params);
+  assert.deepEqual(f.project.environmentStates(saved.project_id), []);
+  refusedNotReady(f, saved.project_id, [
+    {
+      binding_name: REPOSITORY_NAME,
+      status: EnvironmentStatus.Pending,
+      class: null,
+    },
+  ]);
+  await untilTrue(() => resolveCalls.length > NO_CALLS);
+  assert.equal(f.project.environmentStates(saved.project_id).length, ONE_CALL);
+});
+
+test("an active project answers resume with no environment check", (t) => {
+  const { f, saved } = environmentReadFixture(t, {}, WRITABLE);
+  assert.equal(
+    f.invoke("resume", null, RESUME_PARAMS(saved.project_id)).paused_at,
+    null,
+  );
+  assert.deepEqual(f.project.environmentStates(saved.project_id), []);
+});
+
+const PULL_REQUEST_ACTION = {
+  name: "pull_request",
+  follows: { type: "assessment_passed" },
+};
+const PUSH_ACTION = {
+  name: "push",
+  follows: { type: "assessment_passed" },
+};
+const REVIEW_FLOW_CASES: Array<{
+  name: string;
+  action: unknown;
+  link_trust?: unknown;
+  review_flow: ReviewFlow | null;
+}> = [
+  { name: "no-action", action: undefined, review_flow: null },
+  { name: "push", action: PUSH_ACTION, review_flow: null },
+  { name: "pr-open", action: PULL_REQUEST_ACTION, review_flow: ReviewFlow.Off },
+  {
+    name: "pr-empty",
+    action: PULL_REQUEST_ACTION,
+    link_trust: { actor_ids: [] },
+    review_flow: ReviewFlow.Off,
+  },
+  {
+    name: "pr-trusted",
+    action: PULL_REQUEST_ACTION,
+    link_trust: { actor_ids: ["583231"] },
+    review_flow: ReviewFlow.On,
+  },
+];
+
+for (const { name, action, link_trust, review_flow } of REVIEW_FLOW_CASES)
+  test(`the environment state of a ${name} binding answers the review flow ${review_flow}`, async (t) => {
+    const { f } = environmentReadFixture(t, {}, WRITABLE);
+    const base = repositoryBinding();
+    const saved = f.store.transaction((tx) => {
+      const project = insertProject(tx, name);
+      const written = persistBindings(tx, project.id, {
+        [REPOSITORY_NAME]: {
+          kind: BindingKind.Repository,
+          config: {
+            ...base.config,
+            strategy: {
+              base_branch: "main",
+              ...(action === undefined ? {} : { action }),
+            },
+            ...(link_trust === undefined ? {} : { link_trust }),
+          },
+        },
+      }).bindings[REPOSITORY_NAME]!;
+      return { project_id: project.id, binding_id: written.id };
+    });
+    f.project.environmentClaimed(saved.project_id, identityOf(f, saved));
+    await untilTrue(
+      () => f.project.environmentStates(saved.project_id).length === ONE_CALL,
+    );
+    assert.equal(
+      f.project.environmentStates(saved.project_id)[NO_ITEMS]?.review_flow,
+      review_flow,
+    );
   });

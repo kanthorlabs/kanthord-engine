@@ -218,6 +218,7 @@ for (const [end, target] of [
       base_branch: "main",
       action: RepositoryAction.PullRequest,
       landing: "human",
+      ignored_checks: [],
     });
     h.store.transaction((tx) => {
       tx.database

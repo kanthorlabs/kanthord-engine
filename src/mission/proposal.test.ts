@@ -494,6 +494,7 @@ test("a decision that adds an unmatched pair is refused and writes nothing", asy
     base_branch: "main",
     action: null,
     landing: "human",
+    ignored_checks: [],
   });
   h.dependencies.schedulerMatch = {
     unmatchedClaims: (tx, projectId) =>

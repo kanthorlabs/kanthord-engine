@@ -1686,17 +1686,20 @@ test("foldRequiredChecks splits the required checks by the run conclusion", () =
   };
   assert.deepEqual(
     foldRequiredChecks(
-      [
-        "working",
-        "queued",
-        "green",
-        "grey",
-        "skip",
-        "stopped",
-        "red",
-        "slow",
-        "manual",
-      ],
+      {
+        required: [
+          "working",
+          "queued",
+          "green",
+          "grey",
+          "skip",
+          "stopped",
+          "red",
+          "slow",
+          "manual",
+        ],
+        ignoredChecks: ["unrequired"],
+      },
       checkRuns,
       [],
     ),
@@ -1718,7 +1721,11 @@ test("foldRequiredChecks lets the run with the highest id decide", () => {
     ],
   };
   assert.deepEqual(
-    foldRequiredChecks(["retried", "restarted"], checkRuns, []),
+    foldRequiredChecks(
+      { required: ["retried", "restarted"], ignoredChecks: [] },
+      checkRuns,
+      [],
+    ),
     { pending: ["restarted"], failed: [] },
   );
 });
@@ -1734,7 +1741,10 @@ test("foldRequiredChecks lets the newest status decide a name with no run", () =
   ];
   assert.deepEqual(
     foldRequiredChecks(
-      ["ci/a", "ci/b", "ci/c", "ci/d", "ci/none"],
+      {
+        required: ["ci/a", "ci/b", "ci/c", "ci/d", "ci/none"],
+        ignoredChecks: [],
+      },
       { total_count: 0, check_runs: [] },
       statuses,
     ),
@@ -1745,7 +1755,7 @@ test("foldRequiredChecks lets the newest status decide a name with no run", () =
 test("foldRequiredChecks lets a run win over a status of the same name", () => {
   assert.deepEqual(
     foldRequiredChecks(
-      ["check"],
+      { required: ["check"], ignoredChecks: [] },
       { total_count: 1, check_runs: [run(1, "check", "completed", "success")] },
       [{ context: "check", state: "failure" }],
     ),
@@ -1781,7 +1791,10 @@ test("getRequiredChecks folds the required checks of the head commit", async (t)
   );
   const result = await new GitHubPlatform({
     baseUrl: server.baseUrl,
-  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  }).getRequiredChecks(call(), TARGET, {
+    number: 7,
+    ignoredChecks: [],
+  });
   assert.deepEqual(result, {
     ok: true,
     value: {
@@ -1806,29 +1819,116 @@ test("getRequiredChecks folds the required checks of the head commit", async (t)
   );
 });
 
-test("getRequiredChecks reads no check run when the rules require no check", async (t) => {
+test("foldRequiredChecks folds every run of the head and drops no unrequired failure", () => {
+  const checkRuns = {
+    total_count: 2,
+    check_runs: [
+      run(1, "check", "completed", "success"),
+      run(2, "e2e", "completed", "failure"),
+    ],
+  };
+  assert.deepEqual(
+    foldRequiredChecks(
+      { required: ["check"], ignoredChecks: [] },
+      checkRuns,
+      [],
+    ),
+    {
+      pending: [],
+      failed: ["e2e"],
+    },
+  );
+});
+
+test("foldRequiredChecks drops only the ignored checks", () => {
+  const checkRuns = {
+    total_count: 2,
+    check_runs: [
+      run(1, "check", "completed", "success"),
+      run(2, "e2e", "completed", "failure"),
+    ],
+  };
+  assert.deepEqual(
+    foldRequiredChecks(
+      { required: ["check"], ignoredChecks: ["e2e"] },
+      checkRuns,
+      [],
+    ),
+    {
+      pending: [],
+      failed: [],
+    },
+  );
+});
+
+test("foldRequiredChecks reports a pending run that the rules do not require", () => {
+  const checkRuns = {
+    total_count: 1,
+    check_runs: [run(1, "e2e", "in_progress", null)],
+  };
+  assert.deepEqual(
+    foldRequiredChecks({ required: [], ignoredChecks: [] }, checkRuns, []),
+    {
+      pending: ["e2e"],
+      failed: [],
+    },
+  );
+});
+
+test("foldRequiredChecks keeps a required context with no run and no status pending", () => {
+  const checkRuns = {
+    total_count: 1,
+    check_runs: [run(1, "other", "completed", "success")],
+  };
+  assert.deepEqual(
+    foldRequiredChecks(
+      { required: ["deploy"], ignoredChecks: [] },
+      checkRuns,
+      [],
+    ),
+    {
+      pending: ["deploy"],
+      failed: [],
+    },
+  );
+});
+
+test("getRequiredChecks reads the check runs of the head when the rules require no check", async (t) => {
   const server = await platform(
     t,
     checkServer({
       [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
       [RULES_PATH]: [200, [{ type: "pull_request", parameters: {} }]],
+      [CHECK_RUNS_PATH]: [
+        200,
+        {
+          total_count: 1,
+          check_runs: [run(1, "e2e", "completed", "failure")],
+        },
+      ],
+      [STATUSES_PATH]: [200, []],
     }),
   );
   const result = await new GitHubPlatform({
     baseUrl: server.baseUrl,
-  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  }).getRequiredChecks(call(), TARGET, {
+    number: 7,
+    ignoredChecks: [],
+  });
   assert.deepEqual(result, {
     ok: true,
     value: {
       head_commit: HEAD_SHA,
       base_branch: BASE_BRANCH,
       pending: [],
-      failed: [],
+      failed: ["e2e"],
     },
   });
   assert.deepEqual(server.requests.map(pathOf), [
     PULL_REQUEST_PATH,
     RULES_PATH,
+    CHECK_RUNS_PATH,
+    STATUSES_PATH,
   ]);
 });
 
@@ -1857,7 +1957,10 @@ test("getRequiredChecks reads a rule that holds no parameters", async (t) => {
   );
   const result = await new GitHubPlatform({
     baseUrl: server.baseUrl,
-  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  }).getRequiredChecks(call(), TARGET, {
+    number: 7,
+    ignoredChecks: [],
+  });
   assert.deepEqual(result, {
     ok: true,
     value: {
@@ -1878,7 +1981,10 @@ test("getRequiredChecks answers a failed read unchanged", async (t) => {
   );
   const result = await new GitHubPlatform({
     baseUrl: server.baseUrl,
-  }).getRequiredChecks(call(), TARGET, { number: 7 });
+  }).getRequiredChecks(call(), TARGET, {
+    number: 7,
+    ignoredChecks: [],
+  });
   assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
   assert.equal(!result.ok && result.status, HttpStatus.NotFound);
 });

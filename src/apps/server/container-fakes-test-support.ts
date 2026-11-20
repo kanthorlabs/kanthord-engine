@@ -151,6 +151,7 @@ export function fakeRepositoryFiles(): RepositoryFiles {
       })),
     listFilesAtCommit: async () => [],
     readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
+    probePush: async () => {},
     cloneSnapshot: async (_address, revision, directory) => {
       mkdirSync(directory, { recursive: true });
       const git = simpleGit(directory);

@@ -431,6 +431,10 @@ test(
     await t.test(
       "a pull request answers none, other and expected",
       async () => {
+        const head = h.gitHub.pulls.find(
+          (pull) => pull.number === h.number,
+        )?.head_sha;
+        assert.ok(head);
         assert.deepEqual(completed<Fold>(await pullRequest()), {
           end_state: CheckEndState.None,
           landed_commits: [],
@@ -453,7 +457,13 @@ test(
         const rules = read(
           "/repos/owner/gated/rules/branches/main?per_page=100&page=1",
         );
-        const openCheck = [pull, reviews, pull, rules];
+        const checkRuns = read(
+          `/repos/owner/gated/commits/${head}/check-runs?per_page=100`,
+        );
+        const statuses = read(
+          `/repos/owner/gated/commits/${head}/statuses?per_page=100&page=1`,
+        );
+        const openCheck = [pull, reviews, pull, rules, checkRuns, statuses];
         const settledCheck = [pull, reviews];
         assert.deepEqual(
           h.gitHub.calls.map((call) => [call.method, call.path, call.token]),

@@ -8,7 +8,13 @@ import { ResourceFailureReason } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { gitLsRemote, GitStage, GitWriteError } from "./connector.ts";
 import { HostKeyErrorCode, RepositoryErrorCode } from "./contract.ts";
-import { classifyGitFailure, gitFailureReason } from "./git-failure.ts";
+import {
+  classifyGitFailure,
+  gitFailureReason,
+  PushRefusalKind,
+  pushRefusalOf,
+  pushTailOf,
+} from "./git-failure.ts";
 import { SshAgentErrorCode } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
 import {
@@ -26,6 +32,20 @@ const READ_FAILED =
   "fatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.";
 const READ_FAILED_GERMAN =
   "fatal: Konnte nicht vom Remote-Repository lesen.\n\nBitte stellen Sie sicher, dass die korrekten Zugriffsrechte bestehen\nund das Repository existiert.";
+
+const HOOK_DECLINED = "hook declined";
+const HOOK_FAILURE_TEXT = `push: git exited with 1: ${HOOK_DECLINED}`;
+const WORKFLOW_REFUSAL =
+  "refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope";
+
+function pushFailure(stderr: string): GitWriteError {
+  return new GitWriteError(
+    GitStage.Push,
+    new Diagnostic(GIT_FAILED, "push: git failed.", {
+      cause: new Error(`push: git exited with 1: ${stderr}`),
+    }),
+  );
+}
 
 function lsRemoteFailure(stderr: string): string {
   return `ls-remote: git exited with 128: ${stderr}`;
@@ -154,4 +174,28 @@ test("gitFailureReason answers deadline_exceeded for a deadline before the push"
     ),
     ResourceFailureReason.DeadlineExceeded,
   );
+});
+
+test("a GitHub refusal for the missing workflow scope is a workflow_scope push refusal with that line as detail", () => {
+  const refusal = pushRefusalOf(pushFailure(WORKFLOW_REFUSAL));
+  assert.equal(refusal?.kind, PushRefusalKind.WorkflowScope);
+  assert.equal(refusal.detail, WORKFLOW_REFUSAL);
+});
+
+test("the workflow_scope refusal wins over a rule refusal in the same stderr", () => {
+  const stderr = `remote: error: GH013: Repository rule violations found.\n! [remote rejected] main -> x (${WORKFLOW_REFUSAL})`;
+  const refusal = pushRefusalOf(pushFailure(stderr));
+  assert.equal(refusal?.kind, PushRefusalKind.WorkflowScope);
+  assert.match(
+    refusal.detail,
+    /^! \[remote rejected\].*without `workflow` scope\)$/,
+  );
+});
+
+test("pushTailOf names the workflow scope for that refusal and gives the git text for another failure", () => {
+  assert.equal(
+    pushTailOf(pushFailure(WORKFLOW_REFUSAL)),
+    `The binding credential has no \`workflow\` scope: ${WORKFLOW_REFUSAL}`,
+  );
+  assert.equal(pushTailOf(pushFailure(HOOK_DECLINED)), HOOK_FAILURE_TEXT);
 });

@@ -48,6 +48,7 @@ interface ReadTarget {
   target: GitHubTarget;
   number: number;
   trustedActorIds: readonly string[];
+  ignoredChecks: readonly string[];
 }
 
 interface Hold {
@@ -120,6 +121,7 @@ function authorizeRead(
     },
     number: address.number,
     trustedActorIds: facts.link_trust.actor_ids,
+    ignoredChecks: facts.ignored_checks,
   };
 }
 
@@ -187,6 +189,7 @@ async function requiredChecks(
   assert.ok(call.token.length);
   const answer = await github.getRequiredChecks(call, read.target, {
     number: read.number,
+    ignoredChecks: read.ignoredChecks,
   });
   if (!answer.ok) return resultClassAnswer(answer);
   return { body: answer.value, next_cursor: null };

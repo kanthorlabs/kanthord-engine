@@ -73,6 +73,7 @@ function fixture(t: TestContext, action: RepositoryAction | null = null) {
       base_branch: "main",
       action,
       landing: "human" as const,
+      ignored_checks: [],
     }),
   };
   h.store.transaction((tx) => {

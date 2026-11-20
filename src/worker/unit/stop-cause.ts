@@ -47,6 +47,7 @@ const environmentSubcategories: Readonly<Record<string, CauseSubcategory>> = {
   [EnvironmentFailure.AffectedInvalid]: CauseSubcategory.AffectedInvalid,
   [EnvironmentFailure.AffectedTimeout]: CauseSubcategory.AffectedTimeout,
   [EnvironmentFailure.VerificationTimeout]: CauseSubcategory.VerificationHang,
+  [EnvironmentFailure.DiskLow]: CauseSubcategory.DiskLow,
 };
 
 const promptRecordCodes: readonly string[] = [
@@ -102,9 +103,13 @@ function providerCauseOf(code: string | null): FailureCause {
 function environmentCauseOf(code: string | null): FailureCause {
   const subcategory =
     code === null ? undefined : environmentSubcategories[code];
-  return subcategory === undefined
-    ? unattributed([])
-    : attributed(CauseCategory.Environment, subcategory);
+  if (subcategory === undefined) return unattributed([]);
+  return attributed(
+    subcategory === CauseSubcategory.DiskLow
+      ? CauseCategory.Infrastructure
+      : CauseCategory.Environment,
+    subcategory,
+  );
 }
 
 function gitStepCauseOf(gitStep: GitStep | null): FailureCause | null {

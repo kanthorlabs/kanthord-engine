@@ -78,8 +78,19 @@ export function completed<T>(result: OperationResult<T>): T {
   return result.data;
 }
 
-export function localRepositoryFiles(bare: string): RepositoryFiles {
+export function localRepositoryFiles(
+  bare: string,
+  probes: string[] = [],
+): RepositoryFiles {
   return {
+    probePush: async (input, context) => {
+      await repositoryFiles.probePush(
+        { ...input, address: bare },
+        context,
+        LOCAL_GIT_SSH_ACCESS,
+      );
+      probes.push(input.branch);
+    },
     resolveBranchCommit: (_address, branch, context, deadlineMs) =>
       repositoryFiles.resolveBranchCommit(
         bare,

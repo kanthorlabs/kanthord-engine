@@ -143,6 +143,8 @@ const promptParts = [
   partOf(PromptPart.Role, "swe@1.md", AGENT_TEXT),
 ];
 
+const SERVER_DISK_FREE_RATIO = 0.25;
+
 test("setup answers the system and agent prompt after its single snapshot and supports a pinned entry", async (t) => {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
@@ -234,6 +236,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
       return ENVIRONMENT_DIGEST;
     },
     environmentOf: () => null,
+    diskFreeRatio: SERVER_DISK_FREE_RATIO,
     repositoryBindingIdsOf: () => [],
     intentOf: () => ExecutionIntent.Implement,
     repositoryPolicyOf: () => null,
@@ -280,6 +283,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const before = commits;
   const answer = await executionSetup(dependencies, worker, caller);
   assert.deepEqual(composed, [agent.agent_name]);
+  assert.equal(answer.disk_free_ratio, SERVER_DISK_FREE_RATIO);
   const [answered] = answer.agents;
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
@@ -480,24 +484,40 @@ test("setup answers the system and agent prompt after its single snapshot and su
   assert.equal(await environmentOf(null, InstancePlacement.Server), null);
   assert.equal(await environmentOf(null, InstancePlacement.Worker), null);
   const detected = { image: "debian", updateContentCommand: "npm ci" };
-  for (const source of [
-    EnvironmentSource.Detected,
-    EnvironmentSource.Universal,
-  ])
+  for (const placement of Object.values(InstancePlacement))
     assert.deepEqual(
-      await environmentOf(null, InstancePlacement.Container, true, {
-        source,
-        document: detected,
-      }),
-      { source, document: detected },
-    );
-  for (const placement of [InstancePlacement.Server, InstancePlacement.Worker])
-    assert.equal(
       await environmentOf(null, placement, true, {
         source: EnvironmentSource.Detected,
         document: detected,
       }),
+      { source: EnvironmentSource.Detected, document: detected },
+    );
+  assert.deepEqual(
+    await environmentOf(null, InstancePlacement.Container, true, {
+      source: EnvironmentSource.Universal,
+      document: detected,
+    }),
+    { source: EnvironmentSource.Universal, document: detected },
+  );
+  for (const placement of [InstancePlacement.Server, InstancePlacement.Worker])
+    assert.equal(
+      await environmentOf(null, placement, true, {
+        source: EnvironmentSource.Universal,
+        document: detected,
+      }),
       null,
+    );
+  for (const placement of Object.values(InstancePlacement))
+    assert.deepEqual(
+      await environmentOf(stored, placement, true, {
+        source: EnvironmentSource.Detected,
+        document: detected,
+      }),
+      {
+        source: EnvironmentSource.Stored,
+        document: stored,
+        digest: ENVIRONMENT_DIGEST,
+      },
     );
   const claimedBy = async (placement: InstancePlacement) => {
     claimed.length = NO_REQUESTS;
@@ -586,6 +606,7 @@ test("setup claims no environment for a container slot whose worker binding name
       },
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
       environmentOf: () => null,
+      diskFreeRatio: 0.1,
       repositoryBindingIdsOf: () => [],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => null,
@@ -691,6 +712,7 @@ test("one binding that lists a server and a container instance claims the enviro
         },
         environmentDigestOf: () => ENVIRONMENT_DIGEST,
         environmentOf: () => null,
+        diskFreeRatio: 0.1,
         repositoryBindingIdsOf: () => [],
         intentOf: () => ExecutionIntent.Implement,
         repositoryPolicyOf: () => null,
@@ -801,6 +823,7 @@ test("setup of a container worker binding with an environment claims inside a re
         onboarding.environmentClaimed(projectId, resourceIdentity),
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
       environmentOf: () => null,
+      diskFreeRatio: 0.1,
       repositoryBindingIdsOf: () => [bindingId],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({
@@ -1010,6 +1033,7 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
         environmentClaimed: () => {},
         environmentDigestOf: () => ENVIRONMENT_DIGEST,
         environmentOf: () => null,
+        diskFreeRatio: 0.1,
         repositoryBindingIdsOf: (_tx, nodeId, pinnedRevision) => {
           assert.deepEqual(
             [nodeId, pinnedRevision],
@@ -1627,6 +1651,7 @@ async function repositorySetup(t: TestContext, address: string, pin: boolean) {
       environmentClaimed: () => {},
       environmentDigestOf: () => ENVIRONMENT_DIGEST,
       environmentOf: () => null,
+      diskFreeRatio: 0.1,
       repositoryBindingIdsOf: () => [bindingId],
       intentOf: () => ExecutionIntent.Implement,
       repositoryPolicyOf: () => ({

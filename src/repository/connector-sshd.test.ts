@@ -18,6 +18,7 @@ import {
   GitStage,
   GitWriteError,
   landedOn,
+  probePush,
   pushNodeBranch,
   pushSnapshotFresh,
   readFilesAtCommit,
@@ -29,6 +30,7 @@ import {
   gitFailureReason,
   PushRefusalKind,
   pushRefusalOf,
+  pushTailOf,
 } from "./git-failure.ts";
 import { type SshAccess, SshAgentErrorCode } from "./ssh-agent.ts";
 import { generateSshKey } from "./ssh-key.ts";
@@ -217,6 +219,75 @@ test("a pre-receive hook that prints GH013 is a rule refusal of the land", async
   const refusal = pushRefusalOf(failure);
   assert.equal(refusal?.kind, PushRefusalKind.Rule);
   assert.match(refusal.detail, /GH013: Repository rule violations/);
+});
+
+const PROBE_BRANCH = "kanthord/preflight-run_1";
+const NO_BRANCHES = "";
+const PROBE_UPDATES = 2;
+
+async function probeBranches(bare: string): Promise<string> {
+  return git(bare, ["for-each-ref", "refs/heads/kanthord/preflight-*"]);
+}
+
+test("probePush pushes the base commit to the probe branch, deletes it and leaves no new commit", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
+  const commits = await git(bare, ["rev-list", "--all", "--count"]);
+  const received = join(bare, "received.log");
+  const hook = join(bare, "hooks", "pre-receive");
+  await writeFile(hook, `#!/bin/sh\ncat >> "${received}"\n`);
+  await chmod(hook, HOOK_MODE);
+  await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
+    background,
+    ssh,
+  );
+  const updates = (await readFile(received, "utf8")).trim().split("\n");
+  assert.equal(updates.length, PROBE_UPDATES);
+  assert.match(
+    updates[0]!,
+    new RegExp(`^0+ ${base} refs/heads/${PROBE_BRANCH}$`),
+  );
+  assert.match(
+    updates[1]!,
+    new RegExp(`^${base} 0+ refs/heads/${PROBE_BRANCH}$`),
+  );
+  assert.equal(await probeBranches(bare), NO_BRANCHES);
+  assert.equal(await git(bare, ["rev-list", "--all", "--count"]), commits);
+  assert.equal(await git(bare, ["rev-parse", BASE_BRANCH]), base);
+});
+
+test("probePush throws the hook text of a refused push and leaves no probe branch", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
+  const hook = join(bare, "hooks", "pre-receive");
+  await writeFile(
+    hook,
+    "#!/bin/sh\necho 'hook refuses every ref' >&2\nexit 1\n",
+  );
+  await chmod(hook, HOOK_MODE);
+  const failure = await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
+    background,
+    ssh,
+  ).then(
+    () => assert.fail("A refused push must fail."),
+    (error: unknown) => error,
+  );
+  assert.ok(failure instanceof GitWriteError);
+  assert.equal(failure.stage, GitStage.Push);
+  assert.match(pushTailOf(failure), /hook refuses every ref/);
+  assert.equal(await probeBranches(bare), NO_BRANCHES);
 });
 
 test("the author and the committer are the account that the greeting of the key names", async (t) => {

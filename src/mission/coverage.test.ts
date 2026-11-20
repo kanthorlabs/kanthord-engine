@@ -83,6 +83,7 @@ function coverageHarness(t: TestContext) {
       action:
         bindingId === ACTION_REPOSITORY ? RepositoryAction.PullRequest : null,
       landing: "human",
+      ignored_checks: [],
     }),
   };
   const reads: string[] = [];

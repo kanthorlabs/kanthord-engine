@@ -117,6 +117,7 @@ export function anthropicSetup(
     agents: [anthropicAgent()],
     templates: SHIPPED_TEMPLATES,
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
+    disk_free_ratio: 0.0001,
     intent: ExecutionIntent.Implement,
     repositories: [],
     ...overrides,

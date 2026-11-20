@@ -11,14 +11,17 @@ import {
 } from "../kernel/devcontainer.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
+import type { DiskSpace } from "../kernel/disk.ts";
 import { isObject, isString } from "../kernel/values.ts";
+import { pushTailOf } from "../repository/git-failure.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type CheckResult,
   ProjectErrorCode,
+  type ReviewFlow,
   WorkerPlacement,
 } from "./contract.ts";
-import type { GroupResolution } from "./environment.ts";
+import type { BindingProbeInput, GroupResolution } from "./environment.ts";
 import type {
   EnvironmentAgent,
   EnvironmentSessionHandle,
@@ -123,6 +126,12 @@ export type AttemptAnswer =
       attempts_left: number;
     };
 
+const UNREPAIRABLE_CLASSES: ReadonlySet<EnvironmentFailureClass | null> =
+  new Set([
+    EnvironmentFailureClass.PushRefused,
+    EnvironmentFailureClass.DiskLow,
+  ]);
+
 const TOOL_LIMIT_ANSWER = { reason: "tool_limit" } as const;
 
 export interface RepositoryGroup {
@@ -130,6 +139,7 @@ export interface RepositoryGroup {
   binding_name: string;
   resource_identity: string;
   environment_secrets?: Readonly<Record<string, string>>;
+  review_flow: ReviewFlow | null;
 }
 
 export interface WorkerBindingFacts {
@@ -156,6 +166,9 @@ export interface OnboardingDependencies {
     context: Context,
   ): Promise<GroupResolution>;
   baseCommitOf(bindingId: string, context: Context): Promise<string>;
+  probePush(input: BindingProbeInput, context: Context): Promise<void>;
+  freeDisk(): Promise<DiskSpace>;
+  diskFreeRatio: number;
   runtime: EnvironmentRuntime;
   proofs: ProofFiles;
   secrets: Pick<EnvironmentSecrets, "entriesOf" | "release" | "remove">;
@@ -216,6 +229,7 @@ export interface GroupRecord {
   reason_started_at: number | null;
   session: AbortController | null;
   environment_from_agent: boolean;
+  review_flow: ReviewFlow | null;
 }
 
 type WaitingStatus =
@@ -258,6 +272,7 @@ function failedRead(request: ReadRequest, failure: ReadFailure): ReadOutcome {
           proved: false,
         }),
     target,
+    review_flow: group.review_flow,
     reason: failure.reason,
   };
   return { next, failure };
@@ -394,6 +409,7 @@ function emptyRecord(
     reason_started_at: null,
     session: null,
     environment_from_agent: false,
+    review_flow: group.review_flow,
   };
 }
 
@@ -415,21 +431,34 @@ function staleFailure(
 }
 
 function provedTarget(record: GroupRecord): boolean {
-  return (
-    (record.target === EnvironmentTarget.Image && record.proved) ||
-    (record.target === EnvironmentTarget.Host &&
-      record.proof?.outcome === ProofOutcome.Passed)
-  );
+  if (
+    record.target === EnvironmentTarget.Image &&
+    record.source !== EnvironmentSource.None
+  )
+    return record.proved;
+  return record.proof?.outcome === ProofOutcome.Passed;
+}
+
+function buildsImage(
+  target: EnvironmentTarget,
+  document: Environment | null,
+): boolean {
+  return target === EnvironmentTarget.Image && document !== null;
+}
+
+function collectsImages(record: GroupRecord): boolean {
+  return record.target !== EnvironmentTarget.Remote && record.document !== null;
 }
 
 function decidedStatusOf(record: GroupRecord): EnvironmentStatus | null {
   if (!record.read_succeeded) return EnvironmentStatus.Pending;
   if (record.proof?.outcome === ProofOutcome.Failed)
     return EnvironmentStatus.Failed;
-  if (record.target === EnvironmentTarget.Remote) return EnvironmentStatus.None;
-  if (provedTarget(record)) return EnvironmentStatus.Ready;
-  if (record.source === EnvironmentSource.None) return EnvironmentStatus.None;
-  return null;
+  if (!provedTarget(record)) return null;
+  return record.target === EnvironmentTarget.Remote ||
+    record.source === EnvironmentSource.None
+    ? EnvironmentStatus.None
+    : EnvironmentStatus.Ready;
 }
 
 export function statusOf(record: GroupRecord): EnvironmentStatus {
@@ -511,6 +540,7 @@ function stateOf(record: GroupRecord): EnvironmentState {
     checks: proof?.checks ?? [],
     repairs: record.repairs,
     repairing: record.session !== null,
+    review_flow: record.review_flow,
   };
 }
 
@@ -723,6 +753,7 @@ export class Onboarding {
     const key = keyOf(projectId, group.resource_identity);
     const record = this.records.get(key);
     if (record === undefined) return;
+    record.review_flow = group.review_flow;
     const rowChanged =
       record.binding_id !== group.binding_id ||
       record.binding_name !== group.binding_name;
@@ -852,6 +883,7 @@ export class Onboarding {
       } while (this.again.has(key));
     } finally {
       this.computing.delete(key);
+      this.notify();
     }
   }
 
@@ -942,7 +974,6 @@ export class Onboarding {
         commit: resolved.commit,
         reason: resolved.reason,
       };
-    const atImage = target === EnvironmentTarget.Image;
     const secrets = this.dependencies.secrets.entriesOf(
       group.environment_secrets ?? {},
     );
@@ -956,7 +987,9 @@ export class Onboarding {
       secrets,
       version,
     });
-    const tag = atImage ? environmentTagOf(group.resource_identity, sum) : null;
+    const tag = buildsImage(target, resolved.document)
+      ? environmentTagOf(group.resource_identity, sum)
+      : null;
     const path = environmentPath(group.resource_identity);
     const stored = proofs.read(path, sum);
     const stale = staleFailure(stored, resolved.commit);
@@ -964,6 +997,7 @@ export class Onboarding {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
       binding_name: group.binding_name,
+      review_flow: group.review_flow,
       target,
       source: resolved.source,
       commit: resolved.commit,
@@ -1020,7 +1054,7 @@ export class Onboarding {
   }
 
   private async stepOf(record: GroupRecord): Promise<QueuedStep> {
-    if (record.target !== EnvironmentTarget.Image)
+    if (record.target !== EnvironmentTarget.Image || record.document === null)
       return EnvironmentStatus.Proving;
     assert.ok(record.tag !== null, "An image group holds a tag.");
     return (await this.dependencies.runtime.imageExists(record.tag))
@@ -1155,6 +1189,7 @@ export class Onboarding {
     const path = environmentPath(group.resource_identity);
     const proof = this.proofAtCommit(group);
     if (proof === null || proof.repairs >= PE_AGENT_REPAIR_LIMIT) return;
+    if (UNREPAIRABLE_CLASSES.has(proof.class)) return;
     const failure = {
       ...proof,
       repairs: proofs.incrementRepairs(path, group.digest),
@@ -1318,20 +1353,21 @@ export class Onboarding {
   ): Promise<ProofVerdict | null> {
     const { runtime } = this.dependencies;
     const { document, commit, tag } = record;
-    assert.ok(document !== null && commit !== null, "A run holds its inputs.");
+    assert.ok(commit !== null, "A run holds its commit.");
+    const early = await this.preflightVerdict(record, runId, signal);
+    if (early !== null) return early;
+    if (record.target === EnvironmentTarget.Remote || document === null)
+      return classifyProof([]);
     const base = {
       run_id: runId,
       binding_id: record.binding_id,
       resource_identity: record.resource_identity,
       commit,
     };
-    const checksOnly =
-      record.target !== EnvironmentTarget.Image &&
-      record.source === EnvironmentSource.Detected;
     const proof = {
       ...base,
       project_id: record.project_id,
-      setup: checksOnly ? [] : setupScriptsOf(document),
+      setup: setupScriptsOf(document),
       checks: checksOf(document),
     };
     if (record.target !== EnvironmentTarget.Image) {
@@ -1366,6 +1402,41 @@ export class Onboarding {
     }
     return this.tracedProof(trace, proof.setup.length, () =>
       runtime.prove({ ...proof, tag }, signal),
+    );
+  }
+
+  private async preflightVerdict(
+    record: GroupRecord,
+    runId: string,
+    signal: AbortSignal,
+  ): Promise<ProofVerdict | null> {
+    assert.ok(record.commit !== null, "A run holds its commit.");
+    if (record.target !== EnvironmentTarget.Remote) {
+      const low = await this.diskVerdict();
+      if (low !== null) return low;
+    }
+    try {
+      await this.dependencies.probePush(
+        { bindingId: record.binding_id, commit: record.commit, runId },
+        { signal, deadline: null },
+      );
+    } catch (error) {
+      if (signal.aborted) throw error;
+      return failedVerdict(
+        EnvironmentFailureClass.PushRefused,
+        pushTailOf(error),
+      );
+    }
+    return null;
+  }
+
+  private async diskVerdict(): Promise<ProofVerdict | null> {
+    const { free_bytes, total_bytes } = await this.dependencies.freeDisk();
+    const ratio = this.dependencies.diskFreeRatio;
+    if (free_bytes >= ratio * total_bytes) return null;
+    return failedVerdict(
+      EnvironmentFailureClass.DiskLow,
+      `free_bytes=${free_bytes} total_bytes=${total_bytes} ratio=${ratio}`,
     );
   }
 
@@ -1484,7 +1555,7 @@ export class Onboarding {
       await runtime.tagProved(tag);
       record.proved = true;
     }
-    await runtime.collect(path, digest);
+    if (collectsImages(record)) await runtime.collect(path, digest);
     for (const other of proofs.digests(path))
       if (other !== digest) proofs.remove(path, other);
     if (proved)
