@@ -426,6 +426,8 @@ tasks.
   A coder pushes its checkpoint to the node branch and releases with the stop `human_paused`.
   The release ends the claim and leaves the node `Paused`. When the coder does not release before the deadline
   of the stop order, the server revokes the claim with the stop `human_paused`.
+  The act trace of a pause that keeps the claim links the root span of the kept execution.
+  At its start, the server revokes the kept claim of each `Paused` node that has no stop order, with the stop `human_paused`.
   A pause of a node whose instance has no connection revokes the live claim at once and stores the stop `human_paused`.
   Eligible states are
   `Pending`, `Available`, `Executing`, `Waiting`, `Evaluating`,
@@ -433,7 +435,7 @@ tasks.
 - Resume accepts `Resume`, returns `ControlResult`, and requires `Paused`.
   While the `Paused` node keeps a live claim and a stop order is pending, resume answers 409 `mission.node.claim_live`
   with `{ node_id, execution_id }`. Run it again after the release or after the deadline.
-  A `Paused` node that keeps a live claim with no stop order, for example after a server restart,
+  A `Paused` node that keeps a live claim with no stop order, for example after the loss of the order,
   has its claim revoked at once with the stop `human_paused`, and the resume passes.
   `node block` of a `Paused` node revokes a kept claim at once.
   It reads the required external actions and their request evidence first:
