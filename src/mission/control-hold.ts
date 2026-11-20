@@ -210,7 +210,14 @@ export function pauseNode(
         body.reason,
         now,
         controlResult(tx, dependencies, nodeId, null, actor, now),
-        null,
+        {
+          execution_id: live.execution_id,
+          project_id: live.project_id,
+          node_id: live.node_id,
+          attempt: live.attempt,
+          trace_id: live.trace_id,
+          root_span_id: live.root_span_id,
+        },
       ),
       stopOrder: {
         execution_id: live.execution_id,

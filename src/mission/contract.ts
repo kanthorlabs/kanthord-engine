@@ -290,8 +290,12 @@ export interface SchedulerClaims {
   ): {
     execution_id: string;
     runtime_identity: string;
+    project_id: string;
+    node_id: string;
     attempt: number;
     pinned_revision: number;
+    trace_id: string;
+    root_span_id: string;
   } | null;
 }
 

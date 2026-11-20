@@ -20,7 +20,12 @@ import { ControlError } from "./control.ts";
 import { revokeHeldPauses } from "./control-hold.ts";
 import { insertEvidence, openAttempt, readAttempt } from "./record-store.ts";
 import { insertDependency, insertNode, setNodeState } from "./store.ts";
-import { actCalls, controlHarness, revokedExecution } from "./test-support.ts";
+import {
+  actCalls,
+  controlHarness,
+  LIVE_TRACE,
+  revokedExecution,
+} from "./test-support.ts";
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
@@ -510,6 +515,7 @@ function pausedClaim(
           runtime_identity: RUNTIME_IDENTITY,
           attempt: FIRST_ATTEMPT,
           pinned_revision: FIRST_ATTEMPT,
+          ...LIVE_TRACE,
         }
       : null;
   h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now, stop) => {
@@ -556,6 +562,20 @@ test("a pause of a connected execution keeps the claim and sends one stop order 
     [executionId, RUNTIME_IDENTITY, HUMAN_PAUSED, false],
   ]);
   assert.deepEqual(revoked, []);
+});
+
+test("a pause that keeps the claim links the root span of the kept execution", async (t) => {
+  const { h } = pausedClaim(t, NodeState.Executing);
+  await h.invoke("node.pause", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: h.body(NodeState.Executing, FIRST_ATTEMPT),
+  });
+  const written = actCalls(h);
+  assert.equal(written.length, ONE_ACT);
+  assert.deepEqual(written[0]![1].links, [
+    { trace_id: LIVE_TRACE.trace_id, span_id: LIVE_TRACE.root_span_id },
+  ]);
 });
 
 test("a pause rolled back sends no stop order", async (t) => {

@@ -8,6 +8,7 @@ import { setNodeState } from "./store.ts";
 import {
   databaseSnapshot,
   executionHarness,
+  LIVE_TRACE,
   revokedExecution,
 } from "./test-support.ts";
 
@@ -40,6 +41,7 @@ function fixture(t: TestContext, claim: NodeState) {
           runtime_identity: h.claim.runtimeIdentity,
           attempt: FIRST_ATTEMPT,
           pinned_revision: FIRST_ATTEMPT,
+          ...LIVE_TRACE,
         }
       : null;
   claims.revoke = (_tx, nodeId, now, stop) => {
