@@ -93,6 +93,9 @@ const HTTP_SERVER_ERROR = 500;
 const COMMIT_ROUTE = "GET /repos/owner/pushed/commits/";
 const BASE_HEAD_COMMIT = "1111111111111111111111111111111111111111";
 const HEAD_TREE = "2222222222222222222222222222222222222222";
+const EQUAL_TREES_LOG =
+  "merge answered 502: the base branch tree equals the pull request head tree";
+const EQUAL_TREES_RESULT = "equal";
 const BASE_TREE = "3333333333333333333333333333333333333333";
 const ONE_REQUEST = 1;
 const NO_TREE_READS = 0;
@@ -270,7 +273,13 @@ async function harness(
     commit: (write) => store.transaction(write),
   };
   const inFlight = new Set<string>();
-  const logger = pino({ enabled: false });
+  const logLines: string[] = [];
+  const logger = pino(
+    { level: "info" },
+    { write: (line) => logLines.push(line) },
+  );
+  const logs = () =>
+    logLines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const merge = (body: Partial<MergeBody> = {}) =>
     mergeAction(
       {
@@ -317,7 +326,7 @@ async function harness(
         OutboundRequestState.Pending,
       ]);
     });
-  return { ...fake, gitHub, merge, rows, seed };
+  return { ...fake, gitHub, merge, rows, seed, logs };
 }
 
 function mergeRequests(requests: GrantRequest[]) {
@@ -447,6 +456,9 @@ test("regression: F124 a 502 merge answer with equal trees answers merged and re
     `${COMMIT_ROUTE}main`,
     `${COMMIT_ROUTE}${TESTED_COMMIT}`,
   ]);
+  const landed = h.logs().find((line) => line.msg === EQUAL_TREES_LOG);
+  assert.equal(landed?.base_head_commit, BASE_HEAD_COMMIT);
+  assert.equal(landed?.result, EQUAL_TREES_RESULT);
 });
 
 test("a 502 merge answer with different trees answers unknown_outcome and states the difference", async (t) => {
