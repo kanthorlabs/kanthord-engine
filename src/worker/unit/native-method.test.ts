@@ -741,6 +741,8 @@ const CLAIM_READ = "claimGet";
 const NO_OUTPUT = "";
 const THREE_TURNS = 3;
 const FENCE_READS = 1;
+const LONG_COMMAND_S = 600;
+const KILLED_WITHIN_MS = 30000;
 
 test("a run of three turns reads the claim once per 60 s and once at the push fence", async (t) => {
   const { result, calls, provider, pushed } = await watchedImplementRun(t, {
@@ -775,20 +777,30 @@ test("a run of three turns reads the claim once per 60 s and once at the push fe
   assert.ok(pushed);
 });
 
-test("a claim watch revoke during an agent turn aborts the session in the turn and ends as revoked with no push and no release", async (t) => {
+test("a claim watch revoke while an agent command runs kills the command and ends as revoked with no push and no release", async (t) => {
+  const marker = join(temporary(t), "started");
+  const startedAt = Date.now();
   const { result, calls, provider, pushed } = await watchedImplementRun(t, {
     claimState: "finished",
     script: (tick) => [
       () => {
-        tick();
+        void (async () => {
+          while (!existsSync(marker))
+            await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+          tick();
+        })();
         return fauxAssistantMessage(
-          fauxToolCall("bash", { command: "sleep 30" }),
+          fauxToolCall("bash", {
+            command: `touch ${marker}; sleep ${LONG_COMMAND_S}`,
+          }),
           { stopReason: "toolUse" },
         );
       },
       fauxAssistantMessage("unexpected"),
     ],
   });
+  assert.ok(existsSync(marker));
+  assert.ok(Date.now() - startedAt < KILLED_WITHIN_MS);
   assert.deepEqual(result, {
     kind: ExecutionEndKind.Ended,
     reason: EndReason.Revoked,
@@ -796,5 +808,45 @@ test("a claim watch revoke during an agent turn aborts the session in the turn a
   });
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
   assert.deepEqual(calls, [CLAIM_READ]);
+  assert.equal(pushed, false);
+});
+
+test("a fence read of an ended claim in finish ends as revoked with no push and no release", async (t) => {
+  const { result, calls, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: () => [
+      fauxAssistantMessage(
+        fauxToolCall("bash", { command: "printf hello > hello.txt" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  });
+  assert.deepEqual(result, {
+    kind: ExecutionEndKind.Ended,
+    reason: EndReason.Revoked,
+    code: null,
+  });
+  assert.equal(calls.filter((call) => call === CLAIM_READ).length, FENCE_READS);
+  assert.equal(calls.includes(RELEASE_CALL), false);
+  assert.equal(pushed, false);
+});
+
+test("a fence read of an ended claim in onStop skips the push and keeps the stored stop", async (t) => {
+  const { result, calls, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: () => [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "terminated",
+      }),
+    ],
+  });
+  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.equal(
+    result.kind === ExecutionEndKind.Released && result.stop?.reason,
+    EndReason.ProviderFailed,
+  );
+  assert.equal(calls.filter((call) => call === CLAIM_READ).length, FENCE_READS);
   assert.equal(pushed, false);
 });
