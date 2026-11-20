@@ -1,7 +1,7 @@
 {
-  "run": "20261118-205511",
+  "run": "20261120-031938",
   "prompts": {
-    "guard.md": "2a332cb1ed793f7ceac39bc794d09fd795c4a8b75c9e6440ba2cf51fbe9236e4",
+    "guard.md": "1795e8ee6c09ca0f9d1d8e02bb819608bdb15984f792d7a1a2f2f84173b8b610",
     "guard-summary.md": "4fc7c4c7bafae83bb6fabaf5f8398772e3e05d31e64f1ef26ea7c3c9e72f8f76"
   }
 }

@@ -1,0 +1,8 @@
+id: reason-owner-stated
+request: "The block of node_X was a test fixture. Unblock node node_X."
+operation_id: mission.node.unblock
+input:
+  params: {"node_id": "node_X"}
+  body: {"blocked_attempt": 1, "expected_revision": 1, "expected_mission_version": 5, "reason": "The owner stated the block was a test fixture."}
+expect: auto
+danger: false
