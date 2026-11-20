@@ -20,13 +20,14 @@ const STATEMENT_KEEPING_CONTROLS: ReadonlySet<string> = new Set([
 ]);
 const DATABASE_PROBE_OK = 1;
 const NO_RECORDED_MIGRATION = 0;
+const NO_DEPENDENT_TABLE = 0;
 const SCHEMA_KEY_SEPARATOR = "\u0000";
 const SCHEMA_TABLE_TYPE = "table";
 const SCHEMA_OBJECT_TYPE = 0;
 const SCHEMA_OBJECT_NAME = 1;
 const SCHEMA_OBJECT_COLUMNS = ["type", "name", "tbl_name", "sql"] as const;
 const SCHEMA_MISMATCH_MESSAGE =
-  "the schema of this service differs from its migration text; stop the server, delete kanthord.db, tracking.db and their -wal and -shm files in the data directory, and start again";
+  "the schema of this service differs from its migration text; stop the server and run kanthord upgrade --reset-changed; the command rebuilds only the changed services and keeps the credentials and the unchanged services";
 const EXPECTED_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`;
 const LIVE_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND (name IN (SELECT value FROM json_each(?)) OR tbl_name IN (SELECT value FROM json_each(?)) OR substr(name, 1, length(?) + 1) = ? || '_') ORDER BY type, name`;
 
@@ -243,7 +244,11 @@ export class Store {
     }
   }
 
-  plan(services: Migrations): MigrationPlan {
+  private history(services: Migrations): {
+    known: ReadonlyMap<string, readonly Migration[]>;
+    versions: ReadonlyMap<string, number>;
+    recorded: number;
+  } {
     const known = new Map(
       services.map((entry) => [entry.service, entry.migrations]),
     );
@@ -280,9 +285,14 @@ export class Store {
         );
       versions.set(name, version);
     }
+    return { known, versions, recorded: records.length };
+  }
+
+  plan(services: Migrations): MigrationPlan {
+    const { known, versions, recorded } = this.history(services);
     this.assertSchema(known, versions);
     return {
-      fresh: records.length === NO_RECORDED_MIGRATION,
+      fresh: recorded === NO_RECORDED_MIGRATION,
       pending: services
         .map(({ service, migrations }) => ({
           service,
@@ -316,6 +326,115 @@ export class Store {
           },
         );
     }
+  }
+
+  changedServices(services: Migrations): string[] {
+    const { known, versions } = this.history(services);
+    return services
+      .map(({ service }) => service)
+      .filter((service) => {
+        if (!versions.has(service)) return false;
+        const expected = expectedSchema(
+          known.get(service)!,
+          versions.get(service)!,
+        );
+        return (
+          firstSchemaDifference(
+            expected,
+            liveSchema(this.database, service, expected),
+          ) !== null
+        );
+      });
+  }
+
+  private liveTables(
+    services: Migrations,
+    names: readonly string[],
+  ): Map<string, string[]> {
+    const { known, versions } = this.history(services);
+    return new Map(
+      names.map((service) => {
+        const expected = expectedSchema(
+          known.get(service) ?? [],
+          versions.get(service) ?? NO_RECORDED_MIGRATION,
+        );
+        return [
+          service,
+          liveSchema(this.database, service, expected)
+            .filter(
+              (object) => object[SCHEMA_OBJECT_TYPE] === SCHEMA_TABLE_TYPE,
+            )
+            .map((object) => object[SCHEMA_OBJECT_NAME]),
+        ];
+      }),
+    );
+  }
+
+  assertResettable(
+    services: Migrations,
+    names: readonly string[],
+    protectedService: string,
+  ): void {
+    if (names.includes(protectedService))
+      throw new Diagnostic(
+        "system.database.reset.custody_refused",
+        "the reset refuses the protected service; its migration text changed",
+        {
+          fields: [
+            ["path", this.path],
+            ["service", protectedService],
+          ],
+        },
+      );
+    const tables = this.liveTables(services, names);
+    const owners = new Map<string, string>();
+    for (const [service, list] of tables)
+      for (const table of list) owners.set(table.toLowerCase(), service);
+    const dependents = new Map<string, string>();
+    for (const table of this.tableNames()) {
+      if (owners.has(table.toLowerCase())) continue;
+      const references = this.database
+        .prepare("SELECT * FROM pragma_foreign_key_list(?)")
+        .all(table)
+        .map((row) => String(row.table).toLowerCase());
+      const target = references.find((reference) => owners.has(reference));
+      if (target !== undefined) dependents.set(table, owners.get(target)!);
+    }
+    if (dependents.size === NO_DEPENDENT_TABLE) return;
+    throw new Diagnostic(
+      "system.database.reset.foreign_key",
+      "the reset refuses: a table of another service references a table that the reset drops",
+      {
+        fields: [
+          ["path", this.path],
+          ["service", [...dependents.values()][0]!],
+          ...[...dependents.keys()].map((table): [string, string] => [
+            "table",
+            table,
+          ]),
+        ],
+      },
+    );
+  }
+
+  resetServices(
+    services: Migrations,
+    names: readonly string[],
+    protectedService: string,
+  ): string[] {
+    this.assertResettable(services, names, protectedService);
+    const tables = this.liveTables(services, names);
+    const dropped = [...tables.values()].flat();
+    this.transaction(({ database }) => {
+      database.exec("PRAGMA defer_foreign_keys = ON");
+      for (const table of dropped)
+        database.exec(`DROP TABLE "${table.replaceAll('"', '""')}"`);
+      for (const service of names)
+        database
+          .prepare("DELETE FROM migration WHERE service = ?")
+          .run(service);
+    });
+    return dropped;
   }
 
   migrate(

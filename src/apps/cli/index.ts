@@ -159,11 +159,19 @@ function addUpgradeCommand(program: Command): void {
     .description(
       "Upgrade the stored configuration and database to this binary and keep backups",
     )
-    .option("--config <path>", "YAML configuration file");
+    .option("--config <path>", "YAML configuration file")
+    .option(
+      "--reset-changed",
+      "Rebuild the services whose migration text changed and keep the other services and the credentials",
+    );
   configHelp(command);
   command.action(async () => {
     const { upgrade } = await import("./upgrade.ts");
-    await upgrade(effectivePath(command), (text) => process.stdout.write(text));
+    await upgrade(
+      effectivePath(command),
+      (text) => process.stdout.write(text),
+      { resetChanged: command.opts().resetChanged === true },
+    );
   });
 }
 
