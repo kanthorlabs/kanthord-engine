@@ -200,6 +200,7 @@ export function storedStopOf(stop: ReleaseStop): ReleaseStop {
     reason: stop.reason,
     code: stop.code,
     ...(stop.detail === undefined ? {} : { detail: stop.detail }),
+    ...(stop.cause === undefined ? {} : { cause: stop.cause }),
   };
 }
 export function endExecution(

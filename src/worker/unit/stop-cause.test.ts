@@ -13,6 +13,8 @@ import {
   ProviderFailure,
 } from "../../scheduler/contract.ts";
 import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
+import { ResourceFailureReason } from "../../kernel/health.ts";
+import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { ProjectErrorCode } from "../../project/contract.ts";
 import { WorkerErrorCode } from "../contract.ts";
 import { GitStep } from "./git-step.ts";
@@ -28,9 +30,14 @@ import {
   VERIFICATION_INFRASTRUCTURE_FAILED,
 } from "./stop-codes.ts";
 
-const QUIET: StopSignals = { git_step: null, verification_timed_out: false };
+const QUIET: StopSignals = {
+  git_step: null,
+  git_failure: null,
+  verification_timed_out: false,
+};
 const TIMED_OUT_SIGNALS: StopSignals = {
   git_step: null,
+  git_failure: null,
   verification_timed_out: true,
 };
 
@@ -83,6 +90,24 @@ test("a git step wins over the code of an operation failure", () => {
       null,
       { ...QUIET, git_step: GitStep.Push },
     ),
+    unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
+  );
+});
+
+test("a git failure of a host fault is a network cause and any other git failure keeps the git step cause", () => {
+  const gitFailed = (gitFailure: ResourceFailureReason) =>
+    stopCauseOf(
+      ExecutionStopReason.OperationFailed,
+      RepositoryErrorCode.GitFailed,
+      null,
+      { ...QUIET, git_step: GitStep.Push, git_failure: gitFailure },
+    );
+  assert.deepEqual(
+    gitFailed(ResourceFailureReason.HostUnreachable),
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.Network),
+  );
+  assert.deepEqual(
+    gitFailed(ResourceFailureReason.KeyRefused),
     unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
   );
 });
@@ -182,11 +207,7 @@ test("a no-progress stop reads the timeout from its detail", () => {
     noProgress(timedOutDetail(true)),
     unattributed([CauseCategory.Environment, CauseCategory.Plan]),
   );
-  const unmet = unattributed([
-    CauseCategory.Model,
-    CauseCategory.Prompt,
-    CauseCategory.Plan,
-  ]);
+  const unmet = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
   assert.deepEqual(noProgress(timedOutDetail(false)), unmet);
   assert.deepEqual(noProgress(timedOutDetail(false), TIMED_OUT_SIGNALS), unmet);
   assert.deepEqual(noProgress(null), unmet);

@@ -24,8 +24,10 @@ import {
   consecutiveFailures,
   countsFailure,
   digestsOf,
+  isHostFault,
   NO_FAILURE_STOPS,
   recordFailure,
+  recordHostFault,
   requireRunning,
 } from "./settlement.ts";
 
@@ -129,6 +131,14 @@ function recordStop(
 ): StopEffects {
   const { tx, dependencies, executionId, row, now } = context;
   endExecution(tx, executionId, now, stop);
+  if (isHostFault(stop)) {
+    const { transition, hold } = recordHostFault(tx, dependencies, {
+      node_id: row.node_id,
+      failures: consecutiveFailures(tx, row, false),
+      now,
+    });
+    return { transition, hold, environmentRepositories: null };
+  }
   if (NO_FAILURE_STOPS.includes(stop.reason))
     return {
       transition: dependencies.transitions.stopped(tx, row.node_id, now),

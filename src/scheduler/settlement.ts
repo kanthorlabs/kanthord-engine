@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { CauseCategory, CauseSubcategory } from "../kernel/cause.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { canonicalJSON } from "../kernel/json.ts";
@@ -68,6 +69,29 @@ export function heldUntil(
   return until;
 }
 
+interface PlannedHold {
+  failure_count: number;
+  available_at: number;
+}
+
+function holdJob(
+  tx: Transaction,
+  nodeId: string,
+  hold: PlannedHold,
+): FailureHold {
+  const held = tx.database
+    .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
+    .run(hold.available_at, nodeId);
+  return {
+    failure_count: hold.failure_count,
+    available_at: Number(held.changes) === ONE_JOB ? hold.available_at : null,
+  };
+}
+
+function isPausedStay(transition: NodeTransition): boolean {
+  return transition.from === PAUSED && transition.to === PAUSED;
+}
+
 export function recordFailure(
   tx: Transaction,
   dependencies: SettlementDependencies,
@@ -82,23 +106,43 @@ export function recordFailure(
     now,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
-  if (
-    until === null ||
-    (transition.from === PAUSED && transition.to === PAUSED)
-  )
+  if (until === null || isPausedStay(transition))
     return {
       transition,
       hold: { failure_count: failures, available_at: null },
     };
-  const held = tx.database
-    .prepare("UPDATE scheduler_job SET available_at = ? WHERE node_id = ?")
-    .run(until, nodeId);
   return {
     transition,
-    hold: {
-      failure_count: failures,
-      available_at: Number(held.changes) === ONE_JOB ? until : null,
-    },
+    hold: holdJob(tx, nodeId, { failure_count: failures, available_at: until }),
+  };
+}
+
+interface HostFault {
+  node_id: string;
+  failures: number;
+  now: number;
+}
+
+export function recordHostFault(
+  tx: Transaction,
+  dependencies: SettlementDependencies,
+  { node_id: nodeId, failures, now }: HostFault,
+): { transition: NodeTransition; hold: FailureHold } {
+  const transition = dependencies.transitions.stopped(tx, nodeId, now);
+  const until = heldUntil(
+    ENDING_FAILURE,
+    now,
+    dependencies.config.stop_backoff,
+  );
+  assert.ok(until !== null);
+  if (isPausedStay(transition))
+    return {
+      transition,
+      hold: { failure_count: failures, available_at: null },
+    };
+  return {
+    transition,
+    hold: holdJob(tx, nodeId, { failure_count: failures, available_at: until }),
   };
 }
 
@@ -185,9 +229,17 @@ export const NO_FAILURE_STOPS: readonly ExecutionStopReason[] = [
   ExecutionStopReason.HumanPaused,
 ];
 
+export function isHostFault(stop: ReleaseStop | null): boolean {
+  return (
+    stop?.cause?.category === CauseCategory.Infrastructure &&
+    stop.cause.subcategory === CauseSubcategory.Network
+  );
+}
+
 export function countsFailure(stop: ReleaseStop | null): boolean {
   if (stop === null || stop.reason === ExecutionStopReason.BudgetEnd)
     return false;
+  if (isHostFault(stop)) return false;
   if (NO_FAILURE_STOPS.includes(stop.reason)) return false;
   if (isAdvancingStop(stop)) return false;
   return (

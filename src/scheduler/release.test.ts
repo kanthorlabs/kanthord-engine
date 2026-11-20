@@ -44,6 +44,7 @@ import {
   EXECUTION_NOT_RUNNING,
   heldUntil,
 } from "./settlement.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
 import { EXECUTION_RELEASED, STOP_UNORDERED } from "./release.ts";
 
@@ -57,6 +58,7 @@ const STOPPED_CALL = "stopped";
 const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
 const FAILURE_LIMIT = 3;
+const PRIOR_FAILURES = 2;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const SECOND_FAILURE = 2;
@@ -321,12 +323,12 @@ test("a refused release writes no transition span", async (t) => {
   assert.deepEqual(h.telemetry, []);
 });
 
-test("a release with a stop cause stores a stop with no cause", async (t) => {
+test("a release with a stop cause stores the cause with its stop", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   const cause = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
   await h.release(true, { ...STOP, cause });
-  assert.deepEqual(h.read().stop, STOP);
+  assert.deepEqual(h.read().stop, { ...STOP, cause });
   const machine = {
     clientId: createIdentity("client_identity"),
     name: "worker",
@@ -342,8 +344,7 @@ test("a release with a stop cause stores a stop with no cause", async (t) => {
       identity: testMachineIdentity(machine, "machine", h.row.runtime_identity),
     },
   );
-  assert.deepEqual(claimed.stop, STOP);
-  assert.equal(JSON.stringify(claimed).includes("cause"), false);
+  assert.deepEqual(claimed.stop, { ...STOP, cause });
 });
 
 test("the release input refuses a stop with no further work", () => {
@@ -486,6 +487,78 @@ test("a worker_stopped release calls stopped, not failure, and sets no hold", as
         .get(h.row.node_id) as { available_at: number | null },
   );
   assert.equal(job.available_at, null);
+});
+
+const HOST_FAULT: ReleaseStop = {
+  reason: ExecutionStopReason.OperationFailed,
+  code: RepositoryErrorCode.GitFailed,
+  detail: "ssh: connect to host github.com port 22: Operation timed out",
+  cause: attributed(CauseCategory.Infrastructure, CauseSubcategory.Network),
+};
+
+function jobAvailableAt(h: ReturnType<typeof harness>) {
+  return h.store.transaction(
+    (tx) =>
+      (
+        tx.database
+          .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+          .get(h.row.node_id) as { available_at: number | null }
+      ).available_at,
+  );
+}
+
+test("a host-fault release moves the node to Available and holds the job for the stop backoff", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  await h.release(true, HOST_FAULT);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  assert.deepEqual(h.read().stop, HOST_FAULT);
+  assert.equal(jobAvailableAt(h), FIRST_HOLD_END);
+  assert.deepEqual(
+    h.telemetry[1]!.arguments[1],
+    executionTransition(transitionFixture(), FIXTURE_NOW, {
+      failure_count: NO_FAILURES,
+      available_at: FIRST_HOLD_END,
+    }),
+  );
+});
+
+test("a host-fault release at failure count 2 of 3 does not pause the node", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    for (let index = 0; index < PRIOR_FAILURES; index++)
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop: STOP,
+        }),
+      );
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+  });
+  await h.release(true, HOST_FAULT);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  const transition = h.telemetry[1]!.arguments[1] as ReturnType<
+    typeof executionTransition
+  >;
+  assert.equal(transition.to, transitionFixture().to);
+  assert.equal(transition.failure_count, PRIOR_FAILURES);
+  assert.equal(jobAvailableAt(h), FIRST_HOLD_END);
 });
 
 test("an instance_archived release refuses with stop_unordered and writes nothing", async (t) => {
