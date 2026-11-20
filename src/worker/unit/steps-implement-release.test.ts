@@ -41,8 +41,8 @@ import {
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   ONE_FREE_TREE,
-  recordDone,
   recordReleases,
+  recordUnit,
   releasedRoot,
   STEPS_KEY,
   task,
@@ -57,7 +57,7 @@ const BROKEN_CONTENT = "broken";
 const FIXED_CONTENT = "fixed";
 
 async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
-  await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+  await recordUnit(h, nodeUnitOf(h.input.claim.node_id, h.revision));
 }
 
 suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
@@ -318,7 +318,7 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
       );
       assert.ok(head);
       checkout.head = head;
-      return { kind: "complete", recorded: false };
+      return { kind: "complete", committed: false };
     };
     const stop = {
       reason: EndReason.OperationFailed,

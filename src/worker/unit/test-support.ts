@@ -73,7 +73,8 @@ import { commonPorts } from "./worker-ports.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-verdict.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
-import { doneTrailerOf } from "./done-record.ts";
+import { digest } from "../../kernel/json.ts";
+import type { UnitRecord } from "../contract.ts";
 import { VerificationKind } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import { commitStaged, headCommit, stageWork } from "./local-git.ts";
@@ -384,6 +385,12 @@ async function openExecution(
           data: { items: [], next_cursor: null },
         }),
       },
+      worker: {
+        "execution.unit_record.put": async (request: { body: UnitRecord }) => {
+          storeUnitRecord(setup, request.body);
+          return { type: "completed", status: 200, data: request.body };
+        },
+      },
     } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
@@ -518,22 +525,32 @@ export async function commitOnNode(directory: string, content: string) {
   await simpleGit(directory).commit("node change");
 }
 
-export async function recordDone(
-  h: { checkouts: { directory: string; head: string }[] },
+export function storeUnitRecord(
+  setup: ExecutionSetup,
+  record: UnitRecord,
+): void {
+  setup.unit_records = [
+    ...setup.unit_records.filter(({ unit_id }) => unit_id !== record.unit_id),
+    record,
+  ];
+}
+
+export async function recordUnit(
+  h: {
+    checkouts: { directory: string; head: string; binding_id: string }[];
+    input: { setup: ExecutionSetup };
+  },
   unit: TaskContent,
 ) {
   const checkout = h.checkouts[0]!;
   const git = simpleGit(checkout.directory);
-  await git.raw([
-    "commit",
-    "-q",
-    "--allow-empty",
-    "--message",
-    "done",
-    "--trailer",
-    doneTrailerOf(unit),
-  ]);
+  await git.raw(["commit", "-q", "--allow-empty", "--message", "done"]);
   checkout.head = (await git.revparse(["HEAD"])).trim();
+  storeUnitRecord(h.input.setup, {
+    unit_id: unit.id,
+    content_digest: digest(unit.content),
+    commits: [{ binding_id: checkout.binding_id, commit: checkout.head }],
+  });
 }
 
 export function recordReleases(

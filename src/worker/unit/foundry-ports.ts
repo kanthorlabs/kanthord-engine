@@ -7,7 +7,7 @@ import type {
   ExecutionDependency,
   Outcome,
 } from "../../mission/contract.ts";
-import type { ExecutionSetup } from "../contract.ts";
+import type { ExecutionSetup, UnitRecord } from "../contract.ts";
 import type { ReviewWorkspace } from "./chain.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
@@ -94,6 +94,13 @@ export interface ReleaseTreePort {
   giveBase(tree: CommandTree): Promise<void>;
 }
 
+export interface UnitRecordPort {
+  put(
+    record: UnitRecord,
+    context: CancellationContext,
+  ): Promise<PortResult<null>>;
+}
+
 export interface ClaimPort {
   check(context: CancellationContext): Promise<PortResult<null>>;
 }
@@ -145,6 +152,7 @@ export interface ImplementPorts extends CommonPorts {
   repository: RepositoryPort;
   releaseTrees: ReleaseTreePort;
   claim: ClaimPort;
+  unitRecords: UnitRecordPort;
 }
 
 export interface ImplementHostPorts extends ImplementPorts {
@@ -180,6 +188,7 @@ export const IMPLEMENT_PORTS = [
   "releaseTrees.give",
   "releaseTrees.giveBase",
   "claim.check",
+  "unitRecords.put",
 ] as const satisfies readonly PortNameOf<ImplementPorts>[];
 
 export const IMPLEMENT_HOST_PORTS = [

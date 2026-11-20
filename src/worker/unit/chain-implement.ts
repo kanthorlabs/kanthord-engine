@@ -154,6 +154,7 @@ function implementPortsOf(ports: ImplementHostPorts): ImplementPorts {
     repository: ports.repository,
     releaseTrees: ports.releaseTrees,
     claim: ports.claim,
+    unitRecords: ports.unitRecords,
   };
 }
 

@@ -375,6 +375,8 @@ export class ExecutionRun {
       result.type === OperationResultType.Failure
         ? result.error.error.code
         : null;
+    if (isExecutionEnd(result))
+      this.store(this.stopWith(EndReason.Revoked, code, null, null));
     return { kind: PortResultKind.Failed, code, message: code ?? result.type };
   }
 

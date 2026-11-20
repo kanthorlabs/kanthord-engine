@@ -9,7 +9,7 @@ export const unitsPlan: Step<unknown, "state", "plan"> = {
   reads: ["state"],
   writes: ["plan"],
   stops: [],
-  note: "verdict rule, done records, pending units",
+  note: "verdict rule, unit records, pending units",
   async run({ state }, scope) {
     return next(scope, { plan: await startCheck(state) });
   },

@@ -202,7 +202,12 @@ Each commit of the execution has the header `<commit_type>: <subject>` with no s
 The subject of a task commit is the task `name`. The subject of a node unit commit and of a verdict commit is the node `name`.
 The subject of a merge commit is `merge <base branch>`. The subject of a checkpoint commit is the `name` of the current unit.
 The subject starts with a lowercase letter and is cut so that the header holds at most 100 characters. The subject then loses every final full stop and space.
-The body holds the unit identity on its own line. A passed unit adds the `Kanthord-Done` trailer after a blank line.
+The body holds the unit identity on its own line. The worker amends no commit, so the head of each checkout changes only at a gate commit.
+After a unit passes its own commands, the worker takes each checkout whose head is a gate commit of that unit run. It sends `worker.execution.unit_record.put` with one `commits` item for each taken checkout, and logs `unit recorded`. A unit run with no such checkout sends no put and logs `unit record skipped`. In a node with tasks, the node unit writes no record.
+A failed put logs `unit record failed` with the `code`, stores no stop and ends nothing. An execution-end answer of the put ends the execution as `revoked`.
+After the base merge at the start, the worker runs `git rev-list origin/<base_branch>..HEAD` once in each checkout. A unit record is valid when its `content_digest` equals the digest of the current unit content and each commit is in the list of the checkout of its `binding_id`. The plan skips each unit with a valid record. A rebuilt node branch, a new attempt from `base_branch` or a changed unit content reopens the unit.
+A unit counts as completed for the budget-end release when it passes, a checkout head holds its gate commit, and the plan found no valid record for it. The result of the put does not change the count.
+A local `tasks run` answers the put itself and appends it to `outbox.json`. The seed `setup` takes an optional `unit_records`.
 It then submits one evidence with one `repository` asset for each binding in binding order.
 
 The five human reads follow [inspection operations](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/worker-service.impl.md#inspection-operations).

@@ -180,8 +180,11 @@ suite("worker tasks run replay", () => {
       });
       const outbox = JSON.parse(
         readFileSync(join(folder, "outbox.json"), "utf8"),
-      ) as unknown[];
-      assert.equal(outbox.length, ONE_CALL);
+      ) as { operation: string }[];
+      assert.deepEqual(
+        outbox.map(({ operation }) => operation),
+        ["mission.evidence.submit", "worker.execution.unit_record.put"],
+      );
       assert.equal(
         readFileSync(join(checkoutOf(folder), "ran.txt"), "utf8"),
         BASH_OUTPUT,

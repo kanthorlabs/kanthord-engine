@@ -39,8 +39,8 @@ import {
   commitOnNode,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   task,
 } from "./test-support.ts";
 
@@ -54,15 +54,15 @@ const STRAY_FILE = "stray.txt";
 const ONE_RELEASE = 1;
 
 suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("the start check plans each task with no done record for its current content", async (t) => {
+  test("the start check plans each task with no valid unit record for its current content", async (t) => {
     const tasks = [
       task("open", "touch dirty; false"),
       task("done", "true"),
       task("revised", "true"),
     ];
     const h = await fixture(t, tasks, []);
-    await recordDone(h, tasks[1]!);
-    await recordDone(h, {
+    await recordUnit(h, tasks[1]!);
+    await recordUnit(h, {
       ...tasks[2]!,
       content: { ...tasks[2]!.content, criterion: "earlier" },
     });
@@ -99,7 +99,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       tasks,
       content: { ...NODE_CONTENT, verifications: [nodeCommand] },
     } as unknown as Revision;
-    for (const current of tasks) await recordDone(h, current);
+    for (const current of tasks) await recordUnit(h, current);
     h.verdict = {
       source: VerdictSource.Rework,
       text: "The route stays unhandled.",
@@ -353,7 +353,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     } as unknown as Revision;
   }
 
-  test("an implement node with no task plans the node unit until a done record matches the node content", async (t) => {
+  test("an implement node with no task plans the node unit until a valid unit record matches the node content", async (t) => {
     const h = await fixture(t, [], []);
     h.revision = nodeUnitRevision("true");
     const nodeId = h.input.claim.node_id;
@@ -361,7 +361,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       (await startCheck(h)).pending.map((pending) => pending.task.id),
       [nodeId],
     );
-    await recordDone(h, nodeUnitOf(nodeId, h.revision));
+    await recordUnit(h, nodeUnitOf(nodeId, h.revision));
     assert.deepEqual((await startCheck(h)).pending, []);
     h.revision = nodeUnitRevision("false");
     assert.deepEqual(

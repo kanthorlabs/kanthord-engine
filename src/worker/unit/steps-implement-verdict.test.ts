@@ -5,8 +5,6 @@ import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
-import { doneTrailerOf } from "./done-record.ts";
-import { nodeUnitOf } from "./release-gate.ts";
 import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -31,8 +29,8 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   releasedRoot,
   task,
   TEST_SSH_ACCESS,
@@ -167,7 +165,7 @@ async function verdictHarness(
 ) {
   const current = task("judged", "true");
   const h = await fixture(t, [current], script, undefined, names);
-  await recordDone(h, current);
+  await recordUnit(h, current);
   return { h, current };
 }
 
@@ -377,7 +375,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       content: { ...base.content, verifications: [node, "true"] },
     };
     const h = await fixture(t, [current], script);
-    await recordDone(h, current);
+    await recordUnit(h, current);
     h.revision = {
       ...h.revision,
       content: { ...h.revision.content, verifications: [node] },
@@ -407,7 +405,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a setup budget end before the empty list of a verdict unit writes no done record and releases further work", async (t) => {
+  test("a setup budget end before the empty list of a verdict unit writes no unit record and releases further work", async (t) => {
     const { h, count } = await liveNodeHarness(t, [
       write("verdict"),
       fauxAssistantMessage("addressed"),
@@ -424,14 +422,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     assert.ok("furtherWork" in end && end.furtherWork);
     assert.equal((bodies[0] as { further_work: boolean }).further_work, true);
-    const log = await simpleGit(releasedRoot(h)).raw([
-      "log",
-      "--format=%B",
-      h.nodeBranch,
-    ]);
     assert.equal(
-      log.includes(
-        doneTrailerOf(nodeUnitOf(h.input.claim.node_id, h.revision)),
+      h.input.setup.unit_records.some(
+        ({ unit_id }) => unit_id === h.input.claim.node_id,
       ),
       false,
     );
@@ -582,7 +575,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
         fauxAssistantMessage("never"),
       ],
     );
-    await recordDone(h, judged);
+    await recordUnit(h, judged);
     h.verdict = verdictAt(VERDICT, h.checkouts);
     await releasedEnd(h);
     assert.equal(h.provider.calls.length, FOUR_TURNS);

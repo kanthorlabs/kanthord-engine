@@ -22,6 +22,7 @@ import {
   PortResultKind,
   type ReleaseTreePort,
   type RepositoryPort,
+  type UnitRecordPort,
 } from "./foundry-ports.ts";
 import {
   checkoutDetached,
@@ -367,6 +368,24 @@ export function agentOpenPort(host: AgentHost): AgentPort {
   };
 }
 
+function unitRecordPort(run: ExecutionRun): UnitRecordPort {
+  return {
+    async put(record) {
+      const answer = await run.callNoHalt((clientOptions) =>
+        run.clients.worker["execution.unit_record.put"](
+          {
+            params: { execution_id: run.claim.execution_id },
+            query: {},
+            body: record,
+          },
+          clientOptions,
+        ),
+      );
+      return answer.kind === PortResultKind.Ok ? ok(null) : answer;
+    },
+  };
+}
+
 function claimPort(run: ExecutionRun): ClaimPort {
   return {
     async check() {
@@ -442,5 +461,6 @@ export function workerPorts(
     repository: repositoryPort(input, run),
     releaseTrees: releaseTreePort(input, run),
     claim: claimPort(run),
+    unitRecords: unitRecordPort(run),
   };
 }

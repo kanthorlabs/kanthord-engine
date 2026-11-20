@@ -14,7 +14,7 @@ import {
   ExecutionStop,
 } from "./execution-stop.ts";
 import { type ReleaseGate, ReleaseGateKind } from "./release-gate.ts";
-import { doneRecordPut } from "./step-done-record-put.ts";
+import { unitRecordPut } from "./step-unit-record-put.ts";
 import { type HostInput, hostOf, seedOf } from "./chain-host.ts";
 import { openUnit, unitScopeOf } from "./step-unit-enter.ts";
 import {
@@ -83,7 +83,7 @@ export async function runTask(
   openUnit(state, scope);
   const end = await runNodes(
     {
-      nodes: [loopNode("revisions", revisionsFrame), stepNode(doneRecordPut)],
+      nodes: [loopNode("revisions", revisionsFrame), stepNode(unitRecordPut)],
       seed: { state },
       scope,
     },

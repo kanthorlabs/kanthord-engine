@@ -31,9 +31,9 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   nextExecution,
-  recordDone,
   recordReleases,
   recordSpans,
+  recordUnit,
   task,
 } from "./test-support.ts";
 
@@ -147,7 +147,7 @@ suite(
           fauxAssistantMessage("never"),
         ],
       );
-      await recordDone(h, passing);
+      await recordUnit(h, passing);
       h.verdict = {
         source: VerdictSource.Rework,
         text: "The verdict names no task.",
@@ -244,7 +244,7 @@ suite(
       );
       assert.deepEqual(await runTask(h, current), {
         kind: TaskResultKind.Complete,
-        recorded: false,
+        committed: false,
       });
     });
 
