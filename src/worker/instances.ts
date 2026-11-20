@@ -17,9 +17,10 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { packageVersion } from "../kernel/version.ts";
 import type { LoginSessionEntry } from "../llm/contract.ts";
 import { UnreachableReason } from "../tracking/contract.ts";
-import type {
-  ExecutionEnds,
-  MissionCollaborations,
+import {
+  type ExecutionEnds,
+  InstanceLoss,
+  type MissionCollaborations,
 } from "../mission/contract.ts";
 import { getWorkerDeclaration } from "./catalog.ts";
 import {
@@ -81,6 +82,7 @@ export const INSTANCE_CONNECTED_LOG = "worker.instance.connected";
 export const INSTANCE_DISCONNECTED_LOG = "worker.instance.disconnected";
 const STOP_ORDER_FAILED = "worker.instance.stop_order_failed";
 const CONNECTION_LOG_FAILED = "worker.instance.connection_log_failed";
+const LOSS_FAILED = "worker.instance.loss_failed";
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
 const ZERO_BYTE = 0;
@@ -111,6 +113,7 @@ export interface InstanceDependencies {
   ) => { execution_id: string } | null;
   archiveHeld: (tx: Transaction, holder: string, now: number) => void;
   revokeForInstanceArchive: MissionCollaborations["revokeForInstanceArchive"];
+  revokeForInstanceLoss: MissionCollaborations["revokeForInstanceLoss"];
   revokePausedClaim: MissionCollaborations["revokePausedClaim"];
   executionReleased: MissionCollaborations["executionReleased"];
   reportExecutionEnds: MissionCollaborations["reportExecutionEnds"];
@@ -529,7 +532,39 @@ export class WorkerInstances implements WorkerInstanceLookups {
           CONNECTION_LOG_FAILED,
         );
       }
+      this.releaseLostExecutions(instanceId);
     }
+  }
+
+  private releaseLostExecutions(instanceId: string): void {
+    try {
+      const ends = this.dependencies.store.transaction((tx) =>
+        this.revokeLostExecutions(tx, instanceId),
+      );
+      this.reportExecutionEnds(ends);
+    } catch (error) {
+      this.dependencies.logger.error(
+        { err: asError(error), instance_id: instanceId },
+        LOSS_FAILED,
+      );
+    }
+  }
+
+  private revokeLostExecutions(
+    tx: Transaction,
+    instanceId: string,
+  ): ExecutionEnds[] {
+    const instance = readInstanceById(tx, instanceId)?.name;
+    if (instance === undefined) return [];
+    return this.liveExecutionsOf(tx, revisionIdsOf(tx, instance))
+      .filter(({ execution_id }) => this.orderOf(execution_id) === null)
+      .flatMap(({ execution_id }) => {
+        const ends = this.dependencies.revokeForInstanceLoss(tx, execution_id, {
+          instance,
+          loss: InstanceLoss.HeartbeatLost,
+        });
+        return ends ? [ends] : [];
+      });
   }
 
   private openConnection(

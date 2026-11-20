@@ -559,6 +559,12 @@ export class WorkerService implements Service {
           instance,
           actor,
         ),
+      revokeForInstanceLoss: (tx, executionId, options) =>
+        dependencies.instanceArchive.revokeForInstanceLoss(
+          tx,
+          executionId,
+          options,
+        ),
       revokePausedClaim: (executionId) =>
         dependencies.instanceArchive.revokePausedClaim(executionId),
       executionReleased: (executionId, stop) =>

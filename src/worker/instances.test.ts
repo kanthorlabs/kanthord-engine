@@ -34,6 +34,7 @@ import { InstanceCleanableKind } from "../kernel/cleanup.ts";
 import type { HumanActor } from "../kernel/actor.ts";
 import {
   type ExecutionEnds,
+  InstanceLoss,
   type ReleaseStop,
   RevokeCause,
 } from "../mission/contract.ts";
@@ -238,6 +239,7 @@ function instanceFixture(
   const scopes: HolderScope[] = [];
   const unended = new Map<string, string>();
   const revoked: string[] = [];
+  const lost: { executionId: string; instance: string; loss: string }[] = [];
   const archivers: { instance: string; actor: HumanActor }[] = [];
   const reports: { ends: ExecutionEnds; inTransaction: boolean }[] = [];
   const released: { executionId: string; stop: ReleaseStop | null }[] = [];
@@ -248,6 +250,7 @@ function instanceFixture(
   const revocation = {
     failure: null as Error | null,
     archiveFailure: null as Error | null,
+    lossFailure: null as Error | null,
     only: null as string | null,
     claims: false,
   };
@@ -322,7 +325,11 @@ function instanceFixture(
           ? { lost: [], revoked: [revokedClaimOf(executionId)] }
           : ANSWERED_ENDS;
       },
-      revokeForInstanceLoss: unexpected,
+      revokeForInstanceLoss: (_tx, executionId, options) => {
+        if (revocation.lossFailure) throw revocation.lossFailure;
+        lost.push({ executionId, ...options });
+        return ANSWERED_ENDS;
+      },
       revokePausedClaim: (executionId) => {
         pausedRevocation.revoked.push(executionId);
         return pausedRevocation.answer;
@@ -539,6 +546,7 @@ function instanceFixture(
     scopes,
     unended,
     revoked,
+    lost,
     archivers,
     reports,
     revocation,
@@ -2234,4 +2242,78 @@ test("a pause order past the deadline ends a pending archive of its instance whe
   f.worker().instances.sweepStopOrders();
   assert.equal(f.worker().instances.liveInstance(box.record.id), null);
   assert.equal(f.worker().orderOf(box.executionId), null);
+});
+
+const LOSS_FAILED_RECORD = "worker.instance.loss_failed";
+
+function frozenClock(t: TestContext) {
+  const clock = { now: Date.now() };
+  t.mock.method(Date, "now", () => clock.now);
+  return clock;
+}
+
+test("an instance with a heartbeat older than the window loses its live execution at the next connection sweep", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.HeartbeatLost,
+    },
+  ]);
+  assert.equal(f.reports.length, SINGLE_CALL);
+  assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("a heartbeat exactly as old as the window keeps the execution", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  await connectedBusy(f);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("an execution with a stop order is not revoked by the connection sweep", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("a second connection sweep of the same lapsed connection revokes nothing again", async (t) => {
+  const clock = frozenClock(t);
+  const f = instanceFixture(t);
+  await connectedBusy(f);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  f.worker().instances.sweepConnections();
+  assert.equal(f.lost.length, SINGLE_CALL);
+  assert.equal(f.reports.length, SINGLE_CALL);
+});
+
+test("a failed loss revoke logs the error and the sweep continues with the next instance", async (t) => {
+  const clock = frozenClock(t);
+  const { f, records } = loggingFixture(t);
+  const first = await connectedBusy(f);
+  await connectedBusy(f, SECOND_INSTANCE_NAME);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  f.worker().instances.sweepConnections();
+  const failed = records(LOSS_FAILED_RECORD);
+  assert.equal(failed.length, TWO_CALLS);
+  assert.equal(failed[0].level, ERROR_LEVEL);
+  assert.equal(failed[0].instance_id, first.record.id);
+  assert.equal(records(DISCONNECTED_RECORD).length, TWO_CALLS);
 });
