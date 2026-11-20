@@ -526,7 +526,6 @@ interface ConflictMetric {
   model_turns: AttributeValue | null;
   end: AttributeValue | null;
   release_owner_failed: AttributeValue | null;
-  release_owner_failed_count: AttributeValue | null;
 }
 
 function conflictMetricOf(attributes: Attributes): ConflictMetric {
@@ -535,7 +534,6 @@ function conflictMetricOf(attributes: Attributes): ConflictMetric {
     model_turns: attributes[ConflictAttribute.ModelTurns] ?? null,
     end: attributes[ConflictAttribute.End] ?? null,
     release_owner_failed: null,
-    release_owner_failed_count: null,
   };
 }
 
@@ -551,14 +549,10 @@ function conflictsOf(records: readonly TelemetryRecord[]): ConflictMetric[] {
       conflicts.push(conflict);
       pending.push(conflict);
     }
-    const failed = attributes[ConflictAttribute.OwnerFailed];
-    if (record.operation !== SpanOperation.ReleaseGate || failed === undefined)
-      continue;
-    for (const conflict of pending) {
-      conflict.release_owner_failed = failed;
-      conflict.release_owner_failed_count =
-        attributes[ConflictAttribute.OwnerFailedCount] ?? null;
-    }
+    if (record.operation !== SpanOperation.ReleaseGate) continue;
+    for (const conflict of pending)
+      conflict.release_owner_failed =
+        attributes[ConflictAttribute.OwnerFailed] ?? null;
     pending = [];
   }
   return conflicts;

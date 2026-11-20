@@ -1,6 +1,6 @@
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
 import {
-  conflictOwnerFailures,
+  conflictOwnerFailed,
   type ReleaseNote,
   releaseOutcome,
 } from "./release-gate.ts";
@@ -21,7 +21,7 @@ export const releaseRoute: FoundryStep<
   note: "passed -> leave release_rounds; routed -> owner unit, next round",
   async run(ctx, scope) {
     const route = releaseOutcome(ctx.state, ctx.releaseCheck, scope);
-    scope.conflictOwnerFailures = conflictOwnerFailures(
+    scope.conflictOwnerFailed = conflictOwnerFailed(
       ctx.state,
       ctx.releaseCheck,
     );

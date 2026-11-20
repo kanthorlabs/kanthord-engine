@@ -92,7 +92,7 @@ export interface AffectedNote {
 }
 
 export interface ReleaseNote extends AffectedNote {
-  conflictOwnerFailures: number | null;
+  conflictOwnerFailed: boolean | null;
 }
 
 export interface VerifiedRelease {
@@ -189,19 +189,20 @@ export function releaseOutcome(
   return routedRelease(state, verified);
 }
 
-export function conflictOwnerFailures(
+export function conflictOwnerFailed(
   state: StepsState,
   verified: VerifiedRelease,
-): number | null {
+): boolean | null {
   const touched = state.conflictOwners;
   if (touched === undefined) return null;
   delete state.conflictOwners;
+  if (touched === null) return null;
   const { checked, owners } = verified;
-  if (checked.setup) return NO_ITEMS;
-  return checked.run.verification.results.filter(
+  if (checked.setup) return false;
+  return checked.run.verification.results.some(
     (result, index) =>
       result.exit_code !== EXIT_SUCCESS && touched.includes(owners[index]!.id),
-  ).length;
+  );
 }
 
 function firstFailedIndex(run: VerificationRun): number {

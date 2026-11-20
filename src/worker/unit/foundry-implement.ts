@@ -85,7 +85,7 @@ export interface ImplementInput extends FoundryControl {
   setupInstruction: string | null;
   progress: ProgressCtx;
   agent: NativeAgent;
-  conflictOwners?: readonly string[];
+  conflictOwners?: readonly string[] | null;
 }
 
 export interface ImplementResult {
@@ -161,7 +161,7 @@ export const releaseGateFrame: LoopFrame<ReleaseNote> = {
   init: (ctx, outer) => {
     const round = outer as RoundScope | null;
     if (round?.planned) ctx.state.unchangedTurns = NO_UNCHANGED_TURNS;
-    return { verdict: null, conflictOwnerFailures: null };
+    return { verdict: null, conflictOwnerFailed: null };
   },
   body: [
     stepNode(baseFetch),
@@ -189,7 +189,7 @@ export const releaseGateFrame: LoopFrame<ReleaseNote> = {
           ? {}
           : { [RELEASE_GATE_AFFECTED]: scope.verdict }),
         ...("unit" in gate ? { [RELEASE_GATE_UNIT_ID]: gate.unit.id } : {}),
-        ...conflictOwnerAttributes(scope.conflictOwnerFailures),
+        ...conflictOwnerAttributes(scope.conflictOwnerFailed),
       },
     };
   },
@@ -265,7 +265,10 @@ function stateOf(input: ImplementInput, ports: ImplementPorts): StartState {
     ...input.progress,
     ...(input.conflictOwners === undefined
       ? {}
-      : { conflictOwners: [...input.conflictOwners] }),
+      : {
+          conflictOwners:
+            input.conflictOwners === null ? null : [...input.conflictOwners],
+        }),
   };
 }
 

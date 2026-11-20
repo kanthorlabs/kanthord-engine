@@ -1,6 +1,10 @@
 import { perCheckout } from "./per-checkout.ts";
 import { relative } from "node:path";
-import type { Context } from "../../kernel/context.ts";
+import {
+  type Context,
+  ContextCancelled,
+  DeadlineExceeded,
+} from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate, templateUses } from "../../agent/prompt-templates.ts";
@@ -147,8 +151,7 @@ async function mergeUnder(
       files: conflicts,
       message,
     };
-    await conflictTurn(state, { checkout, base, merge, context });
-    if (state.agent.budget.exhausted()) {
+    if (await conflictTurn(state, { checkout, base, merge, context })) {
       const left = await markersLeft(state, merge, context);
       const everyMarked = conflicts.every((file) => marked.includes(file));
       state.openMerge = {
@@ -177,7 +180,7 @@ interface ConflictTurn {
 async function conflictTurn(
   state: StepsState,
   turn: ConflictTurn,
-): Promise<void> {
+): Promise<boolean> {
   const { checkout, base, merge } = turn;
   await noteConflictOwners(state, turn);
   const templates = state.input.setup.templates;
@@ -189,11 +192,18 @@ async function conflictTurn(
   const instruction = conflictInstruction(
     templates,
     templateUses(templates[PromptTemplate.Conflict], BASE_CHANGES)
-      ? { ...prompt, base_changes: await baseChanges(state, turn) }
+      ? {
+          ...prompt,
+          base_changes: await withinGit(
+            state.ports.telemetry,
+            GitStep.MergeBase,
+            () => baseChanges(state, turn),
+          ),
+        }
       : prompt,
     merge.files,
   );
-  await measuredConflict(state, merge.files.length, () =>
+  return measuredConflict(state, merge.files.length, () =>
     gatedAgent(state, merge.message, merge).instruct(
       nodeWork(state),
       instruction,
@@ -262,25 +272,52 @@ async function noteConflictOwners(
   state: StepsState,
   turn: ConflictTurn,
 ): Promise<void> {
-  const bodies = await nodeSideBodies(
-    {
-      env: state.input.env,
-      directory: turn.merge.directory,
-      context: turn.context,
-      deadlineMs: state.input.claim.expired_at - Date.now(),
-    },
-    { merged: turn.merge.commit, files: turn.merge.files },
+  const owners = await touchedUnits(state, turn);
+  const known = state.conflictOwners;
+  state.conflictOwners =
+    owners === null || known === null
+      ? null
+      : [...new Set([...(known ?? []), ...owners])];
+}
+
+async function touchedUnits(
+  state: StepsState,
+  turn: ConflictTurn,
+): Promise<string[] | null> {
+  const units = new Set([
+    state.input.claim.node_id,
+    ...state.revision.tasks.map((task) => task.id),
+  ]);
+  try {
+    const bodies = await nodeSideBodies(
+      {
+        env: state.input.env,
+        directory: turn.merge.directory,
+        context: turn.context,
+        deadlineMs: state.input.claim.expired_at - Date.now(),
+      },
+      { merged: turn.merge.commit, files: turn.merge.files },
+    );
+    return bodies.filter((body) => units.has(body));
+  } catch (error) {
+    if (cancelled(turn.context, error)) throw error;
+    return null;
+  }
+}
+
+function cancelled(context: Context, error: unknown): boolean {
+  return (
+    context.signal.aborted ||
+    error instanceof ContextCancelled ||
+    error instanceof DeadlineExceeded
   );
-  state.conflictOwners = [
-    ...new Set([...(state.conflictOwners ?? []), ...bodies]),
-  ];
 }
 
 async function measuredConflict(
   state: StepsState,
   fileCount: number,
   turn: () => Promise<void>,
-): Promise<void> {
+): Promise<boolean> {
   const spans = state.ports.telemetry;
   const budget = state.agent.budget;
   const spanId = spans.start({
@@ -303,7 +340,9 @@ async function measuredConflict(
     record(failedConflictEnd(state, error));
     throw error;
   }
-  record(budget.exhausted() ? ConflictEnd.BudgetEnd : ConflictEnd.Resolved);
+  const exhausted = budget.exhausted();
+  record(exhausted ? ConflictEnd.BudgetEnd : ConflictEnd.Resolved);
+  return exhausted;
 }
 
 function failedConflictEnd(state: StepsState, error: unknown): ConflictEnd {

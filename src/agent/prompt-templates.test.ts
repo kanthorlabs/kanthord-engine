@@ -14,6 +14,7 @@ import {
   TEMPLATE_DIRECTORY,
   templateDirectory,
   TemplateInvalidReason,
+  templateUses,
 } from "./prompt-templates.ts";
 
 const OVERRIDE_TEXT = "Fix it: {{rationale}}\n";
@@ -113,4 +114,31 @@ test("a render fails on a placeholder without a value", () => {
       }),
     templateInvalid(null, TemplateInvalidReason.Render),
   );
+});
+
+const USED_VARIABLE = "base_changes";
+const VARIABLE_FORMS: readonly (readonly [string, boolean])[] = [
+  ["{{base_changes}}", true],
+  ["{{{base_changes}}}", true],
+  ["{{~base_changes~}}", true],
+  ["{{#if base_changes}}x{{/if}}", true],
+  ["{{#unless base_changes}}x{{/unless}}", true],
+  ["{{#if a}}x{{else if base_changes}}y{{/if}}", true],
+  ["{{json (json base_changes)}}", true],
+  ["{{this.base_changes}}", true],
+  ["{{./base_changes}}", true],
+  ["{{#each a}}{{../base_changes}}{{/each}}", true],
+  ["{{[base_changes]}}", true],
+  ["{{@root.base_changes}}", true],
+  ['{{lookup this "base_changes"}}', true],
+  ["{{! base_changes}}", false],
+  ["{{!-- base_changes --}}", false],
+  ["\\{{base_changes}}", false],
+  ["{{> base_changes}}", false],
+  ["{{files}}", false],
+];
+
+test("templateUses finds a variable in each Handlebars form that reads it, and in no other form", () => {
+  for (const [text, used] of VARIABLE_FORMS)
+    assert.equal(templateUses(text, USED_VARIABLE), used, text);
 });

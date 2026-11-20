@@ -34,7 +34,6 @@ import {
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
-const NO_FAILURES = 0;
 const COMMIT_INPUT_KIND = "repository";
 const DIGEST_SEPARATOR = ",";
 const LIST_BYTES_MAX = 16384;
@@ -438,7 +437,6 @@ export const ConflictAttribute = {
   ModelTurns: "kanthord.conflict.model_turns",
   End: "kanthord.conflict.end",
   OwnerFailed: "kanthord.conflict.owner_failed",
-  OwnerFailedCount: "kanthord.conflict.owner_failed_count",
 } as const;
 
 export interface ConflictFacts {
@@ -463,11 +461,6 @@ export function conflictEnd(facts: ConflictFacts): SpanEnd {
   };
 }
 
-export function conflictOwnerAttributes(failures: number | null): Attributes {
-  if (failures === null) return {};
-  assert.ok(Number.isSafeInteger(failures));
-  return {
-    [ConflictAttribute.OwnerFailed]: failures > NO_FAILURES,
-    [ConflictAttribute.OwnerFailedCount]: failures,
-  };
+export function conflictOwnerAttributes(failed: boolean | null): Attributes {
+  return failed === null ? {} : { [ConflictAttribute.OwnerFailed]: failed };
 }
