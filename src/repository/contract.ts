@@ -60,6 +60,13 @@ export const HostKeyErrorCode = {
   Unpinned: "repository.host_key.unpinned",
 } as const;
 
+export interface ProbePushInput {
+  address: string;
+  baseCommit: string;
+  branch: string;
+  deadlineMs: number;
+}
+
 export interface SshKeyAccess {
   private_key: string;
   public_key: string;

@@ -83,16 +83,13 @@ export function localRepositoryFiles(
   probes: string[] = [],
 ): RepositoryFiles {
   return {
-    probePush: async (_address, baseCommit, branch, context, deadlineMs) => {
+    probePush: async (input, context) => {
       await repositoryFiles.probePush(
-        bare,
-        baseCommit,
-        branch,
+        { ...input, address: bare },
         context,
-        deadlineMs,
         LOCAL_GIT_SSH_ACCESS,
       );
-      probes.push(branch);
+      probes.push(input.branch);
     },
     resolveBranchCommit: (_address, branch, context, deadlineMs) =>
       repositoryFiles.resolveBranchCommit(

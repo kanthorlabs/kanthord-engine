@@ -95,8 +95,8 @@ async function memoryRepository(
       ),
     listFilesAtCommit: async () => [],
     readObjectIds: async (_address, _commit, paths) => paths.map(() => null),
-    probePush: async (_address, _commit, branch) => {
-      probes.push(branch);
+    probePush: async (input) => {
+      probes.push(input.branch);
     },
     cloneSnapshot: async (_address, revision, directory) => {
       cpSync(seed, directory, { recursive: true });

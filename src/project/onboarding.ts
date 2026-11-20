@@ -21,7 +21,7 @@ import {
   type ReviewFlow,
   WorkerPlacement,
 } from "./contract.ts";
-import type { GroupResolution } from "./environment.ts";
+import type { BindingProbeInput, GroupResolution } from "./environment.ts";
 import type {
   EnvironmentAgent,
   EnvironmentSessionHandle,
@@ -166,12 +166,7 @@ export interface OnboardingDependencies {
     context: Context,
   ): Promise<GroupResolution>;
   baseCommitOf(bindingId: string, context: Context): Promise<string>;
-  probePush(
-    bindingId: string,
-    commit: string,
-    runId: string,
-    context: Context,
-  ): Promise<void>;
+  probePush(input: BindingProbeInput, context: Context): Promise<void>;
   freeDisk(): Promise<DiskSpace>;
   diskFreeRatio: number;
   runtime: EnvironmentRuntime;
@@ -1422,9 +1417,7 @@ export class Onboarding {
     }
     try {
       await this.dependencies.probePush(
-        record.binding_id,
-        record.commit,
-        runId,
+        { bindingId: record.binding_id, commit: record.commit, runId },
         { signal, deadline: null },
       );
     } catch (error) {

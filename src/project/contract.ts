@@ -35,6 +35,7 @@ import {
   InstructionFileState,
 } from "../agent/contract.ts";
 import {
+  type ProbePushInput,
   type RepositoryFile,
   SSH_AGENT_CLEANUP_TIMEOUT_MS,
   type SshAccess,
@@ -741,11 +742,8 @@ export type RepositoryFiles = {
     ssh: SshAccess,
   ): Promise<string>;
   probePush(
-    address: string,
-    baseCommit: string,
-    branch: string,
+    input: ProbePushInput,
     context: Context,
-    deadlineMs: number,
     ssh: SshAccess,
   ): Promise<void>;
 };

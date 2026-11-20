@@ -237,7 +237,16 @@ test("probePush pushes the base commit to the probe branch, deletes it and leave
   const hook = join(bare, "hooks", "pre-receive");
   await writeFile(hook, `#!/bin/sh\ncat >> "${received}"\n`);
   await chmod(hook, HOOK_MODE);
-  await probePush(address, base, PROBE_BRANCH, background, DEADLINE_MS, ssh);
+  await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
+    background,
+    ssh,
+  );
   const updates = (await readFile(received, "utf8")).trim().split("\n");
   assert.equal(updates.length, PROBE_UPDATES);
   assert.match(
@@ -263,11 +272,13 @@ test("probePush throws the hook text of a refused push and leaves no probe branc
   );
   await chmod(hook, HOOK_MODE);
   const failure = await probePush(
-    address,
-    base,
-    PROBE_BRANCH,
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
     background,
-    DEADLINE_MS,
     ssh,
   ).then(
     () => assert.fail("A refused push must fail."),

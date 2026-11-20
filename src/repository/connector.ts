@@ -27,6 +27,7 @@ import {
 } from "../kernel/git-environment.ts";
 import {
   type CheckoutResult,
+  type ProbePushInput,
   type PushRecord,
   RepositoryErrorCode,
   type RepositoryFile,
@@ -1043,13 +1044,11 @@ async function pushSnapshotWith(
 }
 
 export async function probePush(
-  address: string,
-  baseCommit: string,
-  branch: string,
+  input: ProbePushInput,
   context: Context,
-  deadlineMs: number,
   ssh: SshAccess,
 ): Promise<void> {
+  const { address, baseCommit, branch, deadlineMs } = input;
   assert.match(baseCommit, COMMIT_PATTERN);
   assert.ok(!branch.startsWith(OPTION_PREFIX));
   const deadlineAt = Date.now() + deadlineMs;

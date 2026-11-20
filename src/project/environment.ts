@@ -79,6 +79,11 @@ export interface GroupResolution {
   files: RepositoryFile[];
   reason?: string;
 }
+export interface BindingProbeInput {
+  bindingId: string;
+  commit: string;
+  runId: string;
+}
 interface ProbedResolution {
   resolution: GroupResolution;
   probed: RepositoryFile[];
@@ -603,12 +608,8 @@ export class ProjectEnvironments {
     );
   }
 
-  async probePush(
-    bindingId: string,
-    commit: string,
-    runId: string,
-    context: Context,
-  ): Promise<void> {
+  async probePush(input: BindingProbeInput, context: Context): Promise<void> {
+    const { bindingId, commit, runId } = input;
     const config = this.dependencies.store.transaction((tx) => {
       const binding = readBindingRevision(tx, bindingId);
       assert.ok(binding);
@@ -616,11 +617,13 @@ export class ProjectEnvironments {
     });
     const { address, ssh } = this.access(bindingId, config);
     await this.dependencies.repositoryFiles.probePush(
-      address,
-      commit,
-      `${PREFLIGHT_BRANCH_PREFIX}${runId}`,
+      {
+        address,
+        baseCommit: commit,
+        branch: `${PREFLIGHT_BRANCH_PREFIX}${runId}`,
+        deadlineMs: ENVIRONMENT_CLONE_TIMEOUT_MS,
+      },
       context,
-      ENVIRONMENT_CLONE_TIMEOUT_MS,
       ssh,
     );
   }

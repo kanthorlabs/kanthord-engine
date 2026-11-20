@@ -430,7 +430,7 @@ class Harness {
         if (this.headCommit instanceof Error) throw this.headCommit;
         return this.headCommit;
       },
-      probePush: async (bindingId, commit, runId) => {
+      probePush: async ({ bindingId, commit, runId }) => {
         this.order.push("probePush");
         this.probeCalls.push({ bindingId, commit, runId });
         if (this.probeError !== null) throw this.probeError;

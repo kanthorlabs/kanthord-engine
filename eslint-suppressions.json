@@ -980,7 +980,7 @@
   },
   "src/project/environment.ts": {
     "@typescript-eslint/max-params": {
-      "count": 13
+      "count": 12
     },
     "kanthord/no-inline-param-type": {
       "count": 3
@@ -1019,7 +1019,7 @@
   },
   "src/repository/connector.ts": {
     "@typescript-eslint/max-params": {
-      "count": 34
+      "count": 33
     },
     "kanthord/no-inline-param-type": {
       "count": 2
