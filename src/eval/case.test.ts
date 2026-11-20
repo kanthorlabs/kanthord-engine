@@ -28,6 +28,7 @@ const RETRIES = "retries";
 const DEFAULT_RETRIES = 2;
 const NO_ITEMS = 0;
 const SINGLE = 1;
+const TWO_TURNS = 2;
 const ASSET_FILE = "report.txt";
 const FIXTURE = JSON.stringify({
   entries: [
@@ -300,4 +301,26 @@ test("security: argument guard - a case grant that is not a list of ids fails th
     parseCase(source(`${caseText()}\ngrant: mission.node.pause`)),
   );
   assert.deepEqual(parseCase(source(caseText())).grant, []);
+});
+
+test("(regression: F131) fork-summary-discard loads with one human turn, a fork turn and the summary and final state checks", () => {
+  const [discard] = loadSuite("ops@1", ["fork-summary-discard"]);
+  assert.equal(discard!.turns.length, TWO_TURNS);
+  assert.equal(discard!.turns.filter((turn) => "human" in turn).length, SINGLE);
+  assert.deepEqual(discard!.turns[SINGLE], { fork: { text: "Carry on." } });
+  assert.deepEqual(discard!.checks.summary_contains, [
+    "discard",
+    "{{p.node.node-x.md}}",
+  ]);
+  assert.deepEqual(discard!.checks.final_state, [
+    {
+      operation_id: "mission.node.get",
+      input: {
+        params: { node_id: "{{p.node.node-x.md}}" },
+        query: {},
+        body: null,
+      },
+      expect: { state: "Blocked" },
+    },
+  ]);
 });

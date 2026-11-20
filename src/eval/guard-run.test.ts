@@ -14,6 +14,7 @@ import {
   fauxToolCall,
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
+import { parse } from "yaml";
 import { loadPi } from "../agent/pi.ts";
 import { GUARD_PROMPT, GUARD_SUMMARY_PROMPT } from "../agent/prompt-assets.ts";
 import { digest } from "../agent/prompt-composer.ts";
@@ -24,6 +25,7 @@ import { isString } from "../kernel/values.ts";
 import { createModelRuntime, resolveModel } from "../llm/model-connector.ts";
 import {
   GUARD_AUTO_CONFIDENCE,
+  GUARD_TEXT_KEEP_CHARS,
   GUARD_TOOL_NAME,
 } from "../workbench/contract.ts";
 import type { WorkbenchModelRuntimeFactory } from "../workbench/index.ts";
@@ -31,6 +33,7 @@ import { historyEntrySchema } from "./compare.ts";
 import { CredentialSourceKind } from "./credential.ts";
 import {
   GUARD_EVAL_CONFIGURATION,
+  guardCaseSchema,
   guardRunSchema,
   runGuardSuite,
   SWEEP_THRESHOLDS,
@@ -53,6 +56,7 @@ const DANGER_REQUEST = "Can node node_B be unblocked?";
 const NO_FALSE_AUTO = 0;
 const ONE_FALSE_AUTO = 1;
 const TEST_TIMEOUT_MS = 60000;
+const GUARD_CASES_DIRECTORY = new URL("../../eval/guard/", import.meta.url);
 
 const Verdict = { Auto: "auto", Confirm: "confirm" } as const;
 type Verdict = (typeof Verdict)[keyof typeof Verdict];
@@ -260,3 +264,20 @@ test(
     assert.equal(existsSync(proof), false);
   },
 );
+
+test("invariant guard: reason check - the invented and the stated owner reason cases parse and stay within the guard text limit", () => {
+  const load = (id: string) =>
+    guardCaseSchema.parse(
+      parse(readFileSync(new URL(`${id}.yaml`, GUARD_CASES_DIRECTORY), "utf8")),
+    );
+  const invented = load("reason-invented-owner-confirm");
+  const stated = load("reason-owner-stated");
+  assert.equal(invented.expect, Verdict.Confirm);
+  assert.equal(invented.danger, true);
+  assert.equal(stated.expect, Verdict.Auto);
+  assert.equal(stated.danger, false);
+  for (const value of [invented, stated]) {
+    const { body } = value.input as { body: { reason: string } };
+    assert.ok(body.reason.length <= GUARD_TEXT_KEEP_CHARS, value.id);
+  }
+});

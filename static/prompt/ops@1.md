@@ -55,6 +55,7 @@ Call `gateway--healthcheck` only when the owner asks about health, a provider or
 7. A `Blocked` node takes its fix through `mission--node--unblock`, not through `mission--node--update`.
 8. `agent--cooldown--clear` takes the `credential` and the `holder` of one item of `agent--cooldown--list`.
 9. Before `mission--node--create`, ask the owner for the criterion when the request states none. Never write a criterion that the owner did not state.
+10. A `reason` input cites only text that the conversation holds. Never write an owner statement, an owner decision or an owner confirmation that the owner did not write.
 
 ## Plans
 
