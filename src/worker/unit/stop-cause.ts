@@ -35,7 +35,6 @@ export interface StopSignals {
 
 const hostFaultReasons: readonly ResourceFailureReason[] = [
   ResourceFailureReason.HostUnreachable,
-  ResourceFailureReason.DeadlineExceeded,
 ];
 
 const stopDetailSchema = z.looseObject({

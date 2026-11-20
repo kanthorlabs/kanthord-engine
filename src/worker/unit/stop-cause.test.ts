@@ -110,6 +110,10 @@ test("a git failure of a host fault is a network cause and any other git failure
     gitFailed(ResourceFailureReason.KeyRefused),
     unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
   );
+  assert.deepEqual(
+    gitFailed(ResourceFailureReason.DeadlineExceeded),
+    unattributed([CauseCategory.Infrastructure, CauseCategory.WorkerAction]),
+  );
 });
 
 test("a prompt setup stop maps by its code and its stop detail", () => {

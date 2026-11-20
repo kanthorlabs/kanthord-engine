@@ -488,7 +488,9 @@ No query fields are accepted. The required file supplies the following fields.
   with no `cause` gives `unattributed` with no suspects.
 - A stop with the cause `infrastructure`, `network` is a host fault. It does
   not count toward `mission.consecutive_failure_limit`, and it holds the node
-  for `scheduler.stop_backoff` seconds before the next claim.
+  for `scheduler.stop_backoff` seconds before the next claim. A git step that fails
+  because the host is not reachable gets this cause. A git step that ends at
+  its deadline keeps the cause of the git step.
 - A stop that repeats the reason, the code and the detail of the stop before it
   in the same attempt pauses the node with the rule `repeated_stop`. The compare
   skips `cause`. A host-fault stop repeats like any other stop. An operator
