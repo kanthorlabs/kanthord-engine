@@ -1473,9 +1473,15 @@ components:
                         - provenance
                         - created_at
                       additionalProperties: false
+                  rule:
+                    anyOf:
+                      - type: string
+                        const: human_acceptance
+                      - type: "null"
                 required:
                   - outcome
                   - requests
+                  - rule
                 additionalProperties: false
               paused_context:
                 type: object

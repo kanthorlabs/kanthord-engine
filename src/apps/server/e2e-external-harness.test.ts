@@ -437,9 +437,31 @@ test(
           },
           auth.token,
         );
-        assert.equal(assessed.node.state, NodeState.Completed);
+        assert.equal(assessed.node.state, NodeState.Blocked);
         assert.deepEqual(assessed.assessment.dependency_node_ids, [implement]);
         assert.equal(assessed.outcome.result, SUCCESS);
+      },
+    );
+    await t.test(
+      "EX10.9b person acceptance completes the examine node",
+      async () => {
+        assert.equal((await node(examine)).state, NodeState.Blocked);
+        const mission = await cli.read<{ version: number }>([
+          "mission",
+          "get",
+          project.id,
+        ]);
+        const accepted = await cli.write<{
+          node: { state: string };
+          outcome: { result: string };
+        }>(["mission", "node", "override", examine, "--result", "success"], {
+          reason: "The person accepts the examine node.",
+          expected_mission_version: mission.version,
+          expected_state: NodeState.Blocked,
+          expected_attempt: FIRST_ATTEMPT,
+        });
+        assert.equal(accepted.node.state, NodeState.Completed);
+        assert.equal(accepted.outcome.result, SUCCESS);
       },
     );
     await t.test(
