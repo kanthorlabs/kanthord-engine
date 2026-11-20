@@ -926,6 +926,9 @@ The required-action and request sets of an `examine` node are empty.
   A human landing during a pause resolves after the resume. KanthorD merges a `kanthord` landing pull request when its
   every check of the head commit passes, except the `ignored_checks` of the binding. A merge that answers `confirmed_failure`,
   `retryable_refusal` or `unknown_outcome` runs the next round after 60 s.
+  A 502 merge answer first compares the tree of the base branch with the tree of the tested commit. Equal trees answer the
+  merge as merged and run no retry. The check of an open pull request whose head is the tested commit and whose tree equals
+  the base branch tree completes the node with the base head commit and adds no empty commit.
   A merge that fails with 403 `mission.authorization.refused` also runs the next round after 60 s. Each
   round sends a new request key. After a `final_refusal` merge answer or another merge error, the check requests no further merge of that pull request. The next server start or the next node check starts the merges again. The rounds continue while another request of the node is pending or failed.
   The warning `Deferred merge failed.` holds the class, the code and the message of a refused merge.
