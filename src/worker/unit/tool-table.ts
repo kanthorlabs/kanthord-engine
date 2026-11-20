@@ -10,6 +10,7 @@ import type { PiCodingAgent } from "../../agent/pi.ts";
 import { HostTool, type HostTools } from "../contract.ts";
 import { evidenceUploadTool, linkUpdateListTool } from "./host-tools.ts";
 export { ToolSource } from "../../agent/contract.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import {
   type BashProcess,
@@ -83,6 +84,7 @@ export function sessionTools(
   hostTools: HostTools,
   env: NodeJS.ProcessEnv,
   processes: ToolProcesses,
+  denyRead: readonly string[],
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
@@ -103,14 +105,18 @@ export function sessionTools(
       env: childEnvironment(context.env),
     }),
     operations: {
-      exec: (command, directory, execOptions) => {
+      exec: async (command, directory, execOptions) => {
         const limit = Math.floor(
           (Math.min(budget.remainingMs(), COMMAND_LIMIT_MS) - 1) /
             MILLISECONDS_PER_SECOND,
         );
-        if (limit < MINIMUM_SECONDS)
-          return Promise.reject(new Error("resource budget ended"));
+        if (limit < MINIMUM_SECONDS) throw new Error("resource budget ended");
         const applied = Math.min(execOptions.timeout ?? limit, limit);
+        const childEnv = childEnvironment(execOptions.env ?? env);
+        const wrapped = await bashSandbox.wrap(command, directory, {
+          env: childEnv,
+          denyRead,
+        });
         processes.recordTimeout(toolCallId, {
           requestedMs:
             execOptions.timeout === undefined
@@ -118,10 +124,10 @@ export function sessionTools(
               : execOptions.timeout * MILLISECONDS_PER_SECOND,
           appliedMs: applied * MILLISECONDS_PER_SECOND,
         });
-        return operations.exec(command, directory, {
+        return operations.exec(wrapped, directory, {
           ...execOptions,
           timeout: applied,
-          env: childEnvironment(execOptions.env ?? env),
+          env: childEnv,
         });
       },
     },

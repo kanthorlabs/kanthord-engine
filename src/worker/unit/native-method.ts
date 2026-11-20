@@ -59,6 +59,7 @@ export interface NativeExecutionInput {
   workspaces: WorkspaceRoot;
   hostHome: string;
   env: NodeJS.ProcessEnv;
+  denyRead: readonly string[];
   modelRuntimeFactory: ModelRuntimeFactory;
   sessionRoot?: string;
   hostTools: (workspace: string) => HostTools;
@@ -122,6 +123,7 @@ export async function runNativeExecution(
           workspace,
           hostHome: input.hostHome,
           env: input.env,
+          denyRead: input.denyRead,
           modelRuntimeFactory: input.modelRuntimeFactory,
           hostTools: input.hostTools(workspace),
           context: run.operationContext,

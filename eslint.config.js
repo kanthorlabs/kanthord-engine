@@ -532,6 +532,7 @@ export default tseslint.config(
                       "pi",
                       "pi-tools",
                       "bash-process",
+                      "bash-sandbox",
                       "agent-session",
                       "environment",
                       "catalog",

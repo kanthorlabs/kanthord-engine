@@ -36,6 +36,7 @@ async function main(): Promise<void> {
       bindings: bindings.initial(data.entries),
       directories: { data: state, log: state },
       env: process.env,
+      deny_read: data.deny_read,
       log: data.log,
       footprint: {
         residue_root: dirname(process.env.XDG_STATE_HOME!),

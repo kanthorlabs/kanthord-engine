@@ -58,6 +58,7 @@ export interface NativeAgentInput {
   workspace: string;
   hostHome: string;
   env: NodeJS.ProcessEnv;
+  denyRead: readonly string[];
   modelRuntimeFactory: ModelRuntimeFactory;
   hostTools: HostTools;
   context: Context;
@@ -336,6 +337,7 @@ export async function openNativeAgent(
         input.hostTools,
         input.env,
         processes,
+        input.denyRead,
       ),
       hostHome: input.hostHome,
       hooks: [pins.hook],

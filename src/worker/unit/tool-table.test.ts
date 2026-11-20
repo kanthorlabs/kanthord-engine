@@ -8,6 +8,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
+import { bashSandbox, createBashSandbox } from "../../agent/bash-sandbox.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   pidsIn,
@@ -23,6 +24,7 @@ import { HostTool } from "../contract.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const MODEL_TIMEOUT_SECONDS = 30;
 const TOOL_CALL = "call_bash";
+const TEMPORARY_FALLBACK = "/tmp";
 const COMMAND = "echo coder";
 const SINGLE_CALL = 1;
 
@@ -60,6 +62,10 @@ class CallRecordingProcesses extends ToolProcesses {
   }
 }
 
+function unwrapped(t: TestContext) {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
+}
+
 function runBash(
   tools: { customTools: ToolDefinition[] },
   command: string,
@@ -77,6 +83,7 @@ function runBash(
 }
 
 test("child environment removes provider keys and bash timeout stays below the budget and the command limit", async (t) => {
+  unwrapped(t);
   const env = {
     ANTHROPIC_API_KEY: "secret",
     OPENAI_API_KEY: "secret",
@@ -111,6 +118,7 @@ test("child environment removes provider keys and bash timeout stays below the b
       unusedHostTools,
       hostEnvironment(),
       recording,
+      [],
     );
   await runBash(tools(budget), "true", 3600);
   const maximumSeconds = 4;
@@ -143,6 +151,7 @@ test("child environment removes provider keys and bash timeout stays below the b
       unusedHostTools,
       hostEnvironment(),
       recording,
+      [],
     ).customTools,
     [],
   );
@@ -155,6 +164,7 @@ test("child environment removes provider keys and bash timeout stays below the b
     unusedHostTools,
     hostEnvironment(),
     processes,
+    [],
   );
   await runBash(real, "true");
   const output = await captured!.operations!.exec(
@@ -185,6 +195,7 @@ test("sessionTools of swe@1 holds both host tools under their own names and re@1
       unusedHostTools,
       hostEnvironment(),
       processes,
+      [],
     );
   const names = Object.values(HostTool);
   const swe = tools("swe@1");
@@ -205,6 +216,7 @@ test("sessionTools of swe@1 holds both host tools under their own names and re@1
 });
 
 test("bash records the requested and the applied timeout once and records nothing for a rejected exec", async (t) => {
+  unwrapped(t);
   const pi = await loadPi();
   const processes = new RecordingProcesses(pi.getShellConfig());
   const cwd = temporary(t);
@@ -224,6 +236,7 @@ test("bash records the requested and the applied timeout once and records nothin
       unusedHostTools,
       hostEnvironment(),
       processes,
+      [],
     );
   const long = budget(COMMAND_LIMIT_MS * 2, now);
   const limitSeconds = COMMAND_LIMIT_MS / MILLISECONDS_PER_SECOND - 1;
@@ -245,6 +258,7 @@ test("bash records the requested and the applied timeout once and records nothin
 });
 
 test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.operations with the child environment", async (t) => {
+  unwrapped(t);
   const pi = await loadPi();
   const processes = new CallRecordingProcesses(pi.getShellConfig());
   const cwd = temporary(t);
@@ -267,6 +281,7 @@ test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.
     unusedHostTools,
     source,
     processes,
+    [],
   );
   await runBash(tools, COMMAND);
   assert.deepEqual(processes.operationIds, [TOOL_CALL]);
@@ -279,6 +294,95 @@ test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.
   assert.deepEqual(call.env, childEnvironment(call.env));
 });
 
+function fakeSandboxRuntime() {
+  const customConfigs: {
+    filesystem?: { allowWrite: string[]; denyRead: string[] };
+  }[] = [];
+  return {
+    customConfigs,
+    runtime: {
+      initialize: async () => {},
+      wrapWithSandbox: async (
+        command: string,
+        _binShell?: string,
+        customConfig: (typeof customConfigs)[number] = {},
+      ) => {
+        customConfigs.push(customConfig);
+        return `sandboxed ${command}`;
+      },
+    },
+  };
+}
+
+function sandboxedTools(
+  pi: Awaited<ReturnType<typeof loadPi>>,
+  options: {
+    processes: ToolProcesses;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+    denyRead: string[];
+  },
+) {
+  const now = Date.now();
+  return sessionTools(
+    pi,
+    "swe@1",
+    options.cwd,
+    new ExecutionBudget({
+      created_at: now,
+      expired_at: now + COMMAND_LIMIT_MS,
+      resource_budget: { wall_time_ms: COMMAND_LIMIT_MS },
+    }),
+    unusedHostTools,
+    options.env,
+    options.processes,
+    options.denyRead,
+  );
+}
+
+test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR of the environment in allowWrite", async (t) => {
+  const pi = await loadPi();
+  const fake = fakeSandboxRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  t.mock.method(bashSandbox, "wrap", sandbox.wrap);
+  const processes = new CallRecordingProcesses(pi.getShellConfig());
+  const cwd = temporary(t);
+  const tmp = hostEnvironment().TMPDIR ?? TEMPORARY_FALLBACK;
+  const denyRead = ["/credential/directory"];
+  const tools = sandboxedTools(pi, {
+    processes,
+    cwd,
+    env: hostEnvironment(),
+    denyRead,
+  });
+  await runBash(tools, COMMAND);
+  assert.equal(processes.calls.length, SINGLE_CALL);
+  assert.equal(processes.calls[0]?.command, `sandboxed ${COMMAND}`);
+  assert.equal(processes.calls[0]?.cwd, cwd);
+  assert.deepEqual(fake.customConfigs[0]?.filesystem?.allowWrite, [cwd, tmp]);
+  assert.deepEqual(fake.customConfigs[0]?.filesystem?.denyRead, denyRead);
+});
+
+test("(security) a rejected wrap rejects the bash call, spawns no process and records no timeout", async (t) => {
+  const pi = await loadPi();
+  t.mock.method(bashSandbox, "wrap", async () => {
+    throw new Error("the bash sandbox is not available: bubblewrap is missing");
+  });
+  const processes = new CallRecordingProcesses(pi.getShellConfig());
+  const tools = sandboxedTools(pi, {
+    processes,
+    cwd: temporary(t),
+    env: hostEnvironment(),
+    denyRead: [],
+  });
+  await assert.rejects(
+    runBash(tools, COMMAND),
+    /the bash sandbox is not available: bubblewrap is missing/,
+  );
+  assert.deepEqual(processes.calls, []);
+  assert.equal(processes.takeTimeout(TOOL_CALL), undefined);
+});
+
 const TREE_TIMEOUT_SECONDS = 20;
 
 async function killedBashCall(
@@ -286,6 +390,7 @@ async function killedBashCall(
   timeout: number | undefined,
   controller: AbortController | undefined,
 ): Promise<{ message: string; spawned: number[]; ready: boolean }> {
+  unwrapped(t);
   const pi = await loadPi();
   let ready = false;
   const cwd = temporary(t);
@@ -303,6 +408,7 @@ async function killedBashCall(
     unusedHostTools,
     hostEnvironment(),
     new ToolProcesses(pi.getShellConfig()),
+    [],
   ).customTools;
   const failure: Error = await bash!
     .execute(

@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
 } from "@anthropic-ai/sandbox-runtime";
 import { platformNetworkHosts } from "../kernel/platform-hosts.ts";
 import { directories } from "../kernel/xdg.ts";
-import { piAgentDirectory } from "./pi.ts";
+import { piDirectory } from "./pi.ts";
 
 const NPM_REGISTRY_HOST = "registry.npmjs.org";
 const TEMPORARY_FALLBACK = "/tmp";
@@ -16,6 +16,8 @@ const WORKERS_DIRECTORY = "workers";
 const LOG_FILE = "kanthord.log";
 const PROJECTS_DIRECTORY = "projects";
 const ENVIRONMENTS_DIRECTORY = "environments";
+const PARENT_SEGMENT = "..";
+const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 
 const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
   allowedDomains: [NPM_REGISTRY_HOST, ...platformNetworkHosts()],
@@ -33,32 +35,70 @@ const DEFAULT_CONFIG: SandboxRuntimeConfig = {
 
 type Runtime = Pick<typeof SandboxManager, "initialize" | "wrapWithSandbox">;
 
-function overriddenConfigFile(): string[] {
-  const override = process.env.KANTHORD_CONFIG;
+function overriddenConfigFile(env: NodeJS.ProcessEnv): string[] {
+  const override = env.KANTHORD_CONFIG;
   return override ? [resolve(override)] : [];
 }
 
-function configurationOf(
+export interface SandboxHost {
+  env: NodeJS.ProcessEnv;
+  denyRead: readonly string[];
+}
+
+export interface DenyReadScope {
+  pi?: string;
+  root?: string;
+}
+
+function isWithin(ancestor: string, path: string): boolean {
+  if (!isAbsolute(ancestor)) return false;
+  const inside = relative(ancestor, path);
+  return (
+    inside !== PARENT_SEGMENT &&
+    !inside.startsWith(`${PARENT_SEGMENT}${sep}`) &&
+    !isAbsolute(inside)
+  );
+}
+
+function withoutAncestors(
+  denyRead: readonly string[],
+  paths: readonly string[],
+): string[] {
+  return denyRead.filter(
+    (denied) => !paths.some((path) => isWithin(denied, path)),
+  );
+}
+
+export function hostDenyRead(
+  env: NodeJS.ProcessEnv,
+  scope: DenyReadScope = {},
+): string[] {
+  const place = directories(env);
+  const denyRead = [
+    ...DEFAULT_CONFIG.filesystem.denyRead,
+    piDirectory(env),
+    ...(scope.pi === undefined ? [] : [scope.pi]),
+    join(place.state, WORKERS_DIRECTORY),
+    join(place.state, LOG_FILE),
+    place.config,
+    ...overriddenConfigFile(env),
+    place.data,
+    ...DATABASE_FILES.map((file) => join(place.data, file)),
+    join(place.state, PROJECTS_DIRECTORY),
+    join(place.state, ENVIRONMENTS_DIRECTORY),
+    "~/.config/kanthord-eval",
+    "~/.pi/agent",
+  ];
+  return scope.root === undefined
+    ? denyRead
+    : withoutAncestors(denyRead, [scope.root]);
+}
+
+function filesystemOf(
+  denyRead: string[],
   allowWrite: string[],
 ): SandboxRuntimeConfig["filesystem"] {
-  const place = directories(process.env);
-  return {
-    ...DEFAULT_CONFIG.filesystem,
-    denyRead: [
-      ...DEFAULT_CONFIG.filesystem.denyRead,
-      piAgentDirectory(),
-      join(place.state, WORKERS_DIRECTORY),
-      join(place.state, LOG_FILE),
-      place.config,
-      ...overriddenConfigFile(),
-      place.data,
-      join(place.state, PROJECTS_DIRECTORY),
-      join(place.state, ENVIRONMENTS_DIRECTORY),
-      "~/.config/kanthord-eval",
-      "~/.pi/agent",
-    ],
-    allowWrite,
-  };
+  return { ...DEFAULT_CONFIG.filesystem, denyRead, allowWrite };
 }
 
 export function createBashSandbox(
@@ -66,7 +106,9 @@ export function createBashSandbox(
   platform: NodeJS.Platform = process.platform,
 ) {
   let started: Promise<void> | undefined;
-  const start = async (): Promise<void> => {
+  const start = async (
+    filesystem: SandboxRuntimeConfig["filesystem"],
+  ): Promise<void> => {
     if (!SUPPORTED_PLATFORMS.includes(platform))
       throw new Error(
         `${UNAVAILABLE}: the platform ${platform} is unsupported`,
@@ -74,7 +116,7 @@ export function createBashSandbox(
     try {
       await runtime.initialize({
         ...DEFAULT_CONFIG,
-        filesystem: configurationOf([]),
+        filesystem,
       });
     } catch (cause) {
       throw new Error(
@@ -87,13 +129,15 @@ export function createBashSandbox(
     async wrap(
       command: string,
       cwd: string,
-      env: NodeJS.ProcessEnv,
+      host: SandboxHost,
     ): Promise<string> {
       assert.ok(cwd);
-      started ??= start();
+      const temporary = host.env.TMPDIR ?? TEMPORARY_FALLBACK;
+      const denied = withoutAncestors(host.denyRead, [cwd, temporary]);
+      started ??= start(filesystemOf(denied, []));
       await started;
       return runtime.wrapWithSandbox(command, undefined, {
-        filesystem: configurationOf([cwd, env.TMPDIR ?? TEMPORARY_FALLBACK]),
+        filesystem: filesystemOf(denied, [cwd, temporary]),
         network: BASH_NETWORK,
       });
     },

@@ -477,6 +477,7 @@ test(
       workspace: prepared.directory,
       hostHome,
       env: hostEnvironment(),
+      denyRead: [],
       modelRuntimeFactory: scriptedModelRuntime(provider),
       context: background,
     });
@@ -655,6 +656,7 @@ test(
         workspace: lab.directory,
         hostHome,
         env: hostEnvironment(),
+        denyRead: [],
         modelRuntimeFactory: scriptedModelRuntime(fake),
         context: background,
       });

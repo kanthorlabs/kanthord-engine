@@ -229,6 +229,7 @@ class ModelUnit implements SlotInstance {
       bindings: this.hosted.initial(wire),
       directories: { data: state, log: state },
       env,
+      deny_read: [],
       log: () => {},
       model_runtime_factory: host.runtime(name),
       repository_transport: host.repository,

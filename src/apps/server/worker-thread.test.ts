@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
+import { PassThrough } from "node:stream";
 import { MessageChannel, Worker } from "node:worker_threads";
 import { test } from "node:test";
 import { build } from "esbuild";
@@ -27,8 +28,10 @@ import {
 import { until } from "./cli-test-support.ts";
 import {
   launchEnvironment,
+  slotThreadData,
   threadEnvironment as slotThreadEnvironment,
 } from "./thread-driver.ts";
+import type { SlotLaunch } from "./slot-driver.ts";
 import {
   gatewayFixture,
   humanCaller,
@@ -37,7 +40,7 @@ import {
 } from "./test-support.ts";
 
 const CLIENT_SECRET_BYTES = 32;
-const DATA_KEYS = ["entries", "log"];
+const DATA_KEYS = ["deny_read", "entries", "log"];
 const ENTRY_KEYS = ["client_id", "client_secret", "port", "state"];
 const TWO_INSTANCES = 2;
 const SINGLE_INSTANCE = 1;
@@ -79,7 +82,7 @@ function entryOf(
 }
 
 function threadData(...entries: ThreadEntry[]) {
-  return { entries, log: LogDestination.File };
+  return { entries, log: LogDestination.File, deny_read: [] };
 }
 
 function startThread(
@@ -93,7 +96,7 @@ function startThread(
   });
 }
 
-test("the worker data of a thread holds an entry list and a log destination only", () => {
+test("the worker data of a thread holds an entry list, a log destination and a deny list only", () => {
   const { port1, port2 } = new MessageChannel();
   try {
     const data = threadData(entryOf(port1));
@@ -152,6 +155,40 @@ test("the directories of a slot thread name the slot root, not the directories o
     assert.notEqual(slot[name], server[name]);
     assert.ok(!slot[name].startsWith(`${sourceRoot}/`));
   }
+});
+
+test("(security) a slot thread gets a deny_read list of the server environment that names no ancestor of the slot workspace or TMPDIR", (t) => {
+  const serverRoot = temporary(t);
+  const serverEnv: NodeJS.ProcessEnv = {
+    PATH: hostEnvironment().PATH,
+    XDG_CONFIG_HOME: join(serverRoot, "config"),
+    XDG_STATE_HOME: join(serverRoot, "state"),
+    XDG_DATA_HOME: join(serverRoot, "data"),
+    XDG_CACHE_HOME: join(serverRoot, "cache"),
+  };
+  const server = directories(serverEnv);
+  const slotRoot = join(server.state, "workers", "slot-a");
+  const launch = {
+    instance: {},
+    entries: [],
+    root: slotRoot,
+    output: new PassThrough(),
+    environment: serverEnv,
+  } as unknown as SlotLaunch;
+  const data = slotThreadData(launch);
+  assert.ok(threadDataSchema.safeParse(data).success);
+  const slot = directories(slotThreadEnvironment(serverEnv, slotRoot));
+  assert.ok(data.deny_read.includes(server.config));
+  assert.ok(data.deny_read.includes(join(server.data, "kanthord.db")));
+  assert.ok(data.deny_read.includes(join(server.state, "pi")));
+  assert.ok(data.deny_read.includes("~/.config/kanthord-eval"));
+  for (const path of [join(slot.state, "workspaces"), join(slotRoot, "tmp")])
+    assert.deepEqual(
+      data.deny_read.filter(
+        (denied) => path === denied || path.startsWith(`${denied}/`),
+      ),
+      [],
+    );
 });
 
 test("a worker thread registers its worker unit through the port and the invocation chain", async (t) => {

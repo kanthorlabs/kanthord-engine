@@ -379,6 +379,7 @@ async function roundsFixture(t: TestContext, reworkLimit?: number) {
         workspaces,
         hostHome: temporary(t),
         env: hostEnvironment(),
+        denyRead: [],
         modelRuntimeFactory: scriptedModelRuntime(provider),
         hostTools: () => unusedHostTools,
         context: background,

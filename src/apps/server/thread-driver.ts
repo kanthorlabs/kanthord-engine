@@ -1,12 +1,14 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
+import { hostDenyRead } from "../../agent/bash-sandbox.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
 import {
   entryPorts,
   type SlotControl,
+  type ThreadData,
   type ThreadEntry,
   ThreadMessageKind,
 } from "../worker/thread-data.ts";
@@ -73,6 +75,14 @@ function threadEntries(entries: readonly SlotEntry[]): ThreadEntry[] {
   }));
 }
 
+export function slotThreadData(launch: SlotLaunch): ThreadData {
+  return {
+    entries: threadEntries(launch.entries),
+    log: LogDestination.File,
+    deny_read: hostDenyRead(launch.environment, { root: launch.root }),
+  };
+}
+
 class ThreadInstance implements SlotInstance {
   readonly exited: Promise<SlotExit>;
   private readonly worker: Worker;
@@ -137,10 +147,7 @@ export class ThreadDriver implements SlotDriver {
   launch(launch: SlotLaunch): SlotInstance {
     const name = launch.instance.name;
     const worker = startThread(
-      {
-        entries: threadEntries(launch.entries),
-        log: LogDestination.File,
-      },
+      slotThreadData(launch),
       launchEnvironment(launch.environment, launch.root),
     );
     worker.stdout.pipe(launch.output, { end: false });

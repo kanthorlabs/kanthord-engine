@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { MessageChannel, type Worker } from "node:worker_threads";
+import { hostDenyRead } from "../../agent/bash-sandbox.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import { BindingEntryState } from "../../worker/contract.ts";
@@ -160,6 +161,7 @@ export class SlotSession {
       {
         entries: frameEntries.map((entry) => this.open(entry)),
         log: LogDestination.StandardError,
+        deny_read: hostDenyRead(this.options.env),
       },
       this.options.env,
     );

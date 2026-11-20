@@ -32,7 +32,7 @@ import {
   ToolSource,
 } from "../agent/contract.ts";
 import { childEnvironment } from "../agent/environment.ts";
-import { bashSandbox } from "../agent/bash-sandbox.ts";
+import { bashSandbox, hostDenyRead } from "../agent/bash-sandbox.ts";
 import { processBashOperations } from "../agent/bash-process.ts";
 import {
   intakeCredentialOperations,
@@ -338,7 +338,10 @@ export function builtinTools(
     operations: {
       exec: async (command, directory, options) => {
         const env = childEnvironment(options.env ?? process.env);
-        const wrapped = await bashSandbox.wrap(command, directory, env);
+        const wrapped = await bashSandbox.wrap(command, directory, {
+          env,
+          denyRead: hostDenyRead(process.env),
+        });
         return local.exec(wrapped, directory, { ...options, env });
       },
     },

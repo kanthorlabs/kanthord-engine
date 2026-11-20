@@ -4,6 +4,7 @@ import type { Provider } from "@earendil-works/pi-ai";
 import type { LlmProvider } from "../../llm/provider.ts";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { hostDenyRead } from "../../agent/bash-sandbox.ts";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import {
@@ -251,6 +252,10 @@ export class Worker implements Service {
         bindings,
         directories,
         env: { ...env, TMPDIR: temporary },
+        deny_read: hostDenyRead(env, {
+          pi: join(directories.data, PI_DIRECTORY_NAME),
+          root: directories.data,
+        }),
         log: this.options.log ?? LogDestination.StandardError,
         model_runtime_factory: this.options.modelRuntimeFactory,
         repository_transport: this.options.repositoryTransport,

@@ -156,7 +156,7 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
   assert.ok(call);
   assert.equal(call.arguments[0], command);
   assert.equal(call.arguments[1], directory);
-  assert.equal(call.arguments[2]?.[name], undefined);
+  assert.equal(call.arguments[2]?.env[name], undefined);
   const text = result.content
     .map((item) => ("text" in item ? item.text : ""))
     .join("");

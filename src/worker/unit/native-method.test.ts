@@ -134,6 +134,7 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     workspace,
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
     spans: run.spans,
@@ -337,6 +338,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     hostTools: () => unusedHostTools,
     context: background,
@@ -427,6 +429,7 @@ test("an agent open that throws after the prepare gives the base head tree back 
     workspaces,
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: async () => {
       throw new Error("open failed");
     },
@@ -527,6 +530,7 @@ async function examineRun(
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     hostTools: () => unusedHostTools,
     context: background,

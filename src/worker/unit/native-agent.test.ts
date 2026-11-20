@@ -168,6 +168,7 @@ async function fixture(
     workspace,
     hostHome,
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context,
     turnCheck: options.turnCheck && (() => options.turnCheck!(context)),

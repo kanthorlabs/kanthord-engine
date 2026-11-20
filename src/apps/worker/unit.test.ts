@@ -11,6 +11,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";
@@ -145,6 +146,7 @@ function unitOf(
     ],
     directories: directoriesOf(env),
     env,
+    deny_read: [],
     log: () => {},
   });
 }
@@ -297,6 +299,7 @@ test("a unit that drains before its first pull cancels a pull that waits for wor
     ],
     directories: directoriesOf(env),
     env,
+    deny_read: [],
     log: () => {},
     resume_pull_wait_ms: SETTLE_WAIT_MS,
   });
@@ -316,6 +319,7 @@ function multiUnit(t: TestContext, bindings: WorkerTransport[]) {
     })),
     directories: directoriesOf(env),
     env,
+    deny_read: [],
     log: () => {},
   });
 }
@@ -463,6 +467,7 @@ async function footprintUnit(t: TestContext, answers: unknown[]) {
     ],
     directories: directoriesOf(env),
     env: { ...env, TMPDIR: temporary(t) },
+    deny_read: [],
     log: () => {},
     footprint: { residue_root: temporary(t), worker_placement: false },
   });
@@ -549,8 +554,13 @@ const RELEASE_FAILED = {
 
 async function liveStopUnit(
   t: TestContext,
-  options: { evaluation: boolean; release?: unknown },
+  options: { evaluation: boolean; release?: unknown; denyRead?: string[] },
 ) {
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string) => command,
+  );
   const h = await implementFixture(t, [task("a", "true")], []);
   const repository = h.input.setup.repositories[0]!;
   const snapshot = (
@@ -713,6 +723,7 @@ async function liveStopUnit(
     bindings: [{ transport, client_secret: secret }],
     directories: directoriesOf(env),
     env,
+    deny_read: options.denyRead ?? [],
     log: () => {},
     model_runtime_factory: scriptedModelRuntime(provider),
     repository_transport: {
@@ -745,6 +756,7 @@ async function liveStopUnit(
     unit,
     running,
     resume: () => resume.resolve(),
+    wrap,
     bare: h.bare,
     claim,
     events,
@@ -753,6 +765,14 @@ async function liveStopUnit(
     assessments,
   };
 }
+
+test("(security) the unit passes the deny_read list of its options to the bash wrap unchanged", async (t) => {
+  const denyRead = ["/credential/directory", "~/.config/kanthord-eval"];
+  const live = await liveStopUnit(t, { evaluation: false, denyRead });
+  const [call] = live.wrap.mock.calls;
+  assert.ok(call);
+  assert.deepEqual(call.arguments[2]?.denyRead, denyRead);
+});
 
 test("a stop during a live steps execution pushes the checkpoint, releases with worker_stopped and then deregisters", async (t) => {
   const live = await liveStopUnit(t, { evaluation: false });

@@ -84,6 +84,7 @@ export interface WorkerUnitOptions {
   bindings: UnitBinding[];
   directories: UnitDirectories;
   env: NodeJS.ProcessEnv;
+  deny_read: readonly string[];
   log: LogConfig["destination"] | ((message: string) => void);
   model_runtime_factory?: ModelRuntimeFactory;
   repository_transport?: RepositoryTransport;
@@ -698,6 +699,7 @@ export class WorkerUnit {
         this.options.model_runtime_factory ?? defaultModelRuntimeFactory,
       hostHome: this.options.env.HOME ?? homedir(),
       env: this.options.env,
+      denyRead: this.options.deny_read,
       context,
       stop,
       sessionRoot: executionSessionRoot(this.options.directories.data),

@@ -19,6 +19,7 @@ export type ThreadEntry = z.infer<typeof threadEntrySchema>;
 export const threadDataSchema = z.strictObject({
   entries: z.array(threadEntrySchema),
   log: z.enum(LogDestination),
+  deny_read: z.array(z.string().min(1)),
 });
 export type ThreadData = z.infer<typeof threadDataSchema>;
 
