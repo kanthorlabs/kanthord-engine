@@ -37,7 +37,10 @@ const STEP_ID = "kanthord.step.id";
 const STEP_OUTCOME = "kanthord.step.outcome";
 type StepOutcome = (typeof FrameOutcome)[keyof typeof FrameOutcome];
 
-function stepStart(spans: SpanRecorder, step: ChainStep): SpanStart {
+function stepStart(
+  spans: SpanRecorder,
+  step: Pick<ChainStep, "id">,
+): SpanStart {
   return {
     key: spans.key(SpanOperation.Step),
     operation: SpanOperation.Step,
@@ -91,8 +94,23 @@ export function withinStep(
   );
 }
 
-export function markStep(spans: SpanRecorder, step: ChainStep): void {
-  spans.end(spans.start(stepStart(spans, step)), stepEnd(FrameOutcome.Next));
+export interface StepMark {
+  outcome: StepOutcome;
+  parent?: string;
+}
+
+export function markStep(
+  spans: SpanRecorder,
+  step: Pick<ChainStep, "id">,
+  mark: StepMark = { outcome: FrameOutcome.Next },
+): void {
+  const start = stepStart(spans, step);
+  spans.end(
+    spans.start(
+      mark.parent === undefined ? start : { ...start, parent: mark.parent },
+    ),
+    stepEnd(mark.outcome),
+  );
 }
 
 export interface Walker {
