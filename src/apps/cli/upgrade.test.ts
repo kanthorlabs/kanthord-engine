@@ -436,6 +436,9 @@ const SERVE_TIMEOUT_MS = 60000;
 const MASTER_KEY_LINE = /^master_key: (.*)$/m;
 const CREDENTIAL_ROW =
   "INSERT INTO credential (id, name, platform, holder, revision, nonce, ciphertext, created_at) VALUES ('c1', 'name', 'platform', 'holder', 1, x'00', x'00', 0)";
+const PROJECT_ROW =
+  "INSERT INTO project_project (id, name, created_at, paused_at) VALUES ('p1', 'kept', 0, NULL)";
+const KEPT_PROJECT_COUNT = 1;
 
 function withExtraText(migrations: Migrations, service: string): Migrations {
   return migrations.map((entry) =>
@@ -544,6 +547,7 @@ test("upgrade --reset-changed rebuilds the changed workbench service and keeps t
   );
   enforceMasterKey(store, MASTER_KEY_LINE.exec(config)![1]!, paths.config);
   store.database.exec(CREDENTIAL_ROW);
+  store.database.exec(PROJECT_ROW);
   store.close();
   const before = keptRows(paths.database, /^(workbench_|migration$)/);
 
@@ -569,6 +573,11 @@ test("upgrade --reset-changed rebuilds the changed workbench service and keeps t
     keptRows(paths.database, /^(workbench_|migration$)/).rows.credential
       ?.length,
     STORED_CREDENTIAL_COUNT,
+  );
+  assert.equal(
+    keptRows(paths.database, /^(workbench_|migration$)/).rows.project_project
+      ?.length,
+    KEPT_PROJECT_COUNT,
   );
   const after = new Store(paths.database);
   assert.deepEqual(after.plan(serverMigrations).pending, []);
