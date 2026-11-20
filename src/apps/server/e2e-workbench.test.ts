@@ -26,6 +26,7 @@ import {
   WORKBENCH_PROMPT,
 } from "../../agent/prompt-assets.ts";
 import { directClient } from "../../gateway/index.ts";
+import { generateHumanJWT } from "../../gateway/auth/jwt.ts";
 import { background } from "../../kernel/context.ts";
 import { type GuestIdentity, isDelegateIdentity } from "../../kernel/caller.ts";
 import {
@@ -1931,6 +1932,9 @@ const THIRD_ANSWER = "Third answer.";
 const FIRST_QUEUED = "First queued message.";
 const SECOND_QUEUED = "Second queued message.";
 const LAUNCH_FAILURE = "launch failed";
+const SECOND_ACCOUNT = "grace";
+const SECOND_ACCOUNT_NAME = "Grace";
+const SECOND_ACCOUNT_TOKEN_LIFETIME = 3600;
 const SECOND_HUMAN = testHumanIdentity("kanthord", "Grace", "workbench-test-2");
 
 function replaceMessage(fixture: Fixture, sessionId: string, text: string) {
@@ -2212,6 +2216,42 @@ test("(security) each drained run uses the requester of its own item", async (t)
     .map(({ arguments: [, requester] }) => requester.jti)
     .filter((jti, index, all) => jti !== all[index - SINGLE]);
   assert.deepEqual(requesters, [identity.jti, SECOND_HUMAN.jti, identity.jti]);
+});
+
+test("(security, F129) a human of a second account messages a session of the first account and the message is accepted", async (t) => {
+  const fixture = await workbenchFixture(t, [fauxAssistantMessage(ANSWER)]);
+  const session = await createSession(fixture);
+  const secondAccount = (
+    await generateHumanJWT(
+      fixture.masterKey,
+      fixture.authVersion,
+      SECOND_ACCOUNT_TOKEN_LIFETIME,
+      SECOND_ACCOUNT,
+      SECOND_ACCOUNT_NAME,
+    )
+  ).token;
+  assert.notEqual(SECOND_ACCOUNT, identity.accountId);
+  const response = await fixture.request(
+    `/api/workbench/session/${session.id}/message`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${secondAccount}`,
+        "content-type": "application/json",
+        "Idempotency-Key": createIdempotencyKey(),
+      },
+      body: JSON.stringify({ text: QUESTION }),
+    },
+  );
+  assert.equal(response.status, HttpStatus.Accepted);
+  const answer = (await response.json()) as {
+    session_id: string;
+    kind: string;
+  };
+  assert.equal(answer.session_id, session.id);
+  assert.equal(answer.kind, MessageKind.Run);
+  const entries = await untilIdle(fixture, session.id, t.signal);
+  assert.deepEqual(texts(entries, "user"), [QUESTION]);
 });
 
 test("(invariant guard) the same idempotency key twice through HTTP queues one message", async (t) => {

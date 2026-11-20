@@ -83,8 +83,6 @@ const SESSION_LIST = toolName("workbench.session.list");
 const OFFER_ACTION = "offer_action";
 const NODE_PAUSE_ID = "mission.node.pause";
 const ROTATE_ID = "llm.credential.rotate";
-const GUEST_RUN_OFFER_TEXT =
-  "offer_action is not available in a run that a guest started. Call the operation. The owner approves it on the guard card.";
 const SCOPE_REFUSED = "gateway.scope.refused";
 const GUEST_ENTRIES_PATH = "/api/workbench/guest/session";
 const FRAME_END = "\n\n";
@@ -662,8 +660,14 @@ test(
   },
 );
 
+function assertNoOfferTool(world: Awaited<ReturnType<typeof scopeWorld>>) {
+  const { tools } = world.fixture.provider;
+  assert.ok(tools.length > NO_ITEMS);
+  for (const names of tools) assert.ok(!names.includes(OFFER_ACTION));
+}
+
 test(
-  "(security) a guest run offer_action answers the guest-run error and writes no action_offer record",
+  "(security) a guest run holds no offer_action tool and writes no action_offer record",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const world = await scopeWorld(t, (target) => [
@@ -677,9 +681,10 @@ test(
     await guestMention(world, GUEST_MENTION);
     await untilIdle(world.fixture, world.hostId, t.signal);
     const entries = await ownerEntries(world.fixture, world.hostId);
+    assertNoOfferTool(world);
     assert.deepEqual(
-      toolResults(entries).map(({ isError, text }) => ({ isError, text })),
-      [{ isError: true, text: GUEST_RUN_OFFER_TEXT }],
+      toolResults(entries).map(({ isError }) => isError),
+      [true],
     );
     assert.equal(
       recordsOf(entries, WorkbenchRecordKind.ActionOffer).length,
@@ -718,7 +723,7 @@ test(
 );
 
 test(
-  "(security) a guest run offer_action on a node of another project and on a credential answers the guest-run error",
+  "(security) a guest run holds no offer_action tool for a node of another project and for a credential",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const world = await scopeWorld(t, (target) => [
@@ -738,10 +743,8 @@ test(
     const entries = await ownerEntries(world.fixture, world.hostId);
     const results = toolResults(entries);
     assert.equal(results.length, PAIR);
-    for (const result of results) {
-      assert.ok(result.isError);
-      assert.equal(result.text, GUEST_RUN_OFFER_TEXT);
-    }
+    assertNoOfferTool(world);
+    for (const result of results) assert.ok(result.isError);
     assert.equal(
       recordsOf(entries, WorkbenchRecordKind.ActionOffer).length,
       NO_ITEMS,
