@@ -198,6 +198,10 @@ const actionSeenSchema = z.union([
     attempt: z.number().int().nonnegative(),
   }),
   z.strictObject({ name: z.string(), paused: z.boolean() }),
+  z.strictObject({
+    name: z.string(),
+    revision: z.number().int().positive(),
+  }),
   z.strictObject({ revision: z.number().int().positive() }),
   z.strictObject({ version: z.number().int().positive() }),
 ]);

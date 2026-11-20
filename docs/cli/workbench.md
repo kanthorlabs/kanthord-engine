@@ -132,6 +132,8 @@ The owner reads the requests in `scope_requests` of `workbench.session.get` and 
 
 Each approve and reject writes one info log line `workbench.scope_request.settled`.
 
+The `seen` value of an `action_offer` record for a credential is `{ name, revision }`: the credential name and its newest live revision. An older offer holds `{ revision }`.
+
 ## Error codes
 
 Every operation can also answer the shared codes of [other.md](other.md#error-codes).

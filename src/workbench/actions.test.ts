@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { llmOperations } from "../llm/contract.ts";
 import { OperationResultType } from "../kernel/operation.ts";
 import { projectOperations } from "../project/contract.ts";
+import { WorkbenchRecordKind, workbenchRecordSchema } from "./contract.ts";
 import {
   ACTION_CARD_OPERATIONS,
   ActionTarget,
@@ -14,6 +15,9 @@ import {
 const CARD_ACT_IDS = Object.keys(ACTION_CARD_OPERATIONS);
 const CARD_ACT_COUNT = 11;
 const RULE_COUNT = 1;
+const CREDENTIAL_NAME = "codex-main";
+const NEWEST_REVISION = 3;
+const ONE_READ = 1;
 const SPLIT_PARTS_PER_RULE = 1;
 const PROMPT_PATH = new URL(
   "../../static/prompt/workbench.md",
@@ -124,6 +128,7 @@ test("(security) a credential read with no live revision throws target_refused a
       Promise.resolve({
         type: OperationResultType.Completed,
         data: {
+          name: CREDENTIAL_NAME,
           revisions: [
             { revision: 1, ended_at: 1 },
             { revision: 2, ended_at: 2 },
@@ -145,6 +150,62 @@ test("(security) a credential read with no live revision throws target_refused a
     /^Error: workbench\.action\.target_refused:/,
   );
   assert.deepEqual(records, []);
+});
+
+test("(happy path) a credential offer records the name and the newest live revision with one read", async () => {
+  const records: unknown[] = [];
+  const reads: unknown[] = [];
+  const rotate = llmOperations.rotate.id;
+  const get = TARGET_READS[ActionTarget.Credential].operation_id;
+  const offerTool = offerActionTool({
+    operations: [{ id: get } as never],
+    invoke: (...input: unknown[]) => {
+      reads.push(input);
+      return Promise.resolve({
+        type: OperationResultType.Completed,
+        data: {
+          name: CREDENTIAL_NAME,
+          revisions: [
+            { revision: 1, ended_at: 1 },
+            { revision: 2, ended_at: null },
+            { revision: NEWEST_REVISION, ended_at: null },
+          ],
+        },
+      } as never);
+    },
+    requester: () => ({}) as never,
+    guestRun: () => false,
+    offer: { taken: () => false, append: (record) => records.push(record) },
+  });
+  await offerTool.execute(
+    "call_1",
+    { operation_id: rotate, target_id: CREDENTIAL_NAME },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  assert.equal(reads.length, ONE_READ);
+  assert.deepEqual(records, [
+    {
+      kind: WorkbenchRecordKind.ActionOffer,
+      tool_call_id: "call_1",
+      operation_id: rotate,
+      target_id: CREDENTIAL_NAME,
+      seen: { name: CREDENTIAL_NAME, revision: NEWEST_REVISION },
+    },
+  ]);
+  assert.ok(workbenchRecordSchema.safeParse(records[0]).success);
+});
+
+test("(invariant guard) an old credential offer record with seen revision only still parses", () => {
+  const old = {
+    kind: WorkbenchRecordKind.ActionOffer,
+    tool_call_id: "call_1",
+    operation_id: llmOperations.rotate.id,
+    target_id: CREDENTIAL_NAME,
+    seen: { revision: NEWEST_REVISION },
+  };
+  assert.deepEqual(workbenchRecordSchema.parse(old), old);
 });
 
 test("(happy path) the offer_action result tells the agent to write the full answer", async () => {

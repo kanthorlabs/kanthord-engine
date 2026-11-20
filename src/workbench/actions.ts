@@ -75,6 +75,7 @@ const projectReadSchema = z.looseObject({
 });
 
 const credentialReadSchema = z.looseObject({
+  name: z.string(),
   revisions: z.array(
     z.looseObject({
       revision: z.number().int().positive(),
@@ -146,8 +147,10 @@ function seenOf(target: ActionTarget, data: unknown): ActionOffer["seen"] {
       const { name, paused_at } = projectReadSchema.parse(data);
       return { name, paused: paused_at !== null };
     }
-    case ActionTarget.Credential:
-      return { revision: newestLiveRevision(data) };
+    case ActionTarget.Credential: {
+      const { name } = credentialReadSchema.parse(data);
+      return { name, revision: newestLiveRevision(data) };
+    }
     case ActionTarget.BindingSet:
       return { version: bindingSetReadSchema.parse(data).version };
     case ActionTarget.Agent:
