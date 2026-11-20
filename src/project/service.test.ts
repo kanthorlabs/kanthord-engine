@@ -78,6 +78,7 @@ import {
   EnvironmentSource,
   FollowsType,
   GitHubAction,
+  IGNORED_CHECKS_MAX,
   InboxField,
   InboxInvalidReason,
   INSTANCE_COUNT_MAX,
@@ -5580,6 +5581,7 @@ test("repositoryPolicyOf preserves the named revision after a strategy change", 
       base_branch: original.config.strategy.base_branch,
       action: GitHubAction.PullRequest,
       landing: Landing.Human,
+      ignored_checks: [],
       prompts,
       environment: null,
       repository_environment: true,
@@ -6779,6 +6781,83 @@ test("a pull request strategy holds a landing choice and other actions refuse on
   assert.equal(strategy(GitHubAction.PullRequest).success, true);
   assert.equal(strategy(GitHubAction.Push, Landing.KanthorD).success, false);
   assert.equal(strategy(GitHubAction.PullRequest, "robot").success, false);
+});
+
+test("a binding set write with ignored checks on a push action refuses at the strategy action path", () => {
+  const withAction = (name: string, ignored_checks: string[]) => ({
+    ...repositoryBinding(),
+    config: {
+      ...repositoryBinding().config,
+      strategy: {
+        base_branch: "main",
+        action: {
+          name,
+          follows: { type: FollowsType.AssessmentPassed },
+          ignored_checks,
+        },
+      },
+    },
+  });
+  assert.deepEqual(
+    schemaIssues({
+      [REPOSITORY_NAME]: withAction(GitHubAction.Push, ["e2e"]),
+    }),
+    [
+      {
+        code: CUSTOM_ISSUE,
+        path: [
+          "body",
+          "bindings",
+          REPOSITORY_NAME,
+          "config",
+          "strategy",
+          "action",
+          "ignored_checks",
+        ],
+      },
+    ],
+  );
+  const accepted = projectOperations["bindingSet.write"].input.safeParse({
+    params: { project_id: "project" },
+    query: EMPTY_QUERY,
+    body: {
+      version: BINDING_SET_INITIAL_VERSION,
+      bindings: {
+        [REPOSITORY_NAME]: withAction(GitHubAction.PullRequest, ["e2e"]),
+      },
+    },
+  });
+  assert.equal(accepted.success, true);
+  const tooMany = Array.from(
+    { length: IGNORED_CHECKS_MAX + 1 },
+    (_, index) => `check-${index}`,
+  );
+  assert.equal(
+    schemaIssues({
+      [REPOSITORY_NAME]: withAction(GitHubAction.PullRequest, tooMany),
+    }).length,
+    ONE_CALL,
+  );
+});
+
+test("the repository policy answers the ignored checks of the binding", (t) => {
+  const f = fixture(t);
+  f.store.transaction((tx) => {
+    const project = insertProject(tx, PROJECT_NAME);
+    const original = repositoryBinding();
+    original.config.strategy.action = {
+      name: GitHubAction.PullRequest,
+      follows: { type: FollowsType.AssessmentPassed },
+      ignored_checks: ["e2e", "docs"],
+    };
+    const bound = persistBindings(tx, project.id, {
+      [REPOSITORY_NAME]: original,
+    }).bindings[REPOSITORY_NAME]!;
+    assert.deepEqual(
+      f.project.repositoryPolicyOf(tx, bound.id)?.ignored_checks,
+      ["e2e", "docs"],
+    );
+  });
 });
 
 const WRITABLE: Partial<Dependencies> = { custodySuitability: () => {} };

@@ -272,6 +272,7 @@ export type RequestFacts = {
   human_landing: boolean;
   assessed_commit: string | null;
   link_trust: { actor_ids: string[] };
+  ignored_checks: string[];
 };
 export type AssetFacts = {
   storage: {

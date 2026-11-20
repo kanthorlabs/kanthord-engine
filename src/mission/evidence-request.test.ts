@@ -56,6 +56,7 @@ function fixture(t: TestContext) {
     base_branch: "main",
     action: RepositoryAction.PullRequest,
     landing: "human",
+    ignored_checks: [],
   });
   h.store.transaction((tx) => {
     insertNode(tx, {

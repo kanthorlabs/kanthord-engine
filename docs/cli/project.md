@@ -373,6 +373,7 @@ Each `PolicyAction` holds only:
   - `type: "assessment_passed"`, with no other members.
   - `type: "action_end_state"` and a required `binding` as a binding-name string, with no other members.
 - `landing`: optional, enum `human | kanthord`, default `human`. Only a `pull_request` action holds it; another action with `landing` fails validation at the `landing` path. With `kanthord`, the Intake Service merges the pull request when it performs the action, with the tested commit as the head guard. A refused merge leaves the pull request open for a human. With `human`, a human merges.
+- `ignored_checks`: optional, array of at most 32 non-empty check names. Only a `pull_request` action holds it; another action with `ignored_checks` fails validation at the `ignored_checks` path. A landing waits for every check run and every commit status of the pull request head, and for the required contexts of the base branch rules. The list names the only checks that the landing does not wait for.
 
 The action rules follow the [GitHub action catalog](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/project-service.impl.md).
 The key of the action is `<binding name>.<name>`, which the Mission Service freezes at the attempt opening.

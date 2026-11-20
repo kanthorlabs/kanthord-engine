@@ -704,6 +704,7 @@ export function authorizeRequestEvidence(
       human_landing: humanLanding,
       assessed_commit: assessed,
       link_trust: linkTrust,
+      ignored_checks: policy.ignored_checks,
     },
   };
 }

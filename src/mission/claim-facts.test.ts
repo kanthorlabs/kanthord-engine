@@ -71,6 +71,7 @@ function factsHarness(
       base_branch: "main",
       action: RepositoryAction.PullRequest,
       landing: "human" as const,
+      ignored_checks: [],
     }),
     ...overrides,
   };

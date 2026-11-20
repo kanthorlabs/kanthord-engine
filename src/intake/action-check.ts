@@ -348,7 +348,10 @@ async function inspectPullRequest(
   });
   if (!reviews.ok) throw platformFailure(reviews);
   const checks = openPullRequestSchema.safeParse(answer.value).success
-    ? await github.getRequiredChecks(call, target, { number: request.number })
+    ? await github.getRequiredChecks(call, target, {
+        number: request.number,
+        ignoredChecks: request.facts.ignored_checks,
+      })
     : { ok: true as const, value: NO_CHECKS };
   if (!checks.ok) throw platformFailure(checks);
   return foldBody(

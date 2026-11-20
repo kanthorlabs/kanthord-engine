@@ -53,7 +53,6 @@ const LAST_LINK_PATTERN =
 const REVIEW_PAGE_SIZE = 100;
 const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
-const NO_REQUIRED_CHECKS = 0;
 const NO_FAILED_CHECKS = 0;
 const NO_PENDING_CHECKS = 0;
 const CHECK_RUN_PAGE_SIZE = 100;
@@ -862,8 +861,13 @@ function outcomeOfCheck(
   return RequiredCheckOutcome.Pending;
 }
 
+interface CheckNames {
+  required: readonly string[];
+  ignoredChecks: readonly string[];
+}
+
 export function foldRequiredChecks(
-  required: readonly string[],
+  names: CheckNames,
   checkRuns: unknown,
   statuses: unknown,
 ): { pending: string[]; failed: string[] } {
@@ -871,7 +875,13 @@ export function foldRequiredChecks(
   const newestStates = newestStatesOf(statuses);
   const pending: string[] = [];
   const failed: string[] = [];
-  for (const name of new Set(required)) {
+  const checked = new Set([
+    ...names.required,
+    ...newestRuns.keys(),
+    ...newestStates.keys(),
+  ]);
+  for (const name of names.ignoredChecks) checked.delete(name);
+  for (const name of checked) {
     const run = newestRuns.get(name);
     const state = newestStates.get(name);
     const outcome = outcomeOfCheck(run, state);
@@ -1216,7 +1226,7 @@ export class GitHubPlatform {
   async getRequiredChecks(
     call: GitHubCall,
     target: GitHubTarget,
-    pullRequest: { number: number },
+    pullRequest: { number: number; ignoredChecks: readonly string[] },
   ): Promise<GitHubAnswer<RequiredCheckRead>> {
     const body = await this.getPullRequest(call, target, pullRequest);
     if (!body.ok) return body;
@@ -1234,8 +1244,6 @@ export class GitHubPlatform {
     });
     try {
       const required = requiredContextsOf(rules.value);
-      if (required.length === NO_REQUIRED_CHECKS)
-        return read({ pending: [], failed: [] });
       const checkRuns = await this.#exchange(call, target, {
         kind: CallKind.Read,
         route: CHECK_RUNS_ROUTE,
@@ -1250,7 +1258,11 @@ export class GitHubPlatform {
       );
       if (!statuses.ok) return statuses;
       return read(
-        foldRequiredChecks(required, checkRuns.value.data, statuses.value),
+        foldRequiredChecks(
+          { required, ignoredChecks: pullRequest.ignoredChecks },
+          checkRuns.value.data,
+          statuses.value,
+        ),
       );
     } catch (error) {
       if (error instanceof z.ZodError) return unreadableBody(CallKind.Read);

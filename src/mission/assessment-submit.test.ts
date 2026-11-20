@@ -278,6 +278,7 @@ async function fixture(
     base_branch: "main",
     action,
     landing,
+    ignored_checks: [],
   });
   const address = {
     kind: AssetKind.Repository,

@@ -616,8 +616,13 @@ MCP server and the Mission Service reach them through the direct adapter.
   the comments of each change request. `next_cursor` is `null`.
 - `github-pull-request-required-check-get` answers
   `{ head_commit, base_branch, pending, failed }`. `pending` and `failed` name
-  the required checks of the base branch that have not ended and that failed on
-  the head commit. `next_cursor` is `null`.
+  every check of the head commit that has not ended and that failed. A check is
+  the newest check run of a name, the newest commit status of a context or a
+  required context of the base branch rules. A required context with no run and
+  no status is `pending`. The answer drops the names of
+  `strategy.action.ignored_checks` of the binding. A pull request with no
+  required context still answers the check runs of its head. `next_cursor` is
+  `null`.
 
 The callers of the outbound operations `intake.action.perform` and
 `intake.storage.delete`, the action performer and the Mission Service, track a
@@ -721,7 +726,7 @@ the read-back of `github.pull_request_merge` that `intake.action.perform` uses.
 It answers the pull request address, or a result class answer with the code
 `repository.platform.github.<class>`. A merge call that GitHub answers with 405 answers `retryable_refusal`. GitHub answers 405 when it cannot merge the pull request at that time, for example while it computes the mergeability after another landing. A merge call that GitHub answers with 409 answers `final_refusal`, because the head of the pull request is not `commit`. When GitHub answers an HTTP status, the message of a refused merge call is that status, a space and the message of GitHub. Intake stores the request under the key `service_merge/<request_key>`. `intake.action.perform` answers `400` `gateway.request.validation_failed` for a `request_key` that starts with `service_merge/`. A stored answer that names another pull request answers `final_refusal` and calls no merge.
 
-Before the merge, the action performer reads the required checks with `github-pull-request-required-check-get`. While a required check of the head commit is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service can then request the merge.
+Before the merge, the action performer reads the checks of the head commit with `github-pull-request-required-check-get`. While a check of the head commit, except an ignored check of the binding, is pending or failed, it requests no merge. When the read fails or answers an unexpected body, it requests no merge. The deferred check of the Mission Service can then request the merge.
 
 Only the Mission Service calls it, for the execution caller of `mission.assessment.submit`. `intake.execution.gate_files.read` runs for an execution caller and takes `{ binding_id, base_branch, commit }`. Intake keeps one bare repository for each binding at `intake/repositories/<binding id>.git` of the server state directory and reuses it. It fetches the commits of the base branch and the commit with `--filter=tree:0` and the SSH identity of the binding. It fetches each tree and blob that a read needs on demand. It reads `.kanthord/affected-tests.json` at the base branch. A path of its `gate_files` is changed when its mode or its object at the merge base differs from its mode or its object at the commit. A new path and a removed path are changed. A declared directory is changed when any entry below it changes. The answer is `{ paths }`. A git failure answers `502` with the git code and removes the bare repository, except after a deadline. A declaration that does not match the declaration shape of the worker, or that holds a path of `gate_files` that is not canonical, answers `502` `repository.gate_declaration.invalid`. The Intake Service keeps the bare repository for this error.
 

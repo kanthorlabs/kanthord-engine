@@ -49,6 +49,8 @@ const ONE_PIN = 1;
 const FAILED_READS = 2;
 const READ_METHODS = 4;
 const REQUIRED_CHECK = "ci";
+const IGNORED_CHECK = "e2e";
+const UNREQUIRED_CHECK = "docs";
 const BAD_GATEWAY_STATUS = 502;
 const PAGE_LIMIT = 30;
 const OUT_OF_RANGE_LIMIT = 101;
@@ -141,7 +143,11 @@ async function setup(t: TestContext) {
     "reads",
   ]);
   const mission = await read<{ id: string }>(["mission", "get", project.id]);
-  const repository = (address: string, action: string) => ({
+  const repository = (
+    address: string,
+    action: string,
+    ignoredChecks: string[] = [],
+  ) => ({
     kind: "repository",
     config: {
       available: true,
@@ -152,14 +158,20 @@ async function setup(t: TestContext) {
       link_trust: { actor_ids: [String(REVIEWER)] },
       strategy: {
         base_branch: "main",
-        action: { name: action, follows: { type: "assessment_passed" } },
+        action: {
+          name: action,
+          follows: { type: "assessment_passed" },
+          ...(ignoredChecks.length > NO_ROWS && {
+            ignored_checks: ignoredChecks,
+          }),
+        },
       },
     },
   });
   await write(["project", "binding", "apply", project.id], {
     version: FIRST_REVISION,
     bindings: {
-      gated: repository(GATED_ADDRESS, "pull_request"),
+      gated: repository(GATED_ADDRESS, "pull_request", [IGNORED_CHECK]),
       pushed: repository(PUSHED_ADDRESS, "push"),
       harness: {
         kind: "worker",
@@ -556,6 +568,48 @@ test(
         });
         assert.equal(h.pins(gated.evaluation).length, ONE_PIN);
         dropped(h.materials, materials + ONE_PIN);
+      },
+    );
+
+    await t.test(
+      "a required check get drops a failed run of the ignored checks of the binding",
+      async () => {
+        const head = h.gitHub.pulls.find(
+          (pull) => pull.number === number,
+        )?.head_sha;
+        assert.ok(head);
+        h.gitHub.checks({
+          required: [REQUIRED_CHECK],
+          commit: head,
+          runs: [
+            {
+              id: 1,
+              name: REQUIRED_CHECK,
+              status: "completed",
+              conclusion: "success",
+            },
+            {
+              id: 2,
+              name: IGNORED_CHECK,
+              status: "completed",
+              conclusion: "failure",
+            },
+            {
+              id: 3,
+              name: UNREQUIRED_CHECK,
+              status: "completed",
+              conclusion: "failure",
+            },
+          ],
+        });
+        const answer = completed(await requiredChecks());
+        assert.ok("body" in answer, JSON.stringify(answer));
+        assert.deepEqual(answer.body, {
+          head_commit: head,
+          base_branch: "main",
+          pending: [],
+          failed: [UNREQUIRED_CHECK],
+        });
       },
     );
 

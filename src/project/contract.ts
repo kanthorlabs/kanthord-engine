@@ -121,6 +121,7 @@ export const ConversationPlatform = {
 export type ConversationPlatform =
   (typeof ConversationPlatform)[keyof typeof ConversationPlatform];
 export const LINK_TRUST_ACTORS_MAX = 32;
+export const IGNORED_CHECKS_MAX = 32;
 export const GITHUB_ACTOR_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 export const CONVERSATION_REPOSITORY_PATTERN = /^[^/\s:]+\/[^/\s:]+$/;
 export const JIRA_SITE_PATTERN =
@@ -349,6 +350,10 @@ export const repositoryConfigSchema = z.strictObject({
             }),
           ]),
           landing: z.enum(Landing).optional(),
+          ignored_checks: z
+            .array(z.string().min(1))
+            .max(IGNORED_CHECKS_MAX)
+            .optional(),
         })
         .refine(
           (action) =>
@@ -357,6 +362,15 @@ export const repositoryConfigSchema = z.strictObject({
           {
             path: ["landing"],
             message: "Only a pull_request action holds a landing choice.",
+          },
+        )
+        .refine(
+          (action) =>
+            action.ignored_checks === undefined ||
+            action.name === GitHubAction.PullRequest,
+          {
+            path: ["ignored_checks"],
+            message: "Only a pull_request action holds ignored checks.",
           },
         )
         .optional(),
@@ -861,6 +875,7 @@ export type RepositoryPolicy = {
   upstream_branch?: string;
   action: (typeof GitHubAction)[keyof typeof GitHubAction] | null;
   landing: Landing;
+  ignored_checks: string[];
   prompts: BindingPrompts;
   environment: Environment | null;
   repository_environment: boolean;

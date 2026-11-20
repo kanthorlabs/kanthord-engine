@@ -602,6 +602,7 @@ export function authorizationHarness(t: TestContext, identity: CallerIdentity) {
     base_branch: "main",
     action: RepositoryAction.PullRequest as RepositoryAction,
     landing: "human" as "human" | "kanthord",
+    ignored_checks: [] as string[],
   };
   h.dependencies.bindings.repositoryPolicyOf = () => ({ ...policy });
   const assess = (
@@ -761,6 +762,7 @@ export async function externalRequestHarness(
     base_branch: "main",
     action,
     landing: "human" as const,
+    ignored_checks: [],
   });
   const testedInput = {
     kind: AssetKind.Repository,
@@ -899,6 +901,7 @@ export async function reviewHarness(
     base_branch: "main",
     action,
     landing: RepositoryLanding.Human,
+    ignored_checks: [],
   });
   const address = {
     kind: AssetKind.Repository,

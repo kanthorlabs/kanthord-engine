@@ -117,6 +117,29 @@ test("an unresolved pull request with a failed check gives one item", async () =
   });
 });
 
+test("a failed check run that the rules do not require is named", async () => {
+  const reads = { attempt: null, evidenceIds: [] };
+  const answer = await failedChecks(
+    dependencies(
+      [entry(ActionResolution.Unresolved, "evidence_1")],
+      body([], ["e2e"]),
+      reads,
+    ),
+    CALL,
+    CLAIM,
+  );
+  assert.deepEqual(answer, {
+    items: [
+      {
+        evidence_id: "evidence_1",
+        binding_id: BINDING_ID,
+        head_commit: HEAD,
+        failed: ["e2e"],
+      },
+    ],
+  });
+});
+
 test("a request with only pending checks gives no item", async () => {
   const reads = { attempt: null, evidenceIds: [] };
   assert.deepEqual(

@@ -135,6 +135,12 @@ components:
                           enum:
                             - human
                             - kanthord
+                        ignored_checks:
+                          maxItems: 32
+                          type: array
+                          items:
+                            type: string
+                            minLength: 1
                       required:
                         - name
                         - follows

@@ -125,7 +125,6 @@ import {
   pinnedConfigSchema,
   type ProjectBindings,
   ProjectErrorCode,
-  ReviewFlow,
   projectOperations,
   REPOSITORY_PLATFORM,
   repositoryConfigSchema,
@@ -135,6 +134,7 @@ import {
   type RepositoryPolicy,
   RESOURCE_CAPABILITY_NETWORK_GIT_READ,
   RESOURCE_TARGET_KIND_REPOSITORY,
+  ReviewFlow,
   type SchedulerWakeup,
   SSH_CREDENTIAL_PLATFORM,
   type StalePin,
@@ -311,6 +311,14 @@ function refuseRepositoryLinkTrust(
   if (config.platform !== RepositoryPlatform.GitHub)
     refuseLinkTrust(binding, LinkTrustReason.PlatformUnsupported);
   refuseInvalidLinkTrust(binding, config.link_trust);
+}
+function actionPolicyOf(config: typeof repositoryConfigSchema._output) {
+  const action = config.strategy.action;
+  return {
+    action: action?.name ?? null,
+    landing: action?.landing ?? Landing.Human,
+    ignored_checks: action?.ignored_checks ?? [],
+  };
 }
 function reviewFlowOf(
   config: typeof repositoryConfigSchema._output,
@@ -2120,8 +2128,7 @@ export class ProjectService implements Service, ProjectBindings {
       ...(config.strategy.upstream_branch !== undefined && {
         upstream_branch: config.strategy.upstream_branch,
       }),
-      action: config.strategy.action?.name ?? null,
-      landing: config.strategy.action?.landing ?? Landing.Human,
+      ...actionPolicyOf(config),
       prompts: config.prompts ?? {},
       environment: currentEnvironmentOf(tx, binding),
       repository_environment: noStoredEnvironment(tx, binding.project_id),
