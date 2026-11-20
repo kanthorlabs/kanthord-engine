@@ -31,6 +31,7 @@ import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import {
   createInstances,
   enableCoveringAgents,
+  expireHeldPause,
   gatewayFixture,
   humanCaller,
   instanceNames,
@@ -321,6 +322,7 @@ async function drive(h: Harness, nodeId: string) {
     query: {},
     body: await o.act(NodeState.Executing, nodeId),
   });
+  expireHeldPause(h.fixture, secondSteps.execution.execution_id);
   assert.equal((await o.node(nodeId)).state, NodeState.Paused);
   await delay(STEP_GAP_MS);
   await h.human(missionOperations["node.resume"], {

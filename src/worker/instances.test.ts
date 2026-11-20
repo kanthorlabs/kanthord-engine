@@ -2157,6 +2157,24 @@ test("a pause order is connected, raises the work version and appears in the wor
   );
 });
 
+test("a revoked order past the deadline leaves the sweep with no Mission call", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().sendRevokedOrder(
+    box.executionId,
+    box.registration.runtime_identity,
+  );
+  assert.equal(f.worker().orderOf(box.executionId), StopOrderReason.Revoked);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  t.mock.method(Date, "now", () => later);
+  f.worker().instances.sweepStopOrders();
+  assert.equal(f.worker().orderOf(box.executionId), null);
+  assert.deepEqual(f.released, []);
+  assert.deepEqual(f.pausedRevocation.revoked, []);
+  assert.deepEqual(f.revoked, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
 test("a pause order past the deadline revokes the paused claim, removes the order and runs the hook for a non-null answer", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);

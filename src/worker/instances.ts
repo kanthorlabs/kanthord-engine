@@ -125,6 +125,7 @@ export interface InstanceDependencies {
   instanceArchived?: (tx: Transaction, name: string) => void;
   instanceEnded: (ended: readonly string[]) => void;
   stopOrdersQueued: (name: string) => void;
+  poolRuns: (instanceId: string) => boolean;
   logger: Logger;
 }
 
@@ -492,7 +493,14 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   executionConnected(tx: Transaction, runtimeIdentity: string): boolean {
     const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-    return !!instanceId && this.connectionOf(instanceId) !== null;
+    return !!instanceId && this.reachable(instanceId);
+  }
+
+  private reachable(instanceId: string): boolean {
+    return (
+      this.connectionOf(instanceId) !== null ||
+      this.dependencies.poolRuns(instanceId)
+    );
   }
 
   connectedAmong(records: readonly InstanceRecord[]): InstanceRecord[] {
@@ -749,7 +757,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
         pending: null,
         orders: [],
       };
-    if (executions.length && this.connectionOf(live.id) !== null)
+    if (executions.length && this.reachable(live.id))
       return {
         record,
         ended: [],
@@ -942,6 +950,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private expireStopOrder(order: StopOrder): void {
     if (order.reason === StopOrderReason.HumanPaused)
       return this.expirePauseOrder(order);
+    if (order.reason === StopOrderReason.Revoked)
+      return this.dropOrder(order.execution_id);
     const pending = [...this.pendingArchives.values()].find((candidate) =>
       candidate.execution_ids.includes(order.execution_id),
     );

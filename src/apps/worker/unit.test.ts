@@ -22,7 +22,7 @@ import { runVerifications, WorkspaceRoot } from "../../worker/unit/index.ts";
 import { spawnSync } from "node:child_process";
 import { createIdentity } from "../../kernel/identity.ts";
 import { InstanceCleanableKind } from "../../kernel/cleanup.ts";
-import { WorkerErrorCode } from "../../worker/contract.ts";
+import { type StopOrderEntry, WorkerErrorCode } from "../../worker/contract.ts";
 import { simpleGit } from "simple-git";
 import {
   deriveHandoverKeys,
@@ -551,7 +551,11 @@ const RELEASE_FAILED = {
 
 async function liveStopUnit(
   t: TestContext,
-  options: { evaluation: boolean; release?: unknown },
+  options: {
+    evaluation: boolean;
+    release?: unknown;
+    earlyOrder?: StopOrderEntry["reason"];
+  },
 ) {
   const h = await implementFixture(t, [task("a", "true")], []);
   const repository = h.input.setup.repositories[0]!;
@@ -730,17 +734,25 @@ async function liveStopUnit(
       },
     },
   });
+  if (options.earlyOrder !== undefined)
+    unit.stopOrders([
+      {
+        execution_id: claim.execution_id,
+        reason: options.earlyOrder,
+      },
+    ]);
   const running = unit.run();
   t.after(async () => {
     resume.resolve();
     await unit.abandon();
   });
-  await Promise.race([
-    entered.promise,
-    running.then((error) => {
-      throw error ?? new Error("Unit ended before the execution blocked");
-    }),
-  ]);
+  if (options.earlyOrder === undefined)
+    await Promise.race([
+      entered.promise,
+      running.then((error) => {
+        throw error ?? new Error("Unit ended before the execution blocked");
+      }),
+    ]);
   return {
     unit,
     running,
@@ -860,6 +872,24 @@ test(
     assert.equal(await live.unit.stop(), null);
     assert.equal(await live.running, null);
     assert.deepEqual(live.events, ["deregister"]);
+  },
+);
+
+test(
+  "a stop order that arrives before the claim applies when the run starts and releases with human_paused",
+  { timeout: RELEASE_WAIT_MS * 2 },
+  async (t) => {
+    const live = await liveStopUnit(t, {
+      evaluation: false,
+      earlyOrder: HUMAN_PAUSED,
+    });
+    await live.released;
+    assert.equal(
+      (live.releases[0] as { stop: { reason: string } }).stop.reason,
+      HUMAN_PAUSED,
+    );
+    assert.equal(await live.unit.stop(), null);
+    assert.equal(await live.running, null);
   },
 );
 

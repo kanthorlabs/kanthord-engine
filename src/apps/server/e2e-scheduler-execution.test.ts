@@ -19,6 +19,7 @@ import {
   createFakeSshCredential,
   createInstancesByCli,
   enableCoveringAgents,
+  expireHeldPause,
   gatewayFixture,
   instanceNames,
 } from "./test-support.ts";
@@ -543,16 +544,21 @@ test(
         );
       },
     );
-    await t.test("E03.12 human pause revokes the evaluation", async () => {
-      const result = await h.write<{ node: Node }>(
-        ["mission", "node", "pause", h.implementId],
-        h.act(NodeState.Evaluating),
-      );
-      assert.equal(result.node.state, NodeState.Paused);
-      const row = await h.claim(E, h.R);
-      assert.equal(row.claim_state, ClaimState.Finished);
-      assert.ok(Number.isSafeInteger(row.ended_at));
-    });
+    await t.test(
+      "E03.12 human pause holds the evaluation and its deadline revokes it",
+      async () => {
+        const result = await h.write<{ node: Node }>(
+          ["mission", "node", "pause", h.implementId],
+          h.act(NodeState.Evaluating),
+        );
+        assert.equal(result.node.state, NodeState.Paused);
+        assert.equal((await h.claim(E, h.R)).claim_state, ClaimState.Running);
+        expireHeldPause(h.fixture, E);
+        const row = await h.claim(E, h.R);
+        assert.equal(row.claim_state, ClaimState.Finished);
+        assert.ok(Number.isSafeInteger(row.ended_at));
+      },
+    );
     await t.test("E03.13 disabled enablement answers no-work", async () => {
       await h.read([
         "agent",

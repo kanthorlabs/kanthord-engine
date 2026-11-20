@@ -590,6 +590,7 @@ export class WorkerService implements Service {
         this.instancesChanged();
       },
       stopOrdersQueued: (name) => this.sendPoolStopOrders(name),
+      poolRuns: (instanceId) => this.poolRuns(instanceId),
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
@@ -751,6 +752,13 @@ export class WorkerService implements Service {
   async stopPool(): Promise<void> {
     this.poolStarted = false;
     await this.dependencies.pool?.host.stop();
+  }
+
+  private poolRuns(instanceId: string): boolean {
+    return (
+      this.poolStarted &&
+      this.pool!.instances().some((instance) => instance.id === instanceId)
+    );
   }
 
   private sendPoolStopOrders(name: string): void {

@@ -22,11 +22,7 @@ import {
   ExecutionStopReason,
   schedulerOperations,
 } from "../../scheduler/contract.ts";
-import {
-  ExecutionEnd,
-  RevokeCause,
-  trackingOperations,
-} from "../../tracking/contract.ts";
+import { ExecutionEnd, trackingOperations } from "../../tracking/contract.ts";
 import {
   alwaysAvailable,
   BindingEntryState,
@@ -870,7 +866,7 @@ test(
 );
 
 test(
-  "a forced archive of a busy instance that no binding lists returns its node to Available and stops its thread, and a later claim of another instance takes the node",
+  "a forced archive of a busy instance that no binding lists sends instance_archived through the slot, the run releases with that stop, the node returns to Available, the thread stops, and a later claim of another instance takes the node",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const s = await scenario(t, [FIRST_INSTANCE, SECOND_INSTANCE]);
@@ -893,21 +889,24 @@ test(
     assert.ok(s.driver.launched(FIRST_INSTANCE).every((unit) => unit.ended));
     assert.notEqual((await s.instance(FIRST_INSTANCE)).ended_at, null);
 
-    const [revoked] = await s.executions(project, nodeId);
-    assert.equal(revoked?.execution_id, claim!.execution_id);
-    assert.equal(revoked?.claim_state, ClaimState.Finished);
-    assert.equal(revoked?.stop?.reason, ExecutionStopReason.InstanceArchived);
-    assert.equal(revoked?.stop?.code, null);
-    assert.deepEqual(JSON.parse(revoked?.stop?.detail ?? "null"), {
-      instance: FIRST_INSTANCE,
-      actor: s.fixture.accountId,
-    });
+    assert.deepEqual(s.driver.launched(FIRST_INSTANCE)[0]!.orders, [
+      {
+        execution_id: claim!.execution_id,
+        reason: StopOrderReason.InstanceArchived,
+      },
+    ]);
+    assert.deepEqual(s.driver.releases, [claim!.execution_id]);
+    const [released] = await s.executions(project, nodeId);
+    assert.equal(released?.execution_id, claim!.execution_id);
+    assert.equal(released?.claim_state, ClaimState.Finished);
+    assert.equal(released?.stop?.reason, ExecutionStopReason.InstanceArchived);
+    assert.equal(released?.stop?.code, null);
     const node = await s.nodeOf(nodeId);
     assert.equal(node.state, NodeState.Available);
     assert.equal(node.attempt, attempt);
     const trace = await s.rootOf(claim!.execution_id);
-    assert.equal(trace.root.attributes[END_ATTRIBUTE], ExecutionEnd.Revoked);
-    assert.equal(trace.root.attributes[CAUSE_ATTRIBUTE], RevokeCause.Human);
+    assert.equal(trace.root.attributes[END_ATTRIBUTE], ExecutionEnd.Finished);
+    assert.equal(trace.root.attributes[CAUSE_ATTRIBUTE], undefined);
     assert.deepEqual(
       trace.spans.filter(
         (span) =>
@@ -941,7 +940,7 @@ test(
 );
 
 test(
-  "a pause of a server instance run sends the stop order revoked through the slot, and the run ends with no push and no release before its claim watch",
+  "a pause of a server instance run keeps the claim, sends human_paused through the slot, and the run pushes its checkpoint and releases with human_paused",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const s = await scenario(t, [FIRST_INSTANCE]);
@@ -993,15 +992,16 @@ test(
       s.signal,
     );
     assert.ok(Date.now() - pausedAt < CLAIM_WATCH_INTERVAL_MS);
-    assert.equal(end?.reason, StopOrderReason.Revoked);
+    assert.equal(end?.reason, StopOrderReason.HumanPaused);
     assert.deepEqual(s.driver.launched(FIRST_INSTANCE)[0]!.orders, [
-      { execution_id: executionId, reason: StopOrderReason.Revoked },
+      { execution_id: executionId, reason: StopOrderReason.HumanPaused },
     ]);
-    assert.deepEqual(s.driver.releases, []);
-    assert.deepEqual(pushes, []);
-    const [revoked] = await s.executions(project, nodeId);
-    assert.equal(revoked?.claim_state, ClaimState.Finished);
-    assert.equal(revoked?.stop?.reason, ExecutionStopReason.HumanPaused);
+    assert.deepEqual(s.driver.releases, [executionId]);
+    assert.equal(pushes.length, SINGLE_ITEM);
+    const [released] = await s.executions(project, nodeId);
+    assert.equal(released?.claim_state, ClaimState.Finished);
+    assert.equal(released?.stop?.reason, ExecutionStopReason.HumanPaused);
+    assert.equal((await s.nodeOf(nodeId)).state, NodeState.Paused);
   },
 );
 

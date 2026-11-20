@@ -546,7 +546,7 @@ The failure count of the new attempt starts at 0.
 
 Follow these steps. Each step names the fields to read.
 
-1. Run `kanthord mission node get <node-id>`. Read `state`, `attempt`, `pinned_revision`, `visible_revision`, `blocked_context` and `paused_context`. For a paused node, `paused_context.rule` names the cause, and `last_stop.trace_id` names the trace of step 3. The rule is `human` when `last_stop.reason` is `human_paused`. A pause of a connected execution keeps the claim until the coder pushes its checkpoint and releases with `human_paused`, or until the deadline. A pause of a disconnected execution revokes the claim at once.
+1. Run `kanthord mission node get <node-id>`. Read `state`, `attempt`, `pinned_revision`, `visible_revision`, `blocked_context` and `paused_context`. For a paused node, `paused_context.rule` names the cause, and `last_stop.trace_id` names the trace of step 3. The rule is `human` when `last_stop.reason` is `human_paused`. A pause of an execution of a reachable instance keeps the claim until the coder pushes its checkpoint and releases with `human_paused`, or until the deadline. A `worker` instance is reachable while it holds a current connection, and a `server` or `container` instance while the server pool runs it. A pause of an execution of an unreachable instance revokes the claim at once.
 2. Run `kanthord scheduler execution list <project-id> --node <node-id> --attempt <attempt>`. Read `stop` of the last executions and `trace_id`.
 3. Run `kanthord tracking span list <trace-id>`. Read the verification spans for the command, the index, `timed_out` and the output tail.
 4. Run `kanthord mission assessment list <node-id>`. Read the rationale and the unmet criterion of a review failure.

@@ -35,6 +35,7 @@ import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import {
   createInstances,
   enableCoveringAgents,
+  expireHeldPause,
   gatewayFixture,
   humanCaller,
   instanceNames,
@@ -194,6 +195,7 @@ async function setup(t: TestContext) {
     };
   };
   return {
+    fixture,
     human,
     project_id: project.id,
     mission_id: mission.id,
@@ -482,9 +484,7 @@ test(
         NodeState.Executing,
       );
       assert.equal(root.attributes[ActAttribute.StateTo], NodeState.Paused);
-      assert.deepEqual(root.links, [
-        { trace_id: trace.summary.trace_id, span_id: trace.root.span_id },
-      ]);
+      assert.deepEqual(root.links, []);
       assert.equal(root.text_ids.length, SINGLE);
       const reason = await o.text(summary.trace_id, root.text_ids[0]!);
       assert.equal(reason.content, PAUSE_REASON);
@@ -576,6 +576,7 @@ test(
         query: {},
         body: await o.act(NodeState.Executing, nodeId, PAUSE_REASON),
       });
+      expireHeldPause(h.fixture, paused.execution.execution_id);
       assert.equal((await o.node(nodeId)).state, NodeState.Paused);
       await assertPause();
     });

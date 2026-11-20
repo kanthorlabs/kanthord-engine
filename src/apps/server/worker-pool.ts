@@ -56,6 +56,7 @@ export interface WorkerPoolOptions {
 interface Hosted {
   instance: PoolInstance;
   entries: readonly PoolEntry[];
+  orders: readonly StopOrderEntry[];
   pending: boolean;
   running?: SlotInstance;
   ports: Map<string, MessagePort>;
@@ -170,6 +171,7 @@ export class WorkerPool implements PoolHost {
     const hosted: Hosted = {
       instance,
       entries,
+      orders: [],
       pending,
       ports: new Map(),
       requested: null,
@@ -191,7 +193,10 @@ export class WorkerPool implements PoolHost {
   }
 
   stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void {
-    this.hosted.get(instance.id)?.running?.stopOrders(orders);
+    const hosted = this.hosted.get(instance.id);
+    if (!hosted) return;
+    hosted.orders = orders;
+    hosted.running?.stopOrders(orders);
   }
 
   restart(instance: PoolInstance): void {
@@ -409,6 +414,7 @@ export class WorkerPool implements PoolHost {
         environment: this.options.environment ?? process.env,
       });
       hosted.running = running;
+      if (hosted.orders.length) running.stopOrders(hosted.orders);
       hosted.failure = null;
       hosted.requested = null;
       hosted.startedAt = Date.now();

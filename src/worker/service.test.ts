@@ -2245,19 +2245,34 @@ test("a revoked stop order of a running server instance reaches the pool host wi
   );
 });
 
-test("a forced archive of a busy server instance revokes its execution and stops the instance after the commit", async (t) => {
-  const f = poolFixture(t, 1);
-  f.worker.startPool();
+function busyArchive(f: ReturnType<typeof poolFixture>) {
   const registration = f.register(FIRST_INSTANCE);
   f.state.executing.add(registration.runtime_identity);
   f.unlist(FIRST_INSTANCE);
   f.caller.identity = FOOTPRINT_HUMAN;
-  const archive = (force?: boolean) =>
+  return (force?: boolean) =>
     f.invoke(
       "instance.archive",
       { expected_revision: FIRST_REVISION, force },
       { instance_name: f.nameOf(FIRST_INSTANCE) },
     );
+}
+
+test("a pool that runs a server instance makes its execution connected, and before startPool it is not", (t) => {
+  const f = poolFixture(t, 1);
+  const registration = f.register(FIRST_INSTANCE);
+  const connected = () =>
+    f.store.transaction((tx) =>
+      f.worker.executionConnected(tx, registration.runtime_identity),
+    );
+  assert.equal(connected(), false);
+  f.worker.startPool();
+  assert.equal(connected(), true);
+});
+
+test("a forced archive of a busy server instance that the pool does not run revokes its execution after the commit", (t) => {
+  const f = poolFixture(t, 1);
+  const archive = busyArchive(f);
   assert.throws(
     () => archive(),
     (error: unknown) =>
@@ -2265,15 +2280,37 @@ test("a forced archive of a busy server instance revokes its execution and stops
       error.code === WorkerErrorCode.InstanceInUse,
   );
   assert.deepEqual(f.state.revoked, []);
-  assert.deepEqual(f.host.archived, []);
   archive(true);
   assert.deepEqual(f.state.revoked, [POOL_EXECUTION]);
   assert.equal(f.state.reported, POOL_ONE_START);
-  await changesApplied();
+  assert.deepEqual(f.host.sentStopOrders, []);
+});
+
+test("a forced archive of a busy server instance that the pool runs keeps the instance and sends the order instance_archived through the pool host", async (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  const archive = busyArchive(f);
+  archive(true);
+  assert.deepEqual(f.state.revoked, []);
   assert.deepEqual(
-    f.host.archived.map(({ name }) => name),
-    [f.nameOf(FIRST_INSTANCE)],
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [
+          {
+            execution_id: POOL_EXECUTION,
+            reason: StopOrderReason.InstanceArchived,
+          },
+        ],
+      ],
+    ],
   );
+  await changesApplied();
+  assert.deepEqual(f.host.archived, []);
 });
 
 test("a deferred archive end drops the heartbeat entries of the ended registrations and schedules a reconcile", async (t) => {

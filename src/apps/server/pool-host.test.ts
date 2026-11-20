@@ -409,6 +409,23 @@ test("an archive of a pending instance removes its slot root and starts none", a
   assert.equal(f.driver.launches.length, FIRST_LAUNCH);
 });
 
+test("a relaunch sends the last stop order list of the instance to the new slot", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  const f = fixture(t);
+  const instance = f.instanceOf("coder-1");
+  f.pool.start(instance, [f.entryOf("a")]);
+  const orders = [
+    {
+      execution_id: createIdentity("execution"),
+      reason: StopOrderReason.HumanPaused,
+    },
+  ];
+  f.pool.stopOrders(instance, orders);
+  await crash(f.driver.instances[0]!);
+  t.mock.timers.tick(POOL_BACKOFF_INITIAL_MS);
+  assert.deepEqual(f.driver.instances[1]!.orders, [orders]);
+});
+
 test("an exit with no stop restarts the instance with the backoff, under the same client identities", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const f = fixture(t);

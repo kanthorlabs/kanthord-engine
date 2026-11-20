@@ -141,6 +141,7 @@ export class WorkerUnit {
   private round?: CancellationContext;
   private execution?: Execution;
   private executionLive = false;
+  private keptOrders = new Map<string, StopOrderEntry["reason"]>();
   private draining = false;
   private abandoning = false;
   private pullStarted = false;
@@ -255,13 +256,19 @@ export class WorkerUnit {
   }
 
   stopOrders(orders: readonly StopOrderEntry[]): void {
+    this.keptOrders = new Map(
+      orders.map((order) => [order.execution_id, order.reason]),
+    );
+    this.applyKeptOrder();
+  }
+
+  private applyKeptOrder(): void {
     const execution = this.execution;
     if (!this.executionLive || !execution) return;
-    for (const order of orders) {
-      if (order.execution_id !== execution.claim.execution_id) continue;
-      if (order.reason === EndReason.Revoked) execution.revoke();
-      else execution.stopWith(new ExecutionStop(order.reason, null));
-    }
+    const reason = this.keptOrders.get(execution.claim.execution_id);
+    if (reason === undefined) return;
+    if (reason === EndReason.Revoked) execution.revoke();
+    else execution.stopWith(new ExecutionStop(reason, null));
   }
 
   private async reportFootprint(
@@ -683,7 +690,10 @@ export class WorkerUnit {
         }
         return result;
       })
-      .finally(() => context.cancel());
+      .finally(() => {
+        this.keptOrders.delete(claim.execution_id);
+        context.cancel();
+      });
     this.execution = {
       claim,
       entry,
@@ -693,6 +703,7 @@ export class WorkerUnit {
         revocation.cancel(new ExecutionStop(EndReason.Revoked, null)),
       task,
     };
+    this.applyKeptOrder();
   }
 
   private async execute(
