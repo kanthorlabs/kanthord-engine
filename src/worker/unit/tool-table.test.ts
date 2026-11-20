@@ -23,6 +23,8 @@ import { HostTool } from "../contract.ts";
 const MILLISECONDS_PER_SECOND = 1000;
 const MODEL_TIMEOUT_SECONDS = 30;
 const TOOL_CALL = "call_bash";
+const COMMAND = "echo coder";
+const SINGLE_CALL = 1;
 
 class RecordingProcesses extends ToolProcesses {
   timeout: number | undefined;
@@ -32,6 +34,26 @@ class RecordingProcesses extends ToolProcesses {
     return {
       exec: async (_command, _cwd, options) => {
         this.timeout = options.timeout;
+        return { exitCode: 0 };
+      },
+    };
+  }
+}
+
+class CallRecordingProcesses extends ToolProcesses {
+  readonly operationIds: string[] = [];
+  readonly calls: {
+    command: string;
+    cwd: string;
+    env: NodeJS.ProcessEnv | undefined;
+  }[] = [];
+
+  override operations(toolCallId: string): BashOperations {
+    assert.ok(toolCallId);
+    this.operationIds.push(toolCallId);
+    return {
+      exec: async (command, cwd, options) => {
+        this.calls.push({ command, cwd, env: options.env });
         return { exitCode: 0 };
       },
     };
@@ -220,6 +242,41 @@ test("bash records the requested and the applied timeout once and records nothin
   const ended = budget(1, now - 10000);
   await assert.rejects(runBash(tools(ended), "true"), /resource budget ended/);
   assert.equal(processes.takeTimeout(TOOL_CALL), undefined);
+});
+
+test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.operations with the child environment", async (t) => {
+  const pi = await loadPi();
+  const processes = new CallRecordingProcesses(pi.getShellConfig());
+  const cwd = temporary(t);
+  const now = Date.now();
+  const budget = new ExecutionBudget({
+    created_at: now,
+    expired_at: now + COMMAND_LIMIT_MS,
+    resource_budget: { wall_time_ms: COMMAND_LIMIT_MS },
+  });
+  const removed = ["ANTHROPIC_API_KEY", "KANTHORD_TOKEN"];
+  const source = {
+    ...hostEnvironment(),
+    ...Object.fromEntries(removed.map((name) => [name, "present"])),
+  };
+  const tools = sessionTools(
+    pi,
+    "swe@1",
+    cwd,
+    budget,
+    unusedHostTools,
+    source,
+    processes,
+  );
+  await runBash(tools, COMMAND);
+  assert.deepEqual(processes.operationIds, [TOOL_CALL]);
+  assert.equal(processes.calls.length, SINGLE_CALL);
+  const [call] = processes.calls;
+  assert.ok(call?.env);
+  assert.equal(call.command, COMMAND);
+  assert.equal(call.cwd, cwd);
+  for (const name of removed) assert.ok(!(name in call.env));
+  assert.deepEqual(call.env, childEnvironment(call.env));
 });
 
 const TREE_TIMEOUT_SECONDS = 20;

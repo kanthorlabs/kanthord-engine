@@ -25,7 +25,10 @@ import {
   ThreadMessageKind,
 } from "../worker/thread-data.ts";
 import { until } from "./cli-test-support.ts";
-import { launchEnvironment } from "./thread-driver.ts";
+import {
+  launchEnvironment,
+  threadEnvironment as slotThreadEnvironment,
+} from "./thread-driver.ts";
 import {
   gatewayFixture,
   humanCaller,
@@ -121,6 +124,33 @@ test("the worker data of a thread holds an entry list and a log destination only
   } finally {
     port1.close();
     port2.close();
+  }
+});
+
+test("the directories of a slot thread name the slot root, not the directories of the source", (t) => {
+  const slotRoot = temporary(t);
+  const sourceRoot = temporary(t);
+  const source: NodeJS.ProcessEnv = {
+    PATH: hostEnvironment().PATH,
+    XDG_CONFIG_HOME: join(sourceRoot, "config"),
+    XDG_STATE_HOME: join(sourceRoot, "state"),
+    XDG_DATA_HOME: join(sourceRoot, "data"),
+    XDG_CACHE_HOME: join(sourceRoot, "cache"),
+  };
+  const slot = directories(slotThreadEnvironment(source, slotRoot));
+  const server = directories(source);
+  assert.deepEqual(
+    [slot.config, slot.state, slot.data],
+    [
+      join(slotRoot, "config", "kanthord"),
+      join(slotRoot, "state", "kanthord"),
+      join(slotRoot, "data", "kanthord"),
+    ],
+  );
+  for (const name of ["config", "state", "data"] as const) {
+    assert.ok(slot[name].startsWith(`${slotRoot}/`));
+    assert.notEqual(slot[name], server[name]);
+    assert.ok(!slot[name].startsWith(`${sourceRoot}/`));
   }
 });
 
