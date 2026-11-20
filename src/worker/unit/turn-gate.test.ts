@@ -89,7 +89,7 @@ const CRLF_CONTENT = "a\r\nb\r\n";
 const HIJACKED_MESSAGE = "hijack";
 const TURN_VIOLATION_LOG = "turn violation";
 const ONE_GATE_SPAN = 1;
-const ONE_TEXT = 1;
+const NO_PROCESSES = 0;
 const GATE_MESSAGE = "feat: gate work";
 const CHANGED_FILE_COUNT = "kanthord.git.changed_file_count";
 const CHANGED_FILES = "kanthord.git.changed_files";
@@ -1069,7 +1069,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(texts, []);
   });
 
-  test("a failed gate commit ends the gate span with Error and the commit text and writes no git span", async (t) => {
+  test("a failed gate commit ends the gate span with Error, the error code and the process count, with no git error text and no git span", async (t) => {
     const h = await fixture(t, [], []);
     const records = recordSpans(h);
     configureFailingSigner(h);
@@ -1081,9 +1081,11 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     const { end, texts } = gateSpan(records);
     assert.equal(end.status, SpanStatus.Error);
-    assert.equal(texts.length, ONE_TEXT);
-    assert.ok(texts[0]!.startsWith(`${GIT_COMMIT_FAILED}:`));
-    assert.ok(texts[0]!.includes(SIGNER_FAILURE));
+    assert.equal(end.attributes?.["error.type"], GIT_COMMIT_FAILED);
+    assert.ok(Number(end.attributes?.[PROCESS_COUNT]) > NO_PROCESSES);
+    assert.equal("kanthord.gate.violation" in (end.attributes ?? {}), false);
+    assert.deepEqual(texts, []);
+    assert.equal(JSON.stringify(records).includes(SIGNER_FAILURE), false);
     assert.deepEqual(spansOf(records, SpanOperation.Git), []);
   });
   test("an unchanged turn runs one git status and writes the process count on its gate span", async (t) => {

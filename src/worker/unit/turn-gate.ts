@@ -18,7 +18,7 @@ import {
   SpanStatus,
 } from "../../tracking/contract.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
-import { gitFailure } from "./method-telemetry.ts";
+import { CodedError } from "../../kernel/errors.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import {
   abortMerge,
@@ -78,6 +78,7 @@ const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
 const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
 const PROCESS_COUNT_ATTRIBUTE = "kanthord.git.process_count";
+const ERROR_TYPE_ATTRIBUTE = "error.type";
 const CHANGED_FILES_MAX_BYTES = 16384;
 const PATH_PREFIX_SEPARATOR = ":";
 
@@ -322,15 +323,20 @@ function gateFailure(
   violation: TurnViolation | null,
   processes: GitProcessCount,
 ): (error: unknown) => SpanEnd {
-  return (error) => {
-    const attributes = {
+  return (error) => ({
+    status: SpanStatus.Error,
+    attributes: {
       [PROCESS_COUNT_ATTRIBUTE]: processes.count,
       ...violationAttributes(violation),
-    };
-    if (error instanceof ExecutionStop)
-      return { status: SpanStatus.Error, attributes };
-    return { ...gitFailure(error), attributes };
-  };
+      ...errorTypeAttributes(error),
+    },
+  });
+}
+
+function errorTypeAttributes(error: unknown): Attributes {
+  return error instanceof CodedError
+    ? { [ERROR_TYPE_ATTRIBUTE]: error.code }
+    : {};
 }
 
 function mergeOf(turn: GateTurn, checkout: NodeCheckout): ConflictMerge | null {
