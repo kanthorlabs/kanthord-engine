@@ -91,6 +91,7 @@ const ONE_TEXT = 1;
 const GATE_MESSAGE = "feat: gate work";
 const CHANGED_FILE_COUNT = "kanthord.git.changed_file_count";
 const CHANGED_FILES = "kanthord.git.changed_files";
+const PROCESS_COUNT = "kanthord.git.process_count";
 const ONE_CHANGED_FILE = 1;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
@@ -968,13 +969,18 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(texts[0]!.includes(SIGNER_FAILURE));
     assert.deepEqual(spansOf(records, SpanOperation.Git), []);
   });
-  test("an unchanged turn runs one git status", async (t) => {
+  test("an unchanged turn runs one git status and writes the process count on its gate span", async (t) => {
     const h = await fixture(t, [], []);
     const commands = countGit(t, h);
+    const records = recordSpans(h);
     const before = h.checkouts[0]!.head;
     await gatedTurn(h, t, async () => {});
     assert.deepEqual(commands(), UNCHANGED_TURN);
     assert.equal(h.checkouts[0]!.head, before);
+    assert.equal(
+      gateSpan(records).end.attributes?.[PROCESS_COUNT],
+      UNCHANGED_TURN.length,
+    );
   });
 
   test("a changed turn with no modified path runs five git processes", async (t) => {

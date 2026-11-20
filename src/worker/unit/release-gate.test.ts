@@ -48,14 +48,17 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   listedVerificationSpans,
+  phaseSpanNames,
   recordReleases,
   recordSpans,
   releasedRoot,
   spanEnds,
+  stepSpanOutcomes,
   task,
 } from "./test-support.ts";
 import { RecordKind } from "../../tracking/contract.ts";
-import { SpanOperation } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
+import { FrameOutcome } from "./chain.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -218,6 +221,44 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(
       await simpleGit(h.bare).raw(["show", `refs/heads/${h.nodeBranch}:file`]),
       REVISED_CONTENT,
+    );
+  });
+
+  test("an implement execution writes one worker.phase span per phase and one worker.step span per step", async (t) => {
+    const h = await fixture(t, [task("plain", "true")], [NOTHING]);
+    const records = recordSpans(h);
+    recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.deepEqual(phaseSpanNames(records), [
+      Phase.Start,
+      Phase.Tasks,
+      Phase.Finish,
+    ]);
+    assert.deepEqual(
+      stepSpanOutcomes(records),
+      [
+        "base.refresh(claim)",
+        "env.setup(live)",
+        "units.plan",
+        "budget.check",
+        "unit.enter",
+        "unit.turn",
+        "verify.own",
+        "unit_record.put",
+        "unit.leave",
+        "base.fetch",
+        "base.refresh(release)",
+        "release.verify",
+        "release.route",
+        "report.coder",
+        "branch.push",
+        "evidence.head",
+        "execution.release",
+      ].map((id) => [id, FrameOutcome.Next]),
     );
   });
 

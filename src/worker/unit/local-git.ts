@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   appendFileSync,
   existsSync,
@@ -54,6 +55,25 @@ const STATUS_INDEX_COLUMN = 2;
 const STATUS_MODES_START = 3;
 const STATUS_MODES_END = 6;
 const GITLINK_MODE = "160000";
+const NO_PROCESSES = 0;
+const ONE_PROCESS = 1;
+const processCounts = new AsyncLocalStorage<GitProcessCount>();
+
+export class GitProcessCount {
+  private value = NO_PROCESSES;
+
+  get count(): number {
+    return this.value;
+  }
+
+  add(): void {
+    this.value += ONE_PROCESS;
+  }
+
+  within<T>(work: () => Promise<T>): Promise<T> {
+    return processCounts.run(this, work);
+  }
+}
 export const HEAD_OUTSIDE_BRANCHES = "(null)";
 const GIT_DIRECTORY = ".git";
 const LOCK_SUFFIX = ".lock";
@@ -282,6 +302,7 @@ async function run(
   assert.ok(directory);
   assert.ok(deadlineMs > EXPIRED);
   context.signal.throwIfAborted();
+  processCounts.getStore()?.add();
   return await simpleGit({
     baseDir: directory,
     abort: context.signal,

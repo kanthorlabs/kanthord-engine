@@ -15,7 +15,6 @@ import {
   IMPLEMENT_HOST_PORTS,
   type ImplementHostPorts,
 } from "./foundry-ports.ts";
-import { phaseFrame } from "./foundry-implement.ts";
 import { affectedDeclaration } from "./step-affected-declaration.ts";
 import { agentOpenImplement } from "./step-agent-open.ts";
 import { envSetupLive } from "./step-env-setup-host.ts";
@@ -23,8 +22,6 @@ import { setupEntriesLive } from "./step-setup-entries-host.ts";
 import { stateOpen } from "./step-state-open.ts";
 import { startInputsNode } from "./chain-implement.ts";
 import { Phase } from "./telemetry.ts";
-
-const TASKS_PREPARE_LOOP = "tasks_prepare";
 
 function unlessSeeded(
   seeded: ReadonlySet<Key>,
@@ -39,21 +36,18 @@ export function tasksPrepareChain(
 ): Chain<ImplementHostPorts> {
   return chain<ImplementHostPorts>(ChainId.TasksPrepare, IMPLEMENT_HOST_PORTS)
     .phase(Phase.Prepare)
-    .loop(
-      TASKS_PREPARE_LOOP,
-      phaseFrame(Phase.Prepare, [
-        parallelNode(
-          "workspace.static",
-          [
-            ...unlessSeeded(seeded, "affectedTests", affectedDeclaration),
-            stepNode(setupEntriesLive),
-            stepNode(agentOpenImplement),
-          ].map(soloBranch),
-        ),
-        stepNode(stateOpen),
-        seeded.has("plan") ? stepNode(envSetupLive) : startInputsNode(),
-      ]),
-    )
+    .nodes([
+      parallelNode(
+        "workspace.static",
+        [
+          ...unlessSeeded(seeded, "affectedTests", affectedDeclaration),
+          stepNode(setupEntriesLive),
+          stepNode(agentOpenImplement),
+        ].map(soloBranch),
+      ),
+      stepNode(stateOpen),
+      seeded.has("plan") ? stepNode(envSetupLive) : startInputsNode(),
+    ])
     .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
     .build();
 }

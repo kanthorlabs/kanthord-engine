@@ -26,7 +26,7 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { frozenStore } from "../../llm/refresh-watch.ts";
 import { AssetKind } from "../../mission/contract.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
-import { RecordKind } from "../../tracking/contract.ts";
+import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import type { ExecutionCtx, FoundryEnd, Key } from "./chain.ts";
 import { FoundryEndKind } from "./chain.ts";
@@ -92,6 +92,7 @@ import {
   RunEndKind,
   verifyRun,
 } from "./tasks-verify.ts";
+import { phaseSpan } from "./method-telemetry.ts";
 import { Phase, SpanOperation } from "./telemetry.ts";
 import { agentOpenPort, commonPorts } from "./worker-ports.ts";
 
@@ -395,11 +396,22 @@ async function tasksEnd(
     until: plan.until,
     env,
   });
-  const end = await foundryImplement(input, {
-    capabilities: io.capabilities,
-    ports: io.ports,
-    steps: composed.steps,
-  });
+  const end = await run.spans.within(
+    phaseSpan(Phase.Tasks),
+    () =>
+      foundryImplement(input, {
+        capabilities: io.capabilities,
+        ports: io.ports,
+        steps: composed.steps,
+      }),
+    (ended) => ({
+      status:
+        ended.kind === FoundryEndKind.Completed ||
+        ended.kind === FoundryEndKind.BudgetEnd
+          ? SpanStatus.Ok
+          : SpanStatus.Error,
+    }),
+  );
   return foundryEndOf(composed, end, serializedInput(input));
 }
 

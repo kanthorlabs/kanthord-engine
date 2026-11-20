@@ -31,6 +31,7 @@ import {
   type GitCall,
   type GitOperation,
   type GitPaths,
+  GitProcessCount,
   type GitStatus,
   HEAD_OUTSIDE_BRANCHES,
   livePaths,
@@ -76,6 +77,7 @@ const GATE_CHANGED_ATTRIBUTE = "kanthord.gate.changed";
 const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
 const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
+const PROCESS_COUNT_ATTRIBUTE = "kanthord.git.process_count";
 const CHANGED_FILES_MAX_BYTES = 16384;
 const PATH_PREFIX_SEPARATOR = ":";
 
@@ -232,60 +234,63 @@ async function runGate(
   assert.equal(before.length, state.checkouts.length);
   let violated: TurnViolation | null = null;
   const changedPaths: string[] = [];
+  const processes = new GitProcessCount();
   return state.ports.telemetry.within(
     {
       key: state.ports.telemetry.key(SpanOperation.Gate),
       operation: SpanOperation.Gate,
       attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
     },
-    async () => {
-      const merges = await gateMerges(state, turn, context);
-      const inspections = await perCheckout(
-        state.checkouts,
-        (checkout, index) =>
-          inspect(state, checkout, before[index]!, {
+    () =>
+      processes.within(async () => {
+        const merges = await gateMerges(state, turn, context);
+        const inspections = await perCheckout(
+          state.checkouts,
+          (checkout, index) =>
+            inspect(state, checkout, before[index]!, {
+              merge: merges[index]!,
+              context,
+            }),
+        );
+        const violation =
+          inspections.find((inspection) => inspection.violation !== null)
+            ?.violation ?? null;
+        if (violation !== null) {
+          violated = violation.code;
+          const detail = await violate(state, before, violation, context);
+          if (turn.violationEnd === ViolationEnd.Restore) return false;
+          throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
+            detail,
+          });
+        }
+        const settled = await perCheckout(state.checkouts, (checkout, index) =>
+          settleCheckout(state, checkout, {
+            before: before[index]!,
+            status: inspections[index]!.status,
+            turn,
             merge: merges[index]!,
             context,
           }),
-      );
-      const violation =
-        inspections.find((inspection) => inspection.violation !== null)
-          ?.violation ?? null;
-      if (violation !== null) {
-        violated = violation.code;
-        const detail = await violate(state, before, violation, context);
-        if (turn.violationEnd === ViolationEnd.Restore) return false;
-        throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
-          detail,
-        });
-      }
-      const settled = await perCheckout(state.checkouts, (checkout, index) =>
-        settleCheckout(state, checkout, {
-          before: before[index]!,
-          status: inspections[index]!.status,
-          turn,
-          merge: merges[index]!,
-          context,
-        }),
-      );
-      for (const [index, checkout] of state.checkouts.entries())
-        changedPaths.push(
-          ...prefixedPaths(state, checkout, settled[index]!.paths),
         );
-      const changed = settled.some((entry) => entry.changed);
-      removeRootEntries(state);
-      return changed;
-    },
+        for (const [index, checkout] of state.checkouts.entries())
+          changedPaths.push(
+            ...prefixedPaths(state, checkout, settled[index]!.paths),
+          );
+        const changed = settled.some((entry) => entry.changed);
+        removeRootEntries(state);
+        return changed;
+      }),
     (changed) => ({
       status: SpanStatus.Ok,
       attributes: {
         [GATE_CHANGED_ATTRIBUTE]: changed,
         [CHANGED_FILE_COUNT_ATTRIBUTE]: changedPaths.length,
         [CHANGED_FILES_ATTRIBUTE]: boundedPaths(changedPaths),
+        [PROCESS_COUNT_ATTRIBUTE]: processes.count,
         ...violationAttributes(violated),
       },
     }),
-    (error) => gateFailure(violated)(error),
+    (error) => gateFailure(violated, processes)(error),
   );
 }
 
@@ -315,9 +320,13 @@ function violationAttributes(violation: TurnViolation | null): Attributes {
 
 function gateFailure(
   violation: TurnViolation | null,
+  processes: GitProcessCount,
 ): (error: unknown) => SpanEnd {
   return (error) => {
-    const attributes = violationAttributes(violation);
+    const attributes = {
+      [PROCESS_COUNT_ATTRIBUTE]: processes.count,
+      ...violationAttributes(violation),
+    };
     if (error instanceof ExecutionStop)
       return { status: SpanStatus.Error, attributes };
     return { ...gitFailure(error), attributes };

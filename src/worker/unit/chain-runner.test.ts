@@ -31,6 +31,7 @@ import {
   DeadlineKind,
   type ExecutionCtx,
   FoundryEndKind,
+  FrameOutcome,
   type Key,
   type LoopFrame,
   loopNode,
@@ -57,9 +58,15 @@ import {
 } from "./execution-stop.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
 import { runTasks } from "./foundry.ts";
+import { phaseSpanNames, spanEnds, stepSpanOutcomes } from "./test-support.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { Phase, SpanOperation } from "./telemetry.ts";
-import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
+import { EndPhase, Phase, SpanOperation } from "./telemetry.ts";
+import {
+  RecordKind,
+  type SpanRecord,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
 
 const WALL_TIME_MS = 60000;
 const RELEASED: ExecutionEnd = {
@@ -135,7 +142,7 @@ function harness(t: TestContext, stop?: CancellationContext): Harness {
       capabilities: [],
       resources,
       host: { env: {} } as unknown as ChainIo["host"],
-      ports: {} as ChainIo["ports"],
+      ports: { telemetry: run.spans } as ChainIo["ports"],
     },
     seed: { claim } as ChainSeed,
     trace,
@@ -284,6 +291,139 @@ test("a chain runs each phase, each frame of a loop and the final step, then dis
     "dispose second",
     "dispose first",
   ]);
+});
+
+const PHASE_ATTRIBUTE = "kanthord.phase";
+const STEP_ID_ATTRIBUTE = "kanthord.step.id";
+
+function spanRecords(h: Harness, operation: string): SpanRecord[] {
+  return h.records.filter(
+    (record): record is SpanRecord =>
+      record.kind === RecordKind.Span && record.operation === operation,
+  );
+}
+
+function closingStep(h: Harness, id: string, end: ExecutionEnd): ChainStep {
+  return { ...finalStep(h, id, end), final: true };
+}
+
+test("the runner writes one worker.phase span per phase and one worker.step span per step, and ends the final step span before the release", async (t) => {
+  const h = harness(t);
+  let endedAtRelease: unknown[] = [];
+  const release = stepOf(h, "release", {
+    kind: StepKind.Closed,
+    patch: { end: RELEASED },
+    work: () => {
+      endedAtRelease = h.records.flatMap((record) =>
+        record.kind === RecordKind.Span && record.end_time !== undefined
+          ? [record.span_id]
+          : [],
+      );
+    },
+  });
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .phase(Phase.Start)
+    .step(stepOf(h, "start"))
+    .tasks(tasksOf([stepNode(foundryOf(stepOf(h, "work")))]))
+    .phase(Phase.Finish)
+    .step(stepOf(h, "push"))
+    .step({ ...release, final: true })
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(phaseSpanNames(h.records), [
+    Phase.Prepare,
+    Phase.Start,
+    Phase.Tasks,
+    Phase.Finish,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(h.records), [
+    ["prepare", FrameOutcome.Next],
+    ["start", FrameOutcome.Next],
+    ["work", FrameOutcome.Next],
+    ["push", FrameOutcome.Next],
+    ["release", FrameOutcome.Next],
+  ]);
+  const startOf = (operation: string, attribute: string, value: string) =>
+    spanRecords(h, operation).find(
+      (record) =>
+        record.start_time !== undefined &&
+        record.attributes?.[attribute] === value,
+    )?.span_id;
+  assert.ok(
+    endedAtRelease.includes(
+      startOf(SpanOperation.Step, STEP_ID_ATTRIBUTE, "release"),
+    ),
+  );
+  assert.ok(
+    endedAtRelease.includes(
+      startOf(SpanOperation.Phase, PHASE_ATTRIBUTE, Phase.Finish),
+    ),
+  );
+});
+
+test("a budget end writes the step outcome budget_end and the phase on_exit, and a stop writes the outcome stop with no text and the phase on_stop", async (t) => {
+  const exited = harness(t);
+  const exitChain = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(exited, "prepare"))
+    .tasks(
+      tasksOf([
+        stepNode(
+          foundryOf(stepOf(exited, "work", { kind: StepKind.BudgetEnd })),
+        ),
+      ]),
+    )
+    .phase(Phase.Finish)
+    .step(closingStep(exited, "release", RELEASED))
+    .budgetEnd({
+      kind: BudgetEndKind.Exit,
+      nodes: [
+        stepNode(stepOf(exited, "checkpoint")),
+        stepNode(closingStep(exited, "exit", EXITED)),
+      ],
+    })
+    .build();
+  assert.deepEqual(
+    await runChain(exitChain, { seed: exited.seed }, exited.io),
+    EXITED,
+  );
+  assert.deepEqual(phaseSpanNames(exited.records), [
+    Phase.Prepare,
+    Phase.Tasks,
+    EndPhase.OnExit,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(exited.records), [
+    ["prepare", FrameOutcome.Next],
+    ["work", FrameOutcome.BudgetEnd],
+    ["checkpoint", FrameOutcome.Next],
+    ["exit", FrameOutcome.Next],
+  ]);
+  const stopped = harness(t);
+  const stopChain = stoppable(
+    stopped,
+    stepOf(stopped, "work", {
+      work: () => stopped.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+    }),
+  )
+    .onStop([stepNode(stepOf(stopped, "checkpoint"))])
+    .build();
+  await assert.rejects(runChain(stopChain, { seed: stopped.seed }, stopped.io));
+  assert.deepEqual(phaseSpanNames(stopped.records), [
+    Phase.Prepare,
+    Phase.Tasks,
+    EndPhase.OnStop,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(stopped.records), [
+    ["prepare", FrameOutcome.Next],
+    ["work", FrameOutcome.Stop],
+    ["checkpoint", FrameOutcome.Next],
+  ]);
+  const failed = spanEnds(stopped.records, SpanOperation.Step)[1]!;
+  assert.equal(failed.status, SpanStatus.Error);
+  assert.deepEqual(failed.text_ids, []);
 });
 
 test("a capture that throws after start logs tasks capture failed, and the chain reaches its final step", async (t) => {
@@ -871,60 +1011,53 @@ test("a step span of a parallel branch has the span that is open at the group st
     stepNode(
       foundryOf(
         contextStepOf(h, id, {
-          call: () =>
-            spans.within(
-              { key: `step:${id}`, operation: SpanOperation.Git },
-              async () => {
-                await work();
-                await spans.within(
-                  { key: `inner:${id}`, operation: SpanOperation.Git },
-                  async () => {},
-                );
-              },
-            ),
+          call: async () => {
+            await work();
+            await spans.within(
+              { key: `inner:${id}`, operation: SpanOperation.Git },
+              async () => {},
+            );
+          },
         }),
       ),
     );
-  const frame: LoopFrame<true> = {
-    reads: [],
-    init: () => true,
-    body: [
-      parallelNode(GROUP, [
-        soloBranch(spanStep("first", () => held)),
-        soloBranch(
-          spanStep("second", async () => {
-            await Promise.resolve();
-            release();
-          }),
-        ),
-      ]),
-    ],
-    next: () => null,
-    span: () => ({ key: "phase:prepare", operation: SpanOperation.Phase }),
-  };
   const built = chain<CommonPorts>(ChainId.Implement, [])
     .phase(Phase.Prepare)
-    .loop("prepare", frame)
+    .parallel(GROUP, [
+      soloBranch(spanStep("first", () => held)),
+      soloBranch(
+        spanStep("second", async () => {
+          await Promise.resolve();
+          release();
+        }),
+      ),
+    ])
     .phase(Phase.Finish)
     .step(finalStep(h, "release", RELEASED))
     .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
     .build();
   assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
-  const parentOf = (key: string) =>
-    h.records.find(
+  const starts = h.records.filter(
+    (record) => record.kind === RecordKind.Span && record.start_time,
+  );
+  const phase = spans.spanIdOf("phase:prepare");
+  for (const id of ["first", "second"]) {
+    const step = starts.find(
       (record) =>
         record.kind === RecordKind.Span &&
-        record.span_id === spans.spanIdOf(key),
+        record.operation === SpanOperation.Step &&
+        record.attributes?.["kanthord.step.id"] === id,
     );
-  const group = spans.spanIdOf("phase:prepare");
-  for (const id of ["first", "second"]) {
-    const step = parentOf(`step:${id}`);
-    const inner = parentOf(`inner:${id}`);
+    const inner = starts.find(
+      (record) =>
+        record.kind === RecordKind.Span &&
+        record.span_id === spans.spanIdOf(`inner:${id}`),
+    );
     assert.ok(
       step?.kind === RecordKind.Span && inner?.kind === RecordKind.Span,
     );
-    assert.equal(step.parent_span_id, group);
-    assert.equal(inner.parent_span_id, spans.spanIdOf(`step:${id}`));
+    assert.equal(step.parent_span_id, phase);
+    assert.equal(inner.parent_span_id, step.span_id);
   }
 });
 

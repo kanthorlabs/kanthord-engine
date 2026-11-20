@@ -17,6 +17,7 @@ function closed<S>(scope: S, end: ExecutionEnd): StepResult<S, "end"> {
 export const executionRelease: Step<unknown, "claim", "end"> = {
   id: "execution.release",
   deadline: DeadlineKind.Cleanup,
+  final: true,
   reads: ["claim"],
   writes: ["end"],
   stops: [],
@@ -29,6 +30,7 @@ export const executionRelease: Step<unknown, "claim", "end"> = {
 export const executionReleaseFurtherWork: Step<unknown, "claim", "end"> = {
   id: "execution.release",
   deadline: DeadlineKind.Cleanup,
+  final: true,
   reads: ["claim"],
   writes: ["end"],
   stops: [],
@@ -45,6 +47,7 @@ export const executionReleaseBudgetEnd: Step<
 > = {
   id: "execution.release",
   deadline: DeadlineKind.Cleanup,
+  final: true,
   reads: ["state", "completedUnits"],
   writes: ["end"],
   stops: [],

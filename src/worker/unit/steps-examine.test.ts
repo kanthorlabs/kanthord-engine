@@ -25,9 +25,14 @@ import { BudgetLimit } from "../../scheduler/contract.ts";
 import {
   anthropicSetup,
   everyBindingSshAccess,
+  phaseSpanNames,
   repositorySetup,
+  stepSpanOutcomes,
   transport,
 } from "./test-support.ts";
+import { FrameOutcome } from "./chain.ts";
+import { Phase } from "./telemetry.ts";
+import type { TelemetryRecord } from "../../tracking/contract.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { CHECKOUTS_DIRECTORY, REVIEW_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
@@ -72,6 +77,8 @@ test("examine reports its dependencies once and gives its tree back to the pool"
       further: false,
       evidence: true,
       opens: 1,
+      phases: [Phase.Prepare, Phase.Tasks, Phase.Finish],
+      turn: FrameOutcome.Next,
     },
     {
       states: ["Completed"],
@@ -79,6 +86,8 @@ test("examine reports its dependencies once and gives its tree back to the pool"
       further: null,
       evidence: false,
       opens: 1,
+      phases: [Phase.Prepare, Phase.Tasks],
+      turn: FrameOutcome.Stop,
     },
   ];
   for (const scenario of scenarios) {
@@ -150,11 +159,16 @@ test("examine reports its dependencies once and gives its tree back to the pool"
         },
       },
     } as unknown as MethodClients;
+    const records: TelemetryRecord[] = [];
     const run = new ExecutionRun({
       claim,
       clients,
       credentials: { release: async () => {} },
       context: background,
+      telemetry: {
+        write: (batch) => void records.push(...batch),
+        flush: async () => {},
+      },
     });
     stopAfter(t, () => run.dispose());
     const open = async () => {
@@ -199,6 +213,22 @@ test("examine reports its dependencies once and gives its tree back to the pool"
     assert.deepEqual(
       workspaces.pool.trees().map((tree) => basename(dirname(tree.path))),
       [PoolClass.Agent],
+    );
+    assert.deepEqual(phaseSpanNames(records), scenario.phases);
+    assert.deepEqual(
+      stepSpanOutcomes(records).sort(),
+      [
+        ["inputs.read(revision, dependencies)", FrameOutcome.Next],
+        ["workspace.review(base)", FrameOutcome.Next],
+        ["setup.entries(examine)", FrameOutcome.Next],
+        ["env.setup(examine)", FrameOutcome.Next],
+        ["agent.open", FrameOutcome.Next],
+        ["verify.node", FrameOutcome.Next],
+        ["examine.turn", scenario.turn],
+        ...(scenario.further === null
+          ? []
+          : [["execution.release", FrameOutcome.Next]]),
+      ].sort(),
     );
   }
 });

@@ -13,7 +13,12 @@ import {
   writesOf,
 } from "./chain.ts";
 import { ExecutionStop } from "./execution-stop.ts";
-import type { SpanEnd, SpanRecorder } from "./telemetry.ts";
+import {
+  type SpanEnd,
+  SpanOperation,
+  type SpanRecorder,
+  type SpanStart,
+} from "./telemetry.ts";
 
 export const CANCELLED = "cancelled";
 export const UNTIL = "until";
@@ -21,6 +26,49 @@ export type Walked = StepKind | typeof CANCELLED | typeof UNTIL | ExecutionStop;
 
 export interface ScopeHolder {
   scope: unknown;
+}
+
+const STEP_ID = "kanthord.step.id";
+const STEP_OUTCOME = "kanthord.step.outcome";
+type StepOutcome = (typeof FrameOutcome)[keyof typeof FrameOutcome];
+
+function stepStart(spans: SpanRecorder, step: ChainStep): SpanStart {
+  return {
+    key: spans.key(SpanOperation.Step),
+    operation: SpanOperation.Step,
+    attributes: { [STEP_ID]: step.id },
+  };
+}
+
+function stepEnd(outcome: StepOutcome): SpanEnd {
+  return {
+    status: outcome === FrameOutcome.Stop ? SpanStatus.Error : SpanStatus.Ok,
+    attributes: { [STEP_OUTCOME]: outcome },
+  };
+}
+
+function stepOutcomeOf(walked: Walked): StepOutcome {
+  if (walked === StepKind.BudgetEnd) return FrameOutcome.BudgetEnd;
+  if (walked === StepKind.Next || walked === StepKind.Closed)
+    return FrameOutcome.Next;
+  return FrameOutcome.Stop;
+}
+
+export function withinStep(
+  spans: SpanRecorder,
+  step: ChainStep,
+  work: () => Promise<Walked>,
+): Promise<Walked> {
+  return spans.within(
+    stepStart(spans, step),
+    work,
+    (walked) => stepEnd(stepOutcomeOf(walked)),
+    () => stepEnd(FrameOutcome.Stop),
+  );
+}
+
+export function markStep(spans: SpanRecorder, step: ChainStep): void {
+  spans.end(spans.start(stepStart(spans, step)), stepEnd(FrameOutcome.Next));
 }
 
 export interface Walker {
