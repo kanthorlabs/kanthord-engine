@@ -481,6 +481,7 @@ export const TransitionRule = {
   ReworkLimit: "rework_limit",
   PlanDefect: "plan_defect",
   HumanAcceptance: "human_acceptance",
+  RepeatedStop: "repeated_stop",
 } as const;
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;

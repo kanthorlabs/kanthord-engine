@@ -44,8 +44,9 @@ import {
   EXECUTION_NOT_RUNNING,
   heldUntil,
 } from "./settlement.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 import { DEFAULT_STOP_BACKOFF_SECONDS } from "./config.ts";
-import { STOP_UNORDERED } from "./release.ts";
+import { EXECUTION_RELEASED, STOP_UNORDERED } from "./release.ts";
 
 const WAKE_CALL_COUNT = 1;
 const HOOK_FAILURE = "hook failed";
@@ -54,9 +55,14 @@ const NO_STALLS = 0;
 const NO_FAILURES = 0;
 const NO_CALLS = 0;
 const STOPPED_CALL = "stopped";
+const FAILURE_CALL = "failure";
+const PAUSED_STATE = "Paused";
 const ONE_CALL = 1;
 const PRIOR_STALLS = 2;
 const FAILURE_LIMIT = 3;
+const PRIOR_FAILURES = 2;
+const NOT_REPEATED = { repeated: false };
+const OTHER_ATTEMPT = 2;
 const CURRENT_STALL = 1;
 const FIRST_FAILURE = 1;
 const SECOND_FAILURE = 2;
@@ -272,7 +278,7 @@ test("a release with a stop stores the stop and routes the failure count", async
   ]);
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
-    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW]],
+    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW, NOT_REPEATED]],
   );
   assert.equal(wake.mock.callCount(), WAKE_CALL_COUNT);
 });
@@ -321,12 +327,12 @@ test("a refused release writes no transition span", async (t) => {
   assert.deepEqual(h.telemetry, []);
 });
 
-test("a release with a stop cause stores a stop with no cause", async (t) => {
+test("a release with a stop cause stores the cause with its stop", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
   const cause = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
   await h.release(true, { ...STOP, cause });
-  assert.deepEqual(h.read().stop, STOP);
+  assert.deepEqual(h.read().stop, { ...STOP, cause });
   const machine = {
     clientId: createIdentity("client_identity"),
     name: "worker",
@@ -342,8 +348,7 @@ test("a release with a stop cause stores a stop with no cause", async (t) => {
       identity: testMachineIdentity(machine, "machine", h.row.runtime_identity),
     },
   );
-  assert.deepEqual(claimed.stop, STOP);
-  assert.equal(JSON.stringify(claimed).includes("cause"), false);
+  assert.deepEqual(claimed.stop, { ...STOP, cause });
 });
 
 test("the release input refuses a stop with no further work", () => {
@@ -488,6 +493,170 @@ test("a worker_stopped release calls stopped, not failure, and sets no hold", as
   assert.equal(job.available_at, null);
 });
 
+const HOST_FAULT: ReleaseStop = {
+  reason: ExecutionStopReason.OperationFailed,
+  code: RepositoryErrorCode.GitFailed,
+  detail: "ssh: connect to host github.com port 22: Operation timed out",
+  cause: attributed(CauseCategory.Infrastructure, CauseSubcategory.Network),
+};
+
+function jobAvailableAt(h: ReturnType<typeof harness>) {
+  return h.store.transaction(
+    (tx) =>
+      (
+        tx.database
+          .prepare("SELECT available_at FROM scheduler_job WHERE node_id = ?")
+          .get(h.row.node_id) as { available_at: number | null }
+      ).available_at,
+  );
+}
+
+test("a host-fault release moves the node to Available and holds the job for the stop backoff", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) =>
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0),
+  );
+  await h.release(true, HOST_FAULT);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  assert.deepEqual(h.read().stop, HOST_FAULT);
+  assert.equal(jobAvailableAt(h), FIRST_HOLD_END);
+  assert.deepEqual(
+    h.telemetry[1]!.arguments[1],
+    executionTransition(transitionFixture(), FIXTURE_NOW, {
+      failure_count: NO_FAILURES,
+      available_at: FIRST_HOLD_END,
+    }),
+  );
+});
+
+test("a host-fault release at failure count 2 of 3 does not pause the node", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  h.store.transaction((tx) => {
+    for (let index = 0; index < PRIOR_FAILURES; index++)
+      insertExecution(
+        tx,
+        executionFixture({
+          node_id: h.row.node_id,
+          project_id: h.row.project_id,
+          attempt: h.row.attempt,
+          ended_at: FIXTURE_NOW,
+          stop: STOP,
+        }),
+      );
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+  });
+  await h.release(true, HOST_FAULT);
+  assert.deepEqual(
+    h.calls.map((call) => call.method),
+    [STOPPED_CALL],
+  );
+  const transition = h.telemetry[1]!.arguments[1] as ReturnType<
+    typeof executionTransition
+  >;
+  assert.equal(transition.to, transitionFixture().to);
+  assert.equal(transition.failure_count, PRIOR_FAILURES);
+  assert.equal(jobAvailableAt(h), FIRST_HOLD_END);
+});
+
+const SAME_DETAIL = "download failed";
+const AFFECTED_INVALID: ReleaseStop = {
+  reason: ExecutionStopReason.EnvironmentFailed,
+  code: EnvironmentFailure.AffectedInvalid,
+  detail: SAME_DETAIL,
+};
+const NO_PROGRESS: ReleaseStop = {
+  reason: ExecutionStopReason.NoProgress,
+  code: null,
+  detail: SAME_DETAIL,
+};
+
+function repeatHarness(t: TestContext, earlier: ReleaseStop, attempt?: number) {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const recorded = h.dependencies.transitions.failure;
+  h.dependencies.transitions.failure = (tx, nodeId, count, now, options) => {
+    recorded(tx, nodeId, count, now, options);
+    return options.repeated
+      ? transitionFixture({
+          to: "Paused",
+          rule: TransitionRule.RepeatedStop,
+          count: null,
+          limit: null,
+        })
+      : transitionFixture();
+  };
+  h.store.transaction((tx) => {
+    insertExecution(
+      tx,
+      executionFixture({
+        node_id: h.row.node_id,
+        project_id: h.row.project_id,
+        attempt: attempt ?? h.row.attempt,
+        ended_at: FIXTURE_NOW,
+        stop: earlier,
+      }),
+    );
+    h.service.insert(tx, h.row.node_id, h.row.project_id, 0);
+  });
+  const failureCalls = () =>
+    h.calls
+      .filter((call) => call.method === FAILURE_CALL)
+      .map((call) => call.arguments.slice(1));
+  const transition = () =>
+    h.telemetry[1]!.arguments[1] as ReturnType<typeof executionTransition>;
+  return { ...h, failureCalls, transition };
+}
+
+for (const stop of [AFFECTED_INVALID, NO_PROGRESS]) {
+  test(`a second ${stop.reason} release with the same detail in one attempt pauses the node with repeated_stop`, async (t) => {
+    const h = repeatHarness(t, stop);
+    await h.release(true, stop);
+    assert.deepEqual(h.failureCalls(), [
+      [h.row.node_id, SECOND_FAILURE, FIXTURE_NOW, { repeated: true }],
+    ]);
+    assert.equal(h.transition().to, PAUSED_STATE);
+    assert.equal(h.transition().rule, TransitionRule.RepeatedStop);
+    assert.equal(h.transition().count, null);
+    assert.equal(h.transition().limit, null);
+  });
+}
+
+test("two stops with another detail follow the failure count", async (t) => {
+  const h = repeatHarness(t, AFFECTED_INVALID);
+  await h.release(true, { ...AFFECTED_INVALID, detail: "another detail" });
+  assert.deepEqual(h.failureCalls(), [
+    [h.row.node_id, SECOND_FAILURE, FIXTURE_NOW, NOT_REPEATED],
+  ]);
+  assert.equal(h.transition().rule, TransitionRule.None);
+});
+
+test("a stop that repeats the stop of another attempt does not pause the node", async (t) => {
+  const h = repeatHarness(t, AFFECTED_INVALID, OTHER_ATTEMPT);
+  await h.release(true, AFFECTED_INVALID);
+  assert.deepEqual(h.failureCalls(), [
+    [h.row.node_id, FIRST_FAILURE, FIXTURE_NOW, NOT_REPEATED],
+  ]);
+  assert.equal(h.transition().rule, TransitionRule.None);
+});
+
+test("a second host-fault release with the same detail in one attempt pauses the node and counts no failure", async (t) => {
+  const h = repeatHarness(t, HOST_FAULT);
+  await h.release(true, HOST_FAULT);
+  assert.deepEqual(h.failureCalls(), [
+    [h.row.node_id, NO_FAILURES, FIXTURE_NOW, { repeated: true }],
+  ]);
+  assert.equal(h.transition().to, PAUSED_STATE);
+  assert.equal(h.transition().rule, TransitionRule.RepeatedStop);
+});
+
 test("an instance_archived release refuses with stop_unordered and writes nothing", async (t) => {
   const h = harness(t);
   t.mock.method(Date, "now", () => FIXTURE_NOW);
@@ -547,12 +716,74 @@ test("an executionReleased that throws is logged and the release answers its res
     execution_id: h.row.execution_id,
     ended_at: FIXTURE_NOW,
   });
-  const records = lines.map((line) => JSON.parse(line));
+  const records = lines
+    .map((line) => JSON.parse(line))
+    .filter((record) => record.msg !== EXECUTION_RELEASED);
   assert.equal(records.length, ONE_CALL);
   assert.equal(records[0].execution_id, h.row.execution_id);
   assert.equal(records[0].err.message, HOOK_FAILURE);
   assert.equal(h.telemetry.length, TELEMETRY_RECORDS);
   assert.equal(wake.mock.callCount(), ONE_CALL);
+});
+
+function releaseRecords(h: ReturnType<typeof harness>) {
+  const lines: string[] = [];
+  h.dependencies.logger = pino(
+    { level: "info" },
+    { write: (line) => lines.push(line) },
+  );
+  return () =>
+    lines
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.msg === EXECUTION_RELEASED);
+}
+
+test("a no_progress release writes one released record with its reason and cause", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  const cause = attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
+  await h.release(true, {
+    reason: ExecutionStopReason.NoProgress,
+    code: null,
+    cause,
+  });
+  const [record, ...others] = records();
+  assert.equal(others.length, NO_CALLS);
+  assert.equal(record.execution_id, h.row.execution_id);
+  assert.equal(record.node_id, h.row.node_id);
+  assert.equal(record.attempt, h.row.attempt);
+  assert.equal(record.further_work, true);
+  assert.equal(record.stop_reason, ExecutionStopReason.NoProgress);
+  assert.equal(record.stop_code, null);
+  assert.deepEqual(record.cause, JSON.parse(JSON.stringify(cause)));
+});
+
+test("a progress release with no stop writes one released record with a null reason", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  await h.release(true);
+  const [record, ...others] = records();
+  assert.equal(others.length, NO_CALLS);
+  assert.equal(record.further_work, true);
+  assert.equal(record.stop_reason, null);
+  assert.equal(record.stop_code, null);
+  assert.equal(record.cause, null);
+});
+
+test("the released record holds no detail of the stop", async (t) => {
+  const h = harness(t);
+  t.mock.method(Date, "now", () => FIXTURE_NOW);
+  t.mock.method(h.service, "wake", () => {});
+  const records = releaseRecords(h);
+  const detail = "secret command output";
+  await h.release(true, { ...STOP, detail });
+  const [record] = records();
+  assert.equal("detail" in record, false);
+  assert.equal(JSON.stringify(record).includes(detail), false);
 });
 
 const API = "repository:github:acme/api";
@@ -643,7 +874,7 @@ test("an environment_failed release with digests neither counts a failure nor ho
   );
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
-    [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW]],
+    [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW, NOT_REPEATED]],
   );
   assert.deepEqual(
     h.store.database.prepare("SELECT * FROM scheduler_job").all(),
@@ -656,7 +887,22 @@ test("an environment_failed release without digests counts a failure", async (t)
   await h.release(true, ENVIRONMENT_STOP);
   assert.deepEqual(
     h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
-    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW]],
+    [["failure", h.row.node_id, FIRST_FAILURE, FIXTURE_NOW, NOT_REPEATED]],
+  );
+});
+
+test("a base_failed release counts no failure and calls environmentFailed never", async (t) => {
+  const h = environmentHarness(t);
+  await h.release(true, {
+    ...ENVIRONMENT_STOP,
+    code: EnvironmentFailure.BaseFailed,
+    detail: JSON.stringify({ command: "false", exit_code: 1 }),
+  });
+  assert.deepEqual(h.failed, []);
+  assert.deepEqual(h.events, ["commit", "wake"]);
+  assert.deepEqual(
+    h.calls.map((call) => [call.method, ...call.arguments.slice(1)]),
+    [["failure", h.row.node_id, NO_FAILURES, FIXTURE_NOW, NOT_REPEATED]],
   );
 });
 

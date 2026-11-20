@@ -8,11 +8,15 @@ import {
 } from "../custody/contract.ts";
 import { background, type Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
-import type { HealthRegistry } from "../kernel/health.ts";
+import type {
+  HealthRegistry,
+  ResourceFailureReason,
+} from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { type Healthcheck, HealthStatus } from "../kernel/service.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { checkRepositoryTools, probeRepositoryTools } from "./check.ts";
+import { gitFailureReason } from "./git-failure.ts";
 import {
   changedGateFiles,
   clone,
@@ -238,6 +242,10 @@ export class RepositoryComponent implements GitWriter {
 
   static sshPortOfAddress(address: string): number {
     return sshPortOf(addressHost(address));
+  }
+
+  static gitFailureReasonOf(error: unknown): ResourceFailureReason {
+    return gitFailureReason(error);
   }
 
   sshHostKeysOf(tx: Transaction, platform: string, address: string): string {

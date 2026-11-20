@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
-import { CauseCategory, unattributed } from "../../kernel/cause.ts";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+  unattributed,
+} from "../../kernel/cause.ts";
 import { suite, test } from "node:test";
 import {
   appendFileSync,
@@ -238,11 +243,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       stop: {
         reason: EndReason.NoProgress,
         code: null,
-        cause: unattributed([
-          CauseCategory.Model,
-          CauseCategory.Prompt,
-          CauseCategory.Plan,
-        ]),
+        cause: attributed(CauseCategory.Model, CauseSubcategory.NoProgress),
         detail: noProgressDetail({
           rule: NoProgressRule.UnchangedRevision,
           count: NO_PROGRESS_LIMIT,
@@ -265,11 +266,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         stop: {
           reason: EndReason.NoProgress,
           code: null,
-          cause: unattributed([
-            CauseCategory.Model,
-            CauseCategory.Prompt,
-            CauseCategory.Plan,
-          ]),
+          cause: attributed(CauseCategory.Model, CauseSubcategory.NoProgress),
           detail: noProgressDetail({
             rule: NoProgressRule.UnchangedRevision,
             count: NO_PROGRESS_LIMIT,

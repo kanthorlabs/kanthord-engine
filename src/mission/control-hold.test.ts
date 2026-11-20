@@ -676,7 +676,9 @@ test("a control on a Paused node passes after the loss of its expired kept claim
   h.dependencies.schedulerClaims.settle = (tx, nodeId, now) => {
     if (!keep.live) return [];
     keep.live = false;
-    answers.push(h.service.failure(tx, nodeId, limit, now));
+    answers.push(
+      h.service.failure(tx, nodeId, limit, now, { repeated: false }),
+    );
     return [];
   };
   const resumed = await h.invoke("node.resume", {

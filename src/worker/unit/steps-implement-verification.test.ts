@@ -38,6 +38,7 @@ import {
   recordReleases,
   recordSpans,
   task,
+  useRealBase,
 } from "./test-support.ts";
 
 const SIGNAL_KILL = "sh -c 'kill -9 $$'";
@@ -180,9 +181,25 @@ suite(
         [current],
         [fauxAssistantMessage("work"), fauxAssistantMessage("revised")],
       );
+      useRealBase(h);
       await assert.rejects(runTask(h, current), {
         reason: EndReason.EnvironmentFailed,
         code: EnvironmentFailure.CommandAbsent,
+      });
+      assert.equal(h.provider.calls.length, ONE_TURN);
+    });
+
+    test("a verification that fails the same way on the base head stops with base_failed and sends no revision turn", async (t) => {
+      const current = task("same-failure", "echo download failed; exit 1");
+      const h = await fixture(
+        t,
+        [current],
+        [fauxAssistantMessage("work"), fauxAssistantMessage("revised")],
+      );
+      useRealBase(h);
+      await assert.rejects(runTask(h, current), {
+        reason: EndReason.EnvironmentFailed,
+        code: EnvironmentFailure.BaseFailed,
       });
       assert.equal(h.provider.calls.length, ONE_TURN);
     });
@@ -202,6 +219,7 @@ suite(
           fauxAssistantMessage("revised again"),
         ],
       );
+      useRealBase(h);
       await assert.rejects(runTask(h, current), {
         reason: EndReason.NoProgress,
       });

@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../kernel/cause.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { BudgetLimit, ClaimState, ExecutionStopReason } from "./contract.ts";
+import {
+  BudgetLimit,
+  ClaimState,
+  ExecutionStopReason,
+  type ReleaseStop,
+} from "./contract.ts";
 import {
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
@@ -21,6 +31,7 @@ import {
 import {
   consecutiveFailures,
   EXECUTION_NOT_RUNNING,
+  pauseFacts,
   requireRunning,
   revoke,
   settleNode,
@@ -32,6 +43,10 @@ const ONE_LOSS = 1;
 const SECOND_LOSS = 2;
 const THIRD_FAILURE = 3;
 const STOP = { reason: ExecutionStopReason.OperationFailed, code: null };
+const HOST_FAULT_CAUSE = attributed(
+  CauseCategory.Infrastructure,
+  CauseSubcategory.Network,
+);
 
 test("credential pins append once in order, retain after end and select only unended executions", (t) => {
   const h = schedulerHarness(t);
@@ -169,6 +184,7 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
     row.node_id,
     ONE_LOSS,
     FIXTURE_DEADLINE,
+    { repeated: false },
   ]);
 });
 
@@ -248,6 +264,46 @@ test("lost and stopped rows count together until a finished row with no stop", (
   });
 });
 
+test("a stored stop keeps its cause", (t) => {
+  const h = schedulerHarness(t);
+  const row = executionFixture();
+  const stop = {
+    ...STOP,
+    detail: "connection timed out",
+    cause: HOST_FAULT_CAUSE,
+  };
+  h.store.transaction((tx) => {
+    insertExecution(tx, row);
+    endExecution(tx, row.execution_id, FIXTURE_NOW + 1, stop);
+    assert.deepEqual(readExecution(tx, row.execution_id)?.stop, stop);
+  });
+});
+
+test("host-fault stops with different details leave the failure count at zero", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  h.store.transaction((tx) => {
+    let last = executionFixture({ node_id: node });
+    for (const offset of [1, 2, 3]) {
+      last = executionFixture({
+        node_id: node,
+        created_at: FIXTURE_NOW + offset,
+      });
+      insertExecution(tx, last);
+      endExecution(tx, last.execution_id, FIXTURE_NOW + offset + 10, {
+        ...STOP,
+        detail: `host fault ${offset}`,
+        cause: HOST_FAULT_CAUSE,
+      });
+    }
+    assert.equal(consecutiveFailures(tx, last, false), NO_FAILURES);
+    assert.equal(
+      pauseFacts(tx, node, last.attempt).consecutive_failures,
+      NO_FAILURES,
+    );
+  });
+});
+
 test("an archive row neither counts nor resets the failure count and a null stop row resets it", (t) => {
   const h = schedulerHarness(t);
   const node = createIdentity("node");
@@ -305,6 +361,7 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
       consecutive_failures: 0,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: null,
     });
     const lost = at(1);
@@ -336,6 +393,7 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
       consecutive_failures: 0,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: null,
     });
     for (const offset of [6, 7]) {
@@ -350,6 +408,27 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.equal(stalls.last_stop?.reason, stalled.reason);
     assert.equal(stalls.last_stop?.code, BudgetLimit.Turns);
     assert.equal(stalls.last_stop?.detail, null);
+  });
+});
+
+test("pause facts answer repeated_stop after two equal stops of the attempt only", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const stop = { ...STOP, detail: "download failed" };
+  h.store.transaction((tx) => {
+    const ended = (offset: number, stored: ReleaseStop) => {
+      const row = executionFixture({
+        node_id: node,
+        created_at: FIXTURE_NOW + offset,
+      });
+      insertExecution(tx, row);
+      endExecution(tx, row.execution_id, FIXTURE_NOW + 10, stored);
+    };
+    ended(1, { ...stop, cause: HOST_FAULT_CAUSE });
+    ended(2, stop);
+    assert.equal(pauseFacts(tx, node, 1).repeated_stop, true);
+    ended(3, { ...stop, detail: "another detail" });
+    assert.equal(pauseFacts(tx, node, 1).repeated_stop, false);
   });
 });
 

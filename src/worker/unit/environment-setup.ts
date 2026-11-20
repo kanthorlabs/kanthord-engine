@@ -43,7 +43,9 @@ import {
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { PoolClass, prepareTree } from "./tree-pool.ts";
 import {
+  type BaseResult,
   type CommandObserver,
+  lastLineOf,
   runVerificationsWithOutput,
   VerificationClass,
   type VerificationRun,
@@ -52,7 +54,6 @@ import type { WorkspaceRoot } from "./workspace.ts";
 
 export const SETUP_COMMAND_LIMIT_MS = COMMAND_LIMIT_MS;
 const SINGLE_CHECKOUT = 1;
-const NO_EXIT = -1;
 const MISSING_INDEX = -1;
 const NO_DOCUMENT = "none";
 const TRACKED_CHECK = "git status --porcelain --untracked-files=no";
@@ -400,7 +401,7 @@ export class BaseHead {
   private readonly checkouts: readonly SetupEntry[];
   private commitsRead: Promise<string[]> | null = null;
   private prepared: Promise<SetupResult> | null = null;
-  private readonly results = new Map<string, number>();
+  private readonly results = new Map<string, BaseResult>();
   private readonly trees: BaseTrees | null;
 
   constructor(
@@ -483,7 +484,7 @@ export class BaseHead {
     return this.prepared;
   }
 
-  async exitOf(command: string): Promise<number | null> {
+  async runOf(command: string): Promise<BaseResult | null> {
     const key = canonicalJSON({
       commits: await this.commits(),
       digests: this.digests(),
@@ -504,9 +505,14 @@ export class BaseHead {
       exhausted: this.input.exhausted,
     });
     if (run.outcome === VerificationClass.BudgetEnd) return null;
-    const exit = run.verification.results[0]?.exit_code ?? NO_EXIT;
-    this.results.set(key, exit);
-    return exit;
+    const result = run.verification.results[0];
+    const base: BaseResult = {
+      exit_code: result?.exit_code ?? null,
+      timed_out: result?.timed_out ?? false,
+      last_line: lastLineOf(run.outputs[0] ?? ""),
+    };
+    this.results.set(key, base);
+    return base;
   }
 
   async giveBack(): Promise<void> {

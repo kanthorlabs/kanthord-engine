@@ -5,6 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import type { CallerContext } from "../kernel/operation.ts";
 import {
   type CooldownChange,
+  EnvironmentFailure,
   environmentFailureSchema,
   type ExecutionRelease,
   type ExecutionRow,
@@ -19,19 +20,27 @@ import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { consecutiveStalls, endExecution } from "./execution-store.ts";
+import {
+  consecutiveStalls,
+  endExecution,
+  readLastEndedOfAttempt,
+} from "./execution-store.ts";
 import {
   consecutiveFailures,
   countsFailure,
   digestsOf,
+  isHostFault,
   NO_FAILURE_STOPS,
   recordFailure,
+  recordHostFault,
+  repeatsStop,
   requireRunning,
 } from "./settlement.ts";
 
 const NO_STALLS = 0;
 export const STOP_UNORDERED = "scheduler.execution.stop_unordered";
 const EXECUTION_RELEASED_FAILED = "scheduler.execution.released_hook_failed";
+export const EXECUTION_RELEASED = "scheduler.execution.released";
 
 function reportEnvironmentFailure(
   dependencies: Dependencies,
@@ -127,7 +136,20 @@ function recordStop(
   stop: ReleaseStopBody,
 ): StopEffects {
   const { tx, dependencies, executionId, row, now } = context;
+  const repeated = repeatsStop(
+    readLastEndedOfAttempt(tx, row.node_id, row.attempt)?.stop ?? null,
+    stop,
+  );
   endExecution(tx, executionId, now, stop);
+  if (isHostFault(stop)) {
+    const { transition, hold } = recordHostFault(tx, dependencies, {
+      node_id: row.node_id,
+      failures: consecutiveFailures(tx, row, false),
+      now,
+      repeated,
+    });
+    return { transition, hold, environmentRepositories: null };
+  }
   if (NO_FAILURE_STOPS.includes(stop.reason))
     return {
       transition: dependencies.transitions.stopped(tx, row.node_id, now),
@@ -135,7 +157,8 @@ function recordStop(
       environmentRepositories: null,
     };
   const environmentRepositories =
-    stop.reason === ExecutionStopReason.EnvironmentFailed
+    stop.reason === ExecutionStopReason.EnvironmentFailed &&
+    stop.code !== EnvironmentFailure.BaseFailed
       ? [
           ...(dependencies.facts.claimFacts(tx, row.node_id)?.repositories ??
             []),
@@ -147,6 +170,7 @@ function recordStop(
     row.node_id,
     consecutiveFailures(tx, row, countsFailure(stop)),
     now,
+    { repeated },
   );
   return { transition, hold, environmentRepositories };
 }
@@ -214,6 +238,20 @@ export function release(
   });
   assert.ok(released, "a committed release read its execution");
   assert.ok(transition, "a committed release moved its node");
+  const cause =
+    body.stop === null ? null : (body.stop.cause ?? unattributed([]));
+  dependencies.logger.info(
+    {
+      execution_id: executionId,
+      node_id: released.node_id,
+      attempt: released.attempt,
+      further_work: body.further_work,
+      stop_reason: body.stop?.reason ?? null,
+      stop_code: body.stop?.code ?? null,
+      cause,
+    },
+    EXECUTION_RELEASED,
+  );
   dependencies.agentChains.cooldownsChanged(cooldowns);
   dependencies.telemetry.executionEnded({
     trace: executionTrace(released),
@@ -221,7 +259,7 @@ export function release(
     end: ExecutionEnd.Finished,
     revoke_cause: null,
     stop: body.stop,
-    cause: body.stop === null ? null : (body.stop.cause ?? unattributed([])),
+    cause,
   });
   notifyReleased(dependencies, executionId, body.stop);
   dependencies.telemetry.executionTransition(

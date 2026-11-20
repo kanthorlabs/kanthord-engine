@@ -12,6 +12,7 @@ import {
   ProviderFailure,
 } from "../../scheduler/contract.ts";
 import { AgentErrorCode, PromptSourceReason } from "../../agent/contract.ts";
+import { ResourceFailureReason } from "../../kernel/health.ts";
 import { ProjectErrorCode } from "../../project/contract.ts";
 import { WorkerErrorCode } from "../contract.ts";
 import { GitStep } from "./git-step.ts";
@@ -28,8 +29,13 @@ const GATEWAY_CODE_PREFIX = "gateway.";
 
 export interface StopSignals {
   git_step: GitStep | null;
+  git_failure: ResourceFailureReason | null;
   verification_timed_out: boolean;
 }
+
+const hostFaultReasons: readonly ResourceFailureReason[] = [
+  ResourceFailureReason.HostUnreachable,
+];
 
 const stopDetailSchema = z.looseObject({
   verification: z.looseObject({ timed_out: z.boolean() }),
@@ -101,6 +107,8 @@ function providerCauseOf(code: string | null): FailureCause {
 }
 
 function environmentCauseOf(code: string | null): FailureCause {
+  if (code === EnvironmentFailure.BaseFailed)
+    return unattributed([CauseCategory.Environment, CauseCategory.Plan]);
   const subcategory =
     code === null ? undefined : environmentSubcategories[code];
   if (subcategory === undefined) return unattributed([]);
@@ -181,10 +189,15 @@ function workerOperationCauseOf(code: string | null): FailureCause | null {
 function operationCauseOf(
   code: string | null,
   detail: string | null,
-  gitStep: GitStep | null,
+  signals: StopSignals,
 ): FailureCause {
+  if (
+    signals.git_failure !== null &&
+    hostFaultReasons.includes(signals.git_failure)
+  )
+    return attributed(CauseCategory.Infrastructure, CauseSubcategory.Network);
   return (
-    gitStepCauseOf(gitStep) ??
+    gitStepCauseOf(signals.git_step) ??
     promptOperationCauseOf(code, detail) ??
     configurationCauseOf(code) ??
     workerOperationCauseOf(code) ??
@@ -195,11 +208,7 @@ function operationCauseOf(
 function noProgressCauseOf(timedOut: boolean): FailureCause {
   return timedOut
     ? unattributed([CauseCategory.Environment, CauseCategory.Plan])
-    : unattributed([
-        CauseCategory.Model,
-        CauseCategory.Prompt,
-        CauseCategory.Plan,
-      ]);
+    : attributed(CauseCategory.Model, CauseSubcategory.NoProgress);
 }
 
 function budgetCauseOf(timedOut: boolean): FailureCause {
@@ -251,7 +260,7 @@ export function stopCauseOf(
     case ExecutionStopReason.EnvironmentFailed:
       return environmentCauseOf(code);
     case ExecutionStopReason.OperationFailed:
-      return operationCauseOf(code, detail, signals.git_step);
+      return operationCauseOf(code, detail, signals);
     case ExecutionStopReason.NoProgress:
       return noProgressCauseOf(isTimedOut(detail, signals));
     case ExecutionStopReason.BudgetEnd:

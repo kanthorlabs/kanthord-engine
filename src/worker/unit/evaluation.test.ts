@@ -1353,13 +1353,36 @@ test("a node with no declaration submits no affected evidence and passes null to
   assert.equal(affectedEnd(review), AffectedVerdict.Absent);
 });
 
+const BASE_ONLY_PASS = 'test "$(cat file)" = base';
+
+test("a review verification that fails the same way on the base commit ends with base_failed and submits no assessment", async (t) => {
+  const review = await affectedReview(t, null, "changed", "false");
+  assert.deepEqual(review.assessments, []);
+  assert.equal(review.opens(), NO_OPENS);
+  assert.equal(review.releases.length, SINGLE_RELEASE);
+  const [body] = review.releases as {
+    further_work: boolean;
+    stop: { reason: string; code: string; detail: string };
+  }[];
+  assert.equal(body?.further_work, true);
+  assert.equal(body?.stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(body?.stop.code, EnvironmentFailure.BaseFailed);
+  assert.deepEqual(JSON.parse(body?.stop.detail ?? ""), {
+    index: 0,
+    command: "false",
+    exit_code: 1,
+    timed_out: false,
+    last_line: "",
+  });
+});
+
 test("a failed listed command runs no affected command", async (t) => {
   const marker = join(temporary(t), "affected-ran");
   const review = await affectedReview(
     t,
     affectedCommand(`touch ${marker}; true`),
     "changed",
-    "false",
+    BASE_ONLY_PASS,
   );
   assert.equal(existsSync(marker), false);
   assert.equal(affectedEvidenceOf(review).length, NO_RELEASES);

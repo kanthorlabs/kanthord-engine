@@ -602,7 +602,7 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
           );
           const FINISHED = "finished";
           assert.equal(claim.claim_state, FINISHED);
-          assert.deepEqual(claim.stop, budgetEnd);
+          assert.deepEqual(claim.stop, answer.result.stop);
         },
       );
       await t.test(

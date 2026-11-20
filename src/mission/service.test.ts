@@ -328,6 +328,7 @@ const pausedDependencies: PausedDependencies = {
     of: () => ({
       consecutive_failures: 0,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: null,
     }),
   },
@@ -448,6 +449,7 @@ function makeService(
       of: () => ({
         consecutive_failures: 0,
         consecutive_stalls: 0,
+        repeated_stop: false,
         last_stop: null,
       }),
     },
@@ -6288,6 +6290,7 @@ test("node get of an Available node whose last execution stopped answers last_st
     return {
       consecutive_failures: 1,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: lastStop,
     };
   };

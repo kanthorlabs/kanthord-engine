@@ -648,6 +648,26 @@ test("regression: K112 a git_failed stop carries the redacted git cause in its d
   });
 });
 
+test("a git failure whose stderr names an unreachable host sends a network cause", async (t) => {
+  const run = fixture();
+  stopAfter(t, () => run.dispose());
+  const stop = await releasedStop(
+    run,
+    new GitWriteError(
+      GitStage.Push,
+      new Diagnostic(RepositoryErrorCode.GitFailed, "push: git failed.", {
+        cause: new Error(
+          "ssh: connect to host github.com port 22: Operation timed out",
+        ),
+      }),
+    ),
+  );
+  assert.deepEqual(
+    stop.cause,
+    attributed(CauseCategory.Infrastructure, CauseSubcategory.Network),
+  );
+});
+
 test("a source_invalid operation failure gives its details reason as the stop detail and the cause of that reason", async (t) => {
   for (const [reason, cause] of [
     [

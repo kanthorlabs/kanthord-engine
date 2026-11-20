@@ -376,7 +376,7 @@ type PreparedEvaluation = Awaited<ReturnType<typeof prepareEvaluation>>;
 function baselineOf(base: PreparedEvaluation["base"]) {
   return base === null
     ? {}
-    : { baseline: (command: string) => base.exitOf(command) };
+    : { baseline: (command: string) => base.runOf(command) };
 }
 
 function headOf(testedInput: TestedInput, bindingId: string): string {

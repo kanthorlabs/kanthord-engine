@@ -14,6 +14,7 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import {
+  type BaseResult,
   environmentStop,
   infrastructureStop,
   runVerifications,
@@ -238,6 +239,12 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const FAILED_EXIT = 1;
   const NO_EXIT = -1;
+  const SUCCESS_EXIT = 0;
+  const baseResult = (
+    exit_code: number | null,
+    last_line = "",
+    timed_out = false,
+  ): BaseResult => ({ exit_code, timed_out, last_line });
   const FIRST_COMMAND = 0;
   const ONE_RESULT = 1;
 
@@ -489,7 +496,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       ...input,
       baseline: async (command) => {
         asked.push(command);
-        return COMMAND_ABSENT_EXIT;
+        return baseResult(COMMAND_ABSENT_EXIT);
       },
     });
     assert.equal(run.outcome, VerificationClass.Environment);
@@ -509,7 +516,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
     for (const base of [0, FAILED_EXIT, NO_EXIT]) {
       const run = await runVerificationsWithOutput({
         ...input,
-        baseline: async () => base,
+        baseline: async () => baseResult(base),
       });
       assert.equal(run.outcome, VerificationClass.CodeFailure);
       assert.equal(environmentStop(run), null);
@@ -534,11 +541,66 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       exhausted: () => true,
       baseline: async () => {
         asked = true;
-        return COMMAND_ABSENT_EXIT;
+        return baseResult(COMMAND_ABSENT_EXIT);
       },
     });
     assert.equal(asked, false);
     assert.equal(run.outcome, VerificationClass.BudgetEnd);
+  });
+
+  const DOWNLOAD_FAILED = "fd download failed: 504";
+  const DOWNLOAD_COMMAND = `echo "${DOWNLOAD_FAILED}"; exit ${FAILED_EXIT}`;
+  const BASE_COMMAND_LIMIT_MS = 300;
+
+  test("a command that fails the same way on the head and on the base is a base failure that stops with base_failed", async (t) => {
+    const { input } = countedInput(temporary(t), [DOWNLOAD_COMMAND]);
+    const run = await runVerificationsWithOutput({
+      ...input,
+      baseline: async () => baseResult(FAILED_EXIT, "fd download failed: 503"),
+    });
+    assert.equal(run.outcome, VerificationClass.BaseFailure);
+    const stop = environmentStop(run);
+    assert.ok(stop instanceof ExecutionStop);
+    assert.equal(stop.reason, EndReason.EnvironmentFailed);
+    assert.equal(stop.code, EnvironmentFailure.BaseFailed);
+    assert.deepEqual(JSON.parse(stop.detail ?? ""), {
+      index: 0,
+      command: DOWNLOAD_COMMAND,
+      exit_code: FAILED_EXIT,
+      timed_out: false,
+      last_line: DOWNLOAD_FAILED,
+    });
+    assert.deepEqual(run.flaky, [false]);
+  });
+
+  test("a command that times out on the head and on the base is a base failure", async (t) => {
+    const { input } = countedInput(temporary(t), ["sleep 30"]);
+    const run = await runVerificationsWithOutput({
+      ...input,
+      commandLimitMs: BASE_COMMAND_LIMIT_MS,
+      baseline: async () => baseResult(null, "", true),
+    });
+    assert.equal(run.outcome, VerificationClass.BaseFailure);
+  });
+
+  test("a command that fails on the head and passes on the base is a code failure", async (t) => {
+    const { input } = countedInput(temporary(t), [DOWNLOAD_COMMAND]);
+    const run = await runVerificationsWithOutput({
+      ...input,
+      baseline: async () => baseResult(SUCCESS_EXIT, DOWNLOAD_FAILED),
+    });
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.equal(environmentStop(run), null);
+  });
+
+  test("a command that fails with another last line on the base is a code failure", async (t) => {
+    const { input } = countedInput(temporary(t), [DOWNLOAD_COMMAND]);
+    const run = await runVerificationsWithOutput({
+      ...input,
+      baseline: async () => baseResult(FAILED_EXIT, "assertion failed"),
+    });
+    assert.equal(run.outcome, VerificationClass.CodeFailure);
+    assert.equal(environmentStop(run), null);
   });
 
   test("an infrastructure failure stops with its code and a detail that names the command", async (t) => {

@@ -28,6 +28,8 @@ import { type FailureCause, unattributed } from "../../kernel/cause.ts";
 import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
+import { RepositoryComponent } from "../../repository/index.ts";
+import type { ResourceFailureReason } from "../../kernel/health.ts";
 import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
 
 type EvidenceBody = Omit<
@@ -49,6 +51,12 @@ function gitFailureCause(error: CodedError): unknown {
   while (cause instanceof CodedError && cause.cause instanceof Error)
     cause = cause.cause;
   return cause;
+}
+
+function gitFailureReasonOf(error: CodedError): ResourceFailureReason {
+  let innermost = error;
+  while (innermost.cause instanceof CodedError) innermost = innermost.cause;
+  return RepositoryComponent.gitFailureReasonOf(innermost);
 }
 
 export const EndReason = {
@@ -262,18 +270,21 @@ export class ExecutionRun {
     if (error instanceof ExecutionStop)
       return this.halt(error.reason, error.code, error.detail);
     const gitStep = gitStepOf(error);
-    if (error instanceof CodedError)
+    if (error instanceof CodedError) {
+      const gitFailed = GIT_FAILURE_CODES.has(error.code);
       return this.halt(
         EndReason.OperationFailed,
         error.code,
-        GIT_FAILURE_CODES.has(error.code)
+        gitFailed
           ? await this.reasonOf(gitFailureCause(error))
           : codedStopDetail(
               error.code,
               "details" in error ? error.details : null,
             ),
         gitStep,
+        gitFailed ? gitFailureReasonOf(error) : null,
       );
+    }
     return this.halt(
       EndReason.OperationFailed,
       null,
@@ -291,9 +302,11 @@ export class ExecutionRun {
     code: string | null,
     detail: string | null = null,
     gitStep: GitStep | null = null,
+    gitFailure: ResourceFailureReason | null = null,
   ): ExecutionStop {
     this.stopped ??=
-      this.requestedStop() ?? this.stopWith(reason, code, detail, gitStep);
+      this.requestedStop() ??
+      this.stopWith(reason, code, detail, gitStep, gitFailure);
     this.operationContext.cancel(this.stopped);
     return this.stopped;
   }
@@ -306,6 +319,7 @@ export class ExecutionRun {
       requested.code,
       requested.detail,
       null,
+      null,
     );
   }
 
@@ -314,6 +328,7 @@ export class ExecutionRun {
     code: string | null,
     detail: string | null,
     gitStep: GitStep | null,
+    gitFailure: ResourceFailureReason | null,
   ): ExecutionStop {
     const stored =
       reason === EndReason.EnvironmentFailed &&
@@ -325,6 +340,7 @@ export class ExecutionRun {
         ? null
         : stopCauseOf(reason, code, stored, {
             git_step: gitStep,
+            git_failure: gitFailure,
             verification_timed_out: this.verificationTimedOut,
           });
     return new ExecutionStop(reason, code, stored, cause);
@@ -470,6 +486,7 @@ export class ExecutionRun {
             code: budgetEnd,
             cause: stopCauseOf(ExecutionStopReason.BudgetEnd, budgetEnd, null, {
               git_step: null,
+              git_failure: null,
               verification_timed_out: this.verificationTimedOut,
             }),
           };

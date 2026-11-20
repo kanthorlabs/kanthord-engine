@@ -294,6 +294,7 @@ function operations(h: Harness) {
     assert.ok(asset.kind === AssetKind.Produced);
     return { id: submitted.evidence.id, address: asset.address };
   };
+  let stops = 0;
   const release = (run: Run, furtherWork: boolean, stop = false) =>
     run.worker.call(schedulerOperations.executionRelease, {
       params: { execution_id: run.execution.execution_id },
@@ -301,7 +302,11 @@ function operations(h: Harness) {
       body: {
         further_work: furtherWork,
         stop: stop
-          ? { reason: ExecutionStopReason.OperationFailed, code: null }
+          ? {
+              reason: ExecutionStopReason.OperationFailed,
+              code: null,
+              detail: `stop ${++stops}`,
+            }
           : null,
       },
     });

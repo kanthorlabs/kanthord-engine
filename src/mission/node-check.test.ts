@@ -637,7 +637,9 @@ async function deferredCheckAfter(
           ACTOR,
         );
       live = false;
-      return h.service.failure(tx, h.node_id, FIRST_ATTEMPT, Date.now());
+      return h.service.failure(tx, h.node_id, FIRST_ATTEMPT, Date.now(), {
+        repeated: false,
+      });
     });
     return { end_state: CheckEndState.Expected, landed_commits: [COMMIT] };
   };

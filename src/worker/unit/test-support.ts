@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
-import type { TestContext } from "node:test";
+import type { Mock, TestContext } from "node:test";
 import {
   appendFileSync,
   existsSync,
@@ -60,6 +60,8 @@ import { openNativeAgent } from "./native-agent.ts";
 import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
+import type { BaseHead } from "./environment-setup.ts";
+import type { BaseResult } from "./verification.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { RefreshResult } from "./base-refresh.ts";
@@ -100,6 +102,20 @@ export function scriptedModelRuntime(
 }
 
 export const ONE_FREE_TREE = 1;
+
+const PASSING_BASE_RESULT: BaseResult = {
+  exit_code: 0,
+  timed_out: false,
+  last_line: "",
+};
+
+export function passingBase(t: TestContext, h: { base: BaseHead }): void {
+  t.mock.method(h.base, "runOf", async () => PASSING_BASE_RESULT);
+}
+
+export function useRealBase(h: { base: BaseHead }): void {
+  (h.base.runOf as unknown as Mock<BaseHead["runOf"]>).mock.restore();
+}
 
 export function releasedRoot(h: {
   root: string;
@@ -366,6 +382,7 @@ async function openExecution(
   });
   stopAfter(t, () => run.dispose());
   const workspace = await prepareStepsWorkspace(input, run);
+  passingBase(t, workspace);
   for (const checkout of workspace.checkouts)
     appendFileSync(join(checkout.directory, ".git", "config"), USER_CONFIG);
   const provider = scriptedProvider(script);

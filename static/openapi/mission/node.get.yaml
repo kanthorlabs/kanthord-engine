@@ -890,6 +890,7 @@ components:
               enum:
                 - failure_limit
                 - further_work_limit
+                - repeated_stop
                 - human
             count:
               anyOf:

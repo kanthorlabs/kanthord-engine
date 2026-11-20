@@ -345,13 +345,14 @@ async function setup(t: TestContext, adapter: Adapter, path?: string) {
     executionId: string,
     token = generalToken,
     furtherWork = true,
+    releaseStop = OPERATION_FAILED_STOP,
   ) =>
     call(
       schedulerOperations.executionRelease,
       {
         params: { execution_id: executionId },
         query: {},
-        body: { further_work: furtherWork, stop: OPERATION_FAILED_STOP },
+        body: { further_work: furtherWork, stop: releaseStop },
       },
       token,
     );
@@ -764,7 +765,12 @@ test("a release with no stop ends the failure count", async (t) => {
   for (let failure = 1; failure < limit; failure++) {
     const claim = completed(await h.pull());
     assert.ok(claim.kind === WorkPullKind.Claimed);
-    completed(await h.stop(claim.execution.execution_id));
+    completed(
+      await h.stop(claim.execution.execution_id, h.generalToken, true, {
+        ...OPERATION_FAILED_STOP,
+        detail: `stop ${failure}`,
+      }),
+    );
     now += stopHold(h, failure);
   }
   const released = completed(await h.pull());
@@ -772,7 +778,12 @@ test("a release with no stop ends the failure count", async (t) => {
   completed(await h.release(released.execution.execution_id));
   const claim = completed(await h.pull());
   assert.ok(claim.kind === WorkPullKind.Claimed);
-  completed(await h.stop(claim.execution.execution_id));
+  completed(
+    await h.stop(claim.execution.execution_id, h.generalToken, true, {
+      ...OPERATION_FAILED_STOP,
+      detail: "stop after release",
+    }),
+  );
   assert.equal(routing.mock.calls.at(-1)!.arguments[2], NO_FAILURE_COUNT_RESET);
   const node = await h.node();
   assert.equal(node.state, NodeState.Available);
