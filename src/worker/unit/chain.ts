@@ -55,7 +55,11 @@ export type ChainId = (typeof ChainId)[keyof typeof ChainId];
 export const DeadlineKind = { Work: "work", Cleanup: "cleanup" } as const;
 export type DeadlineKind = (typeof DeadlineKind)[keyof typeof DeadlineKind];
 
-export const NodeKind = { Step: "step", Loop: "loop" } as const;
+export const NodeKind = {
+  Step: "step",
+  Loop: "loop",
+  Parallel: "parallel",
+} as const;
 export const StepKind = {
   Next: "next",
   BudgetEnd: "budget_end",
@@ -287,9 +291,19 @@ export interface ChainFrame {
   end?(ctx: ExecutionCtx, scope: never, ended: FrameEnd): SpanEnd;
 }
 
+export interface ParallelBranch {
+  name: string | null;
+  nodes: readonly ChainNode[];
+}
+
 export type ChainNode =
   | { kind: typeof NodeKind.Step; step: ChainStep }
-  | { kind: typeof NodeKind.Loop; id: string; frame: ChainFrame };
+  | { kind: typeof NodeKind.Loop; id: string; frame: ChainFrame }
+  | {
+      kind: typeof NodeKind.Parallel;
+      id: string;
+      branches: readonly ParallelBranch[];
+    };
 
 export type BudgetEndRule =
   | { kind: typeof BudgetEndKind.Exit; nodes: readonly ChainNode[] }
@@ -325,6 +339,7 @@ export interface ChainBuilder<P extends CommonPorts> {
   tasks(tasks: ChainTasks<P>): ChainBuilder<P>;
   step(step: ChainStep): ChainBuilder<P>;
   loop<S>(id: string, frame: LoopFrame<S>): ChainBuilder<P>;
+  parallel(id: string, branches: readonly ParallelBranch[]): ChainBuilder<P>;
   nodes(nodes: readonly ChainNode[]): ChainBuilder<P>;
   onStop(nodes: readonly ChainNode[]): ChainBuilder<P>;
   budgetEnd(rule: BudgetEndRule): ChainBuilder<P>;
@@ -338,6 +353,41 @@ export function stepNode(step: ChainStep): ChainNode {
 export function loopNode<S>(id: string, frame: LoopFrame<S>): ChainNode {
   assert.ok(id);
   return { kind: NodeKind.Loop, id, frame };
+}
+
+const MIN_BRANCHES = 2;
+
+export function parallelNode(
+  id: string,
+  branches: readonly ParallelBranch[],
+): ChainNode {
+  assert.ok(id);
+  assert.ok(branches.length >= MIN_BRANCHES, "A group holds two branches.");
+  return { kind: NodeKind.Parallel, id, branches };
+}
+
+export function soloBranch(node: ChainNode): ParallelBranch {
+  return { name: null, nodes: [node] };
+}
+
+export function namedBranch(
+  name: string,
+  nodes: readonly ChainNode[],
+): ParallelBranch {
+  assert.ok(name);
+  return { name, nodes };
+}
+
+export function writesOf(nodes: readonly ChainNode[]): Key[] {
+  return [
+    ...new Set(
+      nodes.flatMap((node): Key[] => {
+        if (node.kind === NodeKind.Step) return [...node.step.writes];
+        if (node.kind === NodeKind.Loop) return writesOf(node.frame.body);
+        return node.branches.flatMap((branch) => writesOf(branch.nodes));
+      }),
+    ),
+  ];
 }
 
 const PHASE_ORDER: readonly Phase[] = [
@@ -399,6 +449,10 @@ export function chain<P extends CommonPorts>(
       current().push(loopNode(loopId, frame));
       return builder;
     },
+    parallel(groupId, branches) {
+      current().push(parallelNode(groupId, branches));
+      return builder;
+    },
     nodes(nodes) {
       current().push(...nodes);
       return builder;
@@ -433,6 +487,7 @@ export const ChainRule = {
   PortOutsidePhase: "port_outside_phase",
   HostStepInTasks: "host_step_in_tasks",
   FoundryReadsSshAccess: "foundry_reads_ssh_access",
+  ParallelWrite: "parallel_write",
 } as const;
 export type ChainRule = (typeof ChainRule)[keyof typeof ChainRule];
 
@@ -502,12 +557,38 @@ function checkStep(written: Written, step: ChainStep): void {
     });
 }
 
+function checkParallel(
+  written: Written,
+  id: string,
+  branches: readonly ParallelBranch[],
+): void {
+  const owned = new Set<Key>();
+  for (const branch of branches) {
+    const keys = new Set(written.keys);
+    checkNodes({ ...written, keys }, branch.nodes);
+    for (const key of keys) {
+      if (written.keys.has(key)) continue;
+      if (owned.has(key))
+        throw new ChainBuildError(written.chain, `parallel ${id}`, {
+          rule: ChainRule.ParallelWrite,
+          key,
+        });
+      owned.add(key);
+    }
+  }
+  for (const key of owned) written.keys.add(key);
+}
+
 function checkNodes(written: Written, nodes: readonly ChainNode[]): void {
   for (const node of nodes) {
     if (node.kind === NodeKind.Step) {
       checkStep(written, node.step);
       requireKeys(written, `step ${node.step.id}`, node.step.reads);
       for (const key of node.step.writes) written.keys.add(key);
+      continue;
+    }
+    if (node.kind === NodeKind.Parallel) {
+      checkParallel(written, node.id, node.branches);
       continue;
     }
     requireKeys(written, `loop ${node.id}`, node.frame.reads);
@@ -528,6 +609,12 @@ function collectReads(
     if (node.kind === NodeKind.Step) {
       note(node.step.reads);
       for (const key of node.step.writes) written.add(key);
+      continue;
+    }
+    if (node.kind === NodeKind.Parallel) {
+      for (const branch of node.branches)
+        collectReads(branch.nodes, new Set(written), read);
+      for (const key of writesOf([node])) written.add(key);
       continue;
     }
     note(node.frame.reads);

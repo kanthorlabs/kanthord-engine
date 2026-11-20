@@ -50,12 +50,16 @@ export interface TasksWalk<R> {
   resultOf(ctx: ExecutionCtx): R;
 }
 
+interface StopMark {
+  step: string | null;
+}
+
 interface TasksRun {
   control: FoundryControl;
   ports: CommonPorts;
   steps: StepWatch | null;
   ctx: ExecutionCtx;
-  stoppedAt: string | null;
+  stopped: StopMark;
 }
 
 function contextOf(run: TasksRun, step: ChainStep): CancellationContext {
@@ -97,7 +101,7 @@ async function walkStep(
     );
     Object.assign(run.ctx, result.patch);
     holder.scope = result.scope;
-    if (result.stop !== undefined) run.stoppedAt ??= step.id;
+    if (result.stop !== undefined) run.stopped.step ??= step.id;
     return walkedOf(run, result);
   } finally {
     if (step.deadline === DeadlineKind.Cleanup) context.cancel();
@@ -112,6 +116,18 @@ function walkerOf(run: TasksRun): Walker {
     cancel: run.control.cancel,
     until: run.control.until,
     step: (step, holder) => walkStep(run, step, holder),
+    branch: (ctx, cancel) =>
+      branchWalkerOf({ ...run, ctx, control: { ...run.control, cancel } }),
+  };
+}
+
+function branchWalkerOf(run: TasksRun): Walker {
+  return {
+    ...walkerOf(run),
+    step: (step, holder) =>
+      run.control.cancel.signal.aborted
+        ? Promise.resolve(CANCELLED)
+        : walkStep(run, step, holder),
   };
 }
 
@@ -139,7 +155,7 @@ export async function runTasks<R>(
     ports: host.ports,
     steps: host.steps ?? null,
     ctx,
-    stoppedAt: null,
+    stopped: { step: null },
   };
   let walked: Walked;
   try {
@@ -151,7 +167,7 @@ export async function runTasks<R>(
     return {
       kind: FoundryEndKind.Stop,
       stop: walked,
-      step: run.stoppedAt ?? UNKNOWN_STEP,
+      step: run.stopped.step ?? UNKNOWN_STEP,
       ...reached(),
     };
   if (walked === CANCELLED)

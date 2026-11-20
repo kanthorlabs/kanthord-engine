@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import type { CancellationContext } from "../../kernel/context.ts";
+import { type CancellationContext, reasonOf } from "../../kernel/context.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import {
@@ -25,6 +25,7 @@ import {
   sliceOf,
   UNTIL,
   type Walked,
+  type Walker,
   walkNodes,
 } from "./chain-walk.ts";
 import type { ExecutionRun } from "./execution-run.ts";
@@ -55,11 +56,29 @@ export interface ChainIo<P extends CommonPorts = CommonPorts> {
   capture?: TasksCapture;
 }
 
+interface WalkMarks {
+  step: string | null;
+}
+
 interface Walk<P extends CommonPorts = CommonPorts> {
   ctx: ExecutionCtx;
   io: ChainIo<P>;
   stopping: boolean;
-  step?: string;
+  cancel: CancellationContext;
+  marks: WalkMarks;
+}
+
+function walkOf<P extends CommonPorts>(
+  ctx: ExecutionCtx,
+  io: ChainIo<P>,
+): Walk<P> {
+  return {
+    ctx,
+    io,
+    stopping: false,
+    cancel: io.run.operationContext,
+    marks: { step: null },
+  };
 }
 
 export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
@@ -76,10 +95,10 @@ export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
 
 function stepContext(walk: Walk, step: ChainStep): CancellationContext {
   const { run, budget } = walk.io;
-  if (step.deadline === DeadlineKind.Work) return run.operationContext;
+  if (step.deadline === DeadlineKind.Work) return walk.cancel;
   return walk.stopping
     ? run.cleanupContext()
-    : budget.cleanupContext(run.operationContext);
+    : budget.cleanupContext(walk.cancel);
 }
 
 function stepResult(
@@ -127,7 +146,7 @@ async function walkStep(
 ): Promise<Walked> {
   const { run } = walk.io;
   const context = stepContext(walk, step);
-  walk.step = step.id;
+  walk.marks.step = step.id;
   walk.io.steps?.started(step.id);
   try {
     const result = await stepResult(walk, step, { context, holder });
@@ -143,21 +162,33 @@ async function walkStep(
   }
 }
 
+function walkerOf(walk: Walk): Walker {
+  return {
+    ctx: walk.ctx,
+    spans: walk.io.run.spans,
+    cancel: walk.cancel,
+    step: (step, holder) => walkStep(walk, step, holder),
+    branch: (ctx, cancel) => branchWalkerOf({ ...walk, ctx, cancel }),
+  };
+}
+
+function branchWalkerOf(walk: Walk): Walker {
+  return {
+    ...walkerOf(walk),
+    step: (step, holder) => {
+      const aborted = reasonOf(walk.cancel.signal);
+      if (aborted !== null) return Promise.reject(aborted);
+      return walkStep(walk, step, holder);
+    },
+  };
+}
+
 async function hostNodes(
   walk: Walk,
   nodes: readonly ChainNode[],
   holder: ScopeHolder,
 ): Promise<StepKind> {
-  const walked = await walkNodes(
-    {
-      ctx: walk.ctx,
-      spans: walk.io.run.spans,
-      cancel: walk.io.run.operationContext,
-      step: (step, stepHolder) => walkStep(walk, step, stepHolder),
-    },
-    nodes,
-    holder,
-  );
+  const walked = await walkNodes(walkerOf(walk), nodes, holder);
   assert.ok(
     !(walked instanceof ExecutionStop) &&
       walked !== CANCELLED &&
@@ -227,11 +258,7 @@ export async function runNodes(
 ): Promise<NodesEnd> {
   const ctx = seededContext(input.seed);
   const holder: ScopeHolder = { scope: input.scope ?? null };
-  const kind = await hostNodes(
-    { ctx, io, stopping: false },
-    input.nodes,
-    holder,
-  );
+  const kind = await hostNodes(walkOf(ctx, io), input.nodes, holder);
   return { kind, ctx, scope: holder.scope };
 }
 
@@ -348,11 +375,7 @@ export async function runChain<P extends CommonPorts>(
       .slice(FIRST_PHASE, from)
       .some(({ phase }) => phase === Phase.Prepare),
   };
-  const walk: Walk<P> = {
-    ctx: seededContext(input.seed),
-    io,
-    stopping: false,
-  };
+  const walk = walkOf(seededContext(input.seed), io);
   try {
     return await walkPhases(built, walk, progress);
   } catch (error) {
@@ -409,11 +432,7 @@ export async function runPhase<P extends CommonPorts>(
   const nodes = phaseNodes(built, input.phase);
   const missing = phaseReads(nodes).filter((key) => !(key in input.seed.keys));
   if (missing.length > NO_NODES) throw new PhaseSeedMissing(missing);
-  const walk: Walk<P> = {
-    ctx: seededContext(input.seed.keys),
-    io,
-    stopping: false,
-  };
+  const walk = walkOf(seededContext(input.seed.keys), io);
   try {
     const kind = await hostNodes(walk, nodes, { scope: null });
     return kind === StepKind.BudgetEnd
@@ -425,7 +444,7 @@ export async function runPhase<P extends CommonPorts>(
     return {
       kind: PhaseEndKind.Stop,
       stop,
-      step: walk.step ?? null,
+      step: walk.marks.step,
       ctx: walk.ctx,
     };
   }
