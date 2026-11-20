@@ -2246,6 +2246,9 @@ test("a pause order past the deadline ends a pending archive of its instance whe
 });
 
 const LOSS_FAILED_RECORD = "worker.instance.loss_failed";
+const LOSS_ABANDONED_RECORD = "worker.instance.loss_abandoned";
+const LOSS_ATTEMPT_LIMIT = 5;
+const EXTRA_SWEEPS = 3;
 
 function frozenClock(t: TestContext) {
   const clock = { now: Date.now() };
@@ -2338,6 +2341,21 @@ test("a failed loss revoke is tried again at the next connection sweep and then 
   ]);
   f.worker().instances.sweepConnections();
   assert.equal(f.lost.length, SINGLE_CALL);
+});
+
+test("a failed loss revoke is tried at most the attempt limit and abandoned with one log", async (t) => {
+  const clock = frozenClock(t);
+  const { f, records } = loggingFixture(t);
+  await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  clock.now += INSTANCE_CONNECTED_WINDOW_MS + SINGLE_CALL;
+  for (let sweep = 0; sweep < LOSS_ATTEMPT_LIMIT + EXTRA_SWEEPS; sweep += 1)
+    f.worker().instances.sweepConnections();
+  assert.equal(records(LOSS_FAILED_RECORD).length, LOSS_ATTEMPT_LIMIT - 1);
+  assert.equal(records(LOSS_ABANDONED_RECORD).length, SINGLE_CALL);
+  f.revocation.lossFailure = null;
+  f.worker().instances.sweepConnections();
+  assert.deepEqual(f.lost, []);
 });
 
 test("a heartbeat ends the retry of a failed loss revoke", async (t) => {
