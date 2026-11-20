@@ -28,6 +28,9 @@ const UNIT_ID = /^[^\s:]+$/;
 const COMMIT_HEADER = new RegExp(
   `^(${Object.values(CommitType).join("|")})(\\([^()\\s]+\\))?: \\S.*$`,
 );
+const COMMIT_HEADER_PREFIX = new RegExp(
+  `^(${Object.values(CommitType).join("|")})(\\([^()\\s]+\\))?:(?: |$)`,
+);
 
 export function commitTypeOf(value: CommitType | undefined): CommitType {
   return value ?? DEFAULT_COMMIT_TYPE;
@@ -60,7 +63,10 @@ export function commitHeader(type: CommitType, subject: string): string {
 
 function headerOf(type: CommitType, subject: string): string {
   const prefix = `${type}${HEADER_SEPARATOR}`;
-  const line = subject.replace(WHITESPACE, SPACE).trim();
+  const line = subject
+    .replace(WHITESPACE, SPACE)
+    .trim()
+    .replace(COMMIT_HEADER_PREFIX, NO_TEXT);
   const lowered =
     line.charAt(FIRST_LETTER).toLowerCase() + line.slice(AFTER_FIRST_LETTER);
   const cut = lowered

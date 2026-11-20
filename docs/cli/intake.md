@@ -637,6 +637,7 @@ old.
 
 For a `pull_request` action, the pull request title is `<commit_type>: <node name>`.
 `commit_type` comes from the pinned revision of the node, `feat` when absent.
+A node name that starts with a commit header prefix, `<type>: ` or `<type>(<scope>): `, loses that prefix, so the title holds one commit type.
 The title follows the header rules of the [worker commits](./worker.md).
 
 For a `pull_request` action with the landing `kanthord`, `intake.action.perform`

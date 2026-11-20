@@ -456,6 +456,23 @@ test("a pull request create names the gate files in its body", async (t) => {
   ]);
 });
 
+test("a pull request title keeps one commit type of the node name", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, {
+      node: { id: NODE_ID, name: "fix: ship accounts", commit_type: "fix" },
+    }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    {
+      head: claim.nodeBranch,
+      base: "main",
+      title: "fix: ship accounts",
+    },
+  ]);
+});
+
 const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
 const REPLY_REPOSITORY = "owner/pushed";
 const REPLY_ACTION = "reply";
