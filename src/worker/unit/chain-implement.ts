@@ -11,6 +11,9 @@ import {
   FrameOutcome,
   type LoopFrame,
   loopNode,
+  namedBranch,
+  parallelNode,
+  soloBranch,
   stepNode,
 } from "./chain.ts";
 import {
@@ -44,7 +47,7 @@ import {
 } from "./step-execution-release.ts";
 import {
   inputsReadAttemptEvidence,
-  inputsReadPrior,
+  inputsReadRevisionPrior,
 } from "./step-inputs-read-host.ts";
 import { reportCoder } from "./step-report-coder.ts";
 import { setupEntriesLive } from "./step-setup-entries-host.ts";
@@ -79,10 +82,15 @@ export function implementWorkspaceNodes(): ChainNode[] {
   ];
 }
 
-function prepareWorkspaceFrame(): LoopFrame<true> {
+function prepareFrame(): LoopFrame<true> {
   return {
-    ...phaseFrame(Phase.Prepare, implementWorkspaceNodes()),
-    reads: ["revision"],
+    ...phaseFrame(Phase.Prepare, [
+      parallelNode("prepare.inputs", [
+        soloBranch(stepNode(inputsReadRevisionPrior)),
+        namedBranch("workspace", implementWorkspaceNodes()),
+      ]),
+    ]),
+    endReads: ["revision"],
     end: (ctx, _scope, ended) =>
       ended.outcome === FrameOutcome.Next
         ? nodeShapeEnd(ctx.revision)
@@ -185,8 +193,7 @@ export function implementChain(
 ): Chain<ImplementHostPorts> {
   return chain<ImplementHostPorts>(ChainId.Implement, IMPLEMENT_HOST_PORTS)
     .phase(Phase.Prepare)
-    .step(inputsReadPrior)
-    .loop("prepare.workspace", prepareWorkspaceFrame())
+    .loop("prepare", prepareFrame())
     .step(agentOpenImplement)
     .step(stateOpen)
     .phase(Phase.Start)

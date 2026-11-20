@@ -26,7 +26,6 @@ import {
   evidencePublishPatches,
   evidencePublishVerification,
 } from "./step-evidence-publish.ts";
-import { inputsReadDependenciesEvaluation } from "./step-inputs-read.ts";
 import { judgement } from "./step-judgement.ts";
 import { verifyAllEvaluation } from "./step-verify-all.ts";
 
@@ -42,6 +41,7 @@ export const EVALUATION_INPUT_KEYS = [
   "setupFailure",
   "placed",
   "reviewRound",
+  "dependencies",
 ] as const;
 export const EVALUATION_RESULT_KEYS = [
   "verification",
@@ -49,7 +49,6 @@ export const EVALUATION_RESULT_KEYS = [
   "verificationEvidence",
   "affectedEvidence",
   "patchEvidence",
-  "dependencies",
   "judgement",
 ] as const;
 
@@ -72,7 +71,6 @@ const evaluationFrame: LoopFrame<true> = {
     stepNode(evidencePublishVerification),
     stepNode(affectedRunEvaluation),
     stepNode(evidencePublishAffected),
-    stepNode(inputsReadDependenciesEvaluation),
     stepNode(judgement),
     stepNode(evidencePublishPatches),
   ],

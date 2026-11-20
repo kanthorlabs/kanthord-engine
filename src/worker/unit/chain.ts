@@ -129,14 +129,9 @@ export interface ExecutionCtx {
 }
 export type Key = keyof ExecutionCtx;
 
-export const SEED_KEYS: readonly Key[] = [
-  "claim",
-  "setup",
-  "sshAccess",
-  "revision",
-];
+export const SEED_KEYS: readonly Key[] = ["claim", "setup", "sshAccess"];
 export type ChainSeed = Partial<ExecutionCtx> &
-  Pick<ExecutionCtx, "claim" | "setup" | "sshAccess" | "revision">;
+  Pick<ExecutionCtx, "claim" | "setup" | "sshAccess">;
 export const RUNNER_KEYS: readonly Key[] = [
   "completedUnits",
   "reports",

@@ -16,13 +16,14 @@ import { Phase } from "./telemetry.ts";
 
 const INDENT = "  ";
 const NOTE_COLUMN = 44;
+const NOTE_GAP = 1;
 const CHAIN_DEPTH = 1;
 const NODE_DEPTH = 2;
 const NEXT_DEPTH = 1;
 
 function line(depth: number, text: string, note: string): string {
   const head = `${INDENT.repeat(depth)}${text}`;
-  return note ? `${head.padEnd(NOTE_COLUMN)}${note}` : head;
+  return note ? `${head.padEnd(NOTE_COLUMN - NOTE_GAP)} ${note}` : head;
 }
 
 function stepNote(step: ChainStep): string {

@@ -1,6 +1,5 @@
 import type { ExecutionBudget } from "./budget.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
-import { readPinnedRevision } from "./node-reads.ts";
 import { runChain } from "./chain-runner.ts";
 import { hostOf, seedOf } from "./chain-host.ts";
 import type { ExecutionRun } from "./execution-run.ts";
@@ -32,10 +31,9 @@ export async function runEvaluation(
   budget: ExecutionBudget,
   openAgent: AgentOpener,
 ): Promise<ExecutionEnd> {
-  const revision = await readPinnedRevision(run);
   return runChain(
     evaluationChain(),
-    { seed: { ...seedOf(input), revision } },
+    { seed: seedOf(input) },
     {
       run,
       budget,

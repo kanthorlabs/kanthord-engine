@@ -33,7 +33,6 @@ import type {
 import { ExecutionBudget } from "./budget.ts";
 import { ClaimWatch } from "./claim-watch.ts";
 import type { TasksCapture } from "./tasks-capture.ts";
-import { readPinnedRevision } from "./node-reads.ts";
 import type { Chain } from "./chain.ts";
 import { evaluationChain } from "./chain-evaluation.ts";
 import { examineChain } from "./chain-examine.ts";
@@ -127,7 +126,6 @@ export async function runNativeExecution(
       await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
-      const revision = await readPinnedRevision(run);
       const intent = input.setup.intent;
       const open = async (request: AgentOpenRequest) => {
         const native = await openNativeAgent({
@@ -161,7 +159,6 @@ export async function runNativeExecution(
             claim: input.claim,
             setup: input.setup,
             sshAccess: input.sshAccess,
-            revision,
           },
         },
         {
