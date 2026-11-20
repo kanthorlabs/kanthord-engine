@@ -4,23 +4,23 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
-import { doneTrailerOf } from "./done-record.ts";
-import { nodeUnitOf } from "./release-gate.ts";
-import { EndReason, type ExecutionEnd } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
   startCheck,
   TaskResultKind,
 } from "./steps-implement.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
+import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { linkUpdatesText } from "./judgement.ts";
-import { readPrior, VerdictSource } from "./node-reads.ts";
+import { readPrior } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
@@ -30,8 +30,8 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   releasedRoot,
   task,
   TEST_SSH_ACCESS,
@@ -166,7 +166,7 @@ async function verdictHarness(
 ) {
   const current = task("judged", "true");
   const h = await fixture(t, [current], script, undefined, names);
-  await recordDone(h, current);
+  await recordUnit(h, current);
   return { h, current };
 }
 
@@ -198,6 +198,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: h.input.claim.node_id,
+      template: PromptTemplate.CriterionRevision,
+      agent_reason: "nothing again",
     });
     assert.equal(h.provider.calls.length, TWO_TURNS);
   });
@@ -376,7 +379,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       content: { ...base.content, verifications: [node, "true"] },
     };
     const h = await fixture(t, [current], script);
-    await recordDone(h, current);
+    await recordUnit(h, current);
     h.revision = {
       ...h.revision,
       content: { ...h.revision.content, verifications: [node] },
@@ -385,12 +388,13 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     return { h, count };
   }
 
-  test("a verdict unit runs no node command in the live checkout", async (t) => {
+  test("a verdict unit runs no node command in the live checkout, and its pass with a gate commit writes no node unit record", async (t) => {
     const { h, count } = await liveNodeHarness(t, [
       write("verdict"),
       fauxAssistantMessage("addressed"),
       fauxAssistantMessage("never"),
     ]);
+    const judgedHead = h.checkouts[0]!.head;
     recordReleases(h);
     recordEvidence(h);
     assert.deepEqual(
@@ -404,9 +408,16 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       readFileSync(count, "utf8").trim().split("\n").length,
       ONE_RUN,
     );
+    assert.notEqual(h.checkouts[0]!.head, judgedHead);
+    assert.equal(
+      h.input.setup.unit_records.some(
+        ({ unit_id }) => unit_id === h.input.claim.node_id,
+      ),
+      false,
+    );
   });
 
-  test("a setup budget end before the empty list of a verdict unit writes no done record and releases further work", async (t) => {
+  test("a setup budget end before the empty list of a verdict unit writes no unit record and releases further work", async (t) => {
     const { h, count } = await liveNodeHarness(t, [
       write("verdict"),
       fauxAssistantMessage("addressed"),
@@ -423,14 +434,9 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     assert.ok("furtherWork" in end && end.furtherWork);
     assert.equal((bodies[0] as { further_work: boolean }).further_work, true);
-    const log = await simpleGit(releasedRoot(h)).raw([
-      "log",
-      "--format=%B",
-      h.nodeBranch,
-    ]);
     assert.equal(
-      log.includes(
-        doneTrailerOf(nodeUnitOf(h.input.claim.node_id, h.revision)),
+      h.input.setup.unit_records.some(
+        ({ unit_id }) => unit_id === h.input.claim.node_id,
       ),
       false,
     );
@@ -529,11 +535,13 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
       fauxAssistantMessage("never"),
     ]);
     h.verdict = verdictAt(VERDICT, h.checkouts);
+    const rerun = join(temporary(t), "rerun");
     h.setup = h.setup.map((entry) => ({
       ...entry,
-      environment: { postCreateCommand: "sleep 30" },
+      environment: {
+        postCreateCommand: `case "$PWD" in */checkouts/*) test -e '${rerun}' && sleep 30; touch '${rerun}'; exit 1;; esac`,
+      },
     }));
-    h.setupPending = true;
     h.agent.budget.wallDeadline = () => Date.now() + WALL_DEADLINE_MS;
     const bodies = recordReleases(h);
     recordEvidence(h);
@@ -581,7 +589,7 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
         fauxAssistantMessage("never"),
       ],
     );
-    await recordDone(h, judged);
+    await recordUnit(h, judged);
     h.verdict = verdictAt(VERDICT, h.checkouts);
     await releasedEnd(h);
     assert.equal(h.provider.calls.length, FOUR_TURNS);

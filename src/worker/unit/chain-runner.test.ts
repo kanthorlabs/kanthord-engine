@@ -1,0 +1,1234 @@
+import assert from "node:assert/strict";
+import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  attributed,
+  CauseCategory,
+  CauseSubcategory,
+} from "../../kernel/cause.ts";
+import {
+  background,
+  CancellationContext,
+  cancelled,
+  type Context,
+  ContextCancelled,
+} from "../../kernel/context.ts";
+import { createIdentity } from "../../kernel/identity.ts";
+import { stopAfter } from "../../kernel/test-support.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
+import { ExecutionBudget } from "./budget.ts";
+import {
+  BudgetEndKind,
+  chain,
+  type ChainBuilder,
+  ChainBuildError,
+  type ChainFoundryStep,
+  ChainId,
+  type ChainNode,
+  ChainRule,
+  type ChainSeed,
+  type ChainStep,
+  type ChainTasks,
+  DeadlineKind,
+  type ExecutionCtx,
+  FoundryEndKind,
+  FrameOutcome,
+  type Key,
+  type LoopFrame,
+  loopNode,
+  namedBranch,
+  parallelNode,
+  soloBranch,
+  StepKind,
+  stepNode,
+} from "./chain.ts";
+import {
+  type ChainIo,
+  executionBoundary,
+  PhaseEndKind,
+  PhaseSeedMissing,
+  runChain,
+  runPhase,
+} from "./chain-runner.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import {
+  EndReason,
+  type ExecutionEnd,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
+import { runTasks } from "./foundry.ts";
+import { phaseSpanNames, spanEnds, stepSpanOutcomes } from "./test-support.ts";
+import type { MethodClients } from "./method-clients.ts";
+import { EndPhase, Phase, SpanOperation } from "./telemetry.ts";
+import {
+  RecordKind,
+  type SpanRecord,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
+
+const WALL_TIME_MS = 60000;
+const RELEASED: ExecutionEnd = {
+  kind: ExecutionEndKind.Released,
+  furtherWork: false,
+};
+const EXITED: ExecutionEnd = {
+  kind: ExecutionEndKind.Released,
+  furtherWork: true,
+};
+const FRAMES = 2;
+const STOP_CODE = "test.stop";
+const CHECKPOINT_FAILED = "checkpoint failed";
+const CAPTURE_FAILED = "tasks capture failed";
+const DISPOSALS = 2;
+const UNWRITTEN_KEY: Key = "agent";
+const RELEASE_STOP_STEP = "execution.release(stop)";
+const ONE_PHASE_SPAN = 1;
+const ONE_RELEASE = 1;
+const BEFORE_LAST = -1;
+
+interface Harness {
+  io: ChainIo;
+  seed: ChainSeed;
+  trace: string[];
+  logs: string[];
+  releases: unknown[];
+  records: TelemetryRecord[];
+}
+
+function harness(t: TestContext, stop?: CancellationContext): Harness {
+  const claim = {
+    execution_id: createIdentity("execution"),
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + WALL_TIME_MS,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const logs: string[] = [];
+  const releases: unknown[] = [];
+  const records: TelemetryRecord[] = [];
+  const run = new ExecutionRun({
+    claim,
+    clients: {
+      scheduler: {
+        executionRelease: async (input: { body: unknown }) => {
+          releases.push(input.body);
+          return { type: "completed", status: 200, data: {} };
+        },
+      },
+    } as unknown as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+    ...(stop === undefined ? {} : { stop }),
+    log: (record) => logs.push(String(record.msg)),
+    telemetry: {
+      write: (written) => void records.push(...written),
+      flush: async () => {},
+    },
+  });
+  stopAfter(t, () => run.dispose());
+  const trace: string[] = [];
+  const resources = new AsyncDisposableStack();
+  resources.defer(() => void trace.push("dispose first"));
+  resources.defer(() => void trace.push("dispose second"));
+  return {
+    io: {
+      run,
+      budget: new ExecutionBudget({
+        ...claim,
+        resource_budget: { wall_time_ms: WALL_TIME_MS },
+      }),
+      capabilities: [],
+      resources,
+      host: { env: {} } as unknown as ChainIo["host"],
+      ports: { telemetry: run.spans } as ChainIo["ports"],
+    },
+    seed: { claim } as ChainSeed,
+    trace,
+    logs,
+    releases,
+    records,
+  };
+}
+
+interface Act {
+  kind?: StepKind;
+  reads?: readonly Key[];
+  patch?: Partial<ExecutionCtx>;
+  work?: (ctx: Partial<ExecutionCtx>) => void;
+}
+
+function stepOf(h: Harness, id: string, act: Act = {}): ChainStep {
+  return {
+    id,
+    deadline: DeadlineKind.Work,
+    reads: act.reads ?? [],
+    writes: Object.keys(act.patch ?? {}) as Key[],
+    stops: [],
+    async run(ctx: Partial<ExecutionCtx>, scope: unknown) {
+      h.trace.push(id);
+      act.work?.(ctx);
+      return {
+        kind: act.kind ?? StepKind.Next,
+        patch: act.patch ?? {},
+        scope,
+      };
+    },
+  };
+}
+
+function returningStep(
+  h: Harness,
+  id: string,
+  work: () => ExecutionStop,
+): ChainFoundryStep {
+  return {
+    foundry: true,
+    id,
+    deadline: DeadlineKind.Work,
+    reads: [],
+    writes: [],
+    stops: [],
+    ports: [],
+    async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
+      h.trace.push(id);
+      return { kind: StepKind.Stop, stop: work(), patch: {}, scope };
+    },
+  };
+}
+
+function abortedStep(
+  h: Harness,
+  id: string,
+  abort: () => void,
+): ChainFoundryStep {
+  return {
+    foundry: true,
+    id,
+    deadline: DeadlineKind.Work,
+    reads: [],
+    writes: [],
+    stops: [],
+    ports: [],
+    async run(_ctx: Partial<ExecutionCtx>, scope: unknown) {
+      h.trace.push(id);
+      abort();
+      return { kind: StepKind.Next, patch: {}, scope };
+    },
+  };
+}
+
+function finalStep(h: Harness, id: string, end: ExecutionEnd): ChainStep {
+  return stepOf(h, id, { kind: StepKind.Closed, patch: { end } });
+}
+
+function foundryOf(step: ChainStep): ChainFoundryStep {
+  return step.foundry ? step : { ...step, foundry: true, ports: [] };
+}
+
+function tasksOf(nodes: readonly ChainNode[]): ChainTasks<CommonPorts> {
+  return {
+    name: "foundryTest",
+    ports: [],
+    nodes,
+    async run(ctx, control, host) {
+      const end = await runTasks(
+        { nodes, seed: ctx, resultOf: (reached) => reached },
+        control,
+        host,
+      );
+      Object.assign(ctx, end.result);
+      return end;
+    },
+  };
+}
+
+function stoppable(h: Harness, work: ChainStep): ChainBuilder<CommonPorts> {
+  return chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .tasks(tasksOf([stepNode(foundryOf(work))]))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({
+      kind: BudgetEndKind.Exit,
+      nodes: [stepNode(finalStep(h, "exit", EXITED))],
+    });
+}
+
+test("a chain runs each phase, each frame of a loop and the final step, then disposes the resources in reverse order", async (t) => {
+  const h = harness(t);
+  const frame: LoopFrame<number> = {
+    reads: ["setupPending"],
+    init: () => 1,
+    body: [
+      stepNode(
+        foundryOf(
+          stepOf(h, "turn", {
+            reads: ["setupPending"],
+            work: (ctx) => assert.equal(ctx.setupPending, true),
+          }),
+        ),
+      ),
+    ],
+    next: (_ctx, scope) => (scope < FRAMES ? scope + 1 : null),
+  };
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare", { patch: { setupPending: true } }))
+    .tasks(tasksOf([loopNode("turns", frame)]))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(h.trace, [
+    "prepare",
+    "turn",
+    "turn",
+    "release",
+    "dispose second",
+    "dispose first",
+  ]);
+});
+
+const PHASE_ATTRIBUTE = "kanthord.phase";
+const STEP_ID_ATTRIBUTE = "kanthord.step.id";
+
+function spanRecords(h: Harness, operation: string): SpanRecord[] {
+  return h.records.filter(
+    (record): record is SpanRecord =>
+      record.kind === RecordKind.Span && record.operation === operation,
+  );
+}
+
+function closingStep(h: Harness, id: string, end: ExecutionEnd): ChainStep {
+  return { ...finalStep(h, id, end), final: true };
+}
+
+test("the runner writes one worker.phase span per phase and one worker.step span per step, and ends the final step span before the release", async (t) => {
+  const h = harness(t);
+  let endedAtRelease: unknown[] = [];
+  const release = stepOf(h, "release", {
+    kind: StepKind.Closed,
+    patch: { end: RELEASED },
+    work: () => {
+      endedAtRelease = h.records.flatMap((record) =>
+        record.kind === RecordKind.Span && record.end_time !== undefined
+          ? [record.span_id]
+          : [],
+      );
+    },
+  });
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .phase(Phase.Start)
+    .step(stepOf(h, "start"))
+    .tasks(tasksOf([stepNode(foundryOf(stepOf(h, "work")))]))
+    .phase(Phase.Finish)
+    .step(stepOf(h, "push"))
+    .step({ ...release, final: true })
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(phaseSpanNames(h.records), [
+    Phase.Prepare,
+    Phase.Start,
+    Phase.Tasks,
+    Phase.Finish,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(h.records), [
+    ["prepare", FrameOutcome.Next],
+    ["start", FrameOutcome.Next],
+    ["work", FrameOutcome.Next],
+    ["push", FrameOutcome.Next],
+    ["release", FrameOutcome.Next],
+  ]);
+  const startOf = (operation: string, attribute: string, value: string) =>
+    spanRecords(h, operation).find(
+      (record) =>
+        record.start_time !== undefined &&
+        record.attributes?.[attribute] === value,
+    )?.span_id;
+  assert.ok(
+    endedAtRelease.includes(
+      startOf(SpanOperation.Step, STEP_ID_ATTRIBUTE, "release"),
+    ),
+  );
+  assert.ok(
+    endedAtRelease.includes(
+      startOf(SpanOperation.Phase, PHASE_ATTRIBUTE, Phase.Finish),
+    ),
+  );
+});
+
+test("a budget end writes the step outcome budget_end and the phase on_exit, and a stop writes the outcome stop with no text and the phase on_stop", async (t) => {
+  const exited = harness(t);
+  const exitChain = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(exited, "prepare"))
+    .tasks(
+      tasksOf([
+        stepNode(
+          foundryOf(stepOf(exited, "work", { kind: StepKind.BudgetEnd })),
+        ),
+      ]),
+    )
+    .phase(Phase.Finish)
+    .step(closingStep(exited, "release", RELEASED))
+    .budgetEnd({
+      kind: BudgetEndKind.Exit,
+      nodes: [
+        stepNode(stepOf(exited, "checkpoint")),
+        stepNode(closingStep(exited, "exit", EXITED)),
+      ],
+    })
+    .build();
+  assert.deepEqual(
+    await runChain(exitChain, { seed: exited.seed }, exited.io),
+    EXITED,
+  );
+  assert.deepEqual(phaseSpanNames(exited.records), [
+    Phase.Prepare,
+    Phase.Tasks,
+    EndPhase.OnExit,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(exited.records), [
+    ["prepare", FrameOutcome.Next],
+    ["work", FrameOutcome.BudgetEnd],
+    ["checkpoint", FrameOutcome.Next],
+    ["exit", FrameOutcome.Next],
+  ]);
+  const stopped = harness(t);
+  const stopChain = stoppable(
+    stopped,
+    stepOf(stopped, "work", {
+      work: () => stopped.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+    }),
+  )
+    .onStop([stepNode(stepOf(stopped, "checkpoint"))])
+    .build();
+  await assert.rejects(runChain(stopChain, { seed: stopped.seed }, stopped.io));
+  assert.deepEqual(phaseSpanNames(stopped.records), [
+    Phase.Prepare,
+    Phase.Tasks,
+    EndPhase.OnStop,
+  ]);
+  assert.deepEqual(stepSpanOutcomes(stopped.records), [
+    ["prepare", FrameOutcome.Next],
+    ["work", FrameOutcome.Stop],
+    ["checkpoint", FrameOutcome.Next],
+  ]);
+  const failed = spanEnds(stopped.records, SpanOperation.Step)[1]!;
+  assert.equal(failed.status, SpanStatus.Error);
+  assert.deepEqual(failed.text_ids, []);
+});
+
+function releaseStopSpan(h: Harness) {
+  const start = spanRecords(h, SpanOperation.Step).find(
+    (record) =>
+      record.start_time !== undefined &&
+      record.attributes?.[STEP_ID_ATTRIBUTE] === RELEASE_STOP_STEP,
+  );
+  assert.ok(start);
+  const end = spanEnds(h.records, SpanOperation.Step).find(
+    (record) => record.span_id === start.span_id,
+  );
+  assert.ok(end);
+  const onStop = spanRecords(h, SpanOperation.Phase).filter(
+    (record) =>
+      record.start_time !== undefined &&
+      record.attributes?.[PHASE_ATTRIBUTE] === EndPhase.OnStop,
+  );
+  assert.equal(onStop.length, ONE_PHASE_SPAN);
+  return { start, end, phase: onStop[0]! };
+}
+
+test("a stop writes one worker.step span execution.release(stop) under the on_stop phase span with the outcome stop and no text", async (t) => {
+  const late = harness(t);
+  const lateChain = stoppable(
+    late,
+    stepOf(late, "work", {
+      work: () => late.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+    }),
+  )
+    .onStop([stepNode(stepOf(late, "checkpoint"))])
+    .build();
+  const early = harness(t);
+  const earlyChain = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(
+      stepOf(early, "prepare", {
+        work: () => early.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+      }),
+    )
+    .phase(Phase.Finish)
+    .step(closingStep(early, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  for (const [h, built, phases] of [
+    [late, lateChain, [Phase.Prepare, Phase.Tasks, EndPhase.OnStop]],
+    [early, earlyChain, [Phase.Prepare, EndPhase.OnStop]],
+  ] as const) {
+    const end = await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    );
+    assert.equal(end.kind, ExecutionEndKind.Released);
+    assert.equal(h.releases.length, ONE_RELEASE);
+    assert.deepEqual(phaseSpanNames(h.records), phases);
+    assert.deepEqual(stepSpanOutcomes(h.records).at(BEFORE_LAST), [
+      RELEASE_STOP_STEP,
+      FrameOutcome.Stop,
+    ]);
+    const span = releaseStopSpan(h);
+    assert.equal(span.start.parent_span_id, span.phase.span_id);
+    assert.equal(span.end.status, SpanStatus.Error);
+    assert.deepEqual(span.end.text_ids, []);
+    assert.equal(JSON.stringify(h.records).includes(STOP_CODE), false);
+  }
+});
+
+test("a capture that throws after start logs tasks capture failed, and the chain reaches its final step", async (t) => {
+  const h = harness(t);
+  h.io.capture = async () => {
+    h.trace.push("capture");
+    throw new Error("capture disk full");
+  };
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .phase(Phase.Start)
+    .step(stepOf(h, "start"))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(h.trace.slice(0, 4), [
+    "prepare",
+    "start",
+    "capture",
+    "release",
+  ]);
+  assert.ok(h.logs.includes(CAPTURE_FAILED));
+});
+
+test("a build rejects a step that reads a key with no earlier writer", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "reader", { reads: [UNWRITTEN_KEY] }))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) => error instanceof ChainBuildError && error.key === UNWRITTEN_KEY,
+  );
+});
+
+const PHASE_PORT = "secrets.redact";
+const WORK_NODE = "step work";
+const READER_NODE = "step reader";
+const SSH_ACCESS_KEY: Key = "sshAccess";
+
+test("a build rejects a tasks step whose port is not in the port set of the tasks phase", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [PHASE_PORT])
+    .phase(Phase.Prepare)
+    .step({ ...foundryOf(stepOf(h, "prepare")), ports: [PHASE_PORT] })
+    .tasks(
+      tasksOf([
+        stepNode({ ...foundryOf(stepOf(h, "work")), ports: [PHASE_PORT] }),
+      ]),
+    )
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === WORK_NODE &&
+      error.rule === ChainRule.PortOutsidePhase &&
+      error.port === PHASE_PORT,
+  );
+});
+
+test("a build rejects a host step in a tasks phase", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "prepare"))
+    .tasks(tasksOf([stepNode(stepOf(h, "work"))]))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === WORK_NODE &&
+      error.rule === ChainRule.HostStepInTasks,
+  );
+});
+
+test("a build rejects a Foundry step that reads sshAccess", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .step(foundryOf(stepOf(h, "reader", { reads: [SSH_ACCESS_KEY] })))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === READER_NODE &&
+      error.rule === ChainRule.FoundryReadsSshAccess &&
+      error.key === SSH_ACCESS_KEY,
+  );
+});
+
+test("a budget end after prepare runs the exit nodes, and a budget end in prepare stops with budget_end/wall_time", async (t) => {
+  const exited = harness(t);
+  const built = stoppable(
+    exited,
+    stepOf(exited, "work", { kind: StepKind.BudgetEnd }),
+  ).build();
+  assert.deepEqual(
+    await runChain(built, { seed: exited.seed }, exited.io),
+    EXITED,
+  );
+  assert.deepEqual(exited.trace.slice(0, -DISPOSALS), [
+    "prepare",
+    "work",
+    "exit",
+  ]);
+  const early = harness(t);
+  const stopped = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(early, "prepare", { kind: StepKind.BudgetEnd }))
+    .phase(Phase.Finish)
+    .step(finalStep(early, "release", RELEASED))
+    .budgetEnd({
+      kind: BudgetEndKind.Exit,
+      nodes: [stepNode(finalStep(early, "exit", EXITED))],
+    })
+    .build();
+  await assert.rejects(
+    runChain(stopped, { seed: early.seed }, early.io),
+    (error) =>
+      error instanceof ExecutionStop &&
+      error.reason === EndReason.BudgetEnd &&
+      error.code === BudgetLimit.WallTime,
+  );
+  assert.deepEqual(early.trace.slice(0, -DISPOSALS), ["prepare"]);
+});
+
+test("a stop after prepare runs the stop nodes before the dispose, keeps the stop when a stop node fails and throws the stop", async (t) => {
+  const h = harness(t);
+  const built = stoppable(
+    h,
+    stepOf(h, "work", {
+      work: () => h.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+    }),
+  )
+    .onStop([
+      stepNode(
+        stepOf(h, "checkpoint", {
+          reads: ["stop"],
+          work: (ctx) => assert.equal(ctx.stop?.code, STOP_CODE),
+        }),
+      ),
+      stepNode(
+        stepOf(h, "push", {
+          work: () => {
+            throw new Error("push failed");
+          },
+        }),
+      ),
+    ])
+    .build();
+  await assert.rejects(
+    runChain(built, { seed: h.seed }, h.io),
+    (error) => error instanceof ExecutionStop && error.code === STOP_CODE,
+  );
+  assert.deepEqual(h.trace, [
+    "prepare",
+    "work",
+    "checkpoint",
+    "push",
+    "dispose second",
+    "dispose first",
+  ]);
+  assert.deepEqual(h.logs, [CHECKPOINT_FAILED]);
+});
+
+test("a revoked stop and a stop in prepare run no stop node", async (t) => {
+  const revoked = harness(t);
+  const onStop = (h: Harness) => [stepNode(stepOf(h, "checkpoint"))];
+  await assert.rejects(
+    runChain(
+      stoppable(
+        revoked,
+        stepOf(revoked, "work", {
+          work: () => revoked.io.run.stop(EndReason.Revoked),
+        }),
+      )
+        .onStop(onStop(revoked))
+        .build(),
+      { seed: revoked.seed },
+      revoked.io,
+    ),
+    (error) =>
+      error instanceof ExecutionStop && error.reason === EndReason.Revoked,
+  );
+  assert.deepEqual(revoked.trace.slice(0, -DISPOSALS), ["prepare", "work"]);
+  const early = harness(t);
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .step(
+      stepOf(early, "prepare", {
+        work: () => early.io.run.stop(EndReason.OperationFailed, STOP_CODE),
+      }),
+    )
+    .phase(Phase.Finish)
+    .step(finalStep(early, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .onStop(onStop(early))
+    .build();
+  await assert.rejects(
+    runChain(built, { seed: early.seed }, early.io),
+    (error) => error instanceof ExecutionStop && error.code === STOP_CODE,
+  );
+  assert.deepEqual(early.trace.slice(0, -DISPOSALS), ["prepare"]);
+});
+
+test("a stored stop wins over the stop that a tasks step returns", async (t) => {
+  const h = harness(t);
+  const built = stoppable(
+    h,
+    returningStep(h, "work", () => {
+      assert.throws(() => h.io.run.stop(EndReason.Revoked));
+      return new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+    }),
+  )
+    .onStop([stepNode(stepOf(h, "checkpoint"))])
+    .build();
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    { kind: ExecutionEndKind.Ended, reason: EndReason.Revoked, code: null },
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), ["prepare", "work"]);
+  assert.deepEqual(h.releases, []);
+});
+
+const REQUESTED_STOPS = [
+  EndReason.HumanPaused,
+  EndReason.InstanceArchived,
+  EndReason.WorkerStopped,
+];
+
+for (const reason of REQUESTED_STOPS) {
+  test(`a requested stop with the reason ${reason} wins over the stop of the tasks step that it aborted`, async (t) => {
+    const order = new CancellationContext();
+    const h = harness(t, order);
+    const built = stoppable(
+      h,
+      returningStep(h, "work", () => {
+        order.cancel(new ExecutionStop(reason, null));
+        return new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+      }),
+    )
+      .onStop([
+        stepNode(
+          stepOf(h, "checkpoint", {
+            reads: ["stop"],
+            work: (ctx) => assert.equal(ctx.stop?.reason, reason),
+          }),
+        ),
+      ])
+      .build();
+    const stop = {
+      reason,
+      code: null,
+      cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+    };
+    assert.deepEqual(
+      await executionBoundary(h.io.run, () =>
+        runChain(built, { seed: h.seed }, h.io),
+      ),
+      { kind: ExecutionEndKind.Released, furtherWork: true, stop },
+    );
+    assert.deepEqual(h.releases, [{ further_work: true, stop }]);
+    assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+      "prepare",
+      "work",
+      "checkpoint",
+    ]);
+  });
+}
+
+test("a requested stop wins when the tasks step that it aborted returns next", async (t) => {
+  const order = new CancellationContext();
+  const h = harness(t, order);
+  const reason = EndReason.HumanPaused;
+  const built = stoppable(
+    h,
+    abortedStep(h, "work", () => order.cancel(new ExecutionStop(reason, null))),
+  )
+    .onStop([stepNode(stepOf(h, "checkpoint"))])
+    .build();
+  const stop = {
+    reason,
+    code: null,
+    cause: attributed(CauseCategory.Human, CauseSubcategory.Intervention),
+  };
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    { kind: ExecutionEndKind.Released, furtherWork: true, stop },
+  );
+  assert.deepEqual(h.releases, [{ further_work: true, stop }]);
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "prepare",
+    "work",
+    "checkpoint",
+  ]);
+});
+
+test("an abort with no stop leaves the result of the tasks step and the walk goes on", async (t) => {
+  const order = new CancellationContext();
+  const h = harness(t, order);
+  const built = stoppable(
+    h,
+    abortedStep(h, "work", () => order.cancel()),
+  ).build();
+  assert.deepEqual(
+    await executionBoundary(h.io.run, () =>
+      runChain(built, { seed: h.seed }, h.io),
+    ),
+    RELEASED,
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "prepare",
+    "work",
+    "release",
+  ]);
+  assert.deepEqual(h.releases, []);
+});
+
+const FRAME_READ: Key = "plan";
+const PHASE_READ: Key = "revision";
+const INNER_WRITE: Key = "setupPending";
+const UNTIL_LOOP = "release_gate";
+
+function phaseChain(h: Harness) {
+  const frame: LoopFrame<true> = {
+    reads: [FRAME_READ, INNER_WRITE],
+    init: () => true,
+    body: [stepNode(stepOf(h, "inner", { reads: [INNER_WRITE] }))],
+    next: () => null,
+  };
+  return chain<CommonPorts>(ChainId.TasksPrepare, [])
+    .phase(Phase.Prepare)
+    .step(stepOf(h, "first", { reads: [PHASE_READ] }))
+    .step(stepOf(h, "writer", { patch: { setupPending: true } }))
+    .loop("frame", frame)
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+}
+
+test("runPhase requires each phase read and each frame read that no node of the phase writes first", async (t) => {
+  const h = harness(t);
+  const built = phaseChain(h);
+  await assert.rejects(
+    runPhase(built, { phase: Phase.Prepare, seed: { keys: {} } }, h.io),
+    (error) =>
+      error instanceof PhaseSeedMissing &&
+      [...error.keys].sort().join() === [FRAME_READ, PHASE_READ].sort().join(),
+  );
+  assert.deepEqual(h.trace, []);
+  const end = await runPhase(
+    built,
+    {
+      phase: Phase.Prepare,
+      seed: {
+        keys: {
+          revision: {} as ExecutionCtx["revision"],
+          plan: {} as ExecutionCtx["plan"],
+        },
+      },
+    },
+    h.io,
+  );
+  assert.equal(end.kind, PhaseEndKind.Completed);
+  assert.deepEqual(h.trace, ["first", "writer", "inner"]);
+});
+
+test("a tasks walk with until ends with completed on entering the named loop", async (t) => {
+  const h = harness(t);
+  const once = (id: string): LoopFrame<true> => ({
+    reads: [],
+    init: () => true,
+    body: [stepNode(foundryOf(stepOf(h, id)))],
+    next: () => null,
+  });
+  const end = await runTasks(
+    {
+      nodes: [
+        loopNode("units", once("unit")),
+        loopNode(UNTIL_LOOP, once("gate")),
+      ],
+      seed: {},
+      resultOf: () => null,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: UNTIL_LOOP,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.Completed);
+  assert.deepEqual(h.trace, ["unit"]);
+});
+
+const LATE_CODE = "test.late";
+const SIBLING_ABORT_MS = 2000;
+const GROUP = "group";
+
+interface StepCall {
+  context: Context;
+  ctx: Partial<ExecutionCtx>;
+}
+
+function contextStepOf(
+  h: Harness,
+  id: string,
+  act: Act & { call: (call: StepCall) => Promise<void> },
+): ChainStep {
+  return {
+    ...stepOf(h, id, act),
+    async run(
+      ctx: Partial<ExecutionCtx>,
+      scope: unknown,
+      io: { context: Context },
+    ) {
+      h.trace.push(id);
+      await act.call({ context: io.context, ctx });
+      return {
+        kind: act.kind ?? StepKind.Next,
+        patch: act.patch ?? {},
+        scope,
+      };
+    },
+  };
+}
+
+test("a stop of one parallel branch aborts its siblings, and the first stop in time wins", async (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(
+          contextStepOf(h, "stopper", {
+            call: async () => {
+              await Promise.resolve();
+              throw new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
+            },
+          }),
+        ),
+      ),
+      namedBranch("waiter", [
+        stepNode(
+          contextStepOf(h, "waiter", {
+            call: async ({ context }) => {
+              await Promise.race([
+                cancelled(context.signal),
+                delay(SIBLING_ABORT_MS),
+              ]);
+              h.trace.push(
+                context.signal.aborted ? "waiter aborted" : "waiter running",
+              );
+              throw new ExecutionStop(EndReason.OperationFailed, LATE_CODE);
+            },
+          }),
+        ),
+        stepNode(stepOf(h, "after waiter")),
+      ]),
+    ])
+    .step(stepOf(h, "after group"))
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  await assert.rejects(
+    runChain(built, { seed: h.seed }, h.io),
+    (error) => error instanceof ExecutionStop && error.code === STOP_CODE,
+  );
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "stopper",
+    "waiter",
+    "waiter aborted",
+  ]);
+});
+
+test("a budget end of one parallel branch merges the patch of each branch that ended next, then ends the walk with the budget end", async (t) => {
+  const h = harness(t);
+  const end = await runTasks(
+    {
+      nodes: [
+        parallelNode(GROUP, [
+          soloBranch(
+            stepNode(
+              foundryOf(stepOf(h, "writer", { patch: { setupPending: true } })),
+            ),
+          ),
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "ender", {
+                  kind: StepKind.BudgetEnd,
+                  patch: { setupInstruction: "lost" },
+                  call: async () => {
+                    await new Promise((resolve) => setImmediate(resolve));
+                  },
+                }),
+              ),
+            ),
+          ),
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "waiter", {
+                  call: async ({ context }) => {
+                    await cancelled(context.signal);
+                    h.trace.push("waiter aborted");
+                  },
+                }),
+              ),
+            ),
+          ),
+        ]),
+        stepNode(foundryOf(stepOf(h, "after group"))),
+      ],
+      seed: {},
+      resultOf: (ctx) => ctx,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: null,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.BudgetEnd);
+  assert.equal(end.result.setupPending, true);
+  assert.equal("setupInstruction" in end.result, false);
+  assert.deepEqual(h.trace, ["writer", "ender", "waiter", "waiter aborted"]);
+});
+
+test("a step that a budget end cancels writes the outcome budget_end with no error status, and a stop in an exhausted budget stays stop", async (t) => {
+  const h = harness(t);
+  const throwing = (id: string, error: () => Error) =>
+    foundryOf(
+      contextStepOf(h, id, {
+        call: async ({ context }) => {
+          await cancelled(context.signal);
+          throw error();
+        },
+      }),
+    );
+  const end = await runTasks(
+    {
+      nodes: [
+        parallelNode(GROUP, [
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "ender", {
+                  kind: StepKind.BudgetEnd,
+                  call: async () => {
+                    await new Promise((resolve) => setImmediate(resolve));
+                    h.io.budget.wallDeadlineReached();
+                  },
+                }),
+              ),
+            ),
+          ),
+          soloBranch(
+            stepNode(throwing("cancelled", () => new ContextCancelled())),
+          ),
+          soloBranch(
+            stepNode(
+              throwing(
+                "stopped",
+                () => new ExecutionStop(EndReason.OperationFailed, STOP_CODE),
+              ),
+            ),
+          ),
+        ]),
+      ],
+      seed: {},
+      resultOf: (ctx) => ctx,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: null,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.BudgetEnd);
+  assert.deepEqual(stepSpanOutcomes(h.records), [
+    ["ender", FrameOutcome.BudgetEnd],
+    ["cancelled", FrameOutcome.BudgetEnd],
+    ["stopped", FrameOutcome.Stop],
+  ]);
+  const statusOf = (id: string) => {
+    const start = spanRecords(h, SpanOperation.Step).find(
+      (record) => record.attributes?.[STEP_ID_ATTRIBUTE] === id,
+    );
+    return spanEnds(h.records, SpanOperation.Step).find(
+      (record) => record.span_id === start?.span_id,
+    )?.status;
+  };
+  assert.equal(statusOf("cancelled"), SpanStatus.Ok);
+  assert.equal(statusOf("stopped"), SpanStatus.Error);
+});
+
+test("a build rejects two parallel branches that write one key", (t) => {
+  const h = harness(t);
+  const built = chain<CommonPorts>(ChainId.Examine, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(stepOf(h, "first", { patch: { setupPending: true } })),
+      ),
+      soloBranch(
+        stepNode(stepOf(h, "second", { patch: { setupPending: false } })),
+      ),
+    ])
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd });
+  assert.throws(
+    () => built.build(),
+    (error) =>
+      error instanceof ChainBuildError &&
+      error.node === `parallel ${GROUP}` &&
+      error.rule === ChainRule.ParallelWrite &&
+      error.key === INNER_WRITE,
+  );
+});
+
+test("a step span of a parallel branch has the span that is open at the group start as its parent", async (t) => {
+  const h = harness(t);
+  const spans = h.io.run.spans;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const spanStep = (id: string, work: () => Promise<void>) =>
+    stepNode(
+      foundryOf(
+        contextStepOf(h, id, {
+          call: async () => {
+            await work();
+            await spans.within(
+              { key: `inner:${id}`, operation: SpanOperation.Git },
+              async () => {},
+            );
+          },
+        }),
+      ),
+    );
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(spanStep("first", () => held)),
+      soloBranch(
+        spanStep("second", async () => {
+          await Promise.resolve();
+          release();
+        }),
+      ),
+    ])
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  const starts = h.records.filter(
+    (record) => record.kind === RecordKind.Span && record.start_time,
+  );
+  const phase = spans.spanIdOf("phase:prepare");
+  for (const id of ["first", "second"]) {
+    const step = starts.find(
+      (record) =>
+        record.kind === RecordKind.Span &&
+        record.operation === SpanOperation.Step &&
+        record.attributes?.["kanthord.step.id"] === id,
+    );
+    const inner = starts.find(
+      (record) =>
+        record.kind === RecordKind.Span &&
+        record.span_id === spans.spanIdOf(`inner:${id}`),
+    );
+    assert.ok(
+      step?.kind === RecordKind.Span && inner?.kind === RecordKind.Span,
+    );
+    assert.equal(step.parent_span_id, phase);
+    assert.equal(inner.parent_span_id, step.span_id);
+  }
+});
+
+test("regression: a parallel branch that ends next keeps its context alive after the group", async (t) => {
+  const h = harness(t);
+  const kept: Context[] = [];
+  const built = chain<CommonPorts>(ChainId.Implement, [])
+    .phase(Phase.Prepare)
+    .parallel(GROUP, [
+      soloBranch(
+        stepNode(
+          contextStepOf(h, "holder", {
+            call: async ({ context }) => void kept.push(context),
+          }),
+        ),
+      ),
+      soloBranch(stepNode(stepOf(h, "sibling"))),
+    ])
+    .step(
+      stepOf(h, "user", {
+        work: () => assert.equal(kept[0]?.signal.aborted, false),
+      }),
+    )
+    .phase(Phase.Finish)
+    .step(finalStep(h, "release", RELEASED))
+    .budgetEnd({ kind: BudgetEndKind.Stop, reason: EndReason.BudgetEnd })
+    .build();
+  assert.deepEqual(await runChain(built, { seed: h.seed }, h.io), RELEASED);
+  assert.deepEqual(h.trace.slice(0, -DISPOSALS), [
+    "holder",
+    "sibling",
+    "user",
+    "release",
+  ]);
+});

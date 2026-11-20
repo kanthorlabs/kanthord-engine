@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { digest } from "../../kernel/json.ts";
 import { test } from "node:test";
 import { simpleGit } from "simple-git";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { runStepsImplement } from "./steps-implement.ts";
-import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { runStepsImplement } from "./steps-implement-host.ts";
 import {
   advanceBase,
   fauxAssistantMessage,
@@ -20,6 +20,7 @@ const COMMIT_RULE =
 const HEADER_MAX_LENGTH = 100;
 const RELEASED = { kind: "released", furtherWork: false };
 const BASE_FILE = "other";
+const NO_TRAILERS = "";
 const LONG_NAME = `Rework ${"the long subject of the node ".repeat(5)}end.`;
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
@@ -78,7 +79,7 @@ async function nodeMessages(h: Harness): Promise<string[]> {
   return messages(h.bare, `main..refs/heads/${h.nodeBranch}`);
 }
 
-test("a task commit and a merge commit take the commit rule, the unit id body and a parsed done trailer", async (t) => {
+test("a task commit and a merge commit take the commit rule and the unit id body with no trailer, and the unit record names the gate commit", async (t) => {
   const current = task("Add the login form.", "test -f login");
   const h = await fixture(
     t,
@@ -97,23 +98,28 @@ test("a task commit and a merge commit take the commit rule, the unit id body an
     "feat: merge main",
   ]);
   const taskMessage = byHeader.get("feat: add the login form")!;
-  const record = `${DONE_TRAILER}: ${doneRecordOf(current)}`;
-  assert.equal(
-    taskMessage,
-    `feat: add the login form\n\n${current.id}\n\n${record}`,
-  );
-  assert.equal(parseTrailers(h.bare, taskMessage), record);
+  assert.equal(taskMessage, `feat: add the login form\n\n${current.id}`);
+  assert.equal(parseTrailers(h.bare, taskMessage), NO_TRAILERS);
   assert.equal(
     byHeader.get("feat: merge main"),
     `feat: merge main\n\n${h.input.claim.node_id}`,
   );
-  const records = await simpleGit(h.bare).raw([
-    "log",
-    `--format=%(trailers:key=${DONE_TRAILER},valueonly)`,
-    `main..refs/heads/${h.nodeBranch}`,
-  ]);
-  assert.deepEqual(records.split("\n").filter(Boolean), [
-    doneRecordOf(current),
+  const gateCommit = (
+    await simpleGit(h.bare).raw([
+      "log",
+      "--format=%H",
+      "--no-merges",
+      "-n",
+      "1",
+      `refs/heads/${h.nodeBranch}`,
+    ])
+  ).trim();
+  assert.deepEqual(h.input.setup.unit_records, [
+    {
+      unit_id: current.id,
+      content_digest: digest(current.content),
+      commits: [{ binding_id: h.checkouts[0]!.binding_id, commit: gateCommit }],
+    },
   ]);
 });
 

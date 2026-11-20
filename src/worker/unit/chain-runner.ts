@@ -1,0 +1,593 @@
+import assert from "node:assert/strict";
+import type { InlineExtension } from "@earendil-works/pi-coding-agent";
+import { type CancellationContext, reasonOf } from "../../kernel/context.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
+import type { ExecutionBudget } from "./budget.ts";
+import {
+  BudgetEndKind,
+  type Chain,
+  type ChainNode,
+  type ChainPhase,
+  type ChainSeed,
+  type ChainStep,
+  type ChainStepResult,
+  DeadlineKind,
+  type ExecutionCtx,
+  type FoundryEnd,
+  FoundryEndKind,
+  type FrameEnd,
+  FrameOutcome,
+  type Key,
+  NodeKind,
+  phaseReads,
+  type PhaseSpanEnd,
+  StepKind,
+} from "./chain.ts";
+import type { StepHost } from "./chain-host.ts";
+import {
+  CANCELLED,
+  markStep,
+  type ScopeHolder,
+  sliceOf,
+  UNTIL,
+  type Walked,
+  type Walker,
+  walkNodes,
+  withinStep,
+} from "./chain-walk.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import {
+  EndReason,
+  type ExecutionEnd,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
+import type { StepWatch } from "./foundry.ts";
+import type { TasksCapture } from "./tasks-capture.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
+import { phaseSpan } from "./method-telemetry.ts";
+import { EndPhase, Phase, type SpanEnd } from "./telemetry.ts";
+
+const CHECKPOINT_FAILED = "checkpoint failed";
+const RELEASE_STOP_STEP = { id: "execution.release(stop)" } as const;
+const stopPhases = new WeakMap<ExecutionRun, string>();
+const CAPTURE_FAILED = "tasks capture failed";
+const FIRST_PHASE = 0;
+const UNKNOWN_PHASE = -1;
+const BEFORE_LAST = -1;
+
+export interface ChainIo<P extends CommonPorts = CommonPorts> {
+  run: ExecutionRun;
+  budget: ExecutionBudget;
+  capabilities: readonly InlineExtension[];
+  resources: AsyncDisposableStack;
+  host: StepHost;
+  ports: P;
+  steps?: StepWatch;
+  capture?: TasksCapture;
+}
+
+interface WalkMarks {
+  stopped: string | null;
+}
+
+interface Walk<P extends CommonPorts = CommonPorts> {
+  ctx: ExecutionCtx;
+  io: ChainIo<P>;
+  stopping: boolean;
+  cancel: CancellationContext;
+  marks: WalkMarks;
+}
+
+function walkOf<P extends CommonPorts>(
+  ctx: ExecutionCtx,
+  io: ChainIo<P>,
+): Walk<P> {
+  return {
+    ctx,
+    io,
+    stopping: false,
+    cancel: io.run.operationContext,
+    marks: { stopped: null },
+  };
+}
+
+export function seededContext(seed: Partial<ExecutionCtx>): ExecutionCtx {
+  const runner: Pick<
+    ExecutionCtx,
+    "completedUnits" | "reports" | "verificationTimedOut"
+  > = {
+    completedUnits: new Set(),
+    reports: new Map(),
+    verificationTimedOut: false,
+  };
+  return { ...runner, ...seed } as ExecutionCtx;
+}
+
+function stepContext(walk: Walk, step: ChainStep): CancellationContext {
+  const { run, budget } = walk.io;
+  if (step.deadline === DeadlineKind.Work) return walk.cancel;
+  return walk.stopping
+    ? run.cleanupContext()
+    : budget.cleanupContext(walk.cancel);
+}
+
+function stepResult(
+  walk: Walk,
+  step: ChainStep,
+  call: StepCall,
+): Promise<ChainStepResult> {
+  const { run, budget, resources, host, ports } = walk.io;
+  const { context } = call;
+  const slice = sliceOf(walk.ctx, step.reads) as never;
+  const scope = call.holder.scope as never;
+  if (step.foundry)
+    return step.run(slice, scope, {
+      budget,
+      context,
+      get deadline() {
+        return budget.wallDeadline();
+      },
+      env: host.env,
+      ports,
+    });
+  return step.run(slice, scope, {
+    run,
+    budget,
+    context,
+    get deadline() {
+      return budget.wallDeadline();
+    },
+    resources,
+    spans: run.spans,
+    host,
+    ports,
+  } as never);
+}
+
+interface StepCall {
+  context: CancellationContext;
+  holder: ScopeHolder;
+}
+
+function walkStep(
+  walk: Walk,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<Walked> {
+  if (step.final === true) return runStep(walk, step, holder);
+  const io = {
+    spans: walk.io.run.spans,
+    budget: walk.io.budget,
+    cancel: walk.cancel,
+  };
+  return withinStep(io, step, () => runStep(walk, step, holder));
+}
+
+async function runStep(
+  walk: Walk,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<Walked> {
+  const { run } = walk.io;
+  const context = stepContext(walk, step);
+  walk.io.steps?.started(step.id);
+  try {
+    const result = await stepResult(walk, step, { context, holder });
+    Object.assign(walk.ctx, result.patch);
+    holder.scope = result.scope;
+    if ("verificationTimedOut" in result.patch)
+      run.noteVerification(walk.ctx.verificationTimedOut);
+    if (result.stop !== undefined) throw run.halt(result.stop);
+    return result.kind;
+  } catch (error) {
+    walk.marks.stopped ??= step.id;
+    throw error;
+  } finally {
+    if (step.deadline === DeadlineKind.Cleanup) context.cancel();
+    walk.io.steps?.ended(step.id, holder.scope);
+  }
+}
+
+function walkerOf(walk: Walk): Walker {
+  return {
+    ctx: walk.ctx,
+    spans: walk.io.run.spans,
+    cancel: walk.cancel,
+    step: (step, holder) => walkStep(walk, step, holder),
+    branch: (ctx, cancel) => branchWalkerOf({ ...walk, ctx, cancel }),
+  };
+}
+
+function branchWalkerOf(walk: Walk): Walker {
+  return {
+    ...walkerOf(walk),
+    step: (step, holder) => {
+      const aborted = reasonOf(walk.cancel.signal);
+      if (aborted !== null) return Promise.reject(aborted);
+      return walkStep(walk, step, holder);
+    },
+  };
+}
+
+async function hostNodes(
+  walk: Walk,
+  nodes: readonly ChainNode[],
+  holder: ScopeHolder,
+): Promise<StepKind> {
+  const walked = await walkNodes(walkerOf(walk), nodes, holder);
+  assert.ok(
+    !(walked instanceof ExecutionStop) &&
+      walked !== CANCELLED &&
+      walked !== UNTIL,
+  );
+  return walked;
+}
+
+interface SpannedPhase {
+  phase: Phase | EndPhase;
+  end: PhaseSpanEnd | null;
+}
+
+function defaultPhaseEnd(_ctx: ExecutionCtx, ended: FrameEnd): SpanEnd {
+  return {
+    status:
+      ended.outcome === FrameOutcome.Stop ? SpanStatus.Error : SpanStatus.Ok,
+  };
+}
+
+function withinPhase(
+  walk: Walk,
+  phase: SpannedPhase,
+  work: (spanId: string) => Promise<StepKind>,
+): Promise<StepKind> {
+  const end = phase.end ?? defaultPhaseEnd;
+  return walk.io.run.spans.within(
+    phaseSpan(phase.phase),
+    work,
+    (kind) =>
+      end(walk.ctx, {
+        outcome:
+          kind === StepKind.BudgetEnd
+            ? FrameOutcome.BudgetEnd
+            : FrameOutcome.Next,
+      }),
+    (error) => end(walk.ctx, { outcome: FrameOutcome.Stop, error }),
+  );
+}
+
+function finalStepOf(nodes: readonly ChainNode[]): ChainStep | null {
+  const last = nodes.at(BEFORE_LAST);
+  return last?.kind === NodeKind.Step && last.step.final === true
+    ? last.step
+    : null;
+}
+
+async function spannedNodes(
+  walk: Walk,
+  phase: SpannedPhase,
+  nodes: readonly ChainNode[],
+): Promise<StepKind> {
+  const final = finalStepOf(nodes);
+  const body = final === null ? nodes : nodes.slice(FIRST_PHASE, BEFORE_LAST);
+  const kind = await withinPhase(walk, phase, async () => {
+    const walked = await hostNodes(walk, body, { scope: null });
+    if (walked === StepKind.Next && final !== null)
+      markStep(walk.io.run.spans, final);
+    return walked;
+  });
+  if (kind !== StepKind.Next || final === null) return kind;
+  return hostNodes(walk, nodes.slice(BEFORE_LAST), { scope: null });
+}
+
+function childEnvironmentOf(
+  env: NodeJS.ProcessEnv,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    Object.entries(env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
+}
+
+function tasksEnd<P extends CommonPorts>(
+  built: Chain<P>,
+  walk: Walk<P>,
+): Promise<FoundryEnd<unknown>> {
+  const { run, budget, host, ports, capabilities } = walk.io;
+  assert.ok(built.tasks, "A tasks phase holds a tasks call.");
+  return built.tasks.run(
+    walk.ctx,
+    {
+      cancel: run.operationContext,
+      budget,
+      until: null,
+      env: childEnvironmentOf(host.env),
+    },
+    { capabilities, ports },
+  );
+}
+
+async function tasksKind(
+  walk: Walk,
+  end: FoundryEnd<unknown>,
+): Promise<StepKind> {
+  const { run } = walk.io;
+  run.noteVerification(end.verificationTimedOut);
+  if (end.kind === FoundryEndKind.Stop) throw run.halt(end.stop);
+  if (end.kind === FoundryEndKind.Cancelled)
+    throw await run.stopOf(run.operationContext.signal.reason);
+  if (end.kind === FoundryEndKind.Failed) throw end.error;
+  return end.kind === FoundryEndKind.BudgetEnd
+    ? StepKind.BudgetEnd
+    : StepKind.Next;
+}
+
+export interface NodesEnd {
+  kind: StepKind;
+  ctx: ExecutionCtx;
+  scope: unknown;
+}
+
+export interface NodesInput {
+  nodes: readonly ChainNode[];
+  seed: Partial<ExecutionCtx>;
+  scope?: unknown;
+}
+
+export async function runNodes(
+  input: NodesInput,
+  io: ChainIo,
+): Promise<NodesEnd> {
+  const ctx = seededContext(input.seed);
+  const holder: ScopeHolder = { scope: input.scope ?? null };
+  const kind = await hostNodes(walkOf(ctx, io), input.nodes, holder);
+  return { kind, ctx, scope: holder.scope };
+}
+
+function closedEnd(ctx: ExecutionCtx, kind: StepKind): ExecutionEnd {
+  assert.equal(kind, StepKind.Closed, "A chain ends with a final step.");
+  assert.ok(ctx.end);
+  return ctx.end;
+}
+
+async function budgetEnd(
+  built: Chain,
+  walk: Walk,
+  prepared: boolean,
+): Promise<ExecutionEnd> {
+  const rule = built.budgetEnd;
+  if (rule.kind === BudgetEndKind.Stop) return walk.io.run.stop(rule.reason);
+  if (!prepared)
+    throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
+  return closedEnd(
+    walk.ctx,
+    await spannedNodes(walk, { phase: EndPhase.OnExit, end: null }, rule.nodes),
+  );
+}
+
+async function captureStart(walk: Walk, capture: TasksCapture): Promise<void> {
+  const { run } = walk.io;
+  try {
+    await capture(walk.ctx);
+  } catch (error) {
+    const reason = await run.reasonOf(error);
+    run.log(CAPTURE_FAILED, reason === null ? {} : { reason });
+  }
+}
+
+async function walkPhases<P extends CommonPorts>(
+  built: Chain<P>,
+  walk: Walk<P>,
+  progress: Progress,
+): Promise<ExecutionEnd> {
+  for (const { phase, nodes, end } of built.phases.slice(progress.from)) {
+    const spanned = { phase, end: end ?? null };
+    const kind =
+      phase === Phase.Tasks
+        ? await withinPhase(walk, spanned, async () =>
+            tasksKind(walk, await tasksEnd(built, walk)),
+          )
+        : await spannedNodes(walk, spanned, nodes);
+    if (kind === StepKind.BudgetEnd)
+      return budgetEnd(built, walk, progress.prepared);
+    if (kind === StepKind.Closed) return closedEnd(walk.ctx, kind);
+    if (phase === Phase.Prepare) progress.prepared = true;
+    if (phase === Phase.Start && walk.io.capture !== undefined)
+      await captureStart(walk, walk.io.capture);
+  }
+  return assert.fail("A chain ends with a final step.");
+}
+
+async function stopNodes(
+  built: Chain,
+  walk: Walk,
+  stop: ExecutionStop,
+): Promise<void> {
+  const { run } = walk.io;
+  walk.ctx.stop = stop;
+  const stopping = { ...walk, stopping: true };
+  try {
+    await withinPhase(
+      stopping,
+      { phase: EndPhase.OnStop, end: null },
+      (spanId) => {
+        stopPhases.set(run, spanId);
+        return hostNodes(stopping, built.onStop, { scope: null });
+      },
+    );
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    const reason = await run.reasonOf(error);
+    run.log(CHECKPOINT_FAILED, reason === null ? {} : { reason });
+  }
+}
+
+const NO_NODES = 0;
+
+async function stopOf(
+  built: Chain,
+  walk: Walk,
+  thrown: Thrown,
+): Promise<unknown> {
+  if (!thrown.prepared || built.onStop.length === NO_NODES) return thrown.error;
+  const stop = await walk.io.run.stopOf(thrown.error);
+  if (stop.reason !== EndReason.Revoked) await stopNodes(built, walk, stop);
+  return stop;
+}
+
+interface Progress {
+  from: number;
+  prepared: boolean;
+}
+
+interface Thrown {
+  error: unknown;
+  prepared: boolean;
+}
+
+export interface WalkInput {
+  seed: ChainSeed;
+  from?: Phase;
+}
+
+export async function runChain<P extends CommonPorts>(
+  built: Chain<P>,
+  input: WalkInput,
+  io: ChainIo<NoInfer<P>>,
+): Promise<ExecutionEnd> {
+  const from =
+    input.from === undefined
+      ? FIRST_PHASE
+      : built.phases.findIndex(({ phase }) => phase === input.from);
+  assert.notEqual(from, UNKNOWN_PHASE);
+  const progress: Progress = {
+    from,
+    prepared: built.phases
+      .slice(FIRST_PHASE, from)
+      .some(({ phase }) => phase === Phase.Prepare),
+  };
+  const walk = walkOf(seededContext(input.seed), io);
+  try {
+    return await walkPhases(built, walk, progress);
+  } catch (error) {
+    throw await stopOf(built, walk, { error, prepared: progress.prepared });
+  } finally {
+    await disposeResources(io.resources);
+  }
+}
+
+export const PhaseEndKind = {
+  Completed: "completed",
+  BudgetEnd: "budget_end",
+  Stop: "stop",
+} as const;
+
+export type PhaseEnd =
+  | { kind: typeof PhaseEndKind.Completed; ctx: ExecutionCtx }
+  | { kind: typeof PhaseEndKind.BudgetEnd; ctx: ExecutionCtx }
+  | {
+      kind: typeof PhaseEndKind.Stop;
+      stop: ExecutionStop;
+      step: string | null;
+      ctx: ExecutionCtx;
+    };
+
+export interface PhaseSeed {
+  keys: Partial<ExecutionCtx>;
+}
+
+interface PhaseInput {
+  phase: Phase;
+  seed: PhaseSeed;
+}
+
+export class PhaseSeedMissing extends Error {
+  readonly keys: readonly Key[];
+  constructor(keys: readonly Key[]) {
+    super(`The phase seed lacks the keys ${keys.join(", ")}.`);
+    this.keys = keys;
+  }
+}
+
+function chainPhaseOf(built: Chain, phase: Phase): ChainPhase {
+  const found = built.phases.find((entry) => entry.phase === phase);
+  assert.ok(found, "A phase run names a phase of the chain.");
+  return found;
+}
+
+export async function runPhase<P extends CommonPorts>(
+  built: Chain<P>,
+  input: PhaseInput,
+  io: ChainIo<NoInfer<P>>,
+): Promise<PhaseEnd> {
+  const { nodes, end } = chainPhaseOf(built, input.phase);
+  const missing = phaseReads(nodes).filter((key) => !(key in input.seed.keys));
+  if (missing.length > NO_NODES) throw new PhaseSeedMissing(missing);
+  const walk = walkOf(seededContext(input.seed.keys), io);
+  try {
+    const kind = await spannedNodes(
+      walk,
+      { phase: input.phase, end: end ?? null },
+      nodes,
+    );
+    return kind === StepKind.BudgetEnd
+      ? { kind: PhaseEndKind.BudgetEnd, ctx: walk.ctx }
+      : { kind: PhaseEndKind.Completed, ctx: walk.ctx };
+  } catch (error) {
+    const stop = await io.run.stopOf(error);
+    if ("agent" in walk.ctx) await walk.ctx.agent.abort();
+    return {
+      kind: PhaseEndKind.Stop,
+      stop,
+      step: walk.marks.stopped,
+      ctx: walk.ctx,
+    };
+  }
+}
+
+async function disposeResources(
+  resources: AsyncDisposableStack,
+): Promise<void> {
+  try {
+    await resources.disposeAsync();
+  } catch (error) {
+    let first = error;
+    while (first instanceof SuppressedError) first = first.suppressed;
+    throw first;
+  }
+}
+
+export async function executionBoundary(
+  run: ExecutionRun,
+  invoke: () => Promise<ExecutionEnd>,
+): Promise<ExecutionEnd> {
+  let stopped: ExecutionStop;
+  try {
+    return await invoke();
+  } catch (error) {
+    stopped = await run.stopOf(error);
+  }
+  if (stopped.reason !== EndReason.Revoked) {
+    await markReleaseStop(run);
+    return run.releaseStop(stopped);
+  }
+  return {
+    kind: ExecutionEndKind.Ended,
+    reason: stopped.reason,
+    code: stopped.code,
+  };
+}
+
+async function markReleaseStop(run: ExecutionRun): Promise<void> {
+  const { spans } = run;
+  const parent = stopPhases.get(run);
+  if (parent !== undefined) {
+    markStep(spans, RELEASE_STOP_STEP, { outcome: FrameOutcome.Stop, parent });
+    return;
+  }
+  await spans.within(phaseSpan(EndPhase.OnStop), async () =>
+    markStep(spans, RELEASE_STOP_STEP, { outcome: FrameOutcome.Stop }),
+  );
+}

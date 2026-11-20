@@ -8,6 +8,7 @@ import { AccessPolicy } from "../../kernel/operation.ts";
 import { CommandName, PROGRAM_NAME } from "./constants.ts";
 import { addWorkerInstanceCommands } from "./worker-instance.ts";
 import { addWorkerMachineCommands } from "./worker-machine.ts";
+import { addWorkerTasksCommands } from "./worker-tasks.ts";
 import {
   LIST_LIMIT_DEFAULT,
   LIST_LIMIT_MAX,
@@ -452,4 +453,5 @@ export function addWorkerCommand(program: Command): void {
     );
   addWorkerInstanceCommands(worker);
   addWorkerMachineCommands(worker);
+  addWorkerTasksCommands(worker);
 }

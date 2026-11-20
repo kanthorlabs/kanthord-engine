@@ -6,11 +6,21 @@ import {
   DhkemX25519HkdfSha256,
   HkdfSha256,
 } from "@hpke/core";
-import { z } from "zod";
 import { canonicalJSON } from "./json.ts";
+import {
+  base64urlPattern,
+  SEALED_ALGORITHM,
+  type SealedObject,
+} from "./sealed-object.ts";
+
+export {
+  base64urlSchema,
+  SEALED_ALGORITHM,
+  type SealedObject,
+  sealedObjectSchema,
+} from "./sealed-object.ts";
 
 export const X25519_KEY_BYTES = 32;
-export const SEALED_ALGORITHM = "hpke-x25519-sha256-aes128gcm";
 const FINGERPRINT_PREFIX = "SHA256:";
 const BASE64URL = "base64url";
 const UTF8 = "utf8";
@@ -21,16 +31,6 @@ export const hpkeSuite = new CipherSuite({
   kdf: new HkdfSha256(),
   aead: new Aes128Gcm(),
 });
-
-const base64urlPattern = /^[A-Za-z0-9_-]+$/;
-export const base64urlSchema = z.string().min(1).regex(base64urlPattern);
-
-export const sealedObjectSchema = z.strictObject({
-  alg: z.literal(SEALED_ALGORITHM),
-  enc: base64urlSchema,
-  ciphertext: base64urlSchema,
-});
-export type SealedObject = z.infer<typeof sealedObjectSchema>;
 
 export class SealedOpenError extends Error {
   constructor() {

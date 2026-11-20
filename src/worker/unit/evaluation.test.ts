@@ -15,7 +15,8 @@ import {
   DeadlineExceeded,
 } from "../../kernel/context.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
 import {
@@ -24,14 +25,16 @@ import {
   commandLimitClock,
   everyBindingSshAccess,
   transport as localTransport,
+  phaseSpanNames,
   repositorySetup,
+  stepSpanOutcomes,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { AFFECTED_DECLARATION_FILE, AffectedVerdict } from "./affected.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import { requestAndRelease, runEvaluation } from "./evaluation.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
@@ -53,7 +56,8 @@ import {
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { simpleGit } from "simple-git";
-import { SpanOperation } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
+import { FrameOutcome } from "./chain.ts";
 import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
@@ -1037,6 +1041,37 @@ test("a review with no repository snapshot states no full change patch rule", as
     instruction!.includes("Read only the checkouts in your working directory"),
   );
   assert.ok(!instruction!.includes("lists the full change of each repository"));
+});
+
+test("an evaluation writes one worker.phase span per phase and one worker.step span per step", async (t) => {
+  const review = await reviewOf(t, "true", undefined, {
+    reply: STATED_REPLY,
+    taskCommand: "true",
+  });
+  assert.deepEqual(phaseSpanNames(review.records), [
+    Phase.Prepare,
+    Phase.Tasks,
+    Phase.Finish,
+  ]);
+  assert.deepEqual(
+    stepSpanOutcomes(review.records).sort(),
+    [
+      "inputs.read(revision, attemptEvidence, reviewRound, dependencies)",
+      "workspace.review(snapshot)",
+      "setup.entries(review)",
+      "assets.place",
+      "env.setup(review)",
+      "verify.all(evaluation)",
+      "evidence.publish(verification)",
+      "affected.run(evaluation)",
+      "evidence.publish(affected)",
+      "judgement",
+      "evidence.publish(patches)",
+      "assessment.submit",
+    ]
+      .map((id) => [id, FrameOutcome.Next])
+      .sort(),
+  );
 });
 
 test("a judgement with a stated first blocker submits the work defect cause and its facts", async (t) => {

@@ -63,10 +63,12 @@ import {
   type RepositoryBindingIdsOf,
   type RepositoryPolicyOf,
   type SchedulerClaims,
+  type SeedSources,
   type SessionRead,
   SessionRemoval,
   type SshHostKeysOf,
   type StopOrderReason,
+  type UnitIdsOf,
   WORKER_SERVICE_NAME,
   type WorkerAgentView,
   type WorkerBindingOf,
@@ -93,7 +95,9 @@ import {
 } from "../custody/contract.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
+import { executionSeed } from "./execution-seed.ts";
 import { executionSetup } from "./execution-setup.ts";
+import { deleteNodeUnitRecords, putUnitRecord } from "./unit-records.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import { linkUpdatePage } from "./link-update.ts";
 import { failedChecks } from "./failed-check.ts";
@@ -220,6 +224,7 @@ export interface Dependencies {
     MissionCollaborations,
     | "revokeForInstanceArchive"
     | "revokePausedClaim"
+    | "revokeHeldPauses"
     | "executionReleased"
     | "reportExecutionEnds"
   >;
@@ -256,11 +261,13 @@ export interface Dependencies {
   repositoryPolicyOf: RepositoryPolicyOf;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
   intentOf: IntentOf;
+  unitIdsOf: UnitIdsOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
   credentialMetadata: CredentialMetadataOf;
   sshHostKeysOf: SshHostKeysOf;
   monotonicNow?: () => number;
   schedulerClaims: SchedulerClaims;
+  seeds?: SeedSources;
   agentConfiguration: AgentConfiguration;
   instanceCopies?: {
     archiveHeld(tx: Transaction, holder: string, now: number): void;
@@ -458,12 +465,19 @@ export class WorkerService implements Service {
   ): void {
     this.instances.sendStopOrder(executionId, runtimeIdentity, reason);
   }
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void {
+    this.instances.sendRevokedOrder(executionId, runtimeIdentity);
+  }
   orderOf(executionId: string): StopOrderReason | null {
     return this.instances.orderOf(executionId);
   }
   archiving(tx: Transaction, runtimeIdentity: string): boolean {
     return this.instances.archiving(tx, runtimeIdentity);
   }
+  deleteNodeUnitRecords(tx: Transaction, nodeId: string): void {
+    deleteNodeUnitRecords(tx, nodeId);
+  }
+
   instanceNameOf(tx: Transaction, instanceId: string): string | null {
     const instance = readInstanceById(tx, instanceId);
     return instance?.ended_at === null ? instance.name : null;
@@ -507,6 +521,7 @@ export class WorkerService implements Service {
   private readonly performer: ActionPerformer;
   private readonly pool?: Pool;
   private poolStarted = false;
+  private ordersRecovered = false;
   readonly instances: WorkerInstances;
   readonly machines: WorkerMachines;
   readonly footprint: WorkerFootprint;
@@ -576,6 +591,8 @@ export class WorkerService implements Service {
           this.heartbeatClock.drop(runtimeIdentity);
         this.instancesChanged();
       },
+      stopOrdersQueued: (name) => this.sendPoolStopOrders(name),
+      poolRuns: (instanceId) => this.poolRuns(instanceId),
       logger: dependencies.pool?.logger ?? pino({ level: "silent" }),
     });
     if (dependencies.pool) this.pool = new Pool(dependencies.pool.host);
@@ -672,13 +689,22 @@ export class WorkerService implements Service {
   }
 
   startPool(): void {
-    if (!this.pool || this.poolStarted) return;
-    this.poolStarted = true;
-    const host = this.dependencies.pool!.host;
-    host.prepare();
-    void host.sweep(this.archivedInstanceNames());
-    this.reconcile();
-    void this.logUnavailableContainerDriver();
+    if (this.pool && !this.poolStarted) {
+      this.poolStarted = true;
+      const host = this.dependencies.pool!.host;
+      host.prepare();
+      void host.sweep(this.archivedInstanceNames());
+      this.reconcile();
+      void this.logUnavailableContainerDriver();
+    }
+    this.recoverLostOrders();
+  }
+
+  private recoverLostOrders(): void {
+    if (this.ordersRecovered) return;
+    this.ordersRecovered = true;
+    this.instances.finishLostArchives();
+    this.dependencies.instanceArchive.revokeHeldPauses();
   }
 
   readSessionEntry(
@@ -737,6 +763,25 @@ export class WorkerService implements Service {
   async stopPool(): Promise<void> {
     this.poolStarted = false;
     await this.dependencies.pool?.host.stop();
+  }
+
+  private poolRuns(instanceId: string): boolean {
+    return (
+      this.poolStarted &&
+      this.pool!.instances().some((instance) => instance.id === instanceId)
+    );
+  }
+
+  private sendPoolStopOrders(name: string): void {
+    if (!this.poolStarted) return;
+    const instance = this.pool!.instances().find(
+      (candidate) => candidate.name === name,
+    );
+    if (!instance) return;
+    const orders = this.dependencies.store.transaction((tx) =>
+      this.instances.stopOrdersOf(tx, instance.id),
+    );
+    this.dependencies.pool!.host.stopOrders(instance, orders);
   }
 
   bindingsChanged(projectId: string): void {
@@ -1568,6 +1613,18 @@ export class WorkerService implements Service {
     registry.register(
       workerOperations["execution.setup.get"],
       (_input, caller) => executionSetup(this.dependencies, this, caller),
+    );
+    registry.register(
+      workerOperations["execution.seed.get"],
+      ({ params }, caller) =>
+        executionSeed(this.dependencies, this, {
+          executionId: params.execution_id,
+          caller,
+        }),
+    );
+    registry.register(
+      workerOperations["execution.unit_record.put"],
+      ({ body }, caller) => putUnitRecord(this.dependencies, caller, body),
     );
     registry.register(
       workerOperations["action.request"],

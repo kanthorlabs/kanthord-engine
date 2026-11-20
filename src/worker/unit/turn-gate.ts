@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import type { PromptTemplate } from "../../agent/contract.ts";
+import { perCheckout } from "./per-checkout.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   commitMessage,
   commitTypeOf,
@@ -15,32 +17,39 @@ import {
   COLLECTION_MAX,
   SpanStatus,
 } from "../../tracking/contract.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
-import { gitFailure } from "./method-telemetry.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { CodedError } from "../../kernel/errors.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   abortMerge,
-  changedFiles,
-  commitWork,
+  commitStaged,
   concludeMerge,
   conflictMarkerFiles,
   containsCommit,
   discardChanges,
   forceBranch,
-  headCommit,
-  isCommitted,
+  type GitCall,
+  type GitOperation,
+  type GitPaths,
+  GitProcessCount,
+  type GitStatus,
+  HEAD_OUTSIDE_BRANCHES,
+  livePaths,
   MERGE_HEAD,
   mergeCommitsSince,
-  mergeHeadOf,
-  operationsInProgress,
+  mergeHeadAt,
+  operationsOf,
   quitOperations,
+  readStatus,
   softReset,
+  stageWork,
   symbolicHead,
+  unmergedPaths,
 } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT, TurnViolation } from "./stop-codes.ts";
 import type { StepsState } from "./steps-implement.ts";
 import { type SpanEnd, SpanOperation } from "./telemetry.ts";
-import { SCRATCH_DIRECTORY, type WorkspaceCheckout } from "./workspace.ts";
+import { type NodeCheckout, SCRATCH_DIRECTORY } from "./workspace-layout.ts";
 
 export const GateMode = {
   Write: "write",
@@ -59,12 +68,18 @@ export const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";
+const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
+const ORDINARY_ENTRY = "1";
+const RENAMED_ENTRY = "2";
+const UNCHANGED_INDEX = ".";
 const MERGE_SUBJECT = "merge";
 const GATE_MODE_ATTRIBUTE = "kanthord.gate.mode";
 const GATE_CHANGED_ATTRIBUTE = "kanthord.gate.changed";
 const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
 const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
+const PROCESS_COUNT_ATTRIBUTE = "kanthord.git.process_count";
+const ERROR_TYPE_ATTRIBUTE = "error.type";
 const CHANGED_FILES_MAX_BYTES = 16384;
 const PATH_PREFIX_SEPARATOR = ":";
 
@@ -72,6 +87,17 @@ export interface ConflictMerge {
   directory: string;
   commit: string;
   files: readonly string[];
+  markerless: readonly string[];
+  message: string;
+}
+export interface OpenMerge extends ConflictMerge {
+  resolved: boolean;
+}
+export interface CheckpointTurn {
+  message: string;
+  merge: ConflictMerge | null;
+  context: Context;
+  violationEnd: ViolationEnd;
 }
 interface GateTurn {
   mode: GateMode;
@@ -82,6 +108,18 @@ interface GateTurn {
 interface Violation {
   code: TurnViolation;
   detail: string;
+}
+interface Inspection {
+  violation: Violation | null;
+  status: GitStatus;
+}
+interface Settled {
+  changed: boolean;
+  paths: string[];
+}
+export interface CheckoutFacts {
+  status: GitStatus;
+  operations: readonly GitOperation[];
 }
 export interface GatedAgent extends NativeAgent {
   changed(): boolean;
@@ -134,7 +172,7 @@ export function gatedAgent(
     changed = false;
     await work();
     if (agent.budget.exhausted()) return;
-    const context = agent.budget.cleanupContext(state.run.operationContext);
+    const context = agent.budget.cleanupContext(state.cancel);
     try {
       changed = await runGate(state, turn, before, context);
     } finally {
@@ -152,24 +190,42 @@ export function gatedAgent(
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),
+    completeReply: () => agent.completeReply(),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
-    dispose: () => agent.dispose(),
+    close: () => agent.close(),
   };
 }
 
 export async function checkpointGate(
   state: StepsState,
-  message: string,
-  context: Context,
-  violationEnd: ViolationEnd,
+  turn: CheckpointTurn,
 ): Promise<boolean> {
-  assert.ok(isCommitMessage(message));
+  assert.ok(isCommitMessage(turn.message));
   return runGate(
     state,
-    { mode: GateMode.Checkpoint, message, merge: null, violationEnd },
+    {
+      mode: GateMode.Checkpoint,
+      message: turn.message,
+      merge: turn.merge,
+      violationEnd: turn.violationEnd,
+    },
     state.checkouts.map((checkout) => checkout.head),
-    context,
+    turn.context,
+  );
+}
+
+function gateMerges(
+  state: StepsState,
+  turn: GateTurn,
+  context: Context,
+): Promise<(ConflictMerge | null)[]> {
+  if (turn.mode !== GateMode.Checkpoint)
+    return Promise.resolve(
+      state.checkouts.map((checkout) => mergeOf(turn, checkout)),
+    );
+  return perCheckout(state.checkouts, (checkout) =>
+    keptMerge(state, checkout, { merge: mergeOf(turn, checkout), context }),
   );
 }
 
@@ -182,86 +238,72 @@ async function runGate(
   assert.equal(before.length, state.checkouts.length);
   let violated: TurnViolation | null = null;
   const changedPaths: string[] = [];
-  return state.run.spans.within(
+  const processes = new GitProcessCount();
+  return state.ports.telemetry.within(
     {
-      key: state.run.spans.key(SpanOperation.Gate),
+      key: state.ports.telemetry.key(SpanOperation.Gate),
       operation: SpanOperation.Gate,
       attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
     },
-    async () => {
-      const remaining = remainingOf(state);
-      if (turn.mode === GateMode.Checkpoint)
-        for (const checkout of state.checkouts)
-          if (
-            (await mergeHeadOf(
-              state.input.env,
-              checkout.directory,
+    () =>
+      processes.within(async () => {
+        const merges = await gateMerges(state, turn, context);
+        const inspections = await perCheckout(
+          state.checkouts,
+          (checkout, index) =>
+            inspect(state, checkout, before[index]!, {
+              merge: merges[index]!,
               context,
-              remaining(),
-            )) !== null
-          )
-            await abortMerge(
-              state.input.env,
-              checkout.directory,
-              context,
-              remaining(),
-            );
-      for (const [index, checkout] of state.checkouts.entries()) {
-        const violation = await violationOf(
-          state,
-          checkout,
-          before[index]!,
-          mergeOf(turn, checkout),
-          context,
+            }),
         );
-        if (violation === null) continue;
-        violated = violation.code;
-        const detail = await violate(state, before, violation, context);
-        if (turn.violationEnd === ViolationEnd.Restore) return false;
-        state.run.stop(EndReason.OperationFailed, violation.code, detail);
-      }
-      let changed = false;
-      for (const [index, checkout] of state.checkouts.entries()) {
-        if (
-          await settleCheckout(state, checkout, before[index]!, turn, context)
-        )
-          changed = true;
-        changedPaths.push(
-          ...(await changedPathsOf(state, checkout, before[index]!, context)),
+        const violation =
+          inspections.find((inspection) => inspection.violation !== null)
+            ?.violation ?? null;
+        if (violation !== null) {
+          violated = violation.code;
+          const detail = await violate(state, before, violation, context);
+          if (turn.violationEnd === ViolationEnd.Restore) return false;
+          throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
+            detail,
+          });
+        }
+        const settled = await perCheckout(state.checkouts, (checkout, index) =>
+          settleCheckout(state, checkout, {
+            before: before[index]!,
+            status: inspections[index]!.status,
+            turn,
+            merge: merges[index]!,
+            context,
+          }),
         );
-      }
-      removeRootEntries(state);
-      return changed;
-    },
+        for (const [index, checkout] of state.checkouts.entries())
+          changedPaths.push(
+            ...prefixedPaths(state, checkout, settled[index]!.paths),
+          );
+        const changed = settled.some((entry) => entry.changed);
+        removeRootEntries(state);
+        return changed;
+      }),
     (changed) => ({
       status: SpanStatus.Ok,
       attributes: {
         [GATE_CHANGED_ATTRIBUTE]: changed,
         [CHANGED_FILE_COUNT_ATTRIBUTE]: changedPaths.length,
         [CHANGED_FILES_ATTRIBUTE]: boundedPaths(changedPaths),
+        [PROCESS_COUNT_ATTRIBUTE]: processes.count,
         ...violationAttributes(violated),
       },
     }),
-    (error) => gateFailure(violated)(error),
+    (error) => gateFailure(violated, processes)(error),
   );
 }
 
-async function changedPathsOf(
+function prefixedPaths(
   state: StepsState,
-  checkout: WorkspaceCheckout,
-  before: string,
-  context: Context,
-): Promise<string[]> {
-  if (checkout.head === before) return [];
-  const paths = await changedFiles(
-    state.input.env,
-    checkout.directory,
-    before,
-    checkout.head,
-    context,
-    remainingOf(state)(),
-  );
-  if (state.checkouts.length === SINGLE_CHECKOUT) return paths;
+  checkout: NodeCheckout,
+  paths: readonly string[],
+): string[] {
+  if (state.checkouts.length === SINGLE_CHECKOUT) return [...paths];
   return paths.map((path) => `${checkout.name}${PATH_PREFIX_SEPARATOR}${path}`);
 }
 
@@ -282,19 +324,25 @@ function violationAttributes(violation: TurnViolation | null): Attributes {
 
 function gateFailure(
   violation: TurnViolation | null,
+  processes: GitProcessCount,
 ): (error: unknown) => SpanEnd {
-  return (error) => {
-    const attributes = violationAttributes(violation);
-    if (error instanceof ExecutionStop)
-      return { status: SpanStatus.Error, attributes };
-    return { ...gitFailure(error), attributes };
-  };
+  return (error) => ({
+    status: SpanStatus.Error,
+    attributes: {
+      [PROCESS_COUNT_ATTRIBUTE]: processes.count,
+      ...violationAttributes(violation),
+      ...errorTypeAttributes(error),
+    },
+  });
 }
 
-function mergeOf(
-  turn: GateTurn,
-  checkout: WorkspaceCheckout,
-): ConflictMerge | null {
+function errorTypeAttributes(error: unknown): Attributes {
+  return error instanceof CodedError
+    ? { [ERROR_TYPE_ATTRIBUTE]: error.code }
+    : {};
+}
+
+function mergeOf(turn: GateTurn, checkout: NodeCheckout): ConflictMerge | null {
   return turn.merge?.directory === checkout.directory ? turn.merge : null;
 }
 
@@ -302,23 +350,76 @@ function remainingOf(state: StepsState): () => number {
   return () => state.input.claim.expired_at - Date.now();
 }
 
-async function violationOf(
+function callOf(
   state: StepsState,
-  checkout: WorkspaceCheckout,
-  before: string,
-  merge: ConflictMerge | null,
+  checkout: NodeCheckout,
   context: Context,
+): GitCall {
+  return {
+    env: state.input.env,
+    directory: checkout.directory,
+    context,
+    deadlineMs: remainingOf(state)(),
+  };
+}
+
+interface InspectOptions {
+  merge: ConflictMerge | null;
+  context: Context;
+}
+
+async function inspect(
+  state: StepsState,
+  checkout: NodeCheckout,
+  before: string,
+  options: InspectOptions,
+): Promise<Inspection> {
+  const call = () => callOf(state, checkout, options.context);
+  const status = await readStatus(call());
+  if (status.branch !== state.nodeBranch)
+    return {
+      violation: {
+        code: TurnViolation.BranchChanged,
+        detail: `The HEAD of checkout ${checkout.name} is ${await headRefOf(status, call)}, not refs/heads/${state.nodeBranch}.`,
+      },
+      status,
+    };
+  const history =
+    status.head === before
+      ? null
+      : await historyViolation(state, checkout, before, options);
+  return {
+    violation:
+      history ??
+      operationViolation(
+        checkout,
+        options.merge,
+        await livePaths(call(), checkout.gitPaths),
+      ),
+    status,
+  };
+}
+
+async function headRefOf(
+  status: GitStatus,
+  call: () => GitCall,
+): Promise<string> {
+  if (status.branch === null) return DETACHED;
+  if (status.branch !== HEAD_OUTSIDE_BRANCHES)
+    return `refs/heads/${status.branch}`;
+  return (await symbolicHead(call())) ?? DETACHED;
+}
+
+async function historyViolation(
+  state: StepsState,
+  checkout: NodeCheckout,
+  before: string,
+  options: InspectOptions,
 ): Promise<Violation | null> {
   const env = state.input.env;
   const directory = checkout.directory;
+  const { merge, context } = options;
   const remaining = remainingOf(state);
-  const branch = `refs/heads/${state.nodeBranch}`;
-  const head = await symbolicHead(env, directory, context, remaining());
-  if (head !== branch)
-    return {
-      code: TurnViolation.BranchChanged,
-      detail: `The HEAD of checkout ${checkout.name} is ${head ?? DETACHED}, not ${branch}.`,
-    };
   if (!(await containsCommit(env, directory, before, context, remaining())))
     return {
       code: TurnViolation.HistoryRewritten,
@@ -331,18 +432,22 @@ async function violationOf(
       merge === null ||
       parents.some((parent) => parent !== before && parent !== merge.commit),
   );
-  if (foreign !== undefined)
-    return {
-      code: TurnViolation.ForeignMerge,
-      detail: `Checkout ${checkout.name} holds merge commit ${foreign.commit}. A turn merges no branch; the worker merges the base itself.`,
-    };
-  const operations = (
-    await operationsInProgress(env, directory, context, remaining())
-  ).filter((operation) => merge === null || operation !== MERGE_HEAD);
-  if (
-    merge !== null &&
-    (await mergeHeadOf(env, directory, context, remaining())) !== merge.commit
-  )
+  if (foreign === undefined) return null;
+  return {
+    code: TurnViolation.ForeignMerge,
+    detail: `Checkout ${checkout.name} holds merge commit ${foreign.commit}. A turn merges no branch; the worker merges the base itself.`,
+  };
+}
+
+function operationViolation(
+  checkout: NodeCheckout,
+  merge: ConflictMerge | null,
+  paths: GitPaths,
+): Violation | null {
+  const operations = operationsOf(paths).filter(
+    (operation) => merge === null || operation !== MERGE_HEAD,
+  );
+  if (merge !== null && mergeHeadAt(paths) !== merge.commit)
     return {
       code: TurnViolation.MergeMissing,
       detail: `Checkout ${checkout.name} holds no open merge of ${merge.commit}.`,
@@ -355,56 +460,134 @@ async function violationOf(
   return null;
 }
 
+async function keptMerge(
+  state: StepsState,
+  checkout: NodeCheckout,
+  options: InspectOptions,
+): Promise<ConflictMerge | null> {
+  const { merge, context } = options;
+  const paths = await livePaths(
+    callOf(state, checkout, context),
+    checkout.gitPaths,
+  );
+  if (!operationsOf(paths).includes(MERGE_HEAD)) return null;
+  if (merge !== null && mergeHeadAt(paths) === merge.commit) return merge;
+  await abortMerge(
+    state.input.env,
+    checkout.directory,
+    context,
+    remainingOf(state)(),
+  );
+  return null;
+}
+
 async function violate(
   state: StepsState,
   before: readonly string[],
   violation: Violation,
   context: Context,
 ): Promise<string | null> {
-  for (const [index, checkout] of state.checkouts.entries())
-    await restoreCheckout(
+  await perCheckout(state.checkouts, (checkout, index) =>
+    restoreCheckout(
       state.input.env,
       checkout,
       state.nodeBranch,
       before[index]!,
       context,
       remainingOf(state),
-    );
-  const detail = await state.run.reasonOf(new Error(violation.detail));
-  state.run.log("turn violation", { code: violation.code, detail });
+    ),
+  );
+  const detail = await state.ports.secrets.redact(
+    String(new Error(violation.detail)),
+    REASON_MAX_LENGTH,
+  );
+  state.ports.log.log("turn violation", { code: violation.code, detail });
   return detail;
+}
+
+interface SettleInput {
+  before: string;
+  status: GitStatus;
+  turn: GateTurn;
+  merge: ConflictMerge | null;
+  context: Context;
 }
 
 async function settleCheckout(
   state: StepsState,
-  checkout: WorkspaceCheckout,
-  before: string,
-  turn: GateTurn,
-  context: Context,
-): Promise<boolean> {
-  const env = state.input.env;
-  const directory = checkout.directory;
-  const remaining = remainingOf(state);
-  if ((await headCommit(env, directory, context, remaining())) !== before)
-    await softReset(env, directory, before, context, remaining());
-  const merge = mergeOf(turn, checkout);
-  let changed = true;
-  if (merge === null)
-    changed =
-      (await commitWork(env, directory, turn.message, context, remaining())) !==
-      null;
-  else {
-    await refuseMarkers(state, checkout, merge, context);
-    await concludeMerge(env, directory, turn.message, context, remaining());
-  }
-  checkout.head = await headCommit(env, directory, context, remaining());
-  await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
-  return changed;
+  checkout: NodeCheckout,
+  input: SettleInput,
+): Promise<Settled> {
+  const { before, status, merge, context } = input;
+  if (
+    merge === null &&
+    status.head === before &&
+    status.entries.length === NO_ENTRIES
+  )
+    return { changed: false, paths: [] };
+  if (status.head !== before)
+    await softReset(
+      state.input.env,
+      checkout.directory,
+      before,
+      context,
+      remainingOf(state)(),
+    );
+  const settled =
+    merge === null
+      ? await commitTurn(state, checkout, input)
+      : await concludeConflict(state, checkout, { merge, input });
+  const after = await readStatus(callOf(state, checkout, context));
+  checkout.head = after.head;
+  assertInvariant(
+    {
+      status: after,
+      operations: operationsOf(
+        await livePaths(callOf(state, checkout, context), checkout.gitPaths),
+      ),
+    },
+    state.nodeBranch,
+    settled.changed ? after.head : before,
+  );
+  return settled;
+}
+
+async function commitTurn(
+  state: StepsState,
+  checkout: NodeCheckout,
+  input: SettleInput,
+): Promise<Settled> {
+  const paths = await stageWork(callOf(state, checkout, input.context));
+  if (paths.length === NO_ENTRIES) return { changed: false, paths };
+  await commitStaged(
+    callOf(state, checkout, input.context),
+    input.turn.message,
+  );
+  return { changed: true, paths };
+}
+
+interface ConflictSettle {
+  merge: ConflictMerge;
+  input: SettleInput;
+}
+
+async function concludeConflict(
+  state: StepsState,
+  checkout: NodeCheckout,
+  conflict: ConflictSettle,
+): Promise<Settled> {
+  const { context } = conflict.input;
+  await refuseMarkers(state, checkout, conflict.merge, context);
+  const paths = await concludeMerge(
+    callOf(state, checkout, context),
+    conflict.merge.message,
+  );
+  return { changed: true, paths };
 }
 
 async function refuseMarkers(
   state: StepsState,
-  checkout: WorkspaceCheckout,
+  checkout: NodeCheckout,
   merge: ConflictMerge,
   context: Context,
 ): Promise<void> {
@@ -416,48 +599,79 @@ async function refuseMarkers(
     context,
     remaining(),
   );
-  if (left.length === NO_ENTRIES) return;
+  if (
+    left.length === NO_ENTRIES &&
+    (await unmergedMarkerless(state, checkout, { merge, context })).length ===
+      NO_ENTRIES
+  )
+    return;
   await abortMerge(state.input.env, checkout.directory, context, remaining());
-  state.run.stop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
+  throw new ExecutionStop(EndReason.OperationFailed, MERGE_MARKERS_LEFT);
+}
+
+interface MarkerlessCheck {
+  merge: ConflictMerge;
+  context: Context;
+}
+
+function unmergedMarkerless(
+  state: StepsState,
+  checkout: NodeCheckout,
+  check: MarkerlessCheck,
+): Promise<string[]> {
+  if (check.merge.markerless.length === NO_ENTRIES) return Promise.resolve([]);
+  return unmergedPaths(
+    callOf(state, checkout, check.context),
+    check.merge.markerless,
+  );
 }
 
 export async function restoreCheckout(
   env: NodeJS.ProcessEnv,
-  checkout: WorkspaceCheckout,
+  checkout: NodeCheckout,
   branch: string,
   target: string,
   context: Context,
   remaining: () => number,
 ): Promise<void> {
   const directory = checkout.directory;
-  await quitOperations(env, directory, context, remaining());
+  const call = (): GitCall => ({
+    env,
+    directory,
+    context,
+    deadlineMs: remaining(),
+  });
+  const paths = await livePaths(call(), checkout.gitPaths);
+  await quitOperations(call(), paths);
   await forceBranch(env, directory, branch, target, context, remaining());
   await discardChanges(env, directory, context, remaining());
   checkout.head = target;
-  await assertInvariant(env, checkout, branch, context, remaining);
+  assertInvariant(
+    {
+      status: await readStatus(call()),
+      operations: operationsOf(paths),
+    },
+    branch,
+    target,
+  );
 }
 
-async function assertInvariant(
-  env: NodeJS.ProcessEnv,
-  checkout: WorkspaceCheckout,
+export function assertInvariant(
+  facts: CheckoutFacts,
   branch: string,
-  context: Context,
-  remaining: () => number,
-): Promise<void> {
-  const directory = checkout.directory;
-  assert.equal(
-    await symbolicHead(env, directory, context, remaining()),
-    `refs/heads/${branch}`,
+  head: string,
+): void {
+  assert.equal(facts.status.branch, branch);
+  assert.match(facts.status.head, COMMIT_PATTERN);
+  assert.equal(facts.status.head, head);
+  assert.ok(
+    facts.status.entries.every(
+      ({ kind, index, gitlink }) =>
+        (kind === ORDINARY_ENTRY || kind === RENAMED_ENTRY) &&
+        (index === UNCHANGED_INDEX || gitlink),
+    ),
   );
-  assert.equal(
-    await headCommit(env, directory, context, remaining()),
-    checkout.head,
-  );
-  assert.ok(await isCommitted(env, directory, context, remaining()));
-  assert.deepEqual(
-    await operationsInProgress(env, directory, context, remaining()),
-    [],
-  );
+  assert.deepEqual(facts.operations, []);
 }
 
 export function removeRootEntries(state: StepsState): void {
@@ -471,5 +685,5 @@ export function removeRootEntries(state: StepsState): void {
   for (const entry of removed)
     rmSync(join(state.root, entry), { recursive: true, force: true });
   if (removed.length > NO_ENTRIES)
-    state.run.log("root entries removed", { entries: removed });
+    state.ports.log.log("root entries removed", { entries: removed });
 }

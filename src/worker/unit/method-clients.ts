@@ -29,5 +29,6 @@ export interface MethodClients {
     | "execution.change_request.get"
     | "execution.link_update.get"
     | "execution.failed_check.get"
+    | "execution.unit_record.put"
   >;
 }

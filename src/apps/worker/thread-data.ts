@@ -2,7 +2,10 @@ import type { MessagePort } from "node:worker_threads";
 import { z } from "zod";
 import { LogDestination } from "../../kernel/log.ts";
 import { isObject } from "../../kernel/values.ts";
-import { BindingEntryState } from "../../worker/contract.ts";
+import {
+  BindingEntryState,
+  stopOrderEntrySchema,
+} from "../../worker/contract.ts";
 
 const portSchema = z.custom<MessagePort>(
   (value) => isObject(value) && "postMessage" in value && "on" in value,
@@ -26,6 +29,7 @@ export const SlotControl = { Drain: "drain", Stop: "stop" } as const;
 export const ThreadMessageKind = {
   ...SlotControl,
   Bindings: "bindings",
+  StopOrders: "stop_orders",
 } as const;
 export const slotControlSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal(SlotControl.Drain) }),
@@ -38,6 +42,10 @@ export const threadMessageSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(ThreadMessageKind.Bindings),
     entries: z.array(threadEntrySchema),
+  }),
+  z.strictObject({
+    kind: z.literal(ThreadMessageKind.StopOrders),
+    orders: z.array(stopOrderEntrySchema),
   }),
 ]);
 export type ThreadMessage = z.infer<typeof threadMessageSchema>;

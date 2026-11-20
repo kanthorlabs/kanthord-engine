@@ -7,7 +7,7 @@ import {
   joined,
 } from "../../kernel/context.ts";
 import { CodedError } from "../../kernel/errors.ts";
-import { thrownReason } from "../../kernel/probe.ts";
+import { redactText, thrownReason } from "../../kernel/probe.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import {
   type ClientOptions,
@@ -24,11 +24,23 @@ import {
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
-import { type FailureCause, unattributed } from "../../kernel/cause.ts";
+import { unattributed } from "../../kernel/cause.ts";
 import { type GitStep, gitStepOf } from "./git-step.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { codedStopDetail, stopCauseOf } from "./stop-cause.ts";
+import {
+  type PortFailure,
+  type PortResult,
+  PortResultKind,
+} from "./foundry-ports.ts";
+import {
+  EndReason,
+  type ExecutionEnd,
+  ExecutionEndKind,
+  ExecutionStop,
+  type MethodClaim,
+} from "./execution-stop.ts";
 
 type EvidenceBody = Omit<
   Parameters<MethodClients["mission"]["evidence.submit"]>[0]["body"],
@@ -51,47 +63,12 @@ function gitFailureCause(error: CodedError): unknown {
   return cause;
 }
 
-export const EndReason = {
-  ...ExecutionStopReason,
-  Revoked: "revoked",
-} as const;
-export type EndReason = (typeof EndReason)[keyof typeof EndReason];
-export const ExecutionEndKind = {
-  Released: "released",
-  Closed: "closed",
-  Ended: "ended",
-} as const;
-export type ExecutionEnd =
-  | {
-      kind: typeof ExecutionEndKind.Released;
-      furtherWork: boolean;
-      stop?: ReleaseStop;
-    }
-  | { kind: typeof ExecutionEndKind.Closed; outcomeId: string }
-  | {
-      kind: typeof ExecutionEndKind.Ended;
-      reason: EndReason;
-      code: string | null;
-      detail?: string;
-    };
 export const EXECUTION_PROOF_FAILED =
   "gateway.invocation.execution_proof_failed";
 export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_TELEMETRY_FAULTS = 0;
 const TELEMETRY_FLUSH_MS = 5000;
 const UNNAMED_WORKER = "unnamed";
-
-export interface MethodClaim {
-  execution_id: string;
-  node_id: string;
-  attempt: number;
-  pinned_revision: number;
-  node_branch: string;
-  created_at: number;
-  expired_at: number;
-  trace_id: string;
-  root_span_id: string;
-}
 
 export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   return (
@@ -103,31 +80,22 @@ export function isExecutionEnd(result: OperationResult<unknown>): boolean {
   );
 }
 
+export function isRevokeAnswer(
+  result: OperationResult<{ claim_state: ClaimState }>,
+): boolean {
+  return (
+    (result.type === OperationResultType.Completed &&
+      result.data.claim_state !== ClaimState.Running) ||
+    isExecutionEnd(result)
+  );
+}
+
 export function endsExecution(error: unknown): error is CodedError {
   return (
     error instanceof CodedError &&
     (error.code === EXECUTION_PROOF_FAILED ||
       error.code === EXECUTION_NOT_RUNNING)
   );
-}
-
-export class ExecutionStop extends Error {
-  readonly reason: EndReason;
-  readonly code: string | null;
-  readonly detail: string | null;
-  readonly cause: FailureCause | null;
-  constructor(
-    reason: EndReason,
-    code: string | null,
-    detail: string | null = null,
-    cause: FailureCause | null = null,
-  ) {
-    super(`Execution stopped: ${reason}`);
-    this.reason = reason;
-    this.code = code;
-    this.detail = detail;
-    this.cause = cause;
-  }
 }
 
 const detailFactsSchema = z.record(z.string(), z.unknown());
@@ -151,6 +119,16 @@ function detailWithDigests(
   return JSON.stringify({ ...detailFactsOf(detail), digests });
 }
 
+function revocationLink(
+  revocation: Context,
+  revoke: (code: string | null) => void,
+): Disposable {
+  return addAbortListener(revocation.signal, () => {
+    const reason: unknown = revocation.signal.reason;
+    revoke(reason instanceof ExecutionStop ? reason.code : null);
+  });
+}
+
 export class ExecutionRun {
   readonly claim: MethodClaim;
   readonly clients: MethodClients;
@@ -162,9 +140,12 @@ export class ExecutionRun {
   private readonly parent: Context;
   private readonly logSink: (record: Record<string, unknown>) => void;
   private stopped: ExecutionStop | null = null;
+  private revokedStop: ExecutionStop | null = null;
   private settlement: Promise<void> | null = null;
   private verificationTimedOut = false;
   private readonly traceClosers = new Set<(status: SpanStatus) => void>();
+  private readonly finalListeners = new Set<() => void>();
+  private readonly revocation: Disposable | null;
 
   constructor(input: {
     claim: MethodClaim;
@@ -172,6 +153,7 @@ export class ExecutionRun {
     credentials: { release(): Promise<void> };
     context: Context;
     stop?: Context;
+    revocation?: Context;
     log?: (record: Record<string, unknown>) => void;
     telemetry?: TelemetrySink;
     workerName?: string;
@@ -196,6 +178,9 @@ export class ExecutionRun {
       input.stop ? joined(input.context, input.stop) : input.context,
       input.claim.expired_at,
     );
+    this.revocation = input.revocation
+      ? revocationLink(input.revocation, (code) => this.revoke(code))
+      : null;
   }
 
   log(msg: string, fields: Record<string, unknown>): void {
@@ -224,6 +209,52 @@ export class ExecutionRun {
     return addAbortListener(this.operationContext.signal, listener);
   }
 
+  onFinalStep(listener: () => void): Disposable {
+    this.finalListeners.add(listener);
+    return {
+      [Symbol.dispose]: () => void this.finalListeners.delete(listener),
+    };
+  }
+
+  private finalStep(): void {
+    for (const listener of [...this.finalListeners]) {
+      this.finalListeners.delete(listener);
+      listener();
+    }
+  }
+
+  private finalCall(): void {
+    this.revocation?.[Symbol.dispose]();
+    this.finalStep();
+  }
+
+  revoke(code: string | null = null): void {
+    this.revokedStop ??= this.stopWith(EndReason.Revoked, code, null, null);
+    this.store(this.revokedStop);
+  }
+
+  async fence(context: Context): Promise<boolean> {
+    this.finalStep();
+    if (this.revokedStop || this.stopped?.reason === EndReason.Revoked)
+      return false;
+    let result: OperationResult<{ claim_state: ClaimState }>;
+    try {
+      result = await this.clients.scheduler.claimGet(
+        {
+          params: { execution_id: this.claim.execution_id },
+          query: {},
+          body: null,
+        },
+        { context, idempotencyKey: createIdempotencyKey() },
+      );
+    } catch {
+      return true;
+    }
+    if (!isRevokeAnswer(result)) return true;
+    this.revoke();
+    return false;
+  }
+
   onTraceClose(close: (status: SpanStatus) => void): Disposable {
     this.traceClosers.add(close);
     return { [Symbol.dispose]: () => void this.traceClosers.delete(close) };
@@ -245,7 +276,7 @@ export class ExecutionRun {
     code: string | null = null,
     detail: string | null = null,
   ): never {
-    throw this.halt(reason, code, detail);
+    throw this.store(this.stopWith(reason, code, detail, null));
   }
 
   async reasonOf(error: unknown): Promise<string | null> {
@@ -258,12 +289,21 @@ export class ExecutionRun {
     return thrownReason(error, secrets);
   }
 
-  async stopOf(error: unknown): Promise<ExecutionStop> {
-    if (error instanceof ExecutionStop)
-      return this.halt(error.reason, error.code, error.detail);
+  async redact(text: string, limit: number): Promise<string | null> {
+    let secrets: readonly string[];
+    try {
+      secrets = await this.secrets();
+    } catch {
+      return null;
+    }
+    return redactText(text, secrets).slice(0, limit);
+  }
+
+  private async builtStop(error: unknown): Promise<ExecutionStop> {
+    if (error instanceof ExecutionStop) return this.restated(error);
     const gitStep = gitStepOf(error);
     if (error instanceof CodedError)
-      return this.halt(
+      return this.stopWith(
         EndReason.OperationFailed,
         error.code,
         GIT_FAILURE_CODES.has(error.code)
@@ -274,7 +314,7 @@ export class ExecutionRun {
             ),
         gitStep,
       );
-    return this.halt(
+    return this.stopWith(
       EndReason.OperationFailed,
       null,
       await this.reasonOf(error),
@@ -282,18 +322,42 @@ export class ExecutionRun {
     );
   }
 
+  async stopOf(error: unknown): Promise<ExecutionStop> {
+    return this.store(await this.builtStop(error));
+  }
+
+  async failureOf(error: unknown): Promise<PortFailure> {
+    const stop =
+      error instanceof ExecutionStop ? error : await this.builtStop(error);
+    return {
+      kind: PortResultKind.Failed,
+      code: stop.code,
+      message: stop.detail ?? stop.message,
+      detail: stop.detail,
+      cause: stop.cause,
+    };
+  }
+
+  halt(stop: ExecutionStop): ExecutionStop {
+    return this.store(this.restated(stop));
+  }
+
+  private restated(stop: ExecutionStop): ExecutionStop {
+    const built = this.stopWith(stop.reason, stop.code, stop.detail, null);
+    return stop.cause === null || built.cause === null
+      ? built
+      : new ExecutionStop(built.reason, built.code, {
+          detail: built.detail,
+          cause: stop.cause,
+        });
+  }
+
   cleanupContext(): CancellationContext {
     return new CancellationContext(this.parent, this.claim.expired_at);
   }
 
-  private halt(
-    reason: EndReason,
-    code: string | null,
-    detail: string | null = null,
-    gitStep: GitStep | null = null,
-  ): ExecutionStop {
-    this.stopped ??=
-      this.requestedStop() ?? this.stopWith(reason, code, detail, gitStep);
+  private store(stop: ExecutionStop): ExecutionStop {
+    this.stopped ??= this.requestedStop() ?? stop;
     this.operationContext.cancel(this.stopped);
     return this.stopped;
   }
@@ -327,7 +391,7 @@ export class ExecutionRun {
             git_step: gitStep,
             verification_timed_out: this.verificationTimedOut,
           });
-    return new ExecutionStop(reason, code, stored, cause);
+    return new ExecutionStop(reason, code, { detail: stored, cause });
   }
 
   private requireActive(): void {
@@ -365,32 +429,28 @@ export class ExecutionRun {
     );
   }
 
-  async checkClaim(): Promise<void> {
-    this.requireActive();
-    let result: OperationResult<{ claim_state: ClaimState }>;
+  async callNoHalt<T>(
+    invoke: (options: ClientOptions) => Promise<OperationResult<T>>,
+  ): Promise<PortResult<T>> {
+    let result: OperationResult<T>;
     try {
-      result = await this.clients.scheduler.claimGet(
-        {
-          params: { execution_id: this.claim.execution_id },
-          query: {},
-          body: null,
-        },
-        {
-          context: this.operationContext,
-          idempotencyKey: createIdempotencyKey(),
-        },
-      );
-    } catch {
-      this.requireActive();
-      return;
+      result = await invoke({
+        context: this.operationContext,
+        idempotencyKey: createIdempotencyKey(),
+      });
+    } catch (error) {
+      const code = error instanceof CodedError ? error.code : null;
+      return { kind: PortResultKind.Failed, code, message: code ?? "thrown" };
     }
-    this.requireActive();
-    if (
-      (result.type === OperationResultType.Completed &&
-        result.data.claim_state !== ClaimState.Running) ||
-      isExecutionEnd(result)
-    )
-      this.stop(EndReason.Revoked);
+    if (result.type === OperationResultType.Completed)
+      return { kind: PortResultKind.Ok, value: result.data };
+    const code =
+      result.type === OperationResultType.Failure
+        ? result.error.error.code
+        : null;
+    if (isExecutionEnd(result))
+      this.store(this.stopWith(EndReason.Revoked, code, null, null));
+    return { kind: PortResultKind.Failed, code, message: code ?? result.type };
   }
 
   async settleCredentials(): Promise<void> {
@@ -408,6 +468,7 @@ export class ExecutionRun {
   }
 
   dispose(): void {
+    this.revocation?.[Symbol.dispose]();
     this.operationContext.cancel();
     if (this.spans.faultCount() > NO_TELEMETRY_FAULTS)
       this.log("telemetry faults", { faults: this.spans.faultCount() });
@@ -428,6 +489,7 @@ export class ExecutionRun {
   }
 
   async submitAssessment(nodeId: string, body: AssessmentBody) {
+    this.finalCall();
     await this.settleCredentials();
     this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
@@ -462,6 +524,7 @@ export class ExecutionRun {
     budgetEnd: BudgetLimit | null = null,
   ): Promise<ExecutionEnd> {
     assert.ok(budgetEnd === null || furtherWork);
+    this.finalCall();
     const stop: ReleaseStop | null =
       budgetEnd === null
         ? null
@@ -588,6 +651,13 @@ export class ExecutionRun {
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
+    this.finalCall();
+    if (this.revokedStop)
+      return {
+        kind: ExecutionEndKind.Ended,
+        reason: this.revokedStop.reason,
+        code: this.revokedStop.code,
+      };
     const stop: ReleaseStop = {
       reason,
       code: stopped.code,

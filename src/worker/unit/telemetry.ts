@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes } from "node:crypto";
 import {
   type Attributes,
@@ -19,6 +20,7 @@ export const noTelemetry: TelemetrySink = {
 
 export const SpanOperation = {
   Phase: "worker.phase",
+  Step: "worker.step",
   Task: "worker.task",
   Verification: "worker.verification",
   Evaluation: "worker.evaluation",
@@ -26,6 +28,7 @@ export const SpanOperation = {
   Gate: "worker.gate",
   Setup: "worker.setup",
   ReleaseGate: "worker.release_gate",
+  Conflict: "worker.conflict",
   Turn: "agent.turn",
   Tool: "agent.tool",
   Session: "agent.session",
@@ -42,6 +45,9 @@ export const Phase = {
   Finish: "finish",
 } as const;
 export type Phase = (typeof Phase)[keyof typeof Phase];
+
+export const EndPhase = { OnExit: "on_exit", OnStop: "on_stop" } as const;
+export type EndPhase = (typeof EndPhase)[keyof typeof EndPhase];
 
 export interface SpanClaim {
   execution_id: string;
@@ -134,7 +140,7 @@ export class SpanRecorder {
   private readonly runKey: string;
   private readonly identity: Attributes;
   private readonly open = new Map<string, OpenSpan>();
-  private readonly scopes: string[] = [];
+  private readonly scope = new AsyncLocalStorage<string>();
   private turns = 0;
   private faults = NO_FAULTS;
   private readonly counters = new Map<string, number>();
@@ -160,9 +166,8 @@ export class SpanRecorder {
   }
 
   current(): string {
-    const spanId = this.scopes.at(-1) ?? this.claim.root_span_id;
+    const spanId = this.scope.getStore() ?? this.claim.root_span_id;
     assert.match(spanId, SPAN_PATTERN);
-    assert.ok(this.scopes.length <= this.open.size);
     return spanId;
   }
 
@@ -264,15 +269,12 @@ export class SpanRecorder {
     assert.ok(work);
     assert.ok(endOf);
     const spanId = this.start(span);
-    this.scopes.push(spanId);
     let result: T;
     try {
-      result = await work(spanId);
+      result = await this.scope.run(spanId, () => work(spanId));
     } catch (error) {
       this.end(spanId, failureOf(error));
       throw error;
-    } finally {
-      assert.equal(this.scopes.pop(), spanId);
     }
     this.end(spanId, endOf(result));
     return result;

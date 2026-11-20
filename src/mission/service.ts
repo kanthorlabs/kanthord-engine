@@ -68,6 +68,7 @@ import {
   type SchedulerClaims,
   type SchedulerMatch,
   type SchedulerWakeup,
+  type UnitRecords,
   type WorkerStopOrders,
   type WorkQueue,
 } from "./contract.ts";
@@ -88,6 +89,7 @@ import {
   readyNode,
   resumeNode,
   revokeForInstanceArchive,
+  revokeHeldPauses,
   revokePausedClaim,
 } from "./control-hold.ts";
 import { blockNode, discardNode, overrideNode } from "./control-close.ts";
@@ -158,6 +160,7 @@ import {
   type ObjectPutInput,
 } from "./authorization.ts";
 import { repositoryBindingIdsOf } from "./evidence-content.ts";
+import { seedNodeOf } from "./seed-read.ts";
 import {
   listAttempts,
   pinPromptCommits,
@@ -301,6 +304,7 @@ export interface Dependencies {
   bindings: MissionBindings;
   environments: MissionEnvironments;
   workQueue: WorkQueue;
+  unitRecords: UnitRecords;
   schedulerClaims: SchedulerClaims;
   schedulerMatch: SchedulerMatch;
   wakeup: SchedulerWakeup;
@@ -1163,8 +1167,8 @@ export class MissionService
     registry.register(
       missionOperations["node.retire"],
       ({ params, body }, caller) =>
-        this.commitGraph(caller, { node_id: params.node_id }, (tx) =>
-          retireNode(
+        this.commitGraph(caller, { node_id: params.node_id }, (tx) => {
+          const change = retireNode(
             tx,
             params.node_id,
             body,
@@ -1172,8 +1176,11 @@ export class MissionService
             this.dependencies.workQueue,
             this.dependencies.config.text_max_bytes,
             this.dependencies.bindings,
-          ),
-        ),
+          );
+          for (const nodeId of change.retired_node_ids)
+            this.dependencies.unitRecords.deleteNode(tx, nodeId);
+          return change;
+        }),
     );
     registry.register(
       missionOperations["node.priority.set"],
@@ -1307,8 +1314,8 @@ export class MissionService
     let result: ImportResult;
     try {
       result = this.commitGraph(caller, { mission_id: missionId }, (tx, ends) =>
-        this.covered(tx, { mission_id: missionId }, (tx) =>
-          applyImport(
+        this.covered(tx, { mission_id: missionId }, (tx) => {
+          const applied = applyImport(
             tx,
             missionId,
             body,
@@ -1322,8 +1329,11 @@ export class MissionService
             (facts) => {
               observed.facts = facts;
             },
-          ),
-        ),
+          );
+          for (const nodeId of applied.changes.retired_node_ids)
+            this.dependencies.unitRecords.deleteNode(tx, nodeId);
+          return applied;
+        }),
       );
     } catch (error) {
       if (error instanceof OperationError && observed.facts !== null)
@@ -1484,6 +1494,10 @@ export class MissionService
     return revokePausedClaim(this.dependencies, executionId, Date.now());
   }
 
+  revokeHeldPauses(): void {
+    revokeHeldPauses(this.dependencies, Date.now());
+  }
+
   reportExecutionEnds(ends: ExecutionEnds): void {
     reportEnds(this.dependencies, ends);
   }
@@ -1622,6 +1636,15 @@ export class MissionService
 
   intentOf(tx: Transaction, nodeId: string, nodeRevision: number): Intent {
     return getRevision(tx, nodeId, nodeRevision).content.intent;
+  }
+
+  unitIdsOf(tx: Transaction, nodeId: string, nodeRevision: number): string[] {
+    const { tasks } = getRevision(tx, nodeId, nodeRevision);
+    return [nodeId, ...tasks.map((task) => task.id)];
+  }
+
+  seedNodeOf(...args: Parameters<typeof seedNodeOf>) {
+    return seedNodeOf(...args);
   }
 
   start(): Promise<Error | null> {

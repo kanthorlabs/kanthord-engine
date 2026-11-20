@@ -4,30 +4,30 @@ import type {
   BashToolOptions,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { COMMAND_LIMIT_MS, type ExecutionBudget } from "./budget.ts";
-import { BuiltinTool, getAgentDeclaration } from "../../agent/catalog.ts";
-import type { PiCodingAgent } from "../../agent/pi.ts";
-import { HostTool, type HostTools } from "../contract.ts";
-import { evidenceUploadTool, linkUpdateListTool } from "./host-tools.ts";
-export { ToolSource } from "../../agent/contract.ts";
-import { childEnvironment } from "../../agent/environment.ts";
+import { BuiltinTool, getAgentDeclaration } from "./catalog.ts";
+import type { PiCodingAgent } from "./pi.ts";
+import { childEnvironment } from "./environment.ts";
 import {
   type BashProcess,
   processBashOperations,
   type ShellConfig,
-} from "../../agent/bash-process.ts";
-export { childEnvironment } from "../../agent/environment.ts";
+} from "./bash-process.ts";
 
+export const COMMAND_LIMIT_MS = 600000;
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
 
-const HOST_TOOLS: Readonly<
-  Record<HostTool, (hostTools: HostTools) => ToolDefinition>
-> = {
-  [HostTool.EvidenceUpload]: evidenceUploadTool,
-  [HostTool.LinkUpdateList]: linkUpdateListTool,
-};
+export interface ToolBudget {
+  remainingMs(): number;
+}
+
+export interface SessionToolsInput {
+  cwd: string;
+  budget: ToolBudget;
+  env: NodeJS.ProcessEnv;
+  processes: ToolProcesses;
+}
 
 export interface ToolTimeout {
   requestedMs: number | null;
@@ -78,21 +78,15 @@ export class ToolProcesses {
 export function sessionTools(
   pi: PiCodingAgent,
   agentName: string,
-  cwd: string,
-  budget: ExecutionBudget,
-  hostTools: HostTools,
-  env: NodeJS.ProcessEnv,
-  processes: ToolProcesses,
+  input: SessionToolsInput,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
-  assert.ok(cwd);
+  assert.ok(input.cwd);
+  const { cwd, budget, env, processes } = input;
   const allowlist: string[] = [...agent.tools, ...agent.host_tools];
-  const customTools: ToolDefinition[] = agent.host_tools.map((name) =>
-    HOST_TOOLS[name](hostTools),
-  );
   if (!agent.tools.includes(BuiltinTool.Bash))
-    return { allowlist, customTools };
+    return { allowlist, customTools: [] };
   const options = (
     toolCallId: string,
     operations: BashOperations,
@@ -100,7 +94,7 @@ export function sessionTools(
     exposeSessionEnvironment: false,
     spawnHook: (context) => ({
       ...context,
-      env: childEnvironment(context.env),
+      env: childEnvironment({ ...env, PATH: context.env.PATH ?? env.PATH }),
     }),
     operations: {
       exec: (command, directory, execOptions) => {
@@ -131,16 +125,15 @@ export function sessionTools(
   });
   const bash: typeof declared = {
     ...declared,
-    execute: (toolCallId, params, signal, onUpdate, context) =>
-      pi
+    execute: (...args: Parameters<typeof declared.execute>) => {
+      const [toolCallId] = args;
+      return pi
         .createBashToolDefinition(
           cwd,
           options(toolCallId, processes.operations(toolCallId)),
         )
-        .execute(toolCallId, params, signal, onUpdate, context),
+        .execute(...args);
+    },
   };
-  return {
-    allowlist,
-    customTools: [bash as unknown as ToolDefinition, ...customTools],
-  };
+  return { allowlist, customTools: [bash as unknown as ToolDefinition] };
 }

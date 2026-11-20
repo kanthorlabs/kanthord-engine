@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { z } from "zod";
+import { PromptTemplate } from "../../agent/contract.ts";
 import type { Attributes } from "../../tracking/contract.ts";
 import { STOP_DETAIL_MAX_LENGTH } from "../../scheduler/contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { Verification } from "./verification.ts";
 
 export const NoProgressRule = {
@@ -14,6 +15,7 @@ export type NoProgressRule =
   (typeof NoProgressRule)[keyof typeof NoProgressRule];
 
 const COMMAND_MAX_LENGTH = 2048;
+export const AGENT_REASON_MAX_LENGTH = 512;
 const NO_OVERFLOW = 0;
 const countSchema = z.number().int().positive();
 const noProgressFactsSchema = z.strictObject({
@@ -31,6 +33,9 @@ const noProgressFactsSchema = z.strictObject({
       timed_out: z.boolean(),
     })
     .nullable(),
+  unit_id: z.string(),
+  template: z.enum(PromptTemplate),
+  agent_reason: z.string().max(AGENT_REASON_MAX_LENGTH).optional(),
 });
 export type NoProgressFacts = z.infer<typeof noProgressFactsSchema>;
 export type VerificationFacts = NoProgressFacts["verification"];
@@ -51,19 +56,41 @@ export function verificationFactsOf(
   };
 }
 
-function fitted(facts: NoProgressFacts): NoProgressFacts {
+function overflowOf(facts: NoProgressFacts): number {
+  return JSON.stringify(facts).length - STOP_DETAIL_MAX_LENGTH;
+}
+
+export function cutText(text: string, length: number): string {
+  return text.slice(NO_OVERFLOW, Math.max(NO_OVERFLOW, length)).toWellFormed();
+}
+
+function reasonFitted(facts: NoProgressFacts): NoProgressFacts {
+  const overflow = overflowOf(facts);
+  if (overflow <= NO_OVERFLOW || facts.agent_reason === undefined) return facts;
+  const { agent_reason: reason, ...rest } = facts;
+  const cut = cutText(reason, reason.length - overflow);
+  return cut.length === NO_OVERFLOW ? rest : { ...rest, agent_reason: cut };
+}
+
+function commandFitted(facts: NoProgressFacts): NoProgressFacts {
   const { verification } = facts;
-  const overflow = JSON.stringify(facts).length - STOP_DETAIL_MAX_LENGTH;
+  const overflow = overflowOf(facts);
   if (overflow <= NO_OVERFLOW || verification === null) return facts;
   if (verification.command === null) return facts;
-  const kept = Math.max(NO_OVERFLOW, verification.command.length - overflow);
   return {
     ...facts,
     verification: {
       ...verification,
-      command: verification.command.slice(NO_OVERFLOW, kept),
+      command: cutText(
+        verification.command,
+        verification.command.length - overflow,
+      ),
     },
   };
+}
+
+function fitted(facts: NoProgressFacts): NoProgressFacts {
+  return commandFitted(reasonFitted(facts));
 }
 
 export function noProgressDetail(facts: NoProgressFacts): string {
@@ -82,6 +109,12 @@ function factsOf(detail: string): NoProgressFacts | null {
   }
   const parsed = noProgressFactsSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
+}
+
+export function loggedNoProgressDetail(detail: string): string | undefined {
+  const facts = factsOf(detail);
+  if (facts === null) return undefined;
+  return JSON.stringify({ ...facts, agent_reason: undefined });
 }
 
 function verificationAttributes(verification: VerificationFacts): Attributes {

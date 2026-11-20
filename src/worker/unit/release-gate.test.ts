@@ -18,22 +18,25 @@ import { dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason, portStop } from "./execution-stop.ts";
+import { background } from "../../kernel/context.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { taskWork } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
-  taskWork,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { refreshAtRelease } from "./base-refresh.ts";
-import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { nodeUnitOf, ReleaseGateKind } from "./release-gate.ts";
+import { releaseGate } from "./steps-implement-host.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
-import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace.ts";
+import { RELEASE_DIRECTORY, WorkspaceKind } from "./workspace-layout.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import {
   advanceBase,
@@ -45,22 +48,28 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   listedVerificationSpans,
+  phaseSpanNames,
   recordReleases,
   recordSpans,
   releasedRoot,
   spanEnds,
+  stepSpanOutcomes,
   task,
 } from "./test-support.ts";
 import { RecordKind } from "../../tracking/contract.ts";
-import { SpanOperation } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
+import { FrameOutcome } from "./chain.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
-import { PoolClass, repoKeyOf, TreeSource } from "./tree-pool.ts";
+import { PoolClass, repoKeyOf } from "./tree-pool.ts";
+import { PortResultKind, TreeSource } from "./foundry-ports.ts";
+import { workerPorts } from "./worker-ports.ts";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const NOTHING = fauxAssistantMessage("nothing");
 const NO_PROGRESS_LIMIT = 2;
+const LAST_AGENT_TEXT = "still nothing";
 const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
 const LAST_COMMAND_INDEX = 1;
@@ -75,6 +84,7 @@ const FLAKY_LOG = "verification flaky";
 const TAG = "x";
 const CONFIG_KEY = "a.b";
 const BASE_CHANGE = "base change";
+const ABSENT_REPOSITORY = /absent. does not exist/;
 const LEFTOVER = "leftover";
 const STRAY_FILE = "stray";
 const NO_CONFIG = "";
@@ -214,6 +224,44 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  test("an implement execution writes one worker.phase span per phase and one worker.step span per step", async (t) => {
+    const h = await fixture(t, [task("plain", "true")], [NOTHING]);
+    const records = recordSpans(h);
+    recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.deepEqual(phaseSpanNames(records), [
+      Phase.Start,
+      Phase.Tasks,
+      Phase.Finish,
+    ]);
+    assert.deepEqual(
+      stepSpanOutcomes(records),
+      [
+        "base.refresh(claim)",
+        "env.setup(live)",
+        "units.plan",
+        "budget.check",
+        "unit.enter",
+        "unit.turn",
+        "verify.own",
+        "unit_record.put",
+        "unit.leave",
+        "base.fetch",
+        "base.refresh(release)",
+        "release.verify",
+        "release.route",
+        "report.coder",
+        "branch.push",
+        "evidence.head",
+        "execution.release",
+      ].map((id) => [id, FrameOutcome.Next]),
+    );
+  });
+
   test("a release failure that no revision changes stops with no_progress and never releases further work false", async (t) => {
     const current = task("ignored", `test -e ${SECRET}`);
     const h = await fixture(
@@ -222,7 +270,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [
         NOTHING,
         fauxAssistantMessage("nothing again"),
-        fauxAssistantMessage("still nothing"),
+        fauxAssistantMessage(LAST_AGENT_TEXT),
       ],
     );
     appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
@@ -256,6 +304,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
             exit_code: FAILED_EXIT_CODE,
             timed_out: false,
           },
+          unit_id: current.id,
+          template: PromptTemplate.TaskRevision,
+          agent_reason: LAST_AGENT_TEXT,
         }),
       },
     });
@@ -283,6 +334,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
               exit_code: FAILED_EXIT_CODE,
               timed_out: false,
             },
+            unit_id: current.id,
+            template: PromptTemplate.TaskRevision,
+            agent_reason: LAST_AGENT_TEXT,
           }),
         },
       },
@@ -305,12 +359,15 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [task("timed", "touch transient; sleep 30")],
       [NOTHING],
     );
+    const transient = join(h.checkouts[0]!.directory, "transient");
+    let verifying = false;
     let deadline = Date.now() + 60000;
     h.agent.budget.wallDeadline = () => {
       deadline = Date.now() + 30;
       return deadline;
     };
-    h.agent.budget.exhausted = () => Date.now() >= deadline;
+    h.agent.budget.exhausted = () =>
+      (verifying ||= existsSync(transient)) && Date.now() >= deadline;
     const bodies = recordReleases(h);
     acceptEvidence(h);
     assert.deepEqual(await runStepsImplement(h), {
@@ -386,7 +443,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [
         NOTHING,
         fauxAssistantMessage("nothing again"),
-        fauxAssistantMessage("still nothing"),
+        fauxAssistantMessage(LAST_AGENT_TEXT),
       ],
     );
     h.revision = {
@@ -417,6 +474,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: node.id,
+      template: PromptTemplate.TaskRevision,
+      agent_reason: LAST_AGENT_TEXT,
     });
     const spans = listedVerificationSpans(records);
     assert.deepEqual(
@@ -698,7 +758,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
   test("a node change that edits the declaration does not change the command that judges it", async (t) => {
     const h = await fixture(t, [task("pass", "true")], []);
     await declareAffected(h, t, affectedCommand(FAILS_WHEN_BROKEN));
-    await refreshAtRelease(h);
+    await refreshAtRelease(h, workerPorts(h.input, h.run));
     writeFileSync(
       join(h.root, AFFECTED_DECLARATION_FILE),
       JSON.stringify({ version: 1, command: affectedCommand(NEVER_FAILS) }),
@@ -958,6 +1018,27 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal((await gate).kind, ReleaseGateKind.Routed);
     assert.equal(freeCommandTrees(h).length, ONE_TREE);
     assert.equal(existsSync(releaseKey(h)), false);
+  });
+
+  test("a release tree take that fails beside a running take leaves the other tree in place, and its stop names its own cause", async (t) => {
+    const h = await fixture(t, [], [], undefined, ["first", "second"]);
+    const [first, second] = h.checkouts;
+    assert.ok(first && second);
+    const { releaseTrees } = workerPorts(h.input, h.run);
+    const call = { context: background, deadline: h.input.claim.expired_at };
+    const [failed, taken] = await Promise.all([
+      releaseTrees.take(
+        { ...first, directory: join(dirname(first.directory), "absent") },
+        first.head,
+        call,
+      ),
+      releaseTrees.take(second, second.head, call),
+    ]);
+    assert.ok(failed?.kind === PortResultKind.Failed);
+    assert.match(portStop(failed).detail ?? "", ABSENT_REPOSITORY);
+    assert.ok(taken?.kind === PortResultKind.Ok);
+    assert.ok(existsSync(join(taken.value.directory, ".git")));
+    await releaseTrees.give(taken.value);
   });
 
   test("a release round after a new commit of the node tests the new head", async (t) => {

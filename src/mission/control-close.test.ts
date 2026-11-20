@@ -56,6 +56,7 @@ const NO_EVIDENCE = 0;
 const FIRST_ATTEMPT = 1;
 const REVOKE = "schedulerClaims.revoke";
 const EXECUTION_REVOKED = "schedulerClaims.executionRevoked";
+const UNIT_RECORDS_DELETED = "unitRecords.deleteNode";
 const EXECUTIONS_LOST = "schedulerClaims.executionsLost";
 const BINDING_MISMATCH = "mission.evidence.binding_mismatch";
 const VALIDATION = "gateway.request.validation_failed";
@@ -1109,7 +1110,7 @@ test("a discard with a pending close reaches Discarded after a forced archive of
   assert.equal(k.h.node().state, NodeState.Discarded);
 });
 
-test("an override and a discard of a disconnected execution revoke at once with the stop human_paused", async (t) => {
+test("an override and a discard of a disconnected execution revoke at once with the stop human_paused and delete the unit records of the node", async (t) => {
   for (const name of ["override", "discard"] as const) {
     const k = keptClaimHarness(t, IDENTITY, NodeState.Executing);
     k.keep.connected = false;
@@ -1123,6 +1124,12 @@ test("an override and a discard of a disconnected execution revoke at once with 
     assert.equal(
       k.h.calls.filter((call) => call.method === EXECUTION_REVOKED).length,
       ONE_ACT,
+    );
+    assert.deepEqual(
+      k.h.calls
+        .filter((call) => call.method === UNIT_RECORDS_DELETED)
+        .map((call) => call.arguments[1]),
+      [k.h.node_id],
     );
   }
 });

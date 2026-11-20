@@ -52,7 +52,12 @@ import type { Dependencies } from "./service.ts";
 import { type AgentPromptFacts, promptReference } from "./prompt-telemetry.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { ExecutionIntent, InstancePlacement } from "./contract.ts";
+import {
+  ExecutionIntent,
+  InstancePlacement,
+  WORKER_SERVICE_NAME,
+} from "./contract.ts";
+import { workerMigrations } from "./migrations.ts";
 import type { AgentSelection } from "../scheduler/contract.ts";
 import {
   RepositoryComponent,
@@ -143,6 +148,9 @@ const promptParts = [
 test("setup answers the system and agent prompt after its single snapshot and supports a pinned entry", async (t) => {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const entry = {
@@ -534,6 +542,9 @@ test("setup answers the system and agent prompt after its single snapshot and su
 test("setup claims no environment for a container slot whose worker binding names none", async (t) => {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claimed: string[][] = [];
@@ -630,6 +641,9 @@ test("setup claims no environment for a container slot whose worker binding name
 test("one binding that lists a server and a container instance claims the environment for the container instance only", async (t) => {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claimed: string[][] = [];
@@ -740,6 +754,9 @@ test("one binding that lists a server and a container instance claims the enviro
 test("setup of a container worker binding with an environment claims inside a real transaction and its compute reads the binding facts", async (t) => {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const setup = anthropicSetup();
   const agent = setup.agents[0]!;
   const claim = {
@@ -881,6 +898,9 @@ function twoAgentFixture(t: TestContext, options: TwoAgentOptions = {}) {
   const composed: string[] = [];
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
+  store.migrate([
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   const setup = anthropicSetup();
   const enablementIds: Record<string, string> = {
     "swe@1": createIdentity("agent_enablement"),
@@ -1560,7 +1580,10 @@ function bindingOf(f: { bindingIds: string[] }): string {
 async function repositorySetup(t: TestContext, address: string, pin: boolean) {
   const store = new Store(":memory:");
   stopAfter(t, () => store.close());
-  store.migrate([{ service: "repository", migrations: repositoryMigrations }]);
+  store.migrate([
+    { service: "repository", migrations: repositoryMigrations },
+    { service: WORKER_SERVICE_NAME, migrations: workerMigrations },
+  ]);
   if (pin)
     store.database
       .prepare(

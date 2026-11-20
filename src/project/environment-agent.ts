@@ -303,7 +303,7 @@ export class EnvironmentAgent {
       ],
       customTools,
       hostHome: this.dependencies.hostHome,
-      hooks: [checkoutConfinement(checkout)],
+      hooks: [checkoutConfinement({ cwd: checkout, roots: [checkout] })],
       context: input.context,
       knownSecrets: credentialSecrets(
         credentials,

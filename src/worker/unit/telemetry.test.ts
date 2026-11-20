@@ -18,7 +18,7 @@ import {
 } from "./telemetry.ts";
 import { AgentErrorType, traceAgent } from "./agent-telemetry.ts";
 import type { TurnPrompt } from "./native-agent.ts";
-import type { ToolTimeout } from "./tool-table.ts";
+import type { ToolTimeout } from "../../agent/tool-table.ts";
 import {
   environmentDigestsOf,
   taskEnd,
@@ -29,7 +29,7 @@ import {
   verificationObserver,
   type VerificationScope,
 } from "./method-telemetry.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { noProgressDetail, NoProgressRule } from "./progress-rule.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import type { TaskContent } from "../../mission/contract.ts";
@@ -270,6 +270,51 @@ test("a nested span names the enclosing span as its parent", async () => {
   assert.equal(spans.current(), CLAIM.root_span_id);
 });
 
+test("a span of one concurrent branch never becomes the parent of a span of another branch", async () => {
+  const { records, spans } = recorder();
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const inner = (name: string) =>
+    spans.within(
+      { key: `inner:${name}`, operation: SpanOperation.Git },
+      async () => {},
+    );
+  const outer = await spans.within(
+    { key: "phase:prepare", operation: SpanOperation.Phase },
+    async (outerId) => {
+      await Promise.all([
+        spans.within(
+          { key: "branch:a", operation: SpanOperation.Phase },
+          async () => {
+            await Promise.resolve();
+            await inner("a");
+            release();
+          },
+        ),
+        spans.within(
+          { key: "branch:b", operation: SpanOperation.Phase },
+          async () => {
+            await held;
+            await inner("b");
+          },
+        ),
+      ]);
+      return outerId;
+    },
+  );
+  const parentOf = (key: string) =>
+    spanRecords(records).find(
+      (record) => record.span_id === spans.spanIdOf(key),
+    )?.parent_span_id;
+  assert.equal(parentOf("branch:a"), outer);
+  assert.equal(parentOf("branch:b"), outer);
+  assert.equal(parentOf("inner:a"), spans.spanIdOf("branch:a"));
+  assert.equal(parentOf("inner:b"), spans.spanIdOf("branch:b"));
+  assert.equal(spans.current(), CLAIM.root_span_id);
+});
+
 test("a failed operation ends its span with Error and keeps the error", async () => {
   const { records, spans } = recorder();
   await assert.rejects(
@@ -307,10 +352,8 @@ async function stoppedTaskEnd(stop: ExecutionStop) {
 
 test("a no_progress stop ends the task span with the rule, the counts and the verification state", async () => {
   const end = await stoppedTaskEnd(
-    new ExecutionStop(
-      EndReason.NoProgress,
-      null,
-      noProgressDetail({
+    new ExecutionStop(EndReason.NoProgress, null, {
+      detail: noProgressDetail({
         rule: NoProgressRule.UnchangedRevision,
         count: NO_PROGRESS_COUNT,
         limit: NO_PROGRESS_COUNT,
@@ -323,8 +366,10 @@ test("a no_progress stop ends the task span with the rule, the counts and the ve
           exit_code: FAILED_EXIT,
           timed_out: false,
         },
+        unit_id: CLAIM.node_id,
+        template: PromptTemplate.TaskRevision,
       }),
-    ),
+    }),
   );
   assert.equal(end?.status, SpanStatus.Error);
   assert.deepEqual(end?.attributes, {

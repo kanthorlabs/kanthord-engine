@@ -28,6 +28,7 @@ import {
 } from "../kernel/service.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
 import type { SchedulerConfig } from "./config.ts";
+import type { StopOrderReason } from "../worker/contract.ts";
 import {
   ExecutionEnd,
   type ExecutionTelemetry,
@@ -60,7 +61,6 @@ import {
   type EndedExecution,
   type EnvironmentGate,
   EXECUTION_IDENTITY_PREFIX,
-  type ExecutionStopReason,
   type Job,
   JOB_IDENTITY_PREFIX,
   LOSS_SWEEP_INTERVAL_MS,
@@ -199,7 +199,7 @@ export interface Dependencies {
   traceIdentity: TraceIdentity;
   telemetry: ExecutionTelemetry;
   logger: Logger;
-  stopOrderOf(executionId: string): ExecutionStopReason | null;
+  stopOrderOf(executionId: string): StopOrderReason | null;
   executionReleased(executionId: string, stop: ReleaseStop | null): void;
   archiving(tx: Transaction, runtimeIdentity: string): boolean;
   health?: HealthRegistry;
@@ -276,6 +276,25 @@ export class SchedulerService implements Service, WorkQueue {
         node_branch: nodeBranchOfExecution(tx, this.dependencies.branches, row),
       };
     });
+  }
+  seedExecutionOf(tx: Transaction, executionId: string) {
+    const row = readExecution(tx, executionId);
+    if (row === null) return null;
+    return {
+      execution_id: row.execution_id,
+      project_id: row.project_id,
+      node_id: row.node_id,
+      attempt: row.attempt,
+      pinned_revision: row.pinned_revision,
+      node_branch: nodeBranchOfExecution(tx, this.dependencies.branches, row),
+      runtime_identity: row.runtime_identity,
+      worker_binding_id: row.worker_binding_id,
+      credentials: row.credentials,
+      created_at: row.created_at,
+      expired_at: row.expired_at,
+      trace_id: row.trace_id,
+      root_span_id: row.root_span_id,
+    };
   }
   revoke(
     tx: Transaction,

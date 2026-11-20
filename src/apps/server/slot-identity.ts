@@ -1,5 +1,5 @@
 import { ULID_LENGTH } from "../../kernel/identity.ts";
-import { deriveKey } from "../../kernel/json.ts";
+import { deriveKey } from "../../kernel/key-derivation.ts";
 
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const BITS_PER_CHARACTER = 5n;

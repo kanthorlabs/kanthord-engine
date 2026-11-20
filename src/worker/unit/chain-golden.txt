@@ -1,0 +1,110 @@
+chain implement
+  seed claim, setup, sshAccess
+  phase prepare
+    [PAR] prepare.inputs
+      step inputs.read(revision, prior)     reads revision and prior in parallel
+      branch workspace
+        step inputs.read(attemptEvidence)
+        step workspace.node                 one coder checkout per binding at the node branch; restore to the read head; stop operation_failed/repository.node_checkout.pending_rebuild, operation_failed/repository.node_branch.missing, operation_failed/repository.connector.git_failed
+        [PAR] workspace.static
+          step affected.declaration         per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
+          step setup.entries(live)          stop environment_failed/setup_failed
+          step agent.open                   port: agent.open; stop operation_failed
+    step state.open                         the live implement state of the later phases
+  phase start
+    step base.refresh(claim)                [LLM] port: secrets.redact; per checkout and merged branch: merge, marker check of the conflicted files, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge, resolved only when each conflicted file held a marker at the merge and holds none now; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+    [PAR] start.inputs
+      step env.setup(live)                  on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end; stop environment_failed/setup_failed
+      step units.plan                       verdict rule, unit records, pending units
+  phase tasks                               one call: foundryImplement(input, host)
+    loop release_rounds                     until the release gate passes; a routed failure gives the next round
+      step budget.check                     budget end at the start of a round
+      loop units                            one frame per unit of the round; span worker.task
+        step unit.enter                     names the current unit; a planned round resets the unchanged-turn count
+        loop revisions                      until the unit passes; scope of the unit
+          step unit.turn                    [LLM] port: secrets.redact; Work | TaskRevision | CriterionRevision; gate G in write mode; budget end; stop provider_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
+          step verify.own                   port: releaseTrees.takeBase, secrets.redact; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit; stop no_progress, operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed
+        step unit_record.put                port: unitRecords.put; on a pass; the unit record of the checkouts that hold a gate commit of the unit; a failed put ends nothing; stop revoked
+        step unit.leave                     notes the final agent text for the coder report; counts the completed unit
+      loop release_gate                     one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count
+        step base.fetch                     port: repository.fetchBase; base_branch and upstream_branch of each checkout; stop operation_failed/repository.connector.git_failed
+        step base.refresh(release)          [LLM] port: secrets.redact; per checkout and merged branch: merge, marker check of the conflicted files, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge, resolved only when each conflicted file held a marker at the merge and holds none now; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
+        step release.verify                 port: releaseTrees.take, releaseTrees.takeBase, releaseTrees.give; release trees, setup, every command, affected tests; gives the trees back; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed, environment_failed/affected_invalid, environment_failed/affected_timeout
+        step release.route                  passed -> leave release_rounds; routed -> owner unit, next round
+  phase finish
+    step report.coder                       one evidence with the final text of each unit; skipped with no text
+    step branch.push                        [cleanup] fence; per checkout; push record around each push; stop revoked, operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
+    step evidence.head                      [cleanup] the pushed head of each binding
+    step execution.release                  [cleanup] further_work false
+  budget_end in prepare: stop budget_end/wall_time
+  onExit budget_end, after prepare
+    step checkpoint.gate                    [cleanup] aborts the agent; concludes a resolved open merge; aborts each other MERGE_HEAD; commits the partial work of the current unit; stop operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left
+    step branch.push                        [cleanup] fence; per checkout; push record around each push; stop revoked, operation_failed/repository.connector.git_failed, operation_failed/repository.node_branch.taken
+    step execution.release                  [cleanup] further_work true; stop budget_end/<limit> only when no unit completed
+  onStop not revoked, after prepare
+    step checkpoint.gate(restore)           [cleanup] aborts the agent; aborts every MERGE_HEAD; skipped after a turn violation; a violation restores
+    step branch.push(stop)                  [cleanup] fence; per checkout; no worker.git span; a failure logs checkpoint failed
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked
+
+chain evaluation
+  seed claim, setup, sshAccess
+  phase prepare
+    step inputs.read(revision, attemptEvidence, reviewRound, dependencies) reads in parallel; dependencies in the examine intent only
+    step workspace.review(snapshot)         review trees and the round scope; stop when a snapshot or the tested input is absent; stop operation_failed, operation_failed/repository.connector.git_failed
+    [PAR] prepare.place
+      branch environment
+        step setup.entries(review)          stop environment_failed/setup_failed
+        step env.setup(review)              node failure -> criterion-not-met; budget end; stop environment_failed/setup_failed
+      branch assets
+        step assets.place                   support assets and round patches for the reviewer; at most 4 downloads at a time; stop operation_failed
+  phase tasks                               one call: foundryEvaluation(input, host)
+    loop evaluation                         one frame; span worker.evaluation
+      step verify.all(evaluation)           every node and task command; the stop class goes to judgement
+      step evidence.publish(verification)   port: evidence.submit
+      step affected.run(evaluation)         implement intent, one checkout or more, setup and verify.all passed; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/affected_invalid, environment_failed/affected_timeout, environment_failed/command_absent
+      step evidence.publish(affected)       port: evidence.submit; only when the affected step holds a document
+      step judgement                        [LLM] port: agent.open; shortcut on failure -> criterion-not-met; else Evaluation, Repair once; budget end; stop operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, judgement_invalid, operation_failed, provider_failed
+      step evidence.publish(patches)        port: evidence.submit
+  phase finish
+    step assessment.submit                  [cleanup] outcome -> closed; node not Evaluating -> revoked; success -> request actions, then execution.release(false); stop operation_failed, action_unsettled
+  budget_end in each phase: stop assessment_absent
+  onStop not revoked, after prepare         no node
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked
+
+chain examine
+  seed claim, setup, sshAccess
+  phase prepare
+    [PAR] prepare.inputs
+      step inputs.read(revision, dependencies) reads in parallel; budget end after the reads
+      branch workspace
+        step workspace.review(base)         one tree per binding at its base head; stop operation_failed/repository.connector.git_failed
+        step setup.entries(examine)         stop environment_failed/setup_failed
+        step env.setup(examine)             budget end; stop environment_failed/setup_failed
+  phase tasks                               one call: foundryExamine(input, host)
+    [PAR] tasks.inputs
+      step agent.open                       port: agent.open; budget end after the open; stop operation_failed
+      step verify.node                      node commands at the base heads; skipped with no checkout
+    step examine.turn                       [LLM] port: evidence.submit; Examine; budget end after the turn unless the reply is complete; submits the report evidence; stop report_absent, provider_failed
+  phase finish
+    step execution.release                  [cleanup] further_work false
+  budget_end in prepare: stop budget_end/wall_time
+  onExit budget_end, after prepare
+    step execution.release                  [cleanup] further_work true; stop budget_end/<limit>
+  onStop not revoked, after prepare         no node
+  dispose resources                         on every end
+  step execution.release(stop)              [cleanup] on each stop that is not revoked
+
+chain tasks_prepare
+  seed claim, setup, workspace, revision, prior
+  phase prepare                             runPhase; no onExit, no onStop
+    [PAR] workspace.static
+      step affected.declaration             per checkout at origin/<base>; an absent declaration gives no entry; stop environment_failed/affected_invalid
+      step setup.entries(live)              stop environment_failed/setup_failed
+      step agent.open                       port: agent.open; stop operation_failed
+    step state.open                         the live implement state of the later phases
+    [PAR] start.inputs
+      step env.setup(live)                  on the merged heads; node failure -> setup instruction of the first unit; budget end; restore on a stop or a budget end; stop environment_failed/setup_failed
+      step units.plan                       verdict rule, unit records, pending units
+  dispose resources                         by the caller, on every end

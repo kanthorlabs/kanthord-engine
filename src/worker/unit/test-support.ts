@@ -39,31 +39,46 @@ import {
 } from "../test-support.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import {
+  type ExecutionCredential,
   modelConnectorInput,
   type ModelRuntimeFactory,
 } from "./model-runtime.ts";
-import {
-  type ExecutionEnvironment,
-  ExecutionIntent,
-  type ExecutionSetup,
-  type RepositoryTransport,
+import type {
+  ExecutionEnvironment,
+  ExecutionSetup,
+  HostTools,
+  RepositoryTransport,
 } from "../contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { AFFECTED_DECLARATION_FILE } from "./affected.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
-import { openNativeAgent } from "./native-agent.ts";
-import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
+import {
+  type NativeOpenRequest,
+  nativeSessionTrace,
+  type NativeTrace,
+  openNativeAgent,
+} from "./native-agent.ts";
+import { agentPort, type SessionPort } from "../../agent/agent-port.ts";
+import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
+import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+import type { KnownSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
-import { prepareStepsWorkspace } from "./steps-implement.ts";
+import { prepareStepsWorkspace } from "./steps-implement-host.ts";
+import { commonPorts } from "./worker-ports.ts";
 import type { RefreshResult } from "./base-refresh.ts";
-import type { Verdict } from "./node-reads.ts";
+import type { Verdict } from "./node-verdict.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
-import { doneTrailerOf } from "./done-record.ts";
+import { digest } from "../../kernel/json.ts";
+import type { UnitRecord } from "../contract.ts";
 import { VerificationKind } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
+import { commitStaged, headCommit, stageWork } from "./local-git.ts";
+import type { Context } from "../../kernel/context.ts";
 export { LOCAL_GIT_SSH_ACCESS } from "../../repository/sshd-test-support.ts";
 export {
   scriptedProvider,
@@ -76,6 +91,21 @@ export {
   fauxThinking,
 } from "@earendil-works/pi-ai";
 export * from "../test-support.ts";
+
+const NO_STAGED_PATHS = 0;
+
+export async function commitWork(
+  env: NodeJS.ProcessEnv,
+  directory: string,
+  message: string,
+  context: Context,
+  deadlineMs: number,
+): Promise<string | null> {
+  const call = { env, directory, context, deadlineMs };
+  if ((await stageWork(call)).length === NO_STAGED_PATHS) return null;
+  await commitStaged(call, message);
+  return headCommit(env, directory, context, deadlineMs);
+}
 
 export function scriptedModelRuntime(
   provider: ScriptedProvider,
@@ -112,6 +142,13 @@ export function agentTrees(workspaces: WorkspaceRoot): string[] {
     .trees()
     .map((tree) => tree.path)
     .filter((path) => basename(dirname(path)) === PoolClass.Agent);
+}
+
+export function commandTrees(workspaces: WorkspaceRoot): string[] {
+  return workspaces.pool
+    .trees()
+    .map((tree) => tree.path)
+    .filter((path) => basename(dirname(path)) === PoolClass.Command);
 }
 
 export async function remapOrigin(
@@ -355,6 +392,12 @@ async function openExecution(
           data: { items: [], next_cursor: null },
         }),
       },
+      worker: {
+        "execution.unit_record.put": async (request: { body: UnitRecord }) => {
+          storeUnitRecord(setup, request.body);
+          return { type: "completed", status: 200, data: request.body };
+        },
+      },
     } as unknown as MethodClients,
     credentials: { release: async () => {} },
     context: background,
@@ -370,33 +413,37 @@ async function openExecution(
     type: "api_key",
     key: STEPS_KEY,
   }));
+  const knownSecrets = credentialSecrets(credentials, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
+  });
   const agent = await openNativeAgent({
-    hostTools: unusedHostTools,
-    setup,
-    claim,
-    intent: ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store: credentials,
-    },
-    knownSecrets: credentialSecrets(credentials, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store: credentials,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome: temporary(t),
     }),
-    workspace: workspace.root,
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
+    request: workspaceRequest(setup, claim, workspace.root),
+    knownSecrets,
+    budget,
     context: run.operationContext,
   });
-  stopAfter(t, () => agent.dispose());
+  stopAfter(t, () => agent.close());
   return {
     input,
     run,
+    cancel: run.operationContext,
+    get ports() {
+      return commonPorts(run);
+    },
     agent,
     revision: {
       filename: "implement.md",
@@ -417,6 +464,7 @@ async function openExecution(
     lastVerification: null as VerificationFacts,
     revisionCount: 0,
     memo: new VerificationMemo(),
+    verificationTimedOut: false,
     provider,
     bare: bares[0]!,
     bares,
@@ -484,22 +532,32 @@ export async function commitOnNode(directory: string, content: string) {
   await simpleGit(directory).commit("node change");
 }
 
-export async function recordDone(
-  h: { checkouts: { directory: string; head: string }[] },
+export function storeUnitRecord(
+  setup: ExecutionSetup,
+  record: UnitRecord,
+): void {
+  setup.unit_records = [
+    ...setup.unit_records.filter(({ unit_id }) => unit_id !== record.unit_id),
+    record,
+  ];
+}
+
+export async function recordUnit(
+  h: {
+    checkouts: { directory: string; head: string; binding_id: string }[];
+    input: { setup: ExecutionSetup };
+  },
   unit: TaskContent,
 ) {
   const checkout = h.checkouts[0]!;
   const git = simpleGit(checkout.directory);
-  await git.raw([
-    "commit",
-    "-q",
-    "--allow-empty",
-    "--message",
-    "done",
-    "--trailer",
-    doneTrailerOf(unit),
-  ]);
+  await git.raw(["commit", "-q", "--allow-empty", "--message", "done"]);
   checkout.head = (await git.revparse(["HEAD"])).trim();
+  storeUnitRecord(h.input.setup, {
+    unit_id: unit.id,
+    content_digest: digest(unit.content),
+    commits: [{ binding_id: checkout.binding_id, commit: checkout.head }],
+  });
 }
 
 export function recordReleases(
@@ -545,6 +603,37 @@ export function spanEnds(
       ? [record]
       : [],
   );
+}
+
+function spanStarts(
+  records: readonly TelemetryRecord[],
+  operation: SpanOperation,
+) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === operation &&
+    record.start_time !== undefined
+      ? [record]
+      : [],
+  );
+}
+
+export function phaseSpanNames(records: readonly TelemetryRecord[]): unknown[] {
+  return spanStarts(records, SpanOperation.Phase).map(
+    (record) => record.attributes?.["kanthord.phase"],
+  );
+}
+
+export function stepSpanOutcomes(
+  records: readonly TelemetryRecord[],
+): unknown[][] {
+  const ends = spanEnds(records, SpanOperation.Step);
+  return spanStarts(records, SpanOperation.Step).map((start) => [
+    start.attributes?.["kanthord.step.id"],
+    ends.find((end) => end.span_id === start.span_id)?.attributes?.[
+      "kanthord.step.outcome"
+    ],
+  ]);
 }
 
 export function listedVerificationSpans(records: readonly TelemetryRecord[]) {
@@ -597,5 +686,50 @@ export function commandLimitClock(t: TestContext, startedMarker: string) {
       assert.ok(ticked, "a verification started");
       await ticked;
     },
+  };
+}
+
+export interface TestSessionsInput {
+  credential: ExecutionCredential;
+  modelRuntimeFactory: ModelRuntimeFactory;
+  knownSecrets: KnownSecrets;
+  budget: ExecutionBudget;
+  hostHome: string;
+  hostTools?: HostTools;
+  spans?: SpanRecorder;
+  sessionRoot?: string;
+}
+
+export function testSessions(
+  input: TestSessionsInput,
+): SessionPort<NativeTrace> {
+  const tools = () => input.hostTools ?? unusedHostTools;
+  return agentPort({
+    capabilities: [executionEvidence(tools), linkUpdates(tools)],
+    modelRuntimeFactory: ({ agent, signal }) =>
+      input.modelRuntimeFactory({
+        credential: input.credential,
+        agent,
+        signal,
+      }),
+    knownSecrets: input.knownSecrets,
+    trace: nativeSessionTrace(input.spans),
+    sessionRoot: input.sessionRoot ?? null,
+    budget: input.budget,
+    env: hostEnvironment(),
+    hostHome: input.hostHome,
+  });
+}
+
+export function workspaceRequest(
+  setup: ExecutionSetup,
+  claim: NativeOpenRequest["claim"],
+  workspace: string,
+): NativeOpenRequest {
+  return {
+    claim,
+    setup,
+    checkouts: [{ directory: workspace }],
+    reviewWorkspace: null,
   };
 }

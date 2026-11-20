@@ -23,7 +23,8 @@ const createWorkerTables: Migration = (database) => {
       public_key TEXT,
       fingerprint TEXT,
       created_at INTEGER NOT NULL,
-      ended_at INTEGER
+      ended_at INTEGER,
+      archive_actor TEXT
     );
     CREATE UNIQUE INDEX worker_instance_name_revision ON worker_instance (name, revision);
     CREATE UNIQUE INDEX worker_instance_fingerprint ON worker_instance (fingerprint);
@@ -38,6 +39,13 @@ const createWorkerTables: Migration = (database) => {
     );
     CREATE UNIQUE INDEX worker_machine_name_revision ON worker_machine (name, revision);
     CREATE UNIQUE INDEX worker_machine_fingerprint ON worker_machine (fingerprint);
+    CREATE TABLE worker_unit_record (
+      node_id TEXT NOT NULL,
+      unit_id TEXT NOT NULL,
+      content_digest TEXT NOT NULL,
+      commits TEXT NOT NULL,
+      PRIMARY KEY (node_id, unit_id)
+    );
   `);
 };
 

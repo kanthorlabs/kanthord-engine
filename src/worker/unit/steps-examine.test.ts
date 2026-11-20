@@ -15,25 +15,31 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
+import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { background } from "../../kernel/context.ts";
 import type { Revision } from "../../mission/contract.ts";
-import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { BudgetLimit } from "../../scheduler/contract.ts";
 import {
   anthropicSetup,
   everyBindingSshAccess,
+  phaseSpanNames,
   repositorySetup,
+  stepSpanOutcomes,
   transport,
 } from "./test-support.ts";
-import {
-  CHECKOUTS_DIRECTORY,
-  REVIEW_DIRECTORY,
-  WorkspaceRoot,
-} from "./workspace.ts";
+import { FrameOutcome } from "./chain.ts";
+import { Phase } from "./telemetry.ts";
+import type { TelemetryRecord } from "../../tracking/contract.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { CHECKOUTS_DIRECTORY, REVIEW_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
+import type { AgentOpenRequest } from "./foundry-ports.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import {
   type CancellationContext,
@@ -71,6 +77,8 @@ test("examine reports its dependencies once and gives its tree back to the pool"
       further: false,
       evidence: true,
       opens: 1,
+      phases: [Phase.Prepare, Phase.Tasks, Phase.Finish],
+      turn: FrameOutcome.Next,
     },
     {
       states: ["Completed"],
@@ -78,6 +86,8 @@ test("examine reports its dependencies once and gives its tree back to the pool"
       further: null,
       evidence: false,
       opens: 1,
+      phases: [Phase.Prepare, Phase.Tasks],
+      turn: FrameOutcome.Stop,
     },
   ];
   for (const scenario of scenarios) {
@@ -107,6 +117,18 @@ test("examine reports its dependencies once and gives its tree back to the pool"
     const empty = async () => completed({ items: [], next_cursor: null });
     const clients = {
       mission: {
+        "execution.pinnedRevision.get": async () => ({
+          type: "completed",
+          status: 200,
+          data: {
+            content: {
+              name: "examine",
+              requirement: "report",
+              criterion: "report",
+              verifications: [],
+            },
+          } as unknown as Revision,
+        }),
         "execution.dependency.list": async () =>
           completed({
             items: [{ id: "dependency", state: scenario.states[reads++] }],
@@ -137,11 +159,16 @@ test("examine reports its dependencies once and gives its tree back to the pool"
         },
       },
     } as unknown as MethodClients;
+    const records: TelemetryRecord[] = [];
     const run = new ExecutionRun({
       claim,
       clients,
       credentials: { release: async () => {} },
       context: background,
+      telemetry: {
+        write: (batch) => void records.push(...batch),
+        flush: async () => {},
+      },
     });
     stopAfter(t, () => run.dispose());
     const open = async () => {
@@ -162,14 +189,6 @@ test("examine reports its dependencies once and gives its tree back to the pool"
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "report",
-          criterion: "report",
-          verifications: [],
-        },
-      } as unknown as Revision,
       new ExecutionBudget({
         ...claim,
         resource_budget: setup.resource_budget,
@@ -195,10 +214,26 @@ test("examine reports its dependencies once and gives its tree back to the pool"
       workspaces.pool.trees().map((tree) => basename(dirname(tree.path))),
       [PoolClass.Agent],
     );
+    assert.deepEqual(phaseSpanNames(records), scenario.phases);
+    assert.deepEqual(
+      stepSpanOutcomes(records).sort(),
+      [
+        ["inputs.read(revision, dependencies)", FrameOutcome.Next],
+        ["workspace.review(base)", FrameOutcome.Next],
+        ["setup.entries(examine)", FrameOutcome.Next],
+        ["env.setup(examine)", FrameOutcome.Next],
+        ["agent.open", FrameOutcome.Next],
+        ["verify.node", FrameOutcome.Next],
+        ["examine.turn", scenario.turn],
+        ...(scenario.further === null
+          ? []
+          : [["execution.release", FrameOutcome.Next]]),
+      ].sort(),
+    );
   }
 });
 
-test("B4 examine releases when reads or agent opening consume the wall budget", async (t) => {
+test("B4 examine releases with the stop budget_end/wall_time when reads in prepare or the agent opening consume the wall budget", async (t) => {
   for (const duringOpen of [false, true]) {
     const setup = anthropicSetup({
       repositories: [],
@@ -223,6 +258,11 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
     let releases = 0;
     const clients = {
       mission: {
+        "execution.pinnedRevision.get": async () => ({
+          type: "completed",
+          status: 200,
+          data: {} as Revision,
+        }),
         "execution.dependency.list": page,
         "execution.dependency.outcome.list": page,
         "execution.dependency.evidence.list": page,
@@ -247,8 +287,8 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
       throw new DeadlineExceeded();
     };
     const workspaces = WorkspaceRoot.open(temporary(t));
-    assert.deepEqual(
-      await runStepsExamine(
+    const end = await executionBoundary(run, () =>
+      runStepsExamine(
         {
           setup,
           claim,
@@ -258,20 +298,22 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
           env: hostEnvironment(),
         },
         run,
-        {} as Revision,
         new ExecutionBudget({
           ...claim,
           resource_budget: setup.resource_budget,
         }),
         open,
       ),
-      { kind: "released", furtherWork: true },
     );
+    assert.ok("furtherWork" in end && end.furtherWork);
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.BudgetEnd);
+    assert.equal(end.stop.code, BudgetLimit.WallTime);
     assert.equal(releases, EXPECTED_RELEASES);
   }
 });
 
-test("an examine node that its agent deadline cuts releases with further work and no failure stop", async (t) => {
+test("an examine node that its agent deadline cuts releases with further work and the stop budget_end/wall_time", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
   const claim = {
     execution_id: setup.execution_id,
@@ -292,6 +334,18 @@ test("an examine node that its agent deadline cuts releases with further work an
   const releases: unknown[] = [];
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "report",
+            criterion: "report",
+            verifications: [],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -338,20 +392,93 @@ test("an examine node that its agent deadline cuts releases with further work an
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "report",
-          criterion: "report",
-          verifications: [],
-        },
-      } as unknown as Revision,
       budget,
       open,
     ),
   );
-  assert.deepEqual(end, { kind: "released", furtherWork: true });
-  assert.deepEqual(releases, [{ further_work: true, stop: null }]);
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.BudgetEnd);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
+  assert.equal(releases.length, EXPECTED_RELEASES);
+});
+
+test("an examine agent open that fails releases with the operation_failed stop", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const releases: {
+    further_work: boolean;
+    stop: { reason: string; code: string | null };
+  }[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {} as Revision,
+      }),
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async (input: { body: (typeof releases)[number] }) => {
+        releases.push(input.body);
+        return { type: "completed", status: 200, data: {} };
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  stopAfter(t, () => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  await executionBoundary(run, () =>
+    runStepsExamine(
+      {
+        setup,
+        claim,
+        workspaces: WorkspaceRoot.open(temporary(t)),
+        transport: {} as RepositoryTransport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      budget,
+      async () => {
+        throw new Error("open failed");
+      },
+    ),
+  );
+  assert.deepEqual(
+    releases.map(({ further_work, stop }) => ({
+      further_work,
+      reason: stop.reason,
+      code: stop.code,
+    })),
+    [{ further_work: true, reason: EndReason.OperationFailed, code: null }],
+  );
 });
 
 test("an examine node with two repository bindings runs from checkouts/ and lists each repository in the work and examine prompts", async (t) => {
@@ -379,6 +506,18 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   const page = async () => completed({ items: [], next_cursor: null });
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: [`pwd > ${output}`],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -410,8 +549,8 @@ test("an examine node with two repository bindings runs from checkouts/ and list
   } as unknown as RepositoryTransport;
   const opened: string[] = [];
   const texts: string[] = [];
-  const open = async (directory: string) => {
-    opened.push(directory);
+  const open = async (request: AgentOpenRequest) => {
+    opened.push(request.reviewWorkspace!.directory);
     return {
       instruct: async (work: { text: string }, text: string) => {
         texts.push(work.text, text);
@@ -431,14 +570,6 @@ test("an examine node with two repository bindings runs from checkouts/ and list
         env: hostEnvironment(),
       },
       run,
-      {
-        content: {
-          name: "examine",
-          requirement: "examine",
-          criterion: "examine",
-          verifications: [`pwd > ${output}`],
-        },
-      } as unknown as Revision,
       new ExecutionBudget({
         ...claim,
         resource_budget: setup.resource_budget,
@@ -482,6 +613,18 @@ test("an examine verification that the wall deadline cuts gives a later assessme
   });
   const clients = {
     mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: ["sleep 30"],
+          },
+        } as unknown as Revision,
+      }),
       "execution.dependency.list": page,
       "execution.dependency.outcome.list": page,
       "execution.dependency.evidence.list": page,
@@ -506,7 +649,11 @@ test("an examine verification that the wall deadline cuts gives a later assessme
     resource_budget: setup.resource_budget,
   });
   const open = async () =>
-    ({ budget, instruct: async () => {} }) as unknown as NativeAgent;
+    ({
+      budget,
+      instruct: async () => {},
+      completeReply: () => false,
+    }) as unknown as NativeAgent;
   const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
   const transport = {
     cloneSnapshot: async (
@@ -518,30 +665,21 @@ test("an examine verification that the wall deadline cuts gives a later assessme
       return "a".repeat(40);
     },
   } as unknown as RepositoryTransport;
-  assert.deepEqual(
-    await runStepsExamine(
-      {
-        setup,
-        claim,
-        workspaces,
-        transport,
-        sshAccess: everyBindingSshAccess,
-        env: hostEnvironment(),
-      },
-      run,
-      {
-        content: {
-          name: "examine",
-          requirement: "examine",
-          criterion: "examine",
-          verifications: ["sleep 30"],
-        },
-      } as unknown as Revision,
-      budget,
-      open,
-    ),
-    { kind: "released", furtherWork: true },
+  const end = await runStepsExamine(
+    {
+      setup,
+      claim,
+      workspaces,
+      transport,
+      sshAccess: everyBindingSshAccess,
+      env: hostEnvironment(),
+    },
+    run,
+    budget,
+    open,
   );
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
   let stopped: unknown;
   try {
     run.stop(EndReason.AssessmentAbsent);
@@ -557,6 +695,118 @@ test("an examine verification that the wall deadline cuts gives a later assessme
       CauseCategory.Model,
     ]),
   );
+});
+
+test("a budget end in env.setup(examine) of prepare releases with further work and the stop budget_end/wall_time", async (t) => {
+  const setup = anthropicSetup({
+    repositories: [
+      {
+        ...repositorySetup(),
+        environment: {
+          source: EnvironmentSource.Stored,
+          document: { postCreateCommand: "sleep 30" },
+          digest: "d".repeat(64),
+        },
+      },
+    ],
+    resource_budget: { turns: 200, wall_time_ms: WALL_TIME_MS },
+  });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const page = async () => ({
+    type: "completed",
+    status: 200,
+    data: { items: [], next_cursor: null },
+  });
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () => ({
+        type: "completed",
+        status: 200,
+        data: {
+          content: {
+            name: "examine",
+            requirement: "examine",
+            criterion: "examine",
+            verifications: [],
+          },
+        } as unknown as Revision,
+      }),
+      "execution.dependency.list": page,
+      "execution.dependency.outcome.list": page,
+      "execution.dependency.evidence.list": page,
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return { type: "completed", status: 200, data: {} };
+      },
+    },
+  } as unknown as MethodClients;
+  const run = new ExecutionRun({
+    claim,
+    clients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  stopAfter(t, () => run.dispose());
+  const budget = new ExecutionBudget({
+    ...claim,
+    resource_budget: setup.resource_budget,
+  });
+  const open = async () => assert.fail("The prepare ends before the agent.");
+  const workspaces = WorkspaceRoot.open(realpathSync(temporary(t)));
+  const transport = {
+    cloneSnapshot: async (
+      _address: string,
+      _revision: string,
+      directory: string,
+    ) => {
+      const git = simpleGit(directory);
+      await git.init();
+      await git.raw([
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.invalid",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "base",
+      ]);
+      return (await git.revparse(["HEAD"])).trim();
+    },
+  } as unknown as RepositoryTransport;
+  const end = await executionBoundary(run, () =>
+    runStepsExamine(
+      {
+        setup,
+        claim,
+        workspaces,
+        transport,
+        sshAccess: everyBindingSshAccess,
+        env: hostEnvironment(),
+      },
+      run,
+      budget,
+      open,
+    ),
+  );
+  assert.ok("furtherWork" in end && end.furtherWork);
+  assert.ok("stop" in end && end.stop);
+  assert.equal(end.stop.reason, EndReason.BudgetEnd);
+  assert.equal(end.stop.code, BudgetLimit.WallTime);
+  assert.equal(releases.length, EXPECTED_RELEASES);
 });
 
 test("an examine checkout resolves origin/<upstream_branch>", async (t) => {

@@ -4,7 +4,8 @@ import { background } from "../../kernel/context.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { AssessmentResult, ClosingEvent } from "../../mission/contract.ts";
 import { linkUpdatesText } from "./judgement.ts";
-import { ExecutionRun, ExecutionStop } from "./execution-run.ts";
+import { ExecutionRun } from "./execution-run.ts";
+import { ExecutionStop } from "./execution-stop.ts";
 import {
   READ_PAGE_LIMIT,
   readAllPages,
@@ -13,8 +14,8 @@ import {
   readRequestedChanges,
   readReworkAssessment,
   VERDICT_LINK_UPDATE_LIMIT,
-  VerdictSource,
 } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
 
@@ -670,4 +671,54 @@ test("no update keeps the verdict absent at attempt 1", async (t) => {
     verdict: null,
     cleared: null,
   });
+});
+
+const FIRST_READS = 3;
+const BARRIER_MS = 5000;
+
+test("the failed check, rework and link update reads run at the same time, and a read that the precedence skips does not run", async (t) => {
+  const run = fixture(SECOND_ATTEMPT);
+  stopAfter(t, () => run.dispose());
+  let started = 0;
+  let open: () => void = () => {};
+  const barrier = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const timeout = AbortSignal.timeout(BARRIER_MS);
+  const together = async <T>(answer: T): Promise<T> => {
+    started += 1;
+    if (started === FIRST_READS) open();
+    await Promise.race([
+      barrier,
+      new Promise((_, reject) =>
+        timeout.addEventListener("abort", () =>
+          reject(new Error("the first reads ran one after another")),
+        ),
+      ),
+    ]);
+    return answer;
+  };
+  const skipped: string[] = [];
+  const never = (name: string) => async () => {
+    skipped.push(name);
+    return NOT_FOUND;
+  };
+  const failed = failedCheckRead(["lint"]);
+  run.clients.mission = {
+    "execution.rework_assessment.get": () => together(NOT_FOUND),
+    "execution.review_round.get": never("review_round"),
+    "execution.clearedOutcome.get": never("cleared_outcome"),
+    "execution.cleared_assessment.get": never("cleared_assessment"),
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = {
+    "execution.failed_check.get": async () =>
+      together(await failed["execution.failed_check.get"]()),
+    "execution.link_update.get": async () =>
+      together(await NO_LINK_UPDATES["execution.link_update.get"]()),
+    "execution.change_request.get": never("change_request"),
+  } as unknown as MethodClients["worker"];
+  const prior = await readPrior(run, REPOSITORIES);
+  assert.equal(prior.verdict?.source, VerdictSource.FailedChecks);
+  assert.equal(started, FIRST_READS);
+  assert.deepEqual(skipped, []);
 });

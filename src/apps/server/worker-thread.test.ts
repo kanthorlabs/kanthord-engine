@@ -17,7 +17,12 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
-import { BindingEntryState, workerOperations } from "../../worker/contract.ts";
+import {
+  BindingEntryState,
+  StopOrderReason,
+  workerOperations,
+} from "../../worker/contract.ts";
+import { createIdentity } from "../../kernel/identity.ts";
 import {
   entryPorts,
   threadDataSchema,
@@ -376,6 +381,66 @@ test("a worker thread exits after a stop that follows a drain and a resume of it
     (candidate) => candidate.items.length === SINGLE_INSTANCE,
     t.signal,
   );
+  const exited = once(thread, "exit", {
+    signal: AbortSignal.timeout(THREAD_EXIT_LIMIT_MS),
+  });
+  thread.postMessage({ kind: ThreadMessageKind.Stop });
+  await exited;
+});
+
+test("a worker thread takes a stop_orders message to its unit, keeps its registration and exits after a stop", async (t) => {
+  requirePiTools();
+  const fixture = await gatewayFixture(t, {
+    repositoryConnector: {
+      gitLsRemote: async () => {},
+    },
+  });
+  await provisionRepositoryCredentials(fixture);
+  const project = await provisionWorkerProject(fixture, "thread-orders", {
+    general: SINGLE_INSTANCE,
+  });
+  await project.pause();
+  const logger = pino({ level: "silent" });
+  const token = await fixture.machineToken(project.id, "general", "slot");
+  const channel = new MessageChannel();
+  servePort(channel.port1, fixture.invocation, () => token, logger);
+  const entry = entryOf(channel.port2, "client_identity_general");
+  const thread = startThread(
+    threadData(entry),
+    threadEnvironment(temporary(t)),
+  );
+  stopAfter(t, async () => {
+    await thread.terminate();
+    channel.port1.close();
+  });
+  const list = humanCaller(fixture);
+  const registrations = () =>
+    list(workerOperations["registration.list"], {
+      params: {},
+      query: { project_id: project.id },
+      body: null,
+    });
+  await until(
+    registrations,
+    (candidate) => candidate.items.length === SINGLE_INSTANCE,
+    t.signal,
+  );
+  let exitedEarly = false;
+  thread.once("exit", () => {
+    exitedEarly = true;
+  });
+  thread.postMessage({
+    kind: ThreadMessageKind.StopOrders,
+    orders: [
+      {
+        execution_id: createIdentity("execution"),
+        reason: StopOrderReason.Revoked,
+      },
+    ],
+  });
+  await delay(DRAIN_DELIVERY_MS);
+  assert.equal(exitedEarly, false);
+  assert.equal((await registrations()).items.length, SINGLE_INSTANCE);
   const exited = once(thread, "exit", {
     signal: AbortSignal.timeout(THREAD_EXIT_LIMIT_MS),
   });

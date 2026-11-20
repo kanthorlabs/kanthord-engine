@@ -19,6 +19,9 @@ export const TemplateInvalidReason = {
   Render: "render",
 } as const;
 const MARKDOWN_EXTENSION = ".md";
+const ROOT_DATA = "root";
+const HASH_KEY = "hash";
+const PROGRAM_KEY = "program";
 const STRING_TYPE = "string";
 const TEMPLATE_NAMES = Object.values(PromptTemplate);
 
@@ -140,4 +143,29 @@ export function renderTemplate(
       error.message,
     );
   }
+}
+
+export function templateUses(text: string, variable: string): boolean {
+  assert.ok(variable);
+  const names = new Set<string>();
+  const visitor = new Handlebars.Visitor();
+  visitor.PathExpression = (path) => {
+    const [head, next] = path.parts;
+    const name = path.data && head === ROOT_DATA ? next : head;
+    if (name !== undefined) names.add(name);
+  };
+  visitor.StringLiteral = (literal) => {
+    names.add(literal.value);
+  };
+  visitor.PartialStatement = (partial) => {
+    visitor.acceptArray(partial.params);
+    visitor.acceptKey(partial, HASH_KEY);
+  };
+  visitor.PartialBlockStatement = (partial) => {
+    visitor.acceptArray(partial.params);
+    visitor.acceptKey(partial, HASH_KEY);
+    visitor.acceptKey(partial, PROGRAM_KEY);
+  };
+  visitor.accept(handlebars.parse(text));
+  return names.has(variable);
 }

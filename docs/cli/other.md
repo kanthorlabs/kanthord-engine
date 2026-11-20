@@ -762,6 +762,7 @@ receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` or
 `KANTHORD_ENDPOINT`.
 
 The data directory of the instance is `<XDG data directory>/kanthord/workers/<name>`.
+With `KANTHORD_CAPTURE_TASKS=1` in the environment of the worker process, each implement execution writes a seed to `captures/<execution_id>/seed.json` of the data directory. [Seed capture](./worker.md#seed-capture) states the rules.
 The log directory is `<XDG state directory>/kanthord/workers/<name>`.
 The bindings, the worker, the agent configuration and the client secret of each
 binding come from the server through the bindings that list the instance.
@@ -866,7 +867,8 @@ diagnostic names the `connection_name` of the other process.
 
 During an execution, the application logs one info record for each task start
 (`task started`), task commit (`task committed`), verification result (`task
-verified`), done record (`done recorded`) and node judgement (`node
+verified`), unit record (`unit recorded`, `unit record skipped`,
+`unit record failed`) and node judgement (`node
 judged`). When the checkpoint commit or the push of a stop
 fails, the application logs `checkpoint failed` with the `reason`, the thrown
 error text with secrets removed. The record has no `reason` when the worker
@@ -940,6 +942,9 @@ runs it, and help does not list it. It takes no option.
   error, so every other output lands in standard error.
 - It creates the `TMPDIR` directory with mode `0700`, then starts the worker
   thread with the operational log on standard error.
+- A `stop_orders` frame holds `orders`, each `{ execution_id, reason }`. It
+  sends the orders to the thread, and the worker unit stops each named
+  execution of its own.
 - A `control` frame sends `drain` or `stop` to the thread. `SIGTERM` and `SIGINT`
   send `stop`. A thread that does not exit within 5 s after a signal is
   terminated.
@@ -1295,7 +1300,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `repository.connector.tool_version`              | Git is older than 2.40 or OpenSSH is older than 9.0.                                                                                                                                                                                                                                                                                                               | serve server, serve worker                                                 |
 | local           | `repository.connector.git_failed`                | A git operation of the repository connector fails, is aborted or reaches its deadline; the message names the operation. An execution stops with `operation_failed`, and the stop detail holds the redacted git cause cut to 300 characters.                                                                                                                        | serve worker, binding apply                                                |
 | local           | `repository.node_branch.missing`                 | A record shows a push of the node branch and the remote holds no such branch; the steps execution stops.                                                                                                                                                                                                                                                           | serve worker                                                               |
-| local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn; the worker aborts the merge and the steps execution stops.                                                                                                                                                                                                                         | serve worker                                                               |
+| local           | `worker.merge.markers_left`                      | A file of the base merge still holds a conflict marker after the conflict turn, or a conflicted file with no marker at the merge is still unmerged in the index; the worker aborts the merge and the steps execution stops.                                                                                                                                        | serve worker                                                               |
 | local           | `project.environment.invalid`                    | The `.devcontainer/devcontainer.json` of the base head is not valid JSONC or not a valid environment; the container slot does not start.                                                                                                                                                                                                                           | serve server                                                               |
 | local           | `project.environment.key_refused`                | The repository devcontainer file of a slot start holds a key, a path or a variable that the build does not allow. The server logs it before the Onboarding component runs; the message names the key and the container slot does not start.                                                                                                                        | serve server                                                               |
 | local           | `project.onboarding.run_started`                 | The Onboarding component starts a run of the environment of a repository binding. The `info` record holds `binding`, `digest`, `target`, `status` and `class`.                                                                                                                                                                                                     | serve server                                                               |

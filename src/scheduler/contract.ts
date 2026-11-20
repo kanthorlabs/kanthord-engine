@@ -275,6 +275,7 @@ export interface NodeTransition {
 }
 export interface RevokedExecution {
   execution_id: string;
+  runtime_identity: string;
   trace: {
     execution_id: string;
     project_id: string;
@@ -290,7 +291,10 @@ export interface FailureHold {
   failure_count: number;
   available_at: number | null;
 }
-export interface EndedExecution extends Omit<RevokedExecution, "stop"> {
+export interface EndedExecution extends Omit<
+  RevokedExecution,
+  "stop" | "runtime_identity"
+> {
   transition: NodeTransition;
   hold: FailureHold;
 }

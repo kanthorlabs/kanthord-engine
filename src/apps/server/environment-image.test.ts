@@ -387,6 +387,27 @@ test("a symlinked .devcontainer of the checkout gets no write and no build path 
   });
 });
 
+test("path_refused: a build context link that leaves the checkout fails the build and names the key", async (t) => {
+  const directory = temporary(t);
+  const outside = join(directory, "outside");
+  mkdirSync(outside);
+  mkdirSync(join(directory, "state"));
+  const { build } = images(join(directory, "state"), {
+    environment: environment({
+      build: { dockerfile: "Dockerfile", context: "context" },
+    }),
+    cli: REPORT_CLI,
+    checkout: (target) => {
+      writeCheckout(target, { ".devcontainer/Dockerfile": "FROM scratch" });
+      symlinkSync(outside, join(target, ".devcontainer/context"));
+    },
+  });
+  assert.deepEqual(failureOf(await build()), {
+    class: EnvironmentImageFailure.BuildFailed,
+    detail: "build.context: the path leaves the checkout",
+  });
+});
+
 test("a local feature with a symbolic link fails the build and names the feature", async (t) => {
   const { build } = images(temporary(t), {
     environment: environment({ image: "base", features: { "./local": {} } }),

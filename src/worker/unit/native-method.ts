@@ -1,51 +1,58 @@
 import assert from "node:assert/strict";
-import {
-  EndReason,
-  type ExecutionEnd,
-  ExecutionEndKind,
-  type ExecutionRun,
-  type ExecutionStop,
-} from "./execution-run.ts";
-import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
+import type { ExecutionRun } from "./execution-run.ts";
+import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
+import { nativeSessionTrace, openNativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
   credentialSecrets,
   mergedSecrets,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
-import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
-import { SpanStatus } from "../../tracking/contract.ts";
-import type { Revision } from "../../mission/contract.ts";
-import { verificationCommands } from "./evaluation-input.ts";
-import { VerificationMemo } from "./verification-memo.ts";
+import { agentPort, type SessionModelFactory } from "../../agent/agent-port.ts";
+import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
+import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+import type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
+import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
-import { type MethodClaim, ExecutionRun as Run } from "./execution-run.ts";
+import { ExecutionRun as Run } from "./execution-run.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   ExecutionIntent,
   type ExecutionSetup,
-  type HostTools,
   type RepositoryTransport,
   WorkerMethod,
 } from "../contract.ts";
 import type { SshAccess } from "../../repository/contract.ts";
 import { getWorkerDeclaration } from "../catalog.ts";
-import { WorkspaceKind, type WorkspaceRoot } from "./workspace.ts";
+import type { WorkspaceRoot } from "./workspace.ts";
 import type {
   ExecutionCredential,
   ModelRuntimeFactory,
 } from "./model-runtime.ts";
 import { ExecutionBudget } from "./budget.ts";
-import { readPinnedRevision, readPrior } from "./node-reads.ts";
-import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
-import { runStepsExamine } from "./steps-examine.ts";
-import { runEvaluation } from "./evaluation.ts";
-import { phaseSpan } from "./method-telemetry.ts";
+import { ClaimWatch } from "./claim-watch.ts";
+import type { TasksCapture } from "./tasks-capture.ts";
+import type { Chain } from "./chain.ts";
+import { evaluationChain } from "./chain-evaluation.ts";
+import { examineChain } from "./chain-examine.ts";
+import { implementChain } from "./chain-implement.ts";
+import {
+  type ChainIo,
+  executionBoundary,
+  runChain,
+  type WalkInput,
+} from "./chain-runner.ts";
+import type { AgentOpenRequest, CommonPorts } from "./foundry-ports.ts";
+import {
+  type AgentHost,
+  evaluationPorts,
+  examinePorts,
+  implementHostPorts,
+} from "./worker-ports.ts";
 
-export type { ExecutionEnd } from "./execution-run.ts";
-const WORKING_AGENT = 0;
-const NODE_TASK_COUNT = "kanthord.node.task_count";
-const NODE_VERIFICATION_COUNT = "kanthord.node.verification_count";
-const NODE_BINDING_COUNT = "kanthord.node.binding_count";
+export type { ExecutionEnd } from "./execution-stop.ts";
+export { executionBoundary } from "./chain-runner.ts";
 export interface NativeExecutionInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
@@ -61,11 +68,13 @@ export interface NativeExecutionInput {
   env: NodeJS.ProcessEnv;
   modelRuntimeFactory: ModelRuntimeFactory;
   sessionRoot?: string;
-  hostTools: (workspace: string) => HostTools;
+  hostTools: SessionHostTools;
   context: Context;
   stop?: Context;
+  revocation?: Context;
   log?: (record: Record<string, unknown>) => void;
   telemetry?: TelemetrySink;
+  capture?: TasksCapture;
 }
 
 export async function runNativeExecution(
@@ -87,47 +96,44 @@ export async function runNativeExecution(
     ...input.claim,
     resource_budget: input.setup.resource_budget,
   });
-  const close = (agent: NativeAgent) => {
+  const close = async (agent: NativeAgent) => {
     const unlink = opened.get(agent);
     if (!unlink) return;
     opened.delete(agent);
     try {
-      disposeAgent(agent);
+      await disposeAgent(agent);
     } finally {
       unlink[Symbol.dispose]();
     }
   };
+  const capabilities = [
+    executionEvidence(input.hostTools),
+    linkUpdates(input.hostTools),
+  ];
+  const sessions = agentPort({
+    capabilities,
+    modelRuntimeFactory: modelFactoryOf(input),
+    knownSecrets: secrets,
+    trace: nativeSessionTrace(run.spans),
+    sessionRoot: input.sessionRoot ?? null,
+    budget,
+    env: input.env,
+    hostHome: input.hostHome,
+  });
   try {
+    using watch = new ClaimWatch(run);
     return await executionBoundary(run, async () => {
       await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
       if (!method) return run.stop(EndReason.OperationFailed);
-      const revision = await readPinnedRevision(run);
       const intent = input.setup.intent;
-      const open = async (workspace: string) => {
-        const agent = input.setup.agents[WORKING_AGENT];
-        assert.ok(agent);
-        const credential = input.credentials.items.find(
-          (item) => item.credential_id === agent.credential_id,
-        );
-        assert.ok(credential);
+      const open = async (request: AgentOpenRequest) => {
         const native = await openNativeAgent({
-          setup: input.setup,
-          claim: input.claim,
-          intent,
-          agent,
-          credential,
-          knownSecrets: secrets,
+          sessions,
+          request,
           budget,
-          workspace,
-          hostHome: input.hostHome,
-          env: input.env,
-          modelRuntimeFactory: input.modelRuntimeFactory,
-          hostTools: input.hostTools(workspace),
+          knownSecrets: secrets,
           context: run.operationContext,
-          turnCheck: () => run.checkClaim(),
-          spans: run.spans,
-          sessionRoot: input.sessionRoot,
         });
         const stop = stopOnEnd(run, native);
         const trace = run.onTraceClose((status) => native.closeTrace(status));
@@ -143,46 +149,34 @@ export async function runNativeExecution(
         opened.set(native, combined);
         return native;
       };
-      if (method === WorkerMethod.Evaluation)
-        return runEvaluation(input, run, budget, open);
-      if (intent === ExecutionIntent.Examine)
-        return runStepsExamine(input, run, revision, budget, open);
-      const prior = await readPrior(run, input.setup.repositories);
-      const workspace = await run.spans.within(
-        phaseSpan(Phase.Prepare),
-        () => prepareStepsWorkspace(input, run),
-        () => nodeShapeEnd(revision),
-      );
-      let working: NativeAgent;
-      try {
-        working = await open(workspace.root);
-      } catch (error) {
-        await workspace.base.giveBack();
-        input.workspaces.release(
-          input.workspaces.nodeKey(input.claim.node_id),
-          WorkspaceKind.Node,
-        );
-        throw error;
-      }
-      const state = {
+      const hosted = hostedChainOf(method, intent, {
         input,
-        run,
-        revision,
-        agent: working,
-        ...workspace,
-        verdict: prior.verdict,
-        cleared: prior.cleared,
-        unchangedTurns: 0,
-        refreshed: null,
-        lastVerification: null,
-        revisionCount: 0,
-        memo: new VerificationMemo(),
-      };
-      return runStepsImplement(state);
+        agent: { run, budget, open },
+      });
+      return hosted(
+        {
+          seed: {
+            claim: input.claim,
+            setup: input.setup,
+            sshAccess: input.sshAccess,
+          },
+        },
+        {
+          run,
+          budget,
+          capabilities,
+          resources: new AsyncDisposableStack(),
+          host: {
+            workspaces: input.workspaces,
+            transport: input.transport,
+            env: input.env,
+          },
+        },
+      );
     });
   } finally {
     try {
-      for (const agent of [...opened.keys()]) close(agent);
+      for (const agent of [...opened.keys()]) await close(agent);
     } finally {
       run.dispose();
     }
@@ -208,15 +202,36 @@ export async function releaseSetupRefusal(
   }
 }
 
-function nodeShapeEnd(revision: Revision): SpanEnd {
-  return {
-    status: SpanStatus.Ok,
-    attributes: {
-      [NODE_TASK_COUNT]: revision.tasks.length,
-      [NODE_VERIFICATION_COUNT]: verificationCommands(revision).length,
-      [NODE_BINDING_COUNT]: revision.content.bindings.length,
-    },
-  };
+interface ChainHost {
+  input: NativeExecutionInput;
+  agent: AgentHost;
+}
+
+type HostedChain = (
+  input: WalkInput,
+  io: Omit<ChainIo, "ports">,
+) => Promise<ExecutionEnd>;
+
+function hostedOf<P extends CommonPorts>(
+  built: Chain<P>,
+  ports: NoInfer<P>,
+): HostedChain {
+  return (input, io) => runChain(built, input, { ...io, ports });
+}
+
+function hostedChainOf(
+  method: WorkerMethod,
+  intent: ExecutionIntent,
+  host: ChainHost,
+): HostedChain {
+  const { input, agent } = host;
+  if (method === WorkerMethod.Evaluation)
+    return hostedOf(evaluationChain(), evaluationPorts(agent));
+  if (intent === ExecutionIntent.Examine)
+    return hostedOf(examineChain(), examinePorts(agent));
+  const hosted = hostedOf(implementChain(), implementHostPorts(input, agent));
+  return (walkInput, io) =>
+    hosted(walkInput, { ...io, capture: input.capture });
 }
 
 export function environmentDigestsOf(
@@ -231,29 +246,21 @@ export function environmentDigestsOf(
   );
 }
 
-export function disposeAgent(agent: NativeAgent | null): void {
+function modelFactoryOf(input: NativeExecutionInput): SessionModelFactory {
+  return ({ agent, signal }) => {
+    const credential = input.credentials.items.find(
+      (item) => item.credential_id === agent.credential_id,
+    );
+    assert.ok(credential);
+    return input.modelRuntimeFactory({ credential, agent, signal });
+  };
+}
+
+export async function disposeAgent(agent: NativeAgent | null): Promise<void> {
   if (!agent) return;
-  agent.dispose();
+  await agent.close();
 }
 
 export function stopOnEnd(run: ExecutionRun, agent: NativeAgent): Disposable {
   return run.onStop(() => void agent.abort());
-}
-
-export async function executionBoundary(
-  run: ExecutionRun,
-  invoke: () => Promise<ExecutionEnd>,
-): Promise<ExecutionEnd> {
-  let stopped: ExecutionStop;
-  try {
-    return await invoke();
-  } catch (error) {
-    stopped = await run.stopOf(error);
-  }
-  if (stopped.reason !== EndReason.Revoked) return run.releaseStop(stopped);
-  return {
-    kind: ExecutionEndKind.Ended,
-    reason: stopped.reason,
-    code: stopped.code,
-  };
 }

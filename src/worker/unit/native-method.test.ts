@@ -1,4 +1,5 @@
 import { ExecutionBudget } from "./budget.ts";
+import { BudgetLimit, EnvironmentFailure } from "../../scheduler/contract.ts";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
@@ -9,13 +10,15 @@ import { setTimeout } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { background } from "../../kernel/context.ts";
 import {
-  EndReason,
   EXECUTION_NOT_RUNNING,
   EXECUTION_PROOF_FAILED,
-  ExecutionEndKind,
   ExecutionRun,
-  ExecutionStop,
 } from "./execution-run.ts";
+import {
+  EndReason,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
 import {
   disposeAgent,
   executionBoundary,
@@ -32,18 +35,24 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import {
   anthropicAgent,
   anthropicSetup,
+  declareAffected,
   everyBindingSshAccess,
   fauxAssistantMessage,
+  fauxText,
   fauxToolCall,
   implementFixture,
   repositorySetup,
   scriptedModelRuntime,
   scriptedProvider,
   task,
+  testSessions,
   testSshAccess,
   transport,
+  workspaceRequest,
 } from "./test-support.ts";
-import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
+import { WorkspaceRoot } from "./workspace.ts";
+import { CLAIM_WATCH_INTERVAL_MS } from "./claim-watch.ts";
+import { BASE_DIRECTORY } from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import {
   RecordKind,
@@ -55,7 +64,8 @@ import { SpanOperation } from "./telemetry.ts";
 import { ExecutionIntent, type RepositoryTransport } from "../contract.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
+import { openNativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
@@ -66,6 +76,7 @@ const RELEASE_CALL = "executionRelease";
 const SESSION_END = "agent.session.end";
 const SESSION_ENTRY = "session_entry";
 const ONE_RELEASE = 1;
+const ONE_TURN = 1;
 async function startedSession(t: TestContext, clients: MethodClients) {
   const setup = anthropicSetup();
   const claim = {
@@ -114,29 +125,29 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     ),
     fauxAssistantMessage("unexpected"),
   ]);
+  const knownSecrets = credentialSecrets(store, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
+  });
   const agent = await openNativeAgent({
-    hostTools: unusedHostTools,
-    setup,
-    claim,
-    intent: ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store,
-    },
-    knownSecrets: credentialSecrets(store, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome: temporary(t),
+      spans: run.spans,
     }),
-    workspace,
-    hostHome: temporary(t),
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
+    request: workspaceRequest(setup, claim, workspace),
+    knownSecrets,
+    budget,
     context: run.operationContext,
-    spans: run.spans,
   });
   stopOnEnd(run, agent);
   const pending = agent.prompt(
@@ -179,8 +190,8 @@ test("S1 refusal aborts an active native session and ends its agent.session span
     reason: EndReason.Revoked,
     code: EXECUTION_NOT_RUNNING,
   });
-  disposeAgent(agent);
-  disposeAgent(agent);
+  await disposeAgent(agent);
+  await disposeAgent(agent);
   run.dispose();
   assert.equal(ends.length, EXPECTED_CALL_COUNT);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
@@ -197,10 +208,10 @@ test("a stop during a turn ends the open tool and turn with stopped and the agen
   } as unknown as MethodClients);
   run.onTraceClose((status) => agent.closeTrace(status));
   const result = await executionBoundary(run, async () => {
-    throw new ExecutionStop(EndReason.OperationFailed, null, null);
+    throw new ExecutionStop(EndReason.OperationFailed, null);
   });
   await pending.catch(() => {});
-  disposeAgent(agent);
+  await disposeAgent(agent);
   run.dispose();
   assert.equal(result.kind, ExecutionEndKind.Released);
   assert.equal(ends.length, EXPECTED_CALL_COUNT);
@@ -334,7 +345,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
 });
 
-test("an agent open that throws after the prepare gives the base head tree back to the command class", async (t) => {
+test("an agent open that throws in the prepare runs no setup and leaves no base head tree", async (t) => {
   const h = await implementFixture(t, [task("first", "true")], []);
   const { claim } = h.input;
   writeFileSync(join(h.root, "node-file"), "node");
@@ -430,22 +441,204 @@ test("an agent open that throws after the prepare gives the base head tree back 
       .trees()
       .filter(({ path }) => basename(dirname(path)) === PoolClass.Command)
       .length,
-    ONE_COMMAND_TREE,
+    NO_COMMAND_TREE,
   );
+});
+
+const RENDEZVOUS_MS = 5000;
+
+function rendezvous(): { arrive(): Promise<void> } {
+  const parties = 2;
+  let arrived = 0;
+  let open: () => void = () => {};
+  const met = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const timeout = AbortSignal.timeout(RENDEZVOUS_MS);
+  return {
+    async arrive() {
+      arrived += 1;
+      if (arrived === parties) open();
+      await Promise.race([
+        met,
+        new Promise((_, reject) =>
+          timeout.addEventListener("abort", () =>
+            reject(new Error("the revision read waited for the workspace")),
+          ),
+        ),
+      ]);
+    },
+  };
+}
+
+test("the pinned revision read runs while the workspace branch prepares the checkout", async (t) => {
+  const h = await implementFixture(t, [task("first", "true")], []);
+  const { claim, setup } = h.input;
+  const both = rendezvous();
+  const checkout = transport.fetchAndCheckout.bind(transport);
+  t.mock.method(
+    transport,
+    "fetchAndCheckout",
+    async (...args: Parameters<typeof checkout>) => {
+      await both.arrive();
+      return checkout(...args);
+    },
+  );
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  let read = false;
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () => {
+        await both.arrive();
+        read = true;
+        return complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        });
+      },
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+    },
+    scheduler: { executionRelease: async () => complete({}) },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_parallel_read",
+  }));
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: async () => {
+      throw new Error("open failed");
+    },
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  assert.ok(read);
+});
+
+const NO_MODEL_CALLS = 0;
+
+test("an invalid affected declaration at the base stops with environment_failed affected_invalid before the first model call", async (t) => {
+  const h = await implementFixture(t, [task("first", "true")], []);
+  await declareAffected(h, t, " ");
+  const { claim, setup } = h.input;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const releases: unknown[] = [];
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+    },
+    scheduler: {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
+        return complete({});
+      },
+    },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_affected_invalid",
+  }));
+  const provider = scriptedProvider([fauxAssistantMessage("never")]);
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  assert.equal(provider.calls.length, NO_MODEL_CALLS);
+  assert.equal(releases.length, ONE_RELEASE);
+  const { stop } = releases[0] as { stop: { reason: string; code: string } };
+  assert.equal(stop.reason, EndReason.EnvironmentFailed);
+  assert.equal(stop.code, EnvironmentFailure.AffectedInvalid);
 });
 
 const OK_RELEASE = { kind: "released", furtherWork: false };
 const NODE_ONLY_SETUP_FAILURE = 'case "$PWD" in */checkouts/*) exit 1;; esac';
-const ONE_COMMAND_TREE = 1;
+const NO_COMMAND_TREE = 0;
+
+interface ExamineOptions {
+  turns?: number;
+}
 
 async function examineRun(
   t: TestContext,
   script: Parameters<typeof scriptedProvider>[0],
+  options: ExamineOptions = {},
 ) {
   const setup = anthropicSetup({
     intent: ExecutionIntent.Examine,
     repositories: [],
   });
+  if (options.turns !== undefined) setup.resource_budget.turns = options.turns;
   const claim = {
     execution_id: setup.execution_id,
     node_id: createIdentity("node"),
@@ -471,6 +664,7 @@ async function examineRun(
   const page = async () => complete({ items: [], next_cursor: null });
   const order: string[] = [];
   const timeline: string[] = [];
+  const releases: unknown[] = [];
   const clients = {
     mission: {
       "execution.pinnedRevision.get": async () =>
@@ -489,7 +683,8 @@ async function examineRun(
       "evidence.submit": async () => complete({ evidence: {} }),
     },
     scheduler: {
-      executionRelease: async () => {
+      executionRelease: async (input: { body: unknown }) => {
+        releases.push(input.body);
         order.push(RELEASE_CALL);
         timeline.push(RELEASE_CALL);
         return complete({});
@@ -536,7 +731,7 @@ async function examineRun(
       flush: async () => {},
     },
   });
-  return { result, provider, order, timeline };
+  return { result, provider, order, timeline, releases };
 }
 
 test("native entry runs an examine report and ends the agent.session span before the release", async (t) => {
@@ -546,6 +741,77 @@ test("native entry runs an examine report and ends the agent.session span before
   assert.deepEqual(result, OK_RELEASE);
   assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
   assert.deepEqual(order, [`${SESSION_END}:${SpanStatus.Ok}`, RELEASE_CALL]);
+});
+
+const EXAMINE_TEXT = "All dependencies completed.";
+const REFUSED_REPLIES = [
+  [
+    "error",
+    fauxAssistantMessage(EXAMINE_TEXT, {
+      stopReason: "error",
+      errorMessage: "terminated",
+    }),
+  ],
+  ["length", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "length" })],
+  ["aborted", fauxAssistantMessage(EXAMINE_TEXT, { stopReason: "aborted" })],
+  ["empty stop", fauxAssistantMessage("")],
+  [
+    "tool call",
+    fauxAssistantMessage([
+      fauxText(EXAMINE_TEXT),
+      fauxToolCall("ls", { path: "." }),
+    ]),
+  ],
+] as const;
+
+test("at an exhausted turns budget only a nonempty stop reply with no tool call keeps the examine report", async (t) => {
+  for (const [name, reply] of REFUSED_REPLIES) {
+    const { result, releases } = await examineRun(
+      t,
+      [reply, fauxAssistantMessage(EXAMINE_TEXT)],
+      { turns: ONE_TURN },
+    );
+    assert.equal(result.kind, ExecutionEndKind.Released, name);
+    assert.deepEqual(
+      (
+        releases as {
+          further_work: boolean;
+          stop: { reason: string; code: string };
+        }[]
+      ).map(({ further_work, stop }) => [further_work, stop.reason, stop.code]),
+      [[true, EndReason.BudgetEnd, BudgetLimit.Turns]],
+      name,
+    );
+  }
+  const { result, releases } = await examineRun(
+    t,
+    [fauxAssistantMessage(EXAMINE_TEXT)],
+    { turns: ONE_TURN },
+  );
+  assert.deepEqual(result, OK_RELEASE);
+  assert.deepEqual(releases, [{ further_work: false, stop: null }]);
+});
+
+test("an examine budget end after prepare releases with further_work and the stop budget_end/<limit>", async (t) => {
+  const { result, releases } = await examineRun(
+    t,
+    [
+      fauxAssistantMessage(fauxToolCall("ls", { path: "." }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("All dependencies completed."),
+    ],
+    { turns: ONE_TURN },
+  );
+  assert.equal(result.kind, ExecutionEndKind.Released);
+  assert.equal(releases.length, ONE_RELEASE);
+  const body = releases[0] as {
+    further_work: boolean;
+    stop: { reason: string; code: string };
+  };
+  assert.equal(body.further_work, true);
+  assert.equal(body.stop.reason, EndReason.BudgetEnd);
+  assert.equal(body.stop.code, BudgetLimit.Turns);
 });
 
 test("the last session_entry record and the agent.session end reach the sink before the release", async (t) => {
@@ -633,4 +899,217 @@ test("refused execution evidence aborts the agent and prevents later server oper
     assert.equal(aborts, EXPECTED_CALL_COUNT);
     assert.equal(releases, NO_RELEASES);
   }
+});
+
+interface WatchedRun {
+  script: (tick: () => void) => Parameters<typeof scriptedProvider>[0];
+  claimState: string;
+}
+
+async function watchedImplementRun(t: TestContext, run: WatchedRun) {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const tick = () => t.mock.timers.tick(CLAIM_WATCH_INTERVAL_MS);
+  const h = await implementFixture(t, [task("hello", "test -f hello.txt")], []);
+  const { claim, setup } = h.input;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const calls: string[] = [];
+  const counted =
+    (name: string, answer: () => unknown) => async (): Promise<unknown> => {
+      calls.push(name);
+      return answer();
+    };
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: h.revision.tasks,
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+      "evidence.submit": counted("evidence.submit", () =>
+        complete({ evidence: { id: createIdentity("evidence"), assets: [] } }),
+      ),
+    },
+    scheduler: {
+      claimGet: counted(CLAIM_READ, () =>
+        complete({
+          claim_state: run.claimState,
+          ended_at: null,
+          stop: null,
+        }),
+      ),
+      executionRelease: counted(RELEASE_CALL, () =>
+        complete({ execution_id: claim.execution_id, ended_at: Date.now() }),
+      ),
+    },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+      "execution.unit_record.put": async (request: { body: unknown }) =>
+        complete(request.body),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_claim_watch",
+  }));
+  const provider = scriptedProvider(run.script(tick));
+  const result = await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces: WorkspaceRoot.open(temporary(t)),
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  const branches = await simpleGit().listRemote([
+    "--heads",
+    h.bare,
+    claim.node_branch,
+  ]);
+  return { result, calls, provider, pushed: branches.trim() !== NO_OUTPUT };
+}
+
+const CLAIM_READ = "claimGet";
+const NO_OUTPUT = "";
+const THREE_TURNS = 3;
+const FENCE_READS = 1;
+const LONG_COMMAND_S = 600;
+const KILLED_WITHIN_MS = 30000;
+
+test("a run of three turns reads the claim once per 60 s and once at the push fence", async (t) => {
+  const { result, calls, provider, pushed } = await watchedImplementRun(t, {
+    claimState: "running",
+    script: (tick) => [
+      () => {
+        tick();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", { command: "printf hello > hello.txt" }),
+          { stopReason: "toolUse" },
+        );
+      },
+      () => {
+        tick();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", { command: "test -f hello.txt" }),
+          { stopReason: "toolUse" },
+        );
+      },
+      () => {
+        tick();
+        return fauxAssistantMessage("done");
+      },
+    ],
+  });
+  assert.deepEqual(result, OK_RELEASE);
+  assert.equal(provider.calls.length, THREE_TURNS);
+  assert.equal(
+    calls.filter((call) => call === CLAIM_READ).length,
+    THREE_TURNS + FENCE_READS,
+  );
+  assert.ok(pushed);
+});
+
+test("a claim watch revoke while an agent command runs kills the command and ends as revoked with no push and no release", async (t) => {
+  const marker = join(temporary(t), "started");
+  const startedAt = Date.now();
+  const { result, calls, provider, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: (tick) => [
+      () => {
+        void (async () => {
+          while (!existsSync(marker))
+            await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+          tick();
+        })();
+        return fauxAssistantMessage(
+          fauxToolCall("bash", {
+            command: `touch ${marker}; sleep ${LONG_COMMAND_S}`,
+          }),
+          { stopReason: "toolUse" },
+        );
+      },
+      fauxAssistantMessage("unexpected"),
+    ],
+  });
+  assert.ok(existsSync(marker));
+  assert.ok(Date.now() - startedAt < KILLED_WITHIN_MS);
+  assert.deepEqual(result, {
+    kind: ExecutionEndKind.Ended,
+    reason: EndReason.Revoked,
+    code: null,
+  });
+  assert.equal(provider.calls.length, EXPECTED_CALL_COUNT);
+  assert.deepEqual(calls, [CLAIM_READ]);
+  assert.equal(pushed, false);
+});
+
+test("a fence read of an ended claim in finish ends as revoked with no push and no release", async (t) => {
+  const { result, calls, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: () => [
+      fauxAssistantMessage(
+        fauxToolCall("bash", { command: "printf hello > hello.txt" }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+  });
+  assert.deepEqual(result, {
+    kind: ExecutionEndKind.Ended,
+    reason: EndReason.Revoked,
+    code: null,
+  });
+  assert.equal(calls.filter((call) => call === CLAIM_READ).length, FENCE_READS);
+  assert.equal(calls.includes(RELEASE_CALL), false);
+  assert.equal(pushed, false);
+});
+
+test("a fence read of an ended claim in onStop skips the push and the release and ends the run as revoked", async (t) => {
+  const { result, calls, pushed } = await watchedImplementRun(t, {
+    claimState: "finished",
+    script: () => [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "terminated",
+      }),
+    ],
+  });
+  assert.equal(result.kind, ExecutionEndKind.Ended);
+  assert.equal(
+    result.kind === ExecutionEndKind.Ended && result.reason,
+    EndReason.Revoked,
+  );
+  assert.equal(calls.filter((call) => call === CLAIM_READ).length, FENCE_READS);
+  assert.equal(
+    calls.filter((call) => call === RELEASE_CALL).length,
+    NO_RELEASES,
+  );
+  assert.equal(pushed, false);
 });

@@ -53,10 +53,12 @@ const AGENT_ENABLEMENT_TABLE = "agent_enablement";
 const WORKER_REGISTRATION_TABLE = "worker_registration";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const WORKER_MACHINE_TABLE = "worker_machine";
+const WORKER_UNIT_RECORD_TABLE = "worker_unit_record";
 const ERD2_WORKER_TABLES = [
   WORKER_REGISTRATION_TABLE,
   WORKER_INSTANCE_TABLE,
   WORKER_MACHINE_TABLE,
+  WORKER_UNIT_RECORD_TABLE,
 ];
 const PROJECT_PROJECT_TABLE = "project_project";
 const PROJECT_BINDING_TABLE = "project_binding";
@@ -149,6 +151,7 @@ const ALL_TABLES = [
   WORKER_INSTANCE_TABLE,
   WORKER_MACHINE_TABLE,
   WORKER_REGISTRATION_TABLE,
+  WORKER_UNIT_RECORD_TABLE,
 ];
 const ALL_INDEXES = [
   "agent_enablement_agent_name_revision",

@@ -1,0 +1,151 @@
+# Generated from the operation registry by kanthord gateway openapi.
+pathItem:
+  put:
+    operationId: worker.execution.unit_record.put
+    tags:
+      - worker
+    description: "Write the unit record of a passed unit of the node of the live
+      implement execution: the unit, the digest of its content and the gate
+      commit of each changed checkout. A put replaces the record of the unit.
+      Refusals: 409 worker.unit_record.intent_invalid,
+      worker.unit_record.unit_unknown and worker.unit_record.binding_unknown."
+    x-access-policy: client
+    x-timeout-ms: 30000
+    x-mutation: true
+    x-kanthord-lifetime: unary
+    security:
+      - bearerAuth: []
+    parameters:
+      - name: execution_id
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/worker.execution.unit_record.put.Input/properties/p\
+            arams/properties/execution_id"
+      - $ref: ../shared/components.yaml#/components/parameters/IdempotencyKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/worker.execution.unit_record.put.Input/properties/b\
+              ody"
+    responses:
+      "200":
+        description: Completed result
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/worker.execution.unit_record.put.Output"
+      "400":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "401":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "403":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "404":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "409":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "413":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "500":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "503":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "504":
+        $ref: ../shared/components.yaml#/components/responses/Error
+components:
+  schemas:
+    worker.execution.unit_record.put.Input:
+      type: object
+      properties:
+        params:
+          type: object
+          properties:
+            execution_id:
+              type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^execution_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+              description: execution_ followed by a canonical 26-character uppercase ULID.
+          required:
+            - execution_id
+          additionalProperties: false
+        query:
+          type: object
+          properties: {}
+          additionalProperties: false
+        body:
+          type: object
+          properties:
+            unit_id:
+              type: string
+              minLength: 1
+            content_digest:
+              type: string
+              pattern: ^[0-9a-f]{64}$
+            commits:
+              minItems: 1
+              type: array
+              items:
+                type: object
+                properties:
+                  binding_id:
+                    type: string
+                    minLength: 34
+                    maxLength: 34
+                    pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                    description: binding_ followed by a canonical 26-character uppercase ULID.
+                  commit:
+                    type: string
+                    pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                required:
+                  - binding_id
+                  - commit
+                additionalProperties: false
+          required:
+            - unit_id
+            - content_digest
+            - commits
+          additionalProperties: false
+      required:
+        - params
+        - query
+        - body
+      additionalProperties: false
+    worker.execution.unit_record.put.Output:
+      type: object
+      properties:
+        unit_id:
+          type: string
+          minLength: 1
+        content_digest:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        commits:
+          minItems: 1
+          type: array
+          items:
+            type: object
+            properties:
+              binding_id:
+                type: string
+                minLength: 34
+                maxLength: 34
+                pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                description: binding_ followed by a canonical 26-character uppercase ULID.
+              commit:
+                type: string
+                pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+            required:
+              - binding_id
+              - commit
+            additionalProperties: false
+      required:
+        - unit_id
+        - content_digest
+        - commits
+      additionalProperties: false

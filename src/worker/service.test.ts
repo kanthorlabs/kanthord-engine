@@ -17,6 +17,7 @@ import {
   type ExecutionSetup,
   HANDOVER_REFRESH_WAIT_MS,
   HANDOVER_TIMEOUT_MS,
+  INSTANCE_CONNECTED_WINDOW_MS,
   INSTANCE_HEARTBEAT_INTERVAL_MS,
   InstancePlacement,
   type MissionPromptPins,
@@ -30,6 +31,7 @@ import {
   RegistrationActivity,
   type SessionRead,
   SessionReadOutcome,
+  StopOrderReason,
   WORKER_SERVICE_NAME,
   type WorkerBindingOf,
   type WorkerEntry,
@@ -150,6 +152,9 @@ const fakeCollaborations = {
   intentOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  unitIdsOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   pinnedCredentialMetadata: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
@@ -186,6 +191,7 @@ const fakeCollaborations = {
     revokePausedClaim: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
+    revokeHeldPauses: () => {},
     executionReleased: () => {
       throw new Error("UNEXPECTED_COLLABORATION");
     },
@@ -1995,6 +2001,7 @@ function poolFixture(
         return { lost: [], revoked: [] };
       },
       revokePausedClaim: () => null,
+      revokeHeldPauses: () => {},
       executionReleased: () => {},
       reportExecutionEnds: () => {
         state.reported++;
@@ -2222,19 +2229,92 @@ test("an instance create starts one and an archive stops one after the change no
   );
 });
 
-test("a forced archive of a busy server instance revokes its execution and stops the instance after the commit", async (t) => {
-  const f = poolFixture(t, 1);
+test("a revoked stop order of a running server instance reaches the pool host with the orders of that instance", (t) => {
+  const f = poolFixture(t, 2);
   f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  assert.deepEqual(
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [{ execution_id: POOL_EXECUTION, reason: StopOrderReason.Revoked }],
+      ],
+    ],
+  );
+});
+
+const ONE_ORDER_LIST = 1;
+const TWO_ORDER_LISTS = 2;
+
+test("the release of an execution with a revoked order sends the pool host the list of that instance with no order", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  f.worker.executionReleased(POOL_EXECUTION);
+  assert.deepEqual(
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [{ execution_id: POOL_EXECUTION, reason: StopOrderReason.Revoked }],
+      ],
+      [f.nameOf(FIRST_INSTANCE), []],
+    ],
+  );
+});
+
+test("a sweep past the deadline drops a revoked order of a server instance and sends the pool host the list with no order", (t) => {
+  const f = poolFixture(t, 2);
+  f.worker.startPool();
+  const registration = f.register(FIRST_INSTANCE);
+  f.worker.sendRevokedOrder(POOL_EXECUTION, registration.runtime_identity);
+  f.worker.instances.sweepStopOrders();
+  assert.equal(f.host.sentStopOrders.length, ONE_ORDER_LIST);
+  const later = Date.now() + INSTANCE_CONNECTED_WINDOW_MS + ONE_ORDER_LIST;
+  t.mock.method(Date, "now", () => later);
+  f.worker.instances.sweepStopOrders();
+  assert.equal(f.worker.orderOf(POOL_EXECUTION), null);
+  assert.deepEqual(f.host.sentStopOrders.at(-1)?.orders, []);
+  assert.equal(f.host.sentStopOrders.length, TWO_ORDER_LISTS);
+});
+
+function busyArchive(f: ReturnType<typeof poolFixture>) {
   const registration = f.register(FIRST_INSTANCE);
   f.state.executing.add(registration.runtime_identity);
   f.unlist(FIRST_INSTANCE);
   f.caller.identity = FOOTPRINT_HUMAN;
-  const archive = (force?: boolean) =>
+  return (force?: boolean) =>
     f.invoke(
       "instance.archive",
       { expected_revision: FIRST_REVISION, force },
       { instance_name: f.nameOf(FIRST_INSTANCE) },
     );
+}
+
+test("a pool that runs a server instance makes its execution connected, and before startPool it is not", (t) => {
+  const f = poolFixture(t, 1);
+  const registration = f.register(FIRST_INSTANCE);
+  const connected = () =>
+    f.store.transaction((tx) =>
+      f.worker.executionConnected(tx, registration.runtime_identity),
+    );
+  assert.equal(connected(), false);
+  f.worker.startPool();
+  assert.equal(connected(), true);
+});
+
+test("a forced archive of a busy server instance that the pool does not run revokes its execution after the commit", (t) => {
+  const f = poolFixture(t, 1);
+  const archive = busyArchive(f);
   assert.throws(
     () => archive(),
     (error: unknown) =>
@@ -2242,15 +2322,37 @@ test("a forced archive of a busy server instance revokes its execution and stops
       error.code === WorkerErrorCode.InstanceInUse,
   );
   assert.deepEqual(f.state.revoked, []);
-  assert.deepEqual(f.host.archived, []);
   archive(true);
   assert.deepEqual(f.state.revoked, [POOL_EXECUTION]);
   assert.equal(f.state.reported, POOL_ONE_START);
-  await changesApplied();
+  assert.deepEqual(f.host.sentStopOrders, []);
+});
+
+test("a forced archive of a busy server instance that the pool runs keeps the instance and sends the order instance_archived through the pool host", async (t) => {
+  const f = poolFixture(t, 1);
+  f.worker.startPool();
+  const archive = busyArchive(f);
+  archive(true);
+  assert.deepEqual(f.state.revoked, []);
   assert.deepEqual(
-    f.host.archived.map(({ name }) => name),
-    [f.nameOf(FIRST_INSTANCE)],
+    f.host.sentStopOrders.map(({ instance, orders }) => [
+      instance.name,
+      orders,
+    ]),
+    [
+      [
+        f.nameOf(FIRST_INSTANCE),
+        [
+          {
+            execution_id: POOL_EXECUTION,
+            reason: StopOrderReason.InstanceArchived,
+          },
+        ],
+      ],
+    ],
   );
+  await changesApplied();
+  assert.deepEqual(f.host.archived, []);
 });
 
 test("a deferred archive end drops the heartbeat entries of the ended registrations and schedules a reconcile", async (t) => {

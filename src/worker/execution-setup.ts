@@ -11,6 +11,7 @@ import {
   type AgentSetup,
   type CredentialMetadataRecord,
   type ExecutionEnvironment,
+  ExecutionIntent,
   type ExecutionSetup,
   executionSetupSchema,
   InstancePlacement,
@@ -33,6 +34,7 @@ import { CancellationContext, type Context } from "../kernel/context.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { bindingText, resolvePrompt } from "../agent/prompt-resolve.ts";
 import { canonicalJSON } from "../kernel/json.ts";
+import { unitRecordsOf } from "./unit-records.ts";
 import type { Dependencies, WorkerService } from "./service.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
 import {
@@ -433,14 +435,23 @@ async function setupWithin(
     }));
     if (placement === InstancePlacement.Container && row.environment)
       dependencies.environmentClaimed(claim.projectId, row.environment);
+    const intent = dependencies.intentOf(
+      tx,
+      claim.nodeId,
+      claim.pinnedRevision,
+    );
     return executionSetupSchema.parse({
       execution_id: claim.executionId,
       worker_name: row.worker_name,
       agents,
       templates,
       resource_budget: row.resource_budget ?? declaration.resource_budget,
-      intent: dependencies.intentOf(tx, claim.nodeId, claim.pinnedRevision),
+      intent,
       repositories,
+      unit_records:
+        intent === ExecutionIntent.Implement
+          ? unitRecordsOf(tx, claim.nodeId)
+          : [],
     });
   });
   const recorded = new Map<string, SetupPrompt>();

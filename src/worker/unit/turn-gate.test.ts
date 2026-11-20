@@ -1,18 +1,27 @@
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
 import {
+  accessSync,
   appendFileSync,
+  constants,
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
+  realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import {
   RecordKind,
   SpanStatus,
@@ -23,19 +32,29 @@ import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
-} from "./execution-run.ts";
+  ExecutionStop,
+} from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
+import { type StepsState, TaskResultKind } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
   runTask,
-  TaskResultKind,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
-import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
+import {
+  assertInvariant,
+  gatedAgent,
+  GateMode,
+  restoreCheckout,
+  TurnViolation,
+} from "./turn-gate.ts";
+import { operationsOf, readStatus, resolveGitPaths } from "./local-git.ts";
+import { VerificationContext } from "./method-telemetry.ts";
+import { memoScopeOf } from "./verification-memo.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
 import {
   advanceBase,
   commitOnNode,
@@ -62,6 +81,7 @@ const DEADLINE_MS = 20000;
 const MERGE_COMMIT_FIELDS = 3;
 const ONE_RELEASE = 1;
 const ONE_COMMIT = 1;
+const ONE_TURN = 1;
 const ONE_PARENT_FIELDS = 2;
 const COUNTED_TURNS = 4;
 const CRLF_FILE = "f.txt";
@@ -69,14 +89,74 @@ const CRLF_CONTENT = "a\r\nb\r\n";
 const HIJACKED_MESSAGE = "hijack";
 const TURN_VIOLATION_LOG = "turn violation";
 const ONE_GATE_SPAN = 1;
-const ONE_TEXT = 1;
+const NO_PROCESSES = 0;
 const GATE_MESSAGE = "feat: gate work";
 const CHANGED_FILE_COUNT = "kanthord.git.changed_file_count";
 const CHANGED_FILES = "kanthord.git.changed_files";
+const PROCESS_COUNT = "kanthord.git.process_count";
 const ONE_CHANGED_FILE = 1;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
+const TRACKED_FILE = "file";
+const REWRITTEN_SUBJECT = "rewritten";
+const GIT_BINARY = "git";
+const WRAPPER_MODE = 0o700;
+const INVARIANT_BRANCH = "main";
+const SIDE_BRANCH = "side";
+const STATUS = "status";
+const UNCHANGED_TURN = [STATUS];
+const CHANGED_TURN = [STATUS, "add", "diff", "commit", STATUS];
+const CHANGED_TURN_M = [STATUS, "add", "diff", "hash-object", "commit", STATUS];
+const COMMITTED_TURN = [
+  STATUS,
+  "merge-base",
+  "rev-list",
+  "reset",
+  "add",
+  "diff",
+  "commit",
+  STATUS,
+];
+const COMMITTED_TURN_M = [
+  STATUS,
+  "merge-base",
+  "rev-list",
+  "reset",
+  "add",
+  "diff",
+  "hash-object",
+  "commit",
+  STATUS,
+];
+const CONVERSION_TURN = [
+  STATUS,
+  "add",
+  "diff",
+  "hash-object",
+  "update-index",
+  "commit",
+  STATUS,
+];
+const CONVERSION_ONLY_TURN = [
+  STATUS,
+  "add",
+  "diff",
+  "hash-object",
+  "update-index",
+  STATUS,
+];
+const MOVED_GITDIR = "moved-gitdir";
+const SUBMODULE = "sub";
+const OUTSIDE_REF = `refs/remotes/origin/${OTHER_BRANCH}`;
+const ONE_PUSH = 1;
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
+const RESTORE = ["checkout", "reset", "clean", STATUS];
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -152,6 +232,114 @@ function gateSpan(records: readonly TelemetryRecord[]) {
   return spans[0]!;
 }
 
+function countGit(t: TestContext, h: Fixture): () => string[] {
+  const bin = temporary(t);
+  const log = join(bin, "commands");
+  const git = (h.input.env.PATH ?? "")
+    .split(delimiter)
+    .map((directory) => join(directory, GIT_BINARY))
+    .find((path) => {
+      try {
+        accessSync(path, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  assert.ok(git);
+  writeFileSync(
+    join(bin, GIT_BINARY),
+    `#!/bin/sh\nprintf '%s\\n' "$1" >> '${log}'\nexec '${git}' "$@"\n`,
+    { mode: WRAPPER_MODE },
+  );
+  h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
+  return () =>
+    existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
+}
+
+function timedStatus(
+  t: TestContext,
+  h: Fixture,
+  log: string,
+  slow: string,
+): string {
+  const bin = temporary(t);
+  const git = (h.input.env.PATH ?? "")
+    .split(delimiter)
+    .map((directory) => join(directory, GIT_BINARY))
+    .find((path) => {
+      try {
+        accessSync(path, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  assert.ok(git);
+  writeFileSync(
+    join(bin, GIT_BINARY),
+    `#!/bin/sh\nif [ "$1" = status ]; then here="$(pwd -P)"; printf 'start %s\\n' "$here" >> '${log}'; if [ "$here" = '${slow}' ]; then sleep 0.6; else sleep 0.1; fi; printf 'end %s\\n' "$here" >> '${log}'; fi\nexec '${git}' "$@"\n`,
+    { mode: WRAPPER_MODE },
+  );
+  return bin;
+}
+
+function countPushes(t: TestContext, h: Fixture): () => number {
+  let pushes = 0;
+  const push = h.input.transport.pushNodeBranch.bind(h.input.transport);
+  t.mock.method(
+    h.input.transport,
+    "pushNodeBranch",
+    async (...args: Parameters<typeof push>) => {
+      pushes++;
+      return push(...args);
+    },
+  );
+  return () => pushes;
+}
+
+async function commitCrlfFile(h: Fixture): Promise<void> {
+  const git = simpleGit(h.root);
+  await git.raw(["config", "core.autocrlf", "false"]);
+  writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT);
+  await git.add(CRLF_FILE);
+  await git.commit("crlf");
+  writeFileSync(join(h.root, ".gitattributes"), "*.txt text\n");
+  await git.add(".gitattributes");
+  await git.commit("attributes");
+  h.checkouts[0]!.head = await headOf(h.root);
+}
+
+async function invariantRepository(t: TestContext) {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.raw(["init", "-q", "-b", INVARIANT_BRANCH]);
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, TRACKED_FILE), "base\n");
+  await git.add(TRACKED_FILE);
+  await git.commit("base");
+  const call = {
+    env: hostEnvironment(),
+    directory,
+    context: background,
+    deadlineMs: DEADLINE_MS,
+  };
+  const paths = await resolveGitPaths(call);
+  const holds = async () => {
+    assertInvariant(
+      {
+        status: await readStatus(call),
+        operations: operationsOf(paths),
+      },
+      INVARIANT_BRANCH,
+      await headOf(directory),
+    );
+  };
+  await holds();
+  return { directory, git, holds };
+}
+
 async function gatedTurn(
   h: Fixture,
   t: TestContext,
@@ -187,8 +375,10 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
   async function conflictFixture(
     t: TestContext,
     script: Parameters<typeof fixture>[2],
+    tasks: Parameters<typeof fixture>[1] = [],
+    turns?: number,
   ) {
-    const h = await fixture(t, [], script);
+    const h = await fixture(t, tasks, script, turns);
     await commitOnNode(h.root, "node side");
     h.checkouts[0]!.head = await headOf(h.root);
     await advanceBase(h, t, "main side");
@@ -220,7 +410,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const before = h.checkouts[0]!.head;
     assert.deepEqual(await runTask(h, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const subjects = await simpleGit(h.root).raw([
       "log",
@@ -274,7 +464,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const before = h.checkouts[0]!.head;
     assert.deepEqual(await runTask(h, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const commits = await simpleGit(h.root).raw([
       "rev-list",
@@ -304,7 +494,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.deepEqual(await runTask(h, first), {
       kind: TaskResultKind.Complete,
-      recorded: false,
+      committed: false,
     });
     await assert.rejects(runTask(h, second), {
       reason: EndReason.NoProgress,
@@ -363,7 +553,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     assert.equal(
       (await simpleGit(h.root).raw(["ls-files", WORK_FILE])).trim(),
@@ -371,7 +561,141 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a wall time end in a conflict turn aborts the merge and releases a budget end", async (t) => {
+  const BUDGET_END_STOP = {
+    reason: ExecutionStopReason.BudgetEnd,
+    code: BudgetLimit.WallTime,
+    cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+  };
+
+  function endWallTimeAfterTurn(h: Fixture): void {
+    const instruct = h.agent.instruct.bind(h.agent);
+    h.agent.instruct = async (work, text, template) => {
+      await instruct(work, text, template);
+      h.agent.budget.wallDeadlineReached();
+    };
+  }
+
+  test("a wall time end in a conflict turn with no marker left concludes the merge in the checkpoint and pushes the merge commit", async (t) => {
+    const h = await conflictFixture(t, [
+      write("file", RESOLVED),
+      fauxAssistantMessage(RESOLVED),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
+    endWallTimeAfterTurn(h);
+    const records = recordSpans(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    const root = releasedRoot(h);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    const head = await headOf(root);
+    assert.equal(await remoteHead(h), head);
+    assert.deepEqual(
+      (await simpleGit(root).raw(["rev-list", "--parents", "-n", "1", head]))
+        .trim()
+        .split(" ")
+        .slice(1),
+      [before, base],
+    );
+    assert.equal(
+      (await simpleGit(root).raw(["log", "-1", "--format=%s", head])).trim(),
+      MERGE_HEADER,
+    );
+    assert.equal(readFileSync(join(root, "file"), "utf8").trim(), RESOLVED);
+    const { start, end } = gateSpan(records);
+    assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
+    assert.equal(end.attributes?.["kanthord.gate.changed"], true);
+  });
+
+  test("a wall time end in a conflict turn with markers left aborts the merge in the checkpoint and pushes the head before the merge", async (t) => {
+    const h = await conflictFixture(t, [fauxAssistantMessage("unresolved")]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    endWallTimeAfterTurn(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    await assertAtBefore(h, before);
+  });
+
+  test("a wall time end after the agent aborts the merge commits nothing in the checkpoint", async (t) => {
+    const h = await conflictFixture(t, [
+      bash("git merge --abort"),
+      fauxAssistantMessage("aborted"),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    endWallTimeAfterTurn(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal((h as StepsState).openMerge?.resolved, true);
+    await assertAtBefore(h, before);
+  });
+
+  test("the checkpoint of a stop aborts the open merge and pushes the head before the merge", async (t) => {
+    const h = await conflictFixture(t, [
+      write("file", RESOLVED),
+      fauxAssistantMessage(RESOLVED),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
+    const instruct = h.agent.instruct.bind(h.agent);
+    h.agent.instruct = async (work, text, template) => {
+      await instruct(work, text, template);
+      (h as StepsState).openMerge = {
+        directory: h.root,
+        commit: base,
+        files: ["file"],
+        markerless: [],
+        message: MERGE_HEADER,
+        resolved: true,
+      };
+      throw new ExecutionStop(EndReason.OperationFailed, null);
+    };
+    const bodies = recordReleases(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.OperationFailed);
+    assert.equal(bodies.length, ONE_RELEASE);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    await assertAtBefore(h, before);
+  });
+
+  test("a wall time end in a modify/delete conflict turn aborts the merge in the checkpoint because the conflict held no marker", async (t) => {
+    const h = await fixture(t, [], [fauxAssistantMessage("unresolved")]);
+    await simpleGit(h.root).rm(TRACKED_FILE);
+    await simpleGit(h.root).commit("node delete");
+    h.checkouts[0]!.head = await headOf(h.root);
+    await advanceBase(h, t, "main side");
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    endWallTimeAfterTurn(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal((h as StepsState).openMerge?.resolved, false);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    await assertAtBefore(h, before);
+  });
+
+  test("a resolved open merge whose MERGE_HEAD holds another commit is aborted and commits nothing in the checkpoint", async (t) => {
     const h = await conflictFixture(t, [
       write("file", RESOLVED),
       fauxAssistantMessage(RESOLVED),
@@ -381,25 +705,87 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const instruct = h.agent.instruct.bind(h.agent);
     h.agent.instruct = async (work, text, template) => {
       await instruct(work, text, template);
+      writeFileSync(gitPath(h, "MERGE_HEAD"), `${before}\n`);
       h.agent.budget.wallDeadlineReached();
     };
     const bodies = recordReleases(h);
-    const stop = {
-      reason: ExecutionStopReason.BudgetEnd,
-      code: BudgetLimit.WallTime,
-      cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
-    };
     assert.deepEqual(
       await executionBoundary(h.run, () => runStepsImplement(h)),
-      {
-        kind: "released",
-        furtherWork: true,
-        stop,
-      },
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
     );
-    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal((h as StepsState).openMerge?.resolved, true);
     assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
     await assertAtBefore(h, before);
+  });
+
+  test("a turn budget end that aborts a conflict turn in progress concludes the resolved merge in the checkpoint", async (t) => {
+    const h = await conflictFixture(
+      t,
+      [write("file", RESOLVED), fauxAssistantMessage(RESOLVED)],
+      [],
+      ONE_TURN,
+    );
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
+    const stop = { ...BUDGET_END_STOP, code: BudgetLimit.Turns };
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    assert.equal(h.provider.calls.length, ONE_TURN);
+    const root = releasedRoot(h);
+    const head = await headOf(root);
+    assert.equal(await remoteHead(h), head);
+    assert.deepEqual(
+      (await simpleGit(root).raw(["rev-list", "--parents", "-n", "1", head]))
+        .trim()
+        .split(" ")
+        .slice(1),
+      [before, base],
+    );
+  });
+
+  test("a wall time end in the conflict turn of base.refresh(release) carries the open merge to the host checkpoint, which concludes it", async (t) => {
+    const current = task("released-merge", `test -f ${WORK_FILE}`);
+    const h = await conflictFixture(
+      t,
+      [
+        write(WORK_FILE, WORK_FILE),
+        fauxAssistantMessage("done"),
+        write("file", RESOLVED),
+        fauxAssistantMessage(RESOLVED),
+      ],
+      [current],
+    );
+    const instruct = h.agent.instruct.bind(h.agent);
+    h.agent.instruct = async (work, text, template) => {
+      await instruct(work, text, template);
+      if (template === PromptTemplate.Conflict)
+        h.agent.budget.wallDeadlineReached();
+    };
+    const bodies = recordReleases(h);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok("furtherWork" in end && end.furtherWork);
+    assert.equal(bodies.length, ONE_RELEASE);
+    assert.equal((h as StepsState).openMerge?.resolved, true);
+    const root = releasedRoot(h);
+    const head = await headOf(root);
+    assert.equal(await remoteHead(h), head);
+    assert.equal(
+      (await simpleGit(root).raw(["log", "-1", "--format=%s", head])).trim(),
+      MERGE_HEADER,
+    );
+    assert.equal(
+      (await simpleGit(root).raw(["rev-list", "--parents", "-n", "1", head]))
+        .trim()
+        .split(" ").length,
+      MERGE_COMMIT_FIELDS,
+    );
+    assert.equal(readFileSync(join(root, "file"), "utf8").trim(), RESOLVED);
   });
 
   test("a marker line that the base brings outside the unmerged paths lets the merge conclude", async (t) => {
@@ -524,7 +910,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const subjects = await git.raw(["log", "--format=%s", `${before}..HEAD`]);
     assert.deepEqual(subjects.trim().split("\n"), [
@@ -606,22 +992,30 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("the gate finds a rebase in progress behind a gitdir file", async (t) => {
+  test("the gate finds a rebase in progress behind a gitdir file that the turn writes and pushes the node branch at before", async (t) => {
     const h = await fixture(
       t,
       [task("gitdir", "false")],
       [
-        bash('mkdir "$(git rev-parse --git-path rebase-merge)"'),
+        bash(
+          `mkdir "$(git rev-parse --git-path rebase-merge)" && mv .git ../${MOVED_GITDIR} && printf "gitdir: %s\\n" "$(cd .. && pwd)/${MOVED_GITDIR}" > .git`,
+        ),
         fauxAssistantMessage("left"),
       ],
     );
-    const gitdir = join(temporary(t), "gitdir");
-    renameSync(join(h.root, ".git"), gitdir);
-    writeFileSync(join(h.root, ".git"), `gitdir: ${gitdir}\n`);
+    await commitOnNode(h.root, "earlier unit commit");
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const pushes = countPushes(t, h);
     const bodies = recordReleases(h);
     const end = await executionBoundary(h.run, () => runStepsImplement(h));
     violationEnd(end, bodies, TurnViolation.GitInProgress);
-    assert.equal(existsSync(join(gitdir, "rebase-merge")), false);
+    assert.equal(pushes(), ONE_PUSH);
+    assert.equal(await remoteHead(h), before);
+    assert.equal(
+      existsSync(join(dirname(h.root), MOVED_GITDIR, "rebase-merge")),
+      false,
+    );
   });
 
   test("the merge commit takes the template message and not the merge message file", async (t) => {
@@ -676,7 +1070,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(texts, []);
   });
 
-  test("a failed gate commit ends the gate span with Error and the commit text and writes no git span", async (t) => {
+  test("a failed gate commit ends the gate span with Error, the error code and the process count, with no git error text and no git span", async (t) => {
     const h = await fixture(t, [], []);
     const records = recordSpans(h);
     configureFailingSigner(h);
@@ -688,9 +1082,331 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     const { end, texts } = gateSpan(records);
     assert.equal(end.status, SpanStatus.Error);
-    assert.equal(texts.length, ONE_TEXT);
-    assert.ok(texts[0]!.startsWith(`${GIT_COMMIT_FAILED}:`));
-    assert.ok(texts[0]!.includes(SIGNER_FAILURE));
+    assert.equal(end.attributes?.["error.type"], GIT_COMMIT_FAILED);
+    assert.ok(Number(end.attributes?.[PROCESS_COUNT]) > NO_PROCESSES);
+    assert.equal("kanthord.gate.violation" in (end.attributes ?? {}), false);
+    assert.deepEqual(texts, []);
+    assert.equal(JSON.stringify(records).includes(SIGNER_FAILURE), false);
     assert.deepEqual(spansOf(records, SpanOperation.Git), []);
+  });
+  test("an unchanged turn runs one git status and writes the process count on its gate span", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    const records = recordSpans(h);
+    const before = h.checkouts[0]!.head;
+    await gatedTurn(h, t, async () => {});
+    assert.deepEqual(commands(), UNCHANGED_TURN);
+    assert.equal(h.checkouts[0]!.head, before);
+    assert.equal(
+      gateSpan(records).end.attributes?.[PROCESS_COUNT],
+      UNCHANGED_TURN.length,
+    );
+  });
+
+  test("a changed turn with no modified path runs five git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () =>
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE),
+    );
+    assert.deepEqual(commands(), CHANGED_TURN);
+    assert.equal(h.checkouts[0]!.head, await headOf(h.root));
+  });
+
+  test("a changed turn with a modified path runs six git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () =>
+      writeFileSync(join(h.root, TRACKED_FILE), FIXED),
+    );
+    assert.deepEqual(commands(), CHANGED_TURN_M);
+  });
+
+  test("an agent-committed turn with no modified path runs eight git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    const before = h.checkouts[0]!.head;
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
+      await simpleGit(h.root).add(WORK_FILE);
+      await simpleGit(h.root).commit(AGENT_SUBJECT);
+    });
+    assert.deepEqual(commands(), COMMITTED_TURN);
+    assert.equal(await headOf(h.root, "HEAD^"), before);
+  });
+
+  test("an agent-committed turn with a modified path runs nine git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, TRACKED_FILE), FIXED);
+      await simpleGit(h.root).commit(AGENT_SUBJECT, [TRACKED_FILE]);
+    });
+    assert.deepEqual(commands(), COMMITTED_TURN_M);
+  });
+
+  test("a conversion-only path adds one git process to a changed turn", async (t) => {
+    const h = await fixture(t, [], []);
+    await commitCrlfFile(h);
+    const commands = countGit(t, h);
+    await gatedTurn(h, t, async () => {
+      writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT);
+      writeFileSync(join(h.root, WORK_FILE), WORK_FILE);
+    });
+    assert.deepEqual(commands(), CONVERSION_TURN);
+    assert.equal(
+      (
+        await simpleGit(h.root).raw([
+          "show",
+          "--name-only",
+          "--format=",
+          "HEAD",
+        ])
+      ).trim(),
+      WORK_FILE,
+    );
+  });
+
+  test("an entry with only a worktree-side change takes the slow path and commits nothing", async (t) => {
+    const h = await fixture(t, [], []);
+    await commitCrlfFile(h);
+    const before = h.checkouts[0]!.head;
+    const commands = countGit(t, h);
+    const gated = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () =>
+      writeFileSync(join(h.root, CRLF_FILE), CRLF_CONTENT),
+    );
+    await gated.prompt(EMPTY_PROMPT);
+    assert.deepEqual(commands(), CONVERSION_ONLY_TURN);
+    assert.equal(gated.changed(), false);
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("the restore after a live verification runs four git processes", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    writeFileSync(join(h.root, TRACKED_FILE), FIXED);
+    writeFileSync(join(h.root, STRAY_FILE), STRAY_FILE);
+    await restoreCheckout(
+      h.input.env,
+      h.checkouts[0]!,
+      h.nodeBranch,
+      h.checkouts[0]!.head,
+      background,
+      () => DEADLINE_MS,
+    );
+    assert.deepEqual(commands(), RESTORE);
+    assert.equal(existsSync(join(h.root, STRAY_FILE)), false);
+  });
+
+  test("the verification memo reads the tree id of a commit once", async (t) => {
+    const h = await fixture(t, [], []);
+    const commands = countGit(t, h);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    await memoScopeOf(h, VerificationContext.Task, [FIXED]);
+    assert.deepEqual(commands(), ["rev-parse"]);
+  });
+
+  test("an agent that rewrites the history stops with history_rewritten and leaves the checkout at before", async (t) => {
+    const h = await fixture(t, [], []);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).raw([
+          "commit",
+          "--amend",
+          "--allow-empty",
+          "-m",
+          REWRITTEN_SUBJECT,
+        ]);
+      }),
+      { code: TurnViolation.HistoryRewritten },
+    );
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("a conflict turn that aborts the merge stops with merge_missing", async (t) => {
+    const h = await conflictFixture(t, [
+      bash("git merge --abort"),
+      fauxAssistantMessage("aborted"),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(refreshAtClaim(h), {
+      reason: EndReason.OperationFailed,
+      code: TurnViolation.MergeMissing,
+    });
+    assert.equal(await headOf(h.root), before);
+  });
+
+  test("two violations in one turn stop with the code of the first check", async (t) => {
+    const h = await fixture(t, [], []);
+    const before = h.checkouts[0]!.head;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+        mkdirSync(gitPath(h, "rebase-merge"));
+      }),
+      { code: TurnViolation.BranchChanged },
+    );
+    assert.equal(await headOf(h.root), before);
+    assert.equal(existsSync(gitPath(h, "rebase-merge")), false);
+  });
+
+  test("two checkouts run the gate checks at the same time, two violations stop with the code of the lowest checkout index, and the violation restores every checkout", async (t) => {
+    const h = await fixture(t, [], [], undefined, ["first", "second"]);
+    const [first, second] = h.checkouts;
+    assert.ok(first && second);
+    const before = [first.head, second.head];
+    const log = join(temporary(t), "status");
+    const bin = timedStatus(t, h, log, realpathSync(first.directory));
+    h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        mkdirSync(join(first.directory, ".git", "rebase-merge"));
+        await simpleGit(second.directory).checkoutLocalBranch(OTHER_BRANCH);
+      }),
+      { code: TurnViolation.GitInProgress },
+    );
+    const events = readFileSync(log, "utf8").trim().split("\n");
+    assert.deepEqual(
+      events.slice(0, 2).map((event) => event.split(" ")[0]),
+      ["start", "start"],
+    );
+    assert.equal(events[2], `end ${realpathSync(second.directory)}`);
+    assert.equal(
+      existsSync(join(first.directory, ".git", "rebase-merge")),
+      false,
+    );
+    assert.equal(await headOf(first.directory), before[0]);
+    assert.equal(await headOf(second.directory), before[1]);
+    assert.equal(
+      (
+        await simpleGit(second.directory).revparse(["--abbrev-ref", "HEAD"])
+      ).trim(),
+      h.nodeBranch,
+    );
+  });
+
+  test("a branch switch names the full refs in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        await simpleGit(h.root).checkoutLocalBranch(OTHER_BRANCH);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is refs/heads/${OTHER_BRANCH}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+          REASON_MAX_LENGTH,
+        ),
+      },
+    );
+  });
+
+  test("a HEAD that names a ref outside refs/heads names that ref in the branch_changed detail", async (t) => {
+    const h = await fixture(t, [], []);
+    await assert.rejects(
+      gatedTurn(h, t, async () => {
+        const git = simpleGit(h.root);
+        await git.raw(["update-ref", OUTSIDE_REF, "HEAD"]);
+        await git.raw(["symbolic-ref", "HEAD", OUTSIDE_REF]);
+      }),
+      {
+        code: TurnViolation.BranchChanged,
+        detail: await h.ports.secrets.redact(
+          String(
+            new Error(
+              `The HEAD of checkout ${h.checkouts[0]!.name} is ${OUTSIDE_REF}, not refs/heads/${h.nodeBranch}.`,
+            ),
+          ),
+          REASON_MAX_LENGTH,
+        ),
+      },
+    );
+  });
+
+  test("a staged gitlink of a submodule with ignore all leaves the turn unchanged", async (t) => {
+    const h = await fixture(t, [], []);
+    const library = temporary(t);
+    const lib = simpleGit(library);
+    await lib.raw(["init", "-q", "-b", INVARIANT_BRANCH]);
+    writeFileSync(join(library, TRACKED_FILE), TRACKED_FILE);
+    await lib.add(TRACKED_FILE);
+    await lib.raw([...IDENTITY, "commit", "-q", "-m", TRACKED_FILE]);
+    const git = simpleGit(h.root, {
+      unsafe: { allowUnsafeProtocolOverride: true },
+    });
+    await git.raw([
+      "-c",
+      "protocol.file.allow=always",
+      "submodule",
+      "add",
+      "-q",
+      library,
+      SUBMODULE,
+    ]);
+    await git.raw([
+      "config",
+      "-f",
+      ".gitmodules",
+      `submodule.${SUBMODULE}.ignore`,
+      "all",
+    ]);
+    await git.raw(["add", "-A"]);
+    await git.commit(SUBMODULE);
+    const before = await headOf(h.root);
+    h.checkouts[0]!.head = before;
+    const gated = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      const sub = simpleGit(join(h.root, SUBMODULE));
+      writeFileSync(join(h.root, SUBMODULE, WORK_FILE), WORK_FILE);
+      await sub.add(WORK_FILE);
+      await sub.raw([...IDENTITY, "commit", "-q", "-m", WORK_FILE]);
+      await git.raw(["add", "-A"]);
+    });
+    await gated.prompt(EMPTY_PROMPT);
+    assert.equal(gated.changed(), false);
+    assert.equal(await headOf(h.root), before);
+    assert.equal(h.checkouts[0]!.head, before);
+  });
+
+  test("invariant I fails on a staged leftover", async (t) => {
+    const repository = await invariantRepository(t);
+    writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
+    await repository.git.add(WORK_FILE);
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an untracked file", async (t) => {
+    const repository = await invariantRepository(t);
+    writeFileSync(join(repository.directory, WORK_FILE), WORK_FILE);
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an unmerged path", async (t) => {
+    const repository = await invariantRepository(t);
+    const { directory, git } = repository;
+    await git.checkoutLocalBranch(SIDE_BRANCH);
+    writeFileSync(join(directory, TRACKED_FILE), SIDE_BRANCH);
+    await git.commit(SIDE_BRANCH, [TRACKED_FILE]);
+    await git.checkout(INVARIANT_BRANCH);
+    writeFileSync(join(directory, TRACKED_FILE), INVARIANT_BRANCH);
+    await git.commit(INVARIANT_BRANCH, [TRACKED_FILE]);
+    await assert.rejects(git.merge([SIDE_BRANCH]));
+    rmSync(join(directory, ".git", "MERGE_HEAD"));
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
+  });
+
+  test("invariant I fails on an operation path", async (t) => {
+    const repository = await invariantRepository(t);
+    mkdirSync(join(repository.directory, ".git", "rebase-merge"));
+    await assert.rejects(repository.holds(), { name: "AssertionError" });
   });
 });

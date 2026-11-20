@@ -8,7 +8,7 @@ import {
 import { BudgetLimit } from "../../scheduler/contract.ts";
 
 const BUDGET_FLOOR = 0;
-export const COMMAND_LIMIT_MS = 600000;
+export { COMMAND_LIMIT_MS } from "../../agent/tool-table.ts";
 export class ExecutionBudget {
   private readonly deadline: number;
   private readonly expiredAt: number;
@@ -63,6 +63,9 @@ export class ExecutionBudget {
     assert.ok(this.endedTurns >= BUDGET_FLOOR);
     this.endedTurns++;
     if (this.exhausted()) for (const context of this.agents) context.cancel();
+  }
+  endedTurnCount(): number {
+    return this.endedTurns;
   }
   exhausted(): boolean {
     return this.exhaustedAt(this.endedTurns);

@@ -25,13 +25,12 @@ import { createIdentity } from "../../kernel/identity.ts";
 import { nodeBranchOf } from "../../repository/node-branch.ts";
 import { generateSshKey } from "../../repository/ssh-key.ts";
 import { DEFAULT_SSH_PORT } from "../../repository/sshd-test-support.ts";
+import { handedSshAccess, WorkspaceRoot } from "./workspace.ts";
 import {
   CHECKOUTS_DIRECTORY,
-  handedSshAccess,
   SCRATCH_DIRECTORY,
   WorkspaceKind,
-  WorkspaceRoot,
-} from "./workspace.ts";
+} from "./workspace-layout.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { branchKeyOf, readPushRecord, writePushRecord } from "./push-record.ts";
 import {

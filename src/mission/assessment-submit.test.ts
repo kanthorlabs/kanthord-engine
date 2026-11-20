@@ -58,6 +58,7 @@ import { requiredActionsOf } from "./frozen-action.ts";
 import {
   evidenceHarness,
   executionHarness,
+  LIVE_TRACE,
   markDelivered,
   refusedAt,
   reviewerFinding,
@@ -656,6 +657,7 @@ test("a criterion-not-met assessment below the rework limit returns the node to 
         runtime_identity: h.claim.runtimeIdentity,
         attempt: h.claim.attempt,
         pinned_revision: h.claim.pinnedRevision,
+        ...LIVE_TRACE,
       });
     };
     const evaluateAgain = () => {
@@ -882,6 +884,7 @@ test("the cleared assessment read answers the assessment that the cleared outcom
       runtime_identity: h.claim.runtimeIdentity,
       attempt: h.claim.attempt,
       pinned_revision: h.claim.pinnedRevision,
+      ...LIVE_TRACE,
     });
     h.store.transaction((tx) =>
       setNodeState(tx, h.node_id, NodeState.Executing),
@@ -1440,6 +1443,7 @@ test("an examine finding never gets the route fix, causes no rework and is repor
     runtime_identity: h.claim.runtimeIdentity,
     attempt: h.claim.attempt,
     pinned_revision: h.claim.pinnedRevision,
+    ...LIVE_TRACE,
   });
   h.store.transaction((tx) =>
     setNodeState(tx, h.node_id, NodeState.Evaluating),

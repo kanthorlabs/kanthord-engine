@@ -248,11 +248,6 @@
       "count": 1
     }
   },
-  "src/apps/worker/unit.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/config/convict.d.ts": {
     "kanthord/no-inline-param-type": {
       "count": 3
@@ -1351,9 +1346,6 @@
   "src/worker/unit/base-refresh.ts": {
     "@typescript-eslint/max-params": {
       "count": 1
-    },
-    "kanthord/no-inline-param-type": {
-      "count": 1
     }
   },
   "src/worker/unit/budget.ts": {
@@ -1368,20 +1360,20 @@
   },
   "src/worker/unit/evaluation-input.ts": {
     "@typescript-eslint/max-params": {
-      "count": 5
+      "count": 2
     },
     "kanthord/no-inline-param-type": {
-      "count": 2
+      "count": 1
     }
   },
   "src/worker/unit/evaluation.ts": {
     "@typescript-eslint/max-params": {
-      "count": 5
+      "count": 1
     }
   },
   "src/worker/unit/execution-run.ts": {
     "@typescript-eslint/max-params": {
-      "count": 3
+      "count": 1
     },
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1402,7 +1394,7 @@
   },
   "src/worker/unit/local-git.ts": {
     "@typescript-eslint/max-params": {
-      "count": 49
+      "count": 37
     }
   },
   "src/worker/unit/method-telemetry.ts": {
@@ -1411,16 +1403,6 @@
     },
     "kanthord/no-inline-param-type": {
       "count": 3
-    }
-  },
-  "src/worker/unit/native-agent.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
-  "src/worker/unit/release-gate.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
     }
   },
   "src/worker/unit/session-entries.ts": {
@@ -1438,15 +1420,7 @@
   },
   "src/worker/unit/steps-examine.ts": {
     "@typescript-eslint/max-params": {
-      "count": 2
-    },
-    "kanthord/no-inline-param-type": {
       "count": 1
-    }
-  },
-  "src/worker/unit/steps-implement.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 2
     }
   },
   "src/worker/unit/stop-cause.ts": {
@@ -1459,14 +1433,9 @@
       "count": 2
     }
   },
-  "src/worker/unit/tool-table.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 2
-    }
-  },
   "src/worker/unit/turn-gate.ts": {
     "@typescript-eslint/max-params": {
-      "count": 9
+      "count": 6
     }
   },
   "src/worker/unit/verdict-rule.ts": {

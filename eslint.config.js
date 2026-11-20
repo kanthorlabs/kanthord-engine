@@ -425,6 +425,11 @@ export default tseslint.config(
                   }),
                 },
                 {
+                  to: element("apps-cli", {
+                    fileInternalPath: "{worker-tasks,tasks-test-support}.ts",
+                  }),
+                },
+                {
                   to: element("service", {
                     captured: { name: "{worker,mission}" },
                     fileInternalPath: "test-support.ts",
@@ -481,8 +486,21 @@ export default tseslint.config(
               ],
             },
             {
-              from: element("apps-cli", { fileInternalPath: "*.test.ts" }),
+              from: element("apps-cli", {
+                fileInternalPath: "{*.test.ts,tasks-test-support.ts}",
+              }),
               allow: [
+                {
+                  to: element("worker-unit", {
+                    fileInternalPath: "test-support.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath: "{pi,pi-tools}.ts",
+                  }),
+                },
                 {
                   to: element("component", {
                     captured: { name: "{llm,repository,storage}" },
@@ -513,6 +531,13 @@ export default tseslint.config(
                       "pi-tools",
                       "bash-process",
                       "agent-session",
+                      "agent-port",
+                      "capabilities/execution-evidence",
+                      "capabilities/host-tools",
+                      "capabilities/link-updates",
+                      "review-roots",
+                      "session-directory",
+                      "tool-table",
                       "environment",
                       "catalog",
                       "prompt-composer",
@@ -528,7 +553,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider,provider-failure,login,sessions}.ts",
+                      "{model-connector,platforms,provider,provider-failure,login,sessions,refresh-watch}.ts",
                   }),
                 },
                 {
@@ -713,6 +738,20 @@ export default tseslint.config(
                 {
                   to: element("service", {
                     captured: { name: "custody" },
+                    fileInternalPath: "contract.ts",
+                  }),
+                },
+              ],
+            },
+            {
+              from: element("service", {
+                captured: { name: "worker" },
+                fileInternalPath: "contract.ts",
+              }),
+              allow: [
+                {
+                  to: element("service", {
+                    captured: { name: "mission" },
                     fileInternalPath: "contract.ts",
                   }),
                 },
@@ -962,6 +1001,27 @@ export default tseslint.config(
         threads: true,
         production: false,
       }),
+    },
+  },
+  {
+    files: ["src/agent/capabilities/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...syntaxRules,
+        ...["modelRegistry", "registerProvider"].flatMap((name) =>
+          [
+            `MemberExpression[property.name='${name}']`,
+            `MemberExpression[property.value='${name}']`,
+            `Property[key.name='${name}']`,
+            `Property[key.value='${name}']`,
+          ].map((selector) => ({
+            selector,
+            message:
+              "A capability reads no model registry and registers no provider.",
+          })),
+        ),
+      ],
     },
   },
   {

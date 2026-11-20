@@ -426,6 +426,8 @@ tasks.
   A coder pushes its checkpoint to the node branch and releases with the stop `human_paused`.
   The release ends the claim and leaves the node `Paused`. When the coder does not release before the deadline
   of the stop order, the server revokes the claim with the stop `human_paused`.
+  The act trace of a pause that keeps the claim links the root span of the kept execution.
+  At its start, the server revokes the kept claim of each `Paused` node that has no stop order, with the stop `human_paused`.
   A pause of a node whose instance has no connection revokes the live claim at once and stores the stop `human_paused`.
   Eligible states are
   `Pending`, `Available`, `Executing`, `Waiting`, `Evaluating`,
@@ -433,7 +435,7 @@ tasks.
 - Resume accepts `Resume`, returns `ControlResult`, and requires `Paused`.
   While the `Paused` node keeps a live claim and a stop order is pending, resume answers 409 `mission.node.claim_live`
   with `{ node_id, execution_id }`. Run it again after the release or after the deadline.
-  A `Paused` node that keeps a live claim with no stop order, for example after a server restart,
+  A `Paused` node that keeps a live claim with no stop order, for example after the loss of the order,
   has its claim revoked at once with the stop `human_paused`, and the resume passes.
   `node block` of a `Paused` node revokes a kept claim at once.
   It reads the required external actions and their request evidence first:
@@ -546,7 +548,7 @@ The failure count of the new attempt starts at 0.
 
 Follow these steps. Each step names the fields to read.
 
-1. Run `kanthord mission node get <node-id>`. Read `state`, `attempt`, `pinned_revision`, `visible_revision`, `blocked_context` and `paused_context`. For a paused node, `paused_context.rule` names the cause, and `last_stop.trace_id` names the trace of step 3. The rule is `human` when `last_stop.reason` is `human_paused`. A pause of a connected execution keeps the claim until the coder pushes its checkpoint and releases with `human_paused`, or until the deadline. A pause of a disconnected execution revokes the claim at once.
+1. Run `kanthord mission node get <node-id>`. Read `state`, `attempt`, `pinned_revision`, `visible_revision`, `blocked_context` and `paused_context`. For a paused node, `paused_context.rule` names the cause, and `last_stop.trace_id` names the trace of step 3. The rule is `human` when `last_stop.reason` is `human_paused`. A pause of an execution of a reachable instance keeps the claim until the coder pushes its checkpoint and releases with `human_paused`, or until the deadline. A `worker` instance is reachable while it holds a current connection, and a `server` or `container` instance while the server pool runs it. A pause of an execution of an unreachable instance revokes the claim at once.
 2. Run `kanthord scheduler execution list <project-id> --node <node-id> --attempt <attempt>`. Read `stop` of the last executions and `trace_id`.
 3. Run `kanthord tracking span list <trace-id>`. Read the verification spans for the command, the index, `timed_out` and the output tail.
 4. Run `kanthord mission assessment list <node-id>`. Read the rationale and the unmet criterion of a review failure.

@@ -27,11 +27,8 @@ import {
   sessionRootOf,
 } from "./session-store.ts";
 import { POOL_DIRECTORY } from "./tree-pool.ts";
-import {
-  WorkspaceRemoval,
-  type WorkspaceRoot,
-  WORKSPACES_DIRECTORY,
-} from "./workspace.ts";
+import { WorkspaceRemoval, type WorkspaceRoot } from "./workspace.ts";
+import { WORKSPACES_DIRECTORY } from "./workspace-layout.ts";
 
 const UNIT_LOG_PATTERN = /^kanthord\.log(\..+)?$/;
 const CACHE_DIRECTORY = ".cache";

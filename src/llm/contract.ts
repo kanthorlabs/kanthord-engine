@@ -14,9 +14,9 @@ import {
   credentialUpdateMetadataBodySchema,
   LoginSessionMode,
   sealedCopyAnswerSchema,
-} from "../custody/contract.ts";
+} from "../kernel/credential-shapes.ts";
 import { resourceFailureReasonSchema } from "../kernel/health.ts";
-import { sealedObjectSchema } from "../kernel/hpke.ts";
+import { sealedObjectSchema } from "../kernel/sealed-object.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
 import {
   AccessPolicy,

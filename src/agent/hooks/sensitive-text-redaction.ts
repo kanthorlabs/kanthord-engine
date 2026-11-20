@@ -10,6 +10,7 @@ import {
   findKnownText,
   findPatternText,
   KNOWN_VALUE_MIN_CHARACTERS,
+  type KnownMatcher,
   knownMatcher,
   mapSensitiveStrings,
   markerIndex,
@@ -40,6 +41,7 @@ export interface SensitiveTextRedaction {
   restore: InlineExtension;
   hook: InlineExtension;
   text(value: string): Promise<string>;
+  modelOutput(value: string): string;
   counts(): RedactionCounts;
 }
 
@@ -150,6 +152,11 @@ interface TableEntry {
 }
 
 type Message = Record<string, unknown>;
+
+interface Scan {
+  pattern(text: string): SensitiveSpan[];
+  known: KnownMatcher;
+}
 
 function sessionPartOf(sessionId: string): string {
   return createHash("sha256")
@@ -308,17 +315,27 @@ export function sensitiveTextRedaction(
     return spans;
   };
 
+  const fullScan: Scan = {
+    pattern: (text) => {
+      const spans = findPatternText(text);
+      for (const span of spans) learn(span);
+      return spans;
+    },
+    known: matcher,
+  };
+  const modelScan: Scan = { pattern: () => [], known: secretMatcher };
+  const outputScan: Scan = { pattern: findPatternText, known: matcher };
+
   const redactStrings = (
     strings: readonly string[],
     extra: readonly string[],
+    scan = fullScan,
   ): Map<string, string> => {
     const firstPass = new Map<string, SensitiveSpan[] | undefined>();
     for (const text of strings) {
       if (firstPass.has(text)) continue;
       try {
-        const spans = findPatternText(text);
-        for (const span of spans) learn(span);
-        firstPass.set(text, spans);
+        firstPass.set(text, scan.pattern(text));
       } catch {
         firstPass.set(text, undefined);
       }
@@ -333,7 +350,7 @@ export function sensitiveTextRedaction(
       try {
         const spans = mergeSpans(
           text,
-          [...findKnownText(text, matcher), ...exactSpans(text, extra)],
+          [...findKnownText(text, scan.known), ...exactSpans(text, extra)],
           pattern,
         );
         result.set(
@@ -351,13 +368,7 @@ export function sensitiveTextRedaction(
   const keepThinking = (block: Record<string, unknown>) => {
     for (const text of stringsOf([block.thinking, block.thinkingSignature]))
       try {
-        const pattern = findPatternText(text);
-        for (const span of pattern) learn(span);
-        counts.thinking_kept += mergeSpans(
-          text,
-          findKnownText(text, matcher),
-          pattern,
-        ).length;
+        counts.thinking_kept += findKnownText(text, secretMatcher).length;
       } catch {
         counts.scan_failed++;
       }
@@ -372,34 +383,47 @@ export function sensitiveTextRedaction(
         : new Set<unknown>();
     for (const block of kept) keepThinking(block as Record<string, unknown>);
     const free = message.role === CUSTOM_ROLE;
-    const walk = (transform: (text: string) => string): Message => {
+    const modelMade = message.role === ASSISTANT_ROLE;
+    type Transform = (text: string) => string;
+    const walk = (outside: Transform, inside: Transform): Message => {
       const rest = mapSensitiveStrings(
         { ...message, [CONTENT_KEY]: undefined },
-        transform,
+        outside,
       ) as Message;
       const mapped = blocks
         ? blocks.map((block) =>
-            kept.has(block)
-              ? block
-              : mapSensitiveStrings(block, transform, free),
+            kept.has(block) ? block : mapSensitiveStrings(block, inside, free),
           )
-        : mapSensitiveStrings(content, transform, free);
+        : mapSensitiveStrings(content, inside, free);
       const copy = { ...rest, [CONTENT_KEY]: mapped };
       if (!(CONTENT_KEY in message)) delete copy[CONTENT_KEY];
       return copy;
     };
-    const strings: string[] = [];
-    walk((text) => {
-      strings.push(text);
-      return text;
-    });
-    const replaced = redactStrings(strings, extra);
+    const outsideStrings: string[] = [];
+    const insideStrings: string[] = [];
+    const collect =
+      (into: string[]): Transform =>
+      (text) => {
+        into.push(text);
+        return text;
+      };
+    walk(collect(outsideStrings), collect(insideStrings));
+    const outsideReplaced = redactStrings(
+      modelMade ? outsideStrings : [...outsideStrings, ...insideStrings],
+      extra,
+    );
+    const insideReplaced = modelMade
+      ? redactStrings(insideStrings, extra, modelScan)
+      : outsideReplaced;
     let changed = false;
-    const copy = walk((text) => {
-      const next = replaced.get(text) ?? text;
-      changed ||= next !== text;
-      return next;
-    });
+    const replace =
+      (replaced: Map<string, string>): Transform =>
+      (text) => {
+        const next = replaced.get(text) ?? text;
+        changed ||= next !== text;
+        return next;
+      };
+    const copy = walk(replace(outsideReplaced), replace(insideReplaced));
     return changed ? copy : undefined;
   };
 
@@ -563,6 +587,7 @@ export function sensitiveTextRedaction(
       await refresh();
       return redactStrings([value], []).get(value)!;
     },
+    modelOutput: (value) => redactStrings([value], [], outputScan).get(value)!,
     counts: () => structuredClone(counts),
   };
 }

@@ -1,8 +1,6 @@
-import { createHash, hkdfSync } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { isObject, isString, ValueType } from "./values.ts";
-
-const DERIVED_KEY_BYTES = 32;
 
 export const timestamp = z
   .int()
@@ -57,16 +55,4 @@ export function digest(value: unknown): string {
   return createHash("sha256")
     .update(canonicalJSON(value), "utf8")
     .digest("hex");
-}
-
-export function deriveKey(masterKey: string, label: string): Buffer {
-  return Buffer.from(
-    hkdfSync(
-      "sha256",
-      Buffer.from(masterKey, "base64"),
-      Buffer.alloc(0),
-      label,
-      DERIVED_KEY_BYTES,
-    ),
-  );
 }

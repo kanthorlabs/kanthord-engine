@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Logger } from "pino";
 import { z } from "zod";
-import type { HumanActor } from "../kernel/actor.ts";
+import { type HumanActor, humanActorSchema } from "../kernel/actor.ts";
+import { canonicalJSON } from "../kernel/json.ts";
 import { asError, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
@@ -54,13 +55,16 @@ import {
   type WorkerInstanceLookups,
 } from "./contract.ts";
 import {
+  type ArchivingInstance,
   countLiveServerInstances,
   endInstance,
   fingerprintTaken,
   insertInstance,
   listInstances,
+  markArchiving,
   nameTaken,
   readArchivedServerInstanceNames,
+  readArchivingInstances,
   readInstanceById,
   readLatestInstance,
   readLiveInstance,
@@ -124,6 +128,8 @@ export interface InstanceDependencies {
   sessionReadWaitMs: number;
   instanceArchived?: (tx: Transaction, name: string) => void;
   instanceEnded: (ended: readonly string[]) => void;
+  stopOrdersQueued: (name: string) => void;
+  poolRuns: (instanceId: string) => boolean;
   logger: Logger;
 }
 
@@ -491,7 +497,14 @@ export class WorkerInstances implements WorkerInstanceLookups {
 
   executionConnected(tx: Transaction, runtimeIdentity: string): boolean {
     const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-    return !!instanceId && this.connectionOf(instanceId) !== null;
+    return !!instanceId && this.reachable(instanceId);
+  }
+
+  private reachable(instanceId: string): boolean {
+    return (
+      this.connectionOf(instanceId) !== null ||
+      this.dependencies.poolRuns(instanceId)
+    );
   }
 
   connectedAmong(records: readonly InstanceRecord[]): InstanceRecord[] {
@@ -748,7 +761,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
         pending: null,
         orders: [],
       };
-    if (executions.length && this.connectionOf(live.id) !== null)
+    if (executions.length && this.reachable(live.id)) {
+      markArchiving(tx, live.id, canonicalJSON(actor));
       return {
         record,
         ended: [],
@@ -765,6 +779,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
         },
         orders: executions,
       };
+    }
     const executionEnds = executionIds.flatMap((executionId) => {
       const ends = this.dependencies.revokeForInstanceArchive(
         tx,
@@ -826,6 +841,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       created_at: Date.now(),
     });
     this.raiseWorkVersion(instance.name);
+    this.dependencies.stopOrdersQueued(instance.name);
   }
 
   stopOrderOf(executionId: string): StopOrderReason | null {
@@ -841,15 +857,32 @@ export class WorkerInstances implements WorkerInstanceLookups {
     runtimeIdentity: string,
     reason: StopOrderReason,
   ): void {
-    const name = this.dependencies.store.transaction((tx) => {
-      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
-      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
-    });
+    const name = this.instanceNameOf(runtimeIdentity);
     assert.ok(name, "a stop order names a registration of an instance");
     this.queueStopOrder(
       { name },
       { execution_id: executionId, runtime_identity: runtimeIdentity, reason },
     );
+  }
+
+  sendRevokedOrder(executionId: string, runtimeIdentity: string): void {
+    const name = this.instanceNameOf(runtimeIdentity);
+    if (!name) return;
+    this.queueStopOrder(
+      { name },
+      {
+        execution_id: executionId,
+        runtime_identity: runtimeIdentity,
+        reason: StopOrderReason.Revoked,
+      },
+    );
+  }
+
+  private instanceNameOf(runtimeIdentity: string): string | undefined {
+    return this.dependencies.store.transaction((tx) => {
+      const instanceId = readRow(tx, runtimeIdentity)?.instance_id;
+      return instanceId ? readInstanceById(tx, instanceId)?.name : undefined;
+    });
   }
 
   stopOrdersOf(
@@ -874,7 +907,10 @@ export class WorkerInstances implements WorkerInstanceLookups {
   }
 
   private dropOrder(executionId: string): void {
+    const order = this.stopOrders.get(executionId);
     this.stopOrders.delete(executionId);
+    const name = order && this.instanceNameOf(order.runtime_identity);
+    if (name) this.dependencies.stopOrdersQueued(name);
     for (const pending of [...this.pendingArchives.values()]) {
       const index = pending.stopping.indexOf(executionId);
       if (index === NOT_FOUND) continue;
@@ -923,6 +959,8 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private expireStopOrder(order: StopOrder): void {
     if (order.reason === StopOrderReason.HumanPaused)
       return this.expirePauseOrder(order);
+    if (order.reason === StopOrderReason.Revoked)
+      return this.dropOrder(order.execution_id);
     const pending = [...this.pendingArchives.values()].find((candidate) =>
       candidate.execution_ids.includes(order.execution_id),
     );
@@ -960,6 +998,62 @@ export class WorkerInstances implements WorkerInstanceLookups {
         actor: pending.actor.name,
         force: pending.force,
         execution_ids: pending.execution_ids,
+      },
+      INSTANCE_ARCHIVED_LOG,
+    );
+    this.dependencies.instanceEnded(ended);
+  }
+
+  finishLostArchives(): void {
+    const archiving = this.dependencies.store.transaction((tx) =>
+      readArchivingInstances(tx),
+    );
+    for (const instance of archiving) {
+      if (this.pendingArchives.has(instance.id)) continue;
+      try {
+        this.finishLostArchive(instance);
+      } catch (error) {
+        this.dependencies.logger.error(
+          { err: asError(error), instance: instance.name },
+          STOP_ORDER_FAILED,
+        );
+      }
+    }
+  }
+
+  private finishLostArchive(instance: ArchivingInstance): void {
+    const actor = humanActorSchema.parse(JSON.parse(instance.archive_actor));
+    const { executionIds, executionEnds, ended } =
+      this.dependencies.store.transaction((tx) => {
+        const revisions = revisionIdsOf(tx, instance.name);
+        const ids = this.liveExecutionsOf(tx, revisions).map(
+          ({ execution_id }) => execution_id,
+        );
+        return {
+          executionIds: ids,
+          executionEnds: ids.flatMap((executionId) => {
+            const ends = this.dependencies.revokeForInstanceArchive(
+              tx,
+              executionId,
+              instance.name,
+              actor,
+            );
+            return ends ? [ends] : [];
+          }),
+          ended: this.endArchived(tx, instance.id, instance.name, revisions),
+        };
+      });
+    this.footprintOrders.delete(instance.id);
+    this.reportExecutionEnds(executionEnds);
+    this.archiveReleased(executionEnds);
+    this.dropConnection(instance.id);
+    this.dependencies.logger.info(
+      {
+        operation: INSTANCE_ARCHIVED_LOG,
+        instance: instance.name,
+        actor: actor.name,
+        force: true,
+        execution_ids: executionIds,
       },
       INSTANCE_ARCHIVED_LOG,
     );

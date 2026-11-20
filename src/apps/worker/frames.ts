@@ -5,7 +5,10 @@ import { type PortAnswer, portAnswerSchema } from "../../gateway/client.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { HttpStatus } from "../../kernel/http.ts";
-import { BindingEntryState } from "../../worker/contract.ts";
+import {
+  BindingEntryState,
+  stopOrderEntrySchema,
+} from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const KIBIBYTE = 1024;
@@ -22,6 +25,7 @@ export const FrameKind = {
   Bindings: "bindings",
   Port: "port",
   Control: "control",
+  StopOrders: "stop_orders",
   Ping: "ping",
 } as const;
 
@@ -51,6 +55,10 @@ export const serverFrameSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal(FrameKind.Control),
     control: z.enum(SlotControl),
+  }),
+  z.strictObject({
+    kind: z.literal(FrameKind.StopOrders),
+    orders: z.array(stopOrderEntrySchema),
   }),
   z.strictObject({ kind: z.literal(FrameKind.Ping) }),
 ]);

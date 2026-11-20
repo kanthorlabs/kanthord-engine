@@ -93,6 +93,8 @@ const TURN_OPERATION = "agent.turn";
 const PASSED_EXIT = 0;
 const RELEASE_CONTEXT = "release";
 const UPLOAD_CALLS = 2;
+const STEP_OPERATION = "worker.step";
+const TURN_STEP = "unit.turn";
 const tool = (name: string, args: Parameters<typeof fauxToolCall>[1]) =>
   fauxAssistantMessage(fauxToolCall(name, args), { stopReason: "toolUse" });
 
@@ -135,7 +137,16 @@ async function assertSpanTree(
     ),
   );
   const turns = named(TURN_OPERATION);
-  assert.ok(turns.some((turn) => turn.parent_span_id === task!.span_id));
+  assert.ok(
+    turns.some((turn) => {
+      const step = parentOf(turn);
+      return (
+        step?.operation === STEP_OPERATION &&
+        step.attributes["kanthord.step.id"] === TURN_STEP &&
+        step.parent_span_id === task!.span_id
+      );
+    }),
+  );
   const tools = named("agent.tool");
   assert.ok(
     tools.every((span) => parentOf(span)?.operation === TURN_OPERATION),

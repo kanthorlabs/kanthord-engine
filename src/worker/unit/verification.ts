@@ -10,12 +10,12 @@ import {
   SYSTEM_PROCESSES,
 } from "../../kernel/process-group.ts";
 import { redactReason } from "../../kernel/probe.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
-import { childEnvironment } from "./tool-table.ts";
+import { childEnvironment } from "../../agent/environment.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
-import type { WorkspaceCheckout } from "./workspace.ts";
+import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import type { MemoEntry, MemoScope } from "./verification-memo.ts";
 
 export type TestedInput =
@@ -469,14 +469,16 @@ export function infrastructureStop(run: VerificationRun): ExecutionStop | null {
   return new ExecutionStop(
     EndReason.OperationFailed,
     VERIFICATION_INFRASTRUCTURE_FAILED,
-    redactReason(
-      JSON.stringify({
-        exit_code: result.exit_code,
-        signal: result.signal,
-        timed_out: result.timed_out,
-        command: result.command,
-      }),
-    ),
+    {
+      detail: redactReason(
+        JSON.stringify({
+          exit_code: result.exit_code,
+          signal: result.signal,
+          timed_out: result.timed_out,
+          command: result.command,
+        }),
+      ),
+    },
   );
 }
 
@@ -486,14 +488,16 @@ function timeoutStop(run: VerificationRun): ExecutionStop {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.VerificationTimeout,
-    redactReason(
-      JSON.stringify({
-        index: run.verification.results.length - 1,
-        limit_ms: COMMAND_LIMIT_MS,
-        exit_code: result.exit_code,
-        command: result.command,
-      }),
-    ),
+    {
+      detail: redactReason(
+        JSON.stringify({
+          index: run.verification.results.length - 1,
+          limit_ms: COMMAND_LIMIT_MS,
+          exit_code: result.exit_code,
+          command: result.command,
+        }),
+      ),
+    },
   );
 }
 
@@ -505,9 +509,14 @@ export function environmentStop(run: VerificationRun): ExecutionStop | null {
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.CommandAbsent,
-    redactReason(
-      JSON.stringify({ exit_code: result.exit_code, command: result.command }),
-    ),
+    {
+      detail: redactReason(
+        JSON.stringify({
+          exit_code: result.exit_code,
+          command: result.command,
+        }),
+      ),
+    },
   );
 }
 

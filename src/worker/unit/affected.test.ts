@@ -25,7 +25,7 @@ import {
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { BaseHead, setupEntries } from "./environment-setup.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { ChangeStatus, commitOf, headCommit } from "./local-git.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import {

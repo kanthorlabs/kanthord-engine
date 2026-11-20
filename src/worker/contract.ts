@@ -16,11 +16,14 @@ import {
 } from "../kernel/cleanup.ts";
 import type { ExternalLink } from "../kernel/external-link.ts";
 import { canonicalJSON, timestamp } from "../kernel/json.ts";
-import { base64urlSchema, sealedObjectSchema } from "../kernel/hpke.ts";
+import {
+  base64urlSchema,
+  sealedObjectSchema,
+} from "../kernel/sealed-object.ts";
 import {
   type HandoverEnvelope,
   handoverEnvelopeSchema,
-} from "../kernel/handover.ts";
+} from "../kernel/handover-envelope.ts";
 import type { CallerIdentity, MachineIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import {
@@ -58,6 +61,7 @@ import {
   promptReferenceSchema,
   promptTemplatesSchema,
 } from "../agent/contract.ts";
+import { type Revision, revisionSchema } from "../mission/contract.ts";
 export const WorkerHost = {
   Kanthord: "kanthord",
   ExternalHarness: "external-harness",
@@ -82,6 +86,7 @@ export const HANDOVER_REFRESH_WAIT_MS =
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
 export const ACTION_REQUEST_TIMEOUT_MS = 900000;
 export const CHANGE_REQUEST_TIMEOUT_MS = 60000;
+export const UNIT_RECORD_TIMEOUT_MS = 30000;
 export const ActionResultKind = {
   Submitted: "submitted",
   AwaitingPrerequisite: "awaiting-prerequisite",
@@ -658,6 +663,12 @@ export const ExecutionIntent = {
 } as const;
 export type ExecutionIntent =
   (typeof ExecutionIntent)[keyof typeof ExecutionIntent];
+export type UnitIdsOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => string[];
+
 export type IntentOf = (
   tx: Transaction,
   nodeId: string,
@@ -1027,6 +1038,7 @@ export interface PoolHost {
     signal: AbortSignal,
   ): Promise<SessionRemovalResult>;
   logItem(instance: PoolInstance): Promise<FootprintItem | null>;
+  stopOrders(instance: PoolInstance, orders: readonly StopOrderEntry[]): void;
 }
 
 export const WORKER_SERVICE_NAME = "worker";
@@ -1042,6 +1054,10 @@ export const WorkerErrorCode = {
   ExecutionCredentialNotPinned: "worker.execution.credential_not_pinned",
   ExecutionPromptNotPinned: "worker.execution.prompt_not_pinned",
   ExecutionPromptRecordFailed: "worker.execution.prompt_record_failed",
+  ExecutionSeedUnavailable: "worker.execution.seed_unavailable",
+  UnitRecordUnitUnknown: "worker.unit_record.unit_unknown",
+  UnitRecordBindingUnknown: "worker.unit_record.binding_unknown",
+  UnitRecordIntentInvalid: "worker.unit_record.intent_invalid",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -1326,6 +1342,19 @@ export const executionEnvironmentSchema = z
   ])
   .nullable();
 export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;
+export const unitRecordSchema = z.strictObject({
+  unit_id: z.string().min(1),
+  content_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  commits: z
+    .array(
+      z.strictObject({
+        binding_id: identitySchema("binding"),
+        commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+      }),
+    )
+    .min(1),
+});
+export type UnitRecord = z.infer<typeof unitRecordSchema>;
 export const executionSetupSchema = z.strictObject({
   execution_id: identitySchema("execution"),
   worker_name: z.string().min(1),
@@ -1348,7 +1377,79 @@ export const executionSetupSchema = z.strictObject({
       environment: executionEnvironmentSchema,
     }),
   ),
+  unit_records: z.array(unitRecordSchema),
 });
+export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+const seedCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+export const seedClaimSchema = z.strictObject({
+  execution_id: identitySchema("execution"),
+  node_id: identitySchema("node"),
+  attempt: z.number().int().positive(),
+  pinned_revision: z.number().int().positive(),
+  node_branch: z.string().min(1),
+  created_at: timestamp,
+  expired_at: timestamp,
+  trace_id: z.string().min(1),
+  root_span_id: z.string().min(1),
+});
+export const executionSeedSchema = z.strictObject({
+  claim: seedClaimSchema,
+  setup: executionSetupSchema,
+  revision: revisionSchema,
+  heads: z.record(identitySchema("binding"), seedCommitSchema),
+});
+export type ExecutionSeed = z.infer<typeof executionSeedSchema>;
+export function withoutEnvironmentMaps<
+  S extends Pick<ExecutionSetup, "repositories">,
+>(setup: S): S {
+  const repositories = setup.repositories.map((repository) => {
+    const environment = repository.environment;
+    if (environment === null || !("document" in environment)) return repository;
+    const document = { ...environment.document };
+    delete document.containerEnv;
+    delete document.remoteEnv;
+    if (document.build !== undefined) {
+      const build = { ...document.build };
+      delete build.args;
+      document.build = build;
+    }
+    return { ...repository, environment: { ...environment, document } };
+  });
+  return { ...setup, repositories };
+}
+export interface SeedExecution {
+  execution_id: string;
+  project_id: string;
+  node_id: string;
+  attempt: number;
+  pinned_revision: number;
+  node_branch: string;
+  runtime_identity: string;
+  worker_binding_id: string;
+  credentials: string[];
+  created_at: number;
+  expired_at: number;
+  trace_id: string;
+  root_span_id: string;
+}
+export interface SeedNode {
+  revision: Revision;
+  heads: Record<string, string>;
+}
+export interface SeedSources {
+  executionOf(tx: Transaction, executionId: string): SeedExecution | null;
+  nodeOf(tx: Transaction, execution: SeedExecution): SeedNode | null;
+  credentialMetadataOf(
+    tx: Transaction,
+    pinned: readonly string[],
+    credentialName: string,
+  ): CredentialMetadataRecord | null;
+  sshPublicKeyOf(
+    tx: Transaction,
+    pinned: readonly string[],
+    credentialName: string,
+  ): string | null;
+}
 export const catalogEntrySchema = z.discriminatedUnion("host", [
   catalogItemSchema.extend({
     host: z.literal(WorkerHost.Kanthord),
@@ -1440,6 +1541,7 @@ export const StopOrderReason = {
   InstanceArchived: "instance_archived",
   WorkerStopped: "worker_stopped",
   HumanPaused: "human_paused",
+  Revoked: "revoked",
 } as const;
 export type StopOrderReason =
   (typeof StopOrderReason)[keyof typeof StopOrderReason];
@@ -1918,6 +2020,44 @@ export const workerOperations = {
     output: executionSetupSchema,
     description:
       "Read native execution setup from the proven claim and its pinned binding and credential revisions, without secret material or creating a pin.",
+  },
+  "execution.seed.get": {
+    ...humanOperation,
+    id: "worker.execution.seed.get",
+    method: HttpMethod.Get,
+    path: "/api/worker/execution/:execution_id/seed",
+    mutation: false,
+    body: false,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: z.null(),
+    }),
+    output: executionSeedSchema,
+    description:
+      "Read the seed of an execution of a node that is not closed: the claim, the setup without containerEnv, remoteEnv and build.args, the pinned revision and the head of each binding. The answer holds no credential, no SSH identity and no handover key.",
+  },
+  "execution.unit_record.put": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.unit_record.put",
+    method: HttpMethod.Put,
+    path: "/api/worker/execution/:execution_id/unit_record",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: UNIT_RECORD_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: unitRecordSchema,
+    }),
+    output: unitRecordSchema,
+    description:
+      "Write the unit record of a passed unit of the node of the live implement execution: the unit, the digest of its content and the gate commit of each changed checkout. A put replaces the record of the unit. Refusals: 409 worker.unit_record.intent_invalid, worker.unit_record.unit_unknown and worker.unit_record.binding_unknown.",
   },
   "action.request": {
     service: WORKER_SERVICE_NAME,

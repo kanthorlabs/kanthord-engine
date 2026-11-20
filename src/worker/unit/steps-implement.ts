@@ -1,113 +1,64 @@
 import assert from "node:assert/strict";
-import { PromptTemplate } from "../../agent/contract.ts";
+import type { Revision, TaskContent } from "../../mission/contract.ts";
+import type { ExecutionSetup } from "../contract.ts";
 import {
-  AssetKind,
-  type Revision,
-  type TaskContent,
-} from "../../mission/contract.ts";
-import type { ExecutionSetup, RepositoryTransport } from "../contract.ts";
-import type { SshAccess } from "../../repository/contract.ts";
-import { join } from "node:path";
-import {
-  BASE_DIRECTORY,
-  sshAccessOf,
+  type NodeCheckout,
   workRepositoriesOf,
   type WorkspaceCheckout,
-  WorkspaceKind,
-  type WorkspaceRoot,
-} from "./workspace.ts";
-import type { Context } from "../../kernel/context.ts";
-import type { NativeAgent } from "./native-agent.ts";
+} from "./workspace-layout.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import {
-  checkpointGate,
-  gatedAgent,
-  type GatedAgent,
-  isTurnViolation,
-  NO_UNCHANGED_TURNS,
+  type OpenMerge,
   removeRootEntries,
   restoreCheckout,
-  unitCommitMessage,
-  ViolationEnd,
 } from "./turn-gate.ts";
-import type { ExecutionRun } from "./execution-run.ts";
-import {
-  EndReason,
-  type ExecutionEnd,
-  ExecutionStop,
-  type MethodClaim,
-} from "./execution-run.ts";
+import { perCheckout } from "./per-checkout.ts";
+import type { CancellationContext } from "../../kernel/context.ts";
+import type { CommonPorts } from "./foundry-ports.ts";
+import type { MethodClaim } from "./execution-stop.ts";
 import {
   type AffectedTest,
   renderWorkPrompt,
 } from "../../agent/prompt-composer.ts";
-import { readDeclaration } from "./affected.ts";
-import { headCommit } from "./local-git.ts";
-import { readPushRecord, writePushRecord } from "./push-record.ts";
 import {
   environmentStop,
   infrastructureStop,
   runVerificationsWithOutput,
   testedInputOf,
   VerificationClass,
-  verificationPassed,
   type VerificationRun,
 } from "./verification.ts";
 import {
-  BaseHead,
+  type BaseHead,
   runSetup,
   SetupEnd,
-  setupEntries,
   type SetupEntry,
-  setUpHeads,
 } from "./environment-setup.ts";
-import { BudgetLimit } from "../../scheduler/contract.ts";
-import { setupScriptsOf } from "../../kernel/devcontainer.ts";
-import {
-  criterionRevisionInstruction,
-  taskRevisionInstruction,
-} from "./judgement.ts";
-import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
-import {
-  readAttemptEvidence,
-  type Verdict,
-  VerdictSource,
-} from "./node-reads.ts";
+import { criterionRevisionInstruction } from "./judgement.ts";
+import { validUnitRecords } from "./unit-record.ts";
+import { type Verdict, VerdictSource } from "./node-verdict.ts";
 import {
   type JudgedCheckout,
   judgedCheckouts,
   verdictRuleHolds,
 } from "./verdict-rule.ts";
-import { Phase } from "./telemetry.ts";
 import {
   environmentDigestsOf,
-  GitStep,
-  phaseSpan,
-  taskEnd,
-  taskFailure,
-  taskSpan,
   testedCommitOf,
   VerificationContext,
   verificationObserver,
-  withinGit,
 } from "./method-telemetry.ts";
-import { nodeWork, refreshAtClaim, RefreshResult } from "./base-refresh.ts";
-import {
-  noProgressDetail,
-  NoProgressRule,
-  type VerificationFacts,
-  verificationFactsOf,
-} from "./progress-rule.ts";
-import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { nodeWork, RefreshResult } from "./base-refresh.ts";
+import type { VerificationFacts } from "./progress-rule.ts";
+import { nodeUnitOf } from "./release-gate.ts";
 import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
-import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
-import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
+import { setupCommandsOf } from "./step-env-setup.ts";
+import { repositoryOf } from "./setup-repository.ts";
 
-export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
+export { HEAD_COMMIT_SUBJECT } from "../contract.ts";
 const NO_TASKS = 0;
 const NO_CHECKOUTS = 0;
 const NO_LINK_UPDATES = 0;
-const NO_PROGRESS_LIMIT = 2;
-const ONE_TURN = 1;
 const SINGLE_CHECKOUT = 1;
 const BASE_MERGED = "base_merged";
 
@@ -131,683 +82,58 @@ function unitsOf(state: StepsState): TaskContent[] {
   return workUnitsOf(state.input.claim.node_id, state.revision);
 }
 
-interface UnitsEnd {
-  task: TaskContent | null;
-  budgetEnd: boolean;
-  completedTasks: number;
-  reports: ReadonlyMap<string, string>;
-}
-
-function noteReport(
-  reports: Map<string, string>,
-  unit: TaskContent,
-  text: string | undefined,
-): void {
-  if (text?.trim())
-    reports.set(unit.id, `## ${unit.id} ${unit.content.name}\n\n${text}`);
-  else reports.delete(unit.id);
-}
-
-async function submitCoderReport(
-  state: StepsState,
-  reports: ReadonlyMap<string, string>,
-): Promise<void> {
-  if (reports.size === NO_TASKS) return;
-  const report = [...reports.values()].join("\n\n");
-  await state.run.submitEvidence(state.input.claim.node_id, {
-    subject: CODER_REPORT_SUBJECT,
-    assets: [
-      {
-        kind: "produced",
-        content: {
-          media_type: REPORT_MEDIA_TYPE,
-          encoding: "base64",
-          data: Buffer.from(report, "utf8").toString("base64"),
-        },
-      },
-    ],
-  });
-}
-
-async function finishImplement(
-  state: StepsState,
-  end: UnitsEnd,
-): Promise<ExecutionEnd> {
-  await state.run.spans.within(phaseSpan(Phase.Finish), () =>
-    settleImplement(state, end),
-  );
-  return await state.run.release(
-    end.budgetEnd,
-    end.budgetEnd && end.completedTasks === NO_TASKS
-      ? state.agent.budget.limit()
-      : null,
-  );
-}
-
-async function settleImplement(
-  state: StepsState,
-  end: UnitsEnd,
-): Promise<void> {
-  assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  assert.ok(end.task === null || end.task.id);
-  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
-  const remaining = () => state.input.claim.expired_at - Date.now();
-  try {
-    if (end.budgetEnd) {
-      await state.agent.abort();
-      await checkpointGate(
-        state,
-        checkpointMessage(state, end.task),
-        cleanup,
-        ViolationEnd.Stop,
-      );
-    } else await submitCoderReport(state, end.reports);
-    await withinGit(state.run.spans, GitStep.Push, () =>
-      pushNodeBranches(state, cleanup, remaining),
-    );
-    if (!end.budgetEnd) {
-      for (const checkout of state.checkouts)
-        checkout.head = await headCommit(
-          state.input.env,
-          checkout.directory,
-          cleanup,
-          remaining(),
-        );
-      await state.run.submitEvidence(state.input.claim.node_id, {
-        subject: HEAD_COMMIT_SUBJECT,
-        assets: state.checkouts.map((checkout) => ({
-          kind: "repository",
-          address: {
-            kind: "repository",
-            binding_id: checkout.binding_id,
-            commit: checkout.head,
-          },
-        })),
-      });
-    }
-  } finally {
-    cleanup.cancel();
-  }
-}
-
-function checkpointMessage(
-  state: StepsState,
-  task: TaskContent | null,
-): string {
-  return unitCommitMessage(
-    state,
-    task ?? nodeUnitOf(state.input.claim.node_id, state.revision),
-  );
-}
-
-async function pushNodeBranches(
-  state: StepsState,
-  context: Context,
-  remaining: () => number,
-): Promise<void> {
-  for (const checkout of state.checkouts) {
-    const key = {
-      nodeKey: state.input.workspaces.nodeKey(state.input.claim.node_id),
-      nodeBranch: state.nodeBranch,
-      bindingId: checkout.binding_id,
-    };
-    const head = await headCommit(
-      state.input.env,
-      checkout.directory,
-      context,
-      remaining(),
-    );
-    writePushRecord(key, {
-      confirmed: readPushRecord(key)?.confirmed ?? null,
-      pending: head,
-    });
-    await state.input.transport.pushNodeBranch(
-      checkout.directory,
-      state.nodeBranch,
-      context,
-      remaining(),
-      sshAccessOf(state.input.sshAccess, checkout.binding_id),
-    );
-    writePushRecord(key, { confirmed: head, pending: null });
-  }
-}
-
-export function repositoryOf(
-  state: Pick<StepsState, "input">,
-  checkout: WorkspaceCheckout,
-): ExecutionSetup["repositories"][number] {
-  const repository = state.input.setup.repositories.find(
-    (row) => row.binding_id === checkout.binding_id,
-  );
-  assert.ok(repository);
-  return repository;
-}
-
-async function checkpointOnStop(
-  state: StepsState,
-  stopped: ExecutionStop,
-): Promise<void> {
-  const cleanup = state.run.cleanupContext();
-  const remaining = () => state.input.claim.expired_at - Date.now();
-  try {
-    await state.agent.abort();
-    if (!isTurnViolation(stopped.code))
-      await checkpointGate(
-        state,
-        checkpointMessage(state, state.task ?? null),
-        cleanup,
-        ViolationEnd.Restore,
-      );
-    await pushNodeBranches(state, cleanup, remaining);
-  } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    const reason = await state.run.reasonOf(error);
-    state.run.log("checkpoint failed", reason === null ? {} : { reason });
-  } finally {
-    cleanup.cancel();
-  }
-}
-
 export type TaskRunner = (
   state: StepsState,
   task: TaskContent,
   instruction: string | null,
 ) => Promise<TaskResult>;
 
-export async function runStepsImplement(
-  state: StepsState,
-  taskRunner: TaskRunner = runTask,
-): Promise<ExecutionEnd> {
-  const spans = state.run.spans;
-  try {
-    const checked = await spans.within(phaseSpan(Phase.Start), () =>
-      startImplement(state),
-    );
-    const end = checked.budgetEnd
-      ? {
-          task: checked.budgetEnd.task,
-          budgetEnd: true,
-          completedTasks: NO_TASKS,
-          reports: new Map(),
-        }
-      : await spans.within(phaseSpan(Phase.Tasks), () =>
-          runUnits(state, checked, taskRunner),
-        );
-    return await finishImplement(state, end);
-  } catch (error) {
-    const stopped = await state.run.stopOf(error);
-    if (stopped.reason !== EndReason.Revoked)
-      await checkpointOnStop(state, stopped);
-    throw stopped;
-  } finally {
-    await state.base.giveBack();
-    state.input.workspaces.release(
-      state.input.workspaces.nodeKey(state.input.claim.node_id),
-      WorkspaceKind.Node,
-    );
-  }
-}
-
-async function startImplement(state: StepsState): Promise<StartCheck> {
-  assert.ok(state.checkouts.length > NO_CHECKOUTS);
-  state.refreshed = await refreshAtClaim(state);
-  if (state.refreshed === RefreshResult.BudgetEnd)
-    return {
-      pending: [],
-      node: null,
-      done: new Set(),
-      budgetEnd: { task: null },
-    };
-  return await startCheck(state);
-}
-
-async function runUnits(
-  state: StepsState,
-  checked: StartCheck,
-  taskRunner: TaskRunner,
-): Promise<UnitsEnd> {
-  const completed = new Set<string>();
-  const reports = new Map<string, string>();
-  let units: readonly PendingTask[] = withSetupInstruction(
-    checked.pending,
-    state.setupInstruction,
-  );
-  let nodeInstruction = checked.node;
-  let planned = true;
-  while (!state.agent.budget.exhausted()) {
-    const ran = await runPending(state, units, nodeInstruction, taskRunner, {
-      done: checked.done,
-      completed,
-      reports,
-      planned,
-    });
-    if (ran.budgetEnd) return ran;
-    if (planned) state.unchangedTurns = NO_UNCHANGED_TURNS;
-    planned = false;
-    nodeInstruction = null;
-    const gate = await releaseGate(state);
-    if (gate.kind === ReleaseGateKind.Passed)
-      return {
-        task: null,
-        budgetEnd: false,
-        completedTasks: completed.size,
-        reports,
-      };
-    if (gate.kind === ReleaseGateKind.BudgetEnd) break;
-    state.run.log("release failure routed", { task_id: gate.unit.id });
-    units = [{ task: gate.unit, instruction: gate.instruction }];
-  }
-  return {
-    task: state.task ?? null,
-    budgetEnd: true,
-    completedTasks: completed.size,
-    reports,
-  };
-}
-
-function withSetupInstruction(
-  pending: readonly PendingTask[],
-  instruction: string | null,
-): readonly PendingTask[] {
-  const [first, ...rest] = pending;
-  if (instruction === null || !first || first.instruction !== null)
-    return pending;
-  return [{ ...first, instruction }, ...rest];
-}
-
-interface PendingScope {
-  done: ReadonlySet<string>;
-  completed: Set<string>;
-  reports: Map<string, string>;
-  planned: boolean;
-}
-
-async function runPending(
-  state: StepsState,
-  pending: readonly PendingTask[],
-  node: NodeInstruction | null,
-  taskRunner: TaskRunner,
-  { done, completed, reports, planned }: PendingScope,
-): Promise<UnitsEnd> {
-  assert.ok(pending.length <= unitsOf(state).length);
-  const units = pending.map(({ task, instruction }) => ({
-    task,
-    verdict: false,
-    round: null as number | null,
-    run: () => taskRunner(state, task, instruction),
-  }));
-  if (node !== null) {
-    const unit = nodeUnitOf(state.input.claim.node_id, state.revision);
-    units.push({
-      task: unit,
-      verdict: true,
-      round: node.round,
-      run: () => runNodeInstruction(state, unit, node),
-    });
-  }
-  for (const { task, verdict, round, run } of units) {
-    state.task = task;
-    state.revisionCount = 0;
-    if (planned) state.unchangedTurns = NO_UNCHANGED_TURNS;
-    const result = await state.run.spans.within(
-      taskSpan(state.run.spans, task, round),
-      run,
-      (ended) => taskEnd(ended, state.revisionCount),
-      (error) => taskFailure(error, state.revisionCount),
-    );
-    if (result.kind === TaskResultKind.BudgetEnd)
-      return { task, budgetEnd: true, completedTasks: completed.size, reports };
-    noteReport(reports, task, state.agent.lastText());
-    if (verdict || (result.recorded && !isDone(done, task)))
-      completed.add(task.id);
-  }
-  return {
-    task: null,
-    budgetEnd: false,
-    completedTasks: completed.size,
-    reports,
-  };
-}
-
-function recordTaskVerification(
-  state: StepsState,
-  unit: TaskContent,
-  checked: CheckedRun,
-): boolean {
-  const { verification } = checked;
-  const passed = verificationPassed(verification, checked.commands);
-  state.lastVerification = verificationFactsOf(passed, verification);
-  state.run.noteVerification(state.lastVerification?.timed_out ?? false);
-  state.run.log("task verified", {
-    task_id: unit.id,
-    commit: headSetOf(state.checkouts),
-    passed,
-    exit_codes: verification.results.map((result) => result.exit_code),
-  });
-  return passed;
-}
-
-function revisionInstructionOf(state: StepsState, checked: CheckedRun): string {
-  return taskRevisionInstruction(
-    state.input.setup.templates,
-    checked.verification,
-    checked.commands,
-    checked.outputs.at(-1) ?? "",
-  );
-}
-
-function reviseNodeInstruction(
-  state: StepsState,
-  checked: CheckedRun,
-  ruled: boolean,
-): string {
-  if (ruled) countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-  const instruction = revisionInstructionOf(state, checked);
-  state.revisionCount++;
-  return instruction;
-}
-
-async function runNodeInstruction(
-  state: StepsState,
-  unit: TaskContent,
-  node: NodeInstruction,
-): Promise<TaskResult> {
-  const budget = state.agent.budget;
-  const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
-  const commands = ownCommandsOf(unit, state.revision);
-  const agent = gatedAgent(state, unitCommitMessage(state, unit));
-  let ruled = node.judged.length > NO_CHECKOUTS;
-  let instruction = node.text;
-  let template: PromptTemplate = PromptTemplate.CriterionRevision;
-  let revised = false;
-  state.run.log("node instruction started", { task_id: unit.id, ruled });
-  while (!budget.exhausted()) {
-    await state.run.checkClaim();
-    const unchangedTurns = state.unchangedTurns;
-    await agent.instruct(taskWork(state, unit), instruction, template);
-    if (budget.exhausted()) return ended;
-    if (ruled) {
-      ruled = !(await verdictRuleHolds(state, node.judged));
-      state.run.log("verdict rule checked", {
-        task_id: unit.id,
-        commit: headSetOf(state.checkouts),
-        holds: !ruled,
-      });
-      if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
-    } else if (revised && !agent.changed())
-      countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
-    const checked = await verifyCommands(state, unit, commands);
-    const passed = recordTaskVerification(state, unit, checked);
-    if (passed) return await completeUnit(state, unit, agent);
-    if (budget.exhausted()) return ended;
-    instruction = reviseNodeInstruction(state, checked, ruled);
-    template = PromptTemplate.TaskRevision;
-    revised = true;
-  }
-  return ended;
-}
-
-function verdictTurnRetried(
-  state: StepsState,
-  unit: TaskContent,
-  unchangedTurns: number,
-): boolean {
-  state.unchangedTurns = unchangedTurns;
-  if (state.unchangedTurns + ONE_TURN >= NO_PROGRESS_LIMIT) {
-    state.run.log("verdict rule waived for review", {
-      task_id: unit.id,
-      commit: headSetOf(state.checkouts),
-    });
-    return false;
-  }
-  countUnchangedTurn(state, NoProgressRule.VerdictRuleUnmet);
-  state.revisionCount++;
-  return true;
-}
-
 export const TaskResultKind = {
   Complete: "complete",
   BudgetEnd: "budget_end",
 } as const;
 export type TaskResult =
-  | { kind: typeof TaskResultKind.Complete; recorded: boolean }
+  | { kind: typeof TaskResultKind.Complete; committed: boolean }
   | { kind: typeof TaskResultKind.BudgetEnd };
-
-async function completeUnit(
-  state: StepsState,
-  unit: TaskContent,
-  agent: GatedAgent,
-): Promise<TaskResult> {
-  return {
-    kind: TaskResultKind.Complete,
-    recorded: await writeDoneRecord(state, unit, agent.commits()),
-  };
-}
-
-export async function runTask(
-  state: StepsState,
-  task: TaskContent,
-  initialInstruction: string | null = null,
-): Promise<TaskResult> {
-  const budget = state.agent.budget;
-  let instruction = initialInstruction;
-  const ended: TaskResult = { kind: TaskResultKind.BudgetEnd };
-  state.run.log("task started", { task_id: task.id });
-  const agent = gatedAgent(state, unitCommitMessage(state, task));
-  while (!budget.exhausted()) {
-    await state.run.checkClaim();
-    if (instruction === null) await agent.prompt(taskWork(state, task));
-    else
-      await agent.instruct(
-        taskWork(state, task),
-        instruction,
-        PromptTemplate.TaskRevision,
-      );
-    if (budget.exhausted()) return ended;
-    if (instruction !== null && !agent.changed())
-      countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
-    state.run.log("task committed", {
-      task_id: task.id,
-      commit: headSetOf(state.checkouts),
-    });
-    const checked = await verifyTaskRun(state, task);
-    if (recordTaskVerification(state, task, checked))
-      return await completeUnit(state, task, agent);
-    instruction = revisionInstructionOf(state, checked);
-    state.revisionCount++;
-  }
-  return ended;
-}
-
-function countUnchangedTurn(state: StepsState, rule: NoProgressRule): void {
-  state.unchangedTurns++;
-  if (state.unchangedTurns >= NO_PROGRESS_LIMIT)
-    state.run.stop(
-      EndReason.NoProgress,
-      null,
-      noProgressDetail({
-        rule,
-        count: state.unchangedTurns,
-        limit: NO_PROGRESS_LIMIT,
-        verification: state.lastVerification,
-      }),
-    );
-}
 
 export interface StepsInput {
   claim: MethodClaim;
   setup: ExecutionSetup;
-  workspaces: WorkspaceRoot;
-  transport: RepositoryTransport;
-  sshAccess: ReadonlyMap<string, SshAccess>;
   env: NodeJS.ProcessEnv;
 }
-export interface StepsState {
+
+export interface ProgressCtx {
+  unchangedTurns: number;
+  lastVerification: VerificationFacts;
+  revisionCount: number;
+}
+
+export interface StepsState extends ProgressCtx {
   input: StepsInput;
-  run: ExecutionRun;
+  cancel: CancellationContext;
+  ports: CommonPorts;
   agent: NativeAgent;
   revision: Revision;
   root: string;
-  checkouts: WorkspaceCheckout[];
+  workspaceKey: string;
+  checkouts: NodeCheckout[];
   nodeBranch: string;
-  verdict: Verdict | null;
-  cleared: string | null;
-  unchangedTurns: number;
-  refreshed: RefreshResult | null;
-  lastVerification: VerificationFacts;
-  revisionCount: number;
   setup: SetupEntry[];
   affectedTests: AffectedTest[];
   base: BaseHead;
   setupPending: boolean;
   setupInstruction: string | null;
   memo: VerificationMemo;
+  verificationTimedOut: boolean;
   task?: TaskContent;
+  openMerge?: OpenMerge;
+  conflictOwners?: string[] | null;
 }
 
-async function affectedTestsOf(
-  input: StepsInput,
-  run: ExecutionRun,
-  checkouts: readonly WorkspaceCheckout[],
-  deadline: number,
-): Promise<AffectedTest[]> {
-  const tests: AffectedTest[] = [];
-  for (const checkout of checkouts) {
-    const declaration = await readDeclaration(
-      input.env,
-      checkout.directory,
-      repositoryOf({ input }, checkout).strategy.base_branch,
-      run.operationContext,
-      deadline - Date.now(),
-    );
-    if (declaration === null || "error" in declaration) continue;
-    tests.push({
-      name: checkout.name,
-      command: declaration.command,
-      gate_files: declaration.gate_files,
-    });
-  }
-  return tests;
-}
-
-export async function prepareStepsWorkspace(
-  input: StepsInput,
-  run: ExecutionRun,
-) {
-  assert.ok(input.setup.repositories.length > NO_CHECKOUTS);
-  assert.equal(input.claim.execution_id, input.setup.execution_id);
-  const pushed = new Set(
-    (await readAttemptEvidence(run)).flatMap((evidence) =>
-      evidence.assets.flatMap((asset) =>
-        asset.kind === AssetKind.Repository ? [asset.address.binding_id] : [],
-      ),
-    ),
-  );
-  const deadline = Math.min(
-    input.claim.created_at + input.setup.resource_budget.wall_time_ms,
-    input.claim.expired_at,
-  );
-  const prepared = await input.workspaces.prepareImplement({
-    env: input.env,
-    nodeId: input.claim.node_id,
-    nodeBranch: input.claim.node_branch,
-    pushed,
-    repositories: input.setup.repositories,
-    log: (msg, fields) => run.log(msg, fields),
-    transport: input.transport,
-    sshAccess: input.sshAccess,
-    context: run.operationContext,
-    deadlineMs: deadline - Date.now(),
-  });
-  const key = input.workspaces.nodeKey(input.claim.node_id);
-  const setupInput = {
-    env: input.env,
-    context: run.operationContext,
-    deadline,
-    spans: run.spans,
-  };
-  let base: BaseHead | null = null;
-  try {
-    for (const checkout of prepared.checkouts)
-      await restoreCheckout(
-        input.env,
-        checkout,
-        input.claim.node_branch,
-        checkout.head,
-        run.operationContext,
-        () => deadline - Date.now(),
-      );
-    const setup = await setupEntries(
-      setupInput,
-      prepared.checkouts.map((checkout) => ({
-        repository: repositoryOf({ input }, checkout),
-        directory: checkout.directory,
-      })),
-    );
-    const affectedTests = await affectedTestsOf(
-      input,
-      run,
-      prepared.checkouts,
-      deadline,
-    );
-    base = new BaseHead(
-      setupInput,
-      {
-        directory: join(key, BASE_DIRECTORY),
-        trees: {
-          workspaces: input.workspaces,
-          nodeId: input.claim.node_id,
-          addresses: new Map(
-            input.setup.repositories.map(({ name, address }) => [
-              name,
-              address,
-            ]),
-          ),
-          log: (msg, fields) => run.log(msg, fields),
-        },
-      },
-      setup,
-    );
-    const result = await setUpHeads(
-      setupInput,
-      setup,
-      base,
-      prepared.checkouts.map((checkout) => checkout.head),
-    );
-    run.log("environment setup", {
-      end: result.end,
-      commands: setupCommandsOf(setup).length,
-    });
-    if (result.end === SetupEnd.BudgetEnd)
-      throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
-    const failed = result.end === SetupEnd.Failed;
-    if (failed)
-      run.log("setup failed on the node head", {
-        exit_codes: result.run.verification.results.map(
-          (entry) => entry.exit_code,
-        ),
-      });
-    return {
-      ...prepared,
-      nodeBranch: input.claim.node_branch,
-      setup,
-      affectedTests,
-      base,
-      setupPending: failed,
-      setupInstruction: failed
-        ? taskRevisionInstruction(
-            input.setup.templates,
-            result.run.verification,
-            result.commands,
-            result.run.outputs.at(-1) ?? "",
-          )
-        : null,
-    };
-  } catch (error) {
-    await base?.giveBack();
-    input.workspaces.release(key, WorkspaceKind.Node);
-    throw error;
-  }
+export interface StartState extends StepsState {
+  verdict: Verdict | null;
+  cleared: string | null;
+  refreshed: RefreshResult | null;
 }
 
 export function taskWork(state: StepsState, task: TaskContent) {
@@ -849,9 +175,9 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
   const result = await runSetup(
     {
       env: state.input.env,
-      context: state.run.operationContext,
+      context: state.cancel,
       deadline: state.agent.budget.wallDeadline(),
-      spans: state.run.spans,
+      spans: state.ports.telemetry,
       exhausted: () => state.agent.budget.exhausted(),
     },
     state.setup,
@@ -877,13 +203,7 @@ async function pendingSetup(state: StepsState): Promise<CheckedRun | null> {
   return { ...result.run, commands: result.commands };
 }
 
-function setupCommandsOf(entries: readonly SetupEntry[]): string[] {
-  return entries.flatMap((entry) =>
-    entry.environment === null ? [] : setupScriptsOf(entry.environment),
-  );
-}
-
-async function verifyCommands(
+export async function verifyCommands(
   state: StepsState,
   task: TaskContent,
   commands: readonly string[],
@@ -897,7 +217,7 @@ async function verifyCommands(
       : VerificationContext.Task;
   const run = await runVerificationsWithOutput({
     observe: verificationObserver(
-      state.run.spans,
+      state.ports.telemetry,
       testedCommitOf(testedInput),
       environmentDigestsOf(state.input.setup.repositories),
       { context, ownerOf: () => task.id },
@@ -907,24 +227,25 @@ async function verifyCommands(
     commands,
     tested_input: testedInput,
     deadline: state.agent.budget.wallDeadline(),
-    context: state.run.operationContext,
+    context: state.cancel,
     env: state.input.env,
     exhausted: () => state.agent.budget.exhausted(),
     baseline: (command) => state.base.exitOf(command),
   });
   if (run.outcome === VerificationClass.BudgetEnd)
     state.agent.budget.wallDeadlineReached();
-  const cleanup = state.agent.budget.cleanupContext(state.run.operationContext);
+  const cleanup = state.agent.budget.cleanupContext(state.cancel);
   try {
-    for (const checkout of state.checkouts)
-      await restoreCheckout(
+    await perCheckout(state.checkouts, (checkout) =>
+      restoreCheckout(
         state.input.env,
         checkout,
         state.nodeBranch,
         checkout.head,
         cleanup,
         () => state.input.claim.expired_at - Date.now(),
-      );
+      ),
+    );
     removeRootEntries(state);
   } finally {
     cleanup.cancel();
@@ -934,7 +255,7 @@ async function verifyCommands(
   return { ...run, commands };
 }
 
-function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {
+export function headSetOf(checkouts: readonly WorkspaceCheckout[]): string {
   assert.ok(checkouts.length >= SINGLE_CHECKOUT);
   if (checkouts.length === SINGLE_CHECKOUT) return checkouts[0]!.head;
   return checkouts
@@ -961,7 +282,7 @@ export interface StartCheck {
 }
 
 async function nodeInstructionOf(
-  state: StepsState,
+  state: StartState,
 ): Promise<NodeInstruction | null> {
   if (state.verdict === null)
     return state.cleared === null
@@ -972,7 +293,7 @@ async function nodeInstructionOf(
     state.verdict.source === VerdictSource.FailedChecks &&
     state.refreshed === RefreshResult.Merged
   ) {
-    state.run.log("verdict planned", {
+    state.ports.log.log("verdict planned", {
       commit: headSetOf(state.checkouts),
       judged: judged.map(({ checkout }) => checkout.name),
       holds: false,
@@ -983,7 +304,7 @@ async function nodeInstructionOf(
   }
   const holds =
     judged.length > NO_CHECKOUTS && (await verdictRuleHolds(state, judged));
-  state.run.log("verdict planned", {
+  state.ports.log.log("verdict planned", {
     commit: headSetOf(state.checkouts),
     judged: judged.map(({ checkout }) => checkout.name),
     holds,
@@ -1000,14 +321,15 @@ async function nodeInstructionOf(
   };
 }
 
-export async function startCheck(state: StepsState): Promise<StartCheck> {
+export async function startCheck(state: StartState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const node = await nodeInstructionOf(state);
-  const done = await readDoneRecords(state);
-  const pending = unitsOf(state)
-    .filter((task) => !isDone(done, task))
+  const units = unitsOf(state);
+  const done = await validUnitRecords(state, units);
+  const pending = units
+    .filter((task) => !done.has(task.id))
     .map((task) => ({ task, instruction: null }));
-  state.run.log("units planned", {
+  state.ports.log.log("units planned", {
     commit: headSetOf(state.checkouts),
     pending: pending.map(({ task }) => task.id),
   });

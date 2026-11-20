@@ -29,23 +29,22 @@ import { SpanOperation } from "./telemetry.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
-import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace-layout.ts";
+import { digest } from "../../kernel/json.ts";
 import { readPushRecord } from "./push-record.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
   HEAD_COMMIT_SUBJECT,
-  runStepsImplement,
-  runTask,
   startCheck,
   TaskResultKind,
   taskWork,
   verifyTaskRun,
 } from "./steps-implement.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
 import { nodeWork } from "./base-refresh.ts";
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { NoProgressRule } from "./progress-rule.ts";
@@ -54,8 +53,8 @@ import {
   implementFixture as fixture,
   nextExecution,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   STEPS_KEY,
   task,
   TEST_SSH_ACCESS,
@@ -65,7 +64,7 @@ import { background } from "../../kernel/context.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { AssetKind, type Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
-import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
+import { REPORT_MEDIA_TYPE } from "./step-examine-turn.ts";
 
 const TASK_VERIFIED = "task verified";
 const REVISION_COUNT_ATTRIBUTE = "kanthord.task.revision_count";
@@ -231,7 +230,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         bindings: [],
       },
     } as unknown as Revision;
-    await recordDone(h, done);
+    await recordUnit(h, done);
     h.verdict = {
       source: VerdictSource.Rework,
       text: "Rework the node.",
@@ -267,7 +266,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     const events = t.mock.method(h.run, "log");
     assert.deepEqual(await runTask(h, current), {
       kind: "complete",
-      recorded: true,
+      committed: true,
     });
     assert.deepEqual(
       events.mock.calls.map((call) => call.arguments[0]),
@@ -277,7 +276,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         "task verified",
         "task committed",
         "task verified",
-        "done recorded",
+        "unit recorded",
       ],
     );
     const verified = events.mock.calls
@@ -404,6 +403,9 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: current.id,
+      template: PromptTemplate.TaskRevision,
+      agent_reason: "still nothing",
     });
     assert.deepEqual(
       events.mock.calls
@@ -411,6 +413,62 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         .filter((msg) => msg === TASK_VERIFIED).length,
       VERIFIED_BEFORE_NO_PROGRESS,
     );
+  });
+
+  const REASON_PREFIX = "word ".repeat(100);
+  const REASON_SUFFIX = " tail".repeat(40);
+  const AGENT_REASON_MAX_LENGTH = 512;
+
+  test("a no_progress detail redacts a secret of the agent text that crosses the 512-character cut", async (t) => {
+    const current = task("stuck", "false");
+    const h = await fixture(
+      t,
+      [current],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
+      ],
+    );
+    t.mock.method(
+      h.agent,
+      "lastText",
+      () => `${REASON_PREFIX}${STEPS_KEY}${REASON_SUFFIX}`,
+    );
+    const stopped = await stopOf(runTask(h, current));
+    assert.equal(stopped.reason, EndReason.NoProgress);
+    assert.equal(stopped.detail?.includes(STEPS_KEY), false);
+    const { agent_reason } = JSON.parse(stopped.detail!);
+    assert.equal(
+      agent_reason,
+      `${REASON_PREFIX}[redacted]${REASON_SUFFIX}`.slice(
+        0,
+        AGENT_REASON_MAX_LENGTH,
+      ),
+    );
+  });
+
+  test("a no_progress detail holds no agent_reason when the secret list of the execution cannot be read for the redaction", async (t) => {
+    const current = task("stuck", "false");
+    const h = await fixture(
+      t,
+      [current],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
+      ],
+    );
+    t.mock.method(h.agent, "lastText", () => `still nothing ${STEPS_KEY}`);
+    (h.run as unknown as { secrets: () => Promise<string[]> }).secrets =
+      async () => {
+        throw new Error("The secret list cannot be read.");
+      };
+    const stopped = await stopOf(runTask(h, current));
+    assert.equal(stopped.reason, EndReason.NoProgress);
+    const detail = JSON.parse(stopped.detail!);
+    assert.equal("agent_reason" in detail, false);
+    assert.equal(detail.unit_id, current.id);
   });
 
   test("a live failure runs again on the next turn with an unchanged tree", async (t) => {
@@ -455,25 +513,6 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         span.owner,
       ]),
       [[VerificationContext.Task, first.id]],
-    );
-  });
-
-  test("a revoked claim stops the task loop before the next cycle", async (t) => {
-    const current = task("revoked", "false");
-    const h = await fixture(t, [current], [fauxAssistantMessage("never")]);
-    h.run.clients.scheduler = {
-      claimGet: async () => ({
-        type: "completed",
-        status: 200,
-        data: { claim_state: "finished" },
-      }),
-    } as unknown as MethodClients["scheduler"];
-    const events = t.mock.method(h.run, "log");
-    const stopped = await stopOf(runTask(h, current));
-    assert.equal(stopped.reason, EndReason.Revoked);
-    assert.deepEqual(
-      events.mock.calls.map((call) => call.arguments[0]),
-      ["task started"],
     );
   });
 
@@ -834,7 +873,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const TWO_BINDINGS = ["api", "web"];
 
-  test("two bindings commit only the checkout with a change", async (t) => {
+  test("two bindings commit only the checkout with a change, and the unit record names only that checkout at its gate commit", async (t) => {
     const current = task("api-change", "test -f api/added");
     const h = await fixture(
       t,
@@ -857,7 +896,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     const webBefore = web.head;
     assert.deepEqual(await runTask(h, current), {
       kind: "complete",
-      recorded: true,
+      committed: true,
     });
     assert.notEqual(api.head, apiBefore);
     assert.equal(await simpleGit(api.directory).revparse(["HEAD"]), api.head);
@@ -866,10 +905,16 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.equal(web.head, webBefore);
     assert.equal(await simpleGit(web.directory).revparse(["HEAD"]), webBefore);
-    assert.ok(
-      (
-        await simpleGit(api.directory).raw(["log", "-1", "--format=%B"])
-      ).includes(`${DONE_TRAILER}: ${doneRecordOf(current)}`),
+    assert.deepEqual(h.input.setup.unit_records, [
+      {
+        unit_id: current.id,
+        content_digest: digest(current.content),
+        commits: [{ binding_id: api.binding_id, commit: api.head }],
+      },
+    ]);
+    assert.equal(
+      (await simpleGit(api.directory).raw(["log", "-1", "--format=%B"])).trim(),
+      `feat: ${current.content.name}\n\n${current.id}`,
     );
     h.input.workspaces.release(key, WorkspaceKind.Node);
   });
@@ -910,7 +955,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         verifications: [baseMoved ? "test -f other" : "true"],
       },
     };
-    await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+    await recordUnit(h, nodeUnitOf(h.input.claim.node_id, h.revision));
     const judged = h.checkouts.map((checkout) => ({
       binding_id: checkout.binding_id,
       commit: checkout.head,

@@ -505,6 +505,30 @@ export function readReleaseEvidence(
     ) as unknown as EvidenceRow[];
 }
 
+export interface EvidenceSubjectScope {
+  from: number;
+  to: number;
+  subject: string;
+}
+
+export function readExecutionEvidenceOfSubject(
+  tx: Transaction,
+  nodeId: string,
+  scope: EvidenceSubjectScope,
+): (EvidenceRow & { execution_id: string })[] {
+  return tx.database
+    .prepare(
+      "SELECT *, json_extract(provenance, '$.execution_id') AS execution_id FROM mission_evidence WHERE node_id = ? AND attempt BETWEEN ? AND ? AND subject = ? AND json_extract(provenance, '$.kind') = ? ORDER BY id",
+    )
+    .all(
+      nodeId,
+      scope.from,
+      scope.to,
+      scope.subject,
+      ActorKind.Execution,
+    ) as unknown as (EvidenceRow & { execution_id: string })[];
+}
+
 export function insertAssessment(
   tx: Transaction,
   row: Omit<AssessmentRow, "sequence">,

@@ -97,6 +97,7 @@ function machineFixture(t: TestContext) {
     instanceArchive: {
       revokeForInstanceArchive: unexpected,
       revokePausedClaim: unexpected,
+      revokeHeldPauses: () => {},
       executionReleased: unexpected,
       reportExecutionEnds: unexpected,
     },
@@ -150,6 +151,7 @@ function machineFixture(t: TestContext) {
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,
     intentOf: unexpected,
+    unitIdsOf: unexpected,
     pinnedCredentialMetadata: unexpected,
     credentialMetadata: unexpected,
     sshHostKeysOf: unexpected,

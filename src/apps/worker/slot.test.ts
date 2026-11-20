@@ -15,7 +15,7 @@ import {
   instanceFrameSchema,
   type ServerFrame,
 } from "./frames.ts";
-import { BindingEntryState } from "../../worker/contract.ts";
+import { BindingEntryState, StopOrderReason } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
 
 const SHELL = "/bin/sh";
@@ -52,6 +52,8 @@ parentPort.on("message", (message) => {
   if (message.kind === "bindings")
     for (const entry of message.entries)
       if (entry.port) host(entry);
+  if (message.kind === "stop_orders")
+    workerData.entries[0].port.postMessage({ orders: message.orders });
   if (message.kind === "stop" && workerData.entries[0].client_secret !== ${JSON.stringify(IGNORING_SECRET)}) process.exit(0);
 });
 `;
@@ -316,4 +318,22 @@ test("serve slot applies a bindings frame and opens a port for the new entry onl
     portFrames(exit.stdout).map(({ client_id }) => client_id),
     [CLIENT_ID, SECOND_CLIENT_ID],
   );
+});
+
+test("serve slot hands a stop_orders frame to the thread as a stop_orders message", async (t) => {
+  const instance = slot(t, {});
+  instance.send(init());
+  await framesCount(instance, 1);
+  const orders = [
+    {
+      execution_id: "execution_01ARZ3NDEKTSV4RRFFQ69G5FAV",
+      reason: StopOrderReason.Revoked,
+    },
+  ];
+  instance.send({ kind: FrameKind.StopOrders, orders });
+  await framesCount(instance, 2);
+  instance.send({ kind: FrameKind.Control, control: SlotControl.Stop });
+  const exit = await instance.exited;
+  assert.equal(exit.code, THREAD_STOPPED);
+  assert.deepEqual(portFrames(exit.stdout)[1]?.message, { orders });
 });

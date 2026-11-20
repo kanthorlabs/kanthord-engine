@@ -758,6 +758,41 @@ components:
               - strategy
               - environment
             additionalProperties: false
+        unit_records:
+          type: array
+          items:
+            type: object
+            properties:
+              unit_id:
+                type: string
+                minLength: 1
+              content_digest:
+                type: string
+                pattern: ^[0-9a-f]{64}$
+              commits:
+                minItems: 1
+                type: array
+                items:
+                  type: object
+                  properties:
+                    binding_id:
+                      type: string
+                      minLength: 34
+                      maxLength: 34
+                      pattern: ^binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$
+                      description: binding_ followed by a canonical 26-character uppercase ULID.
+                    commit:
+                      type: string
+                      pattern: ^(?:[0-9a-f]{40}|[0-9a-f]{64})$
+                  required:
+                    - binding_id
+                    - commit
+                  additionalProperties: false
+            required:
+              - unit_id
+              - content_digest
+              - commits
+            additionalProperties: false
       required:
         - execution_id
         - worker_name
@@ -766,4 +801,5 @@ components:
         - resource_budget
         - intent
         - repositories
+        - unit_records
       additionalProperties: false

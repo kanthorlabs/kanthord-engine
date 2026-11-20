@@ -869,6 +869,7 @@ export function composeServices(options: ComposeServicesOptions) {
       revokeForInstanceArchive: (...args) =>
         mission.revokeForInstanceArchive(...args),
       revokePausedClaim: (...args) => mission.revokePausedClaim(...args),
+      revokeHeldPauses: () => mission.revokeHeldPauses(),
       executionReleased: (...args) => mission.executionReleased(...args),
       reportExecutionEnds: (...args) => mission.reportExecutionEnds(...args),
     },
@@ -977,6 +978,8 @@ export function composeServices(options: ComposeServicesOptions) {
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
     intentOf: (tx, nodeId, revision) => mission.intentOf(tx, nodeId, revision),
+    unitIdsOf: (tx, nodeId, revision) =>
+      mission.unitIdsOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
@@ -990,6 +993,15 @@ export function composeServices(options: ComposeServicesOptions) {
       activityOf: (...args) => scheduler.activityOf(...args),
       agentSelectionsOf: (...args) => scheduler.agentSelectionsOf(...args),
       agentPinsOf: (...args) => scheduler.agentPinsOf(...args),
+    },
+    seeds: {
+      executionOf: (tx, executionId) =>
+        scheduler.seedExecutionOf(tx, executionId),
+      nodeOf: (tx, execution) => mission.seedNodeOf(tx, execution),
+      credentialMetadataOf: (tx, pinned, name) =>
+        custody.pinnedMetadata(tx, pinned, name),
+      sshPublicKeyOf: (tx, pinned, name) =>
+        custody.pinnedSshPublicKeyOf(tx, pinned, name),
     },
     health: options.health,
     registrations: options.registrations,
@@ -1159,6 +1171,9 @@ export function composeServices(options: ComposeServicesOptions) {
     config: options.config.mission,
     health: options.health,
     workQueue,
+    unitRecords: {
+      deleteNode: (tx, nodeId) => worker.deleteNodeUnitRecords(tx, nodeId),
+    },
     schedulerClaims: {
       revoke: (...args) => scheduler.revoke(...args),
       executionRevoked: (...args) => scheduler.executionRevoked(...args),
@@ -1178,6 +1193,7 @@ export function composeServices(options: ComposeServicesOptions) {
     workerStopOrders: {
       connected: (...args) => worker.executionConnected(...args),
       sendStopOrder: (...args) => worker.sendStopOrder(...args),
+      sendRevokedOrder: (...args) => worker.sendRevokedOrder(...args),
       orderOf: (...args) => worker.orderOf(...args),
     },
     pauseFacts: {

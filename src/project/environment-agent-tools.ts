@@ -1,5 +1,6 @@
 import { Type } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { EnvironmentTool } from "../agent/catalog.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import type { Context } from "../kernel/context.ts";
 import { parseEnvironmentText } from "../kernel/devcontainer.ts";
@@ -109,7 +110,7 @@ export function environmentAgentTools(
   port: EnvironmentAgentPort,
 ): ToolDefinition[] {
   const probe: ToolDefinition<typeof PROBE_PARAMETERS> = {
-    name: "probe",
+    name: EnvironmentTool.Probe,
     label: "Probe the environment image",
     description: `Run one read-only command in a throwaway container of the last image. The command must match the allowlist: ${PROBE_ALLOWLIST.join("; ")}.`,
     parameters: PROBE_PARAMETERS,
@@ -125,7 +126,7 @@ export function environmentAgentTools(
     },
   };
   const write: ToolDefinition<typeof WRITE_PARAMETERS> = {
-    name: "environment_write",
+    name: EnvironmentTool.EnvironmentWrite,
     label: "Write the environment",
     description:
       "Store the environment document and build the image. Each call is one attempt. The answer holds the outcome, the class and the tail of the run.",

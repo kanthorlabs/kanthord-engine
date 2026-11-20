@@ -28,7 +28,7 @@ import type {
   FailedChecks,
   LinkUpdateRead,
 } from "../contract.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
 

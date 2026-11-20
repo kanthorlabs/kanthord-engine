@@ -1,4 +1,4 @@
-import { VerdictSource } from "./node-reads.ts";
+import { VerdictSource } from "./node-verdict.ts";
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
@@ -16,21 +16,22 @@ import {
   releasedRoot,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
+import { ExecutionRun } from "./execution-run.ts";
 import {
   EndReason,
   ExecutionEndKind,
-  ExecutionRun,
   ExecutionStop,
-} from "./execution-run.ts";
+} from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
-import { WorkspaceKind } from "./workspace.ts";
+import { WorkspaceKind } from "./workspace-layout.ts";
+import { startCheck } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
-  startCheck,
-} from "./steps-implement.ts";
+} from "./steps-implement-host.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
+import { resolveGitPaths } from "./local-git.ts";
 import { MERGE_MARKERS_LEFT } from "./turn-gate.ts";
 import { nodeUnitOf } from "./release-gate.ts";
 import {
@@ -38,8 +39,8 @@ import {
   commitOnNode,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   task,
 } from "./test-support.ts";
 
@@ -53,15 +54,15 @@ const STRAY_FILE = "stray.txt";
 const ONE_RELEASE = 1;
 
 suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
-  test("the start check plans each task with no done record for its current content", async (t) => {
+  test("the start check plans each task with no valid unit record for its current content", async (t) => {
     const tasks = [
       task("open", "touch dirty; false"),
       task("done", "true"),
       task("revised", "true"),
     ];
     const h = await fixture(t, tasks, []);
-    await recordDone(h, tasks[1]!);
-    await recordDone(h, {
+    await recordUnit(h, tasks[1]!);
+    await recordUnit(h, {
       ...tasks[2]!,
       content: { ...tasks[2]!.content, criterion: "earlier" },
     });
@@ -98,7 +99,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       tasks,
       content: { ...NODE_CONTENT, verifications: [nodeCommand] },
     } as unknown as Revision;
-    for (const current of tasks) await recordDone(h, current);
+    for (const current of tasks) await recordUnit(h, current);
     h.verdict = {
       source: VerdictSource.Rework,
       text: "The route stays unhandled.",
@@ -261,7 +262,18 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       (await simpleGit(prepared.root).branch()).current,
       restartBranch,
     );
-    const state = { ...h, ...prepared };
+    const checkouts = [];
+    for (const checkout of prepared.checkouts)
+      checkouts.push({
+        ...checkout,
+        gitPaths: await resolveGitPaths({
+          env: h.input.env,
+          directory: checkout.directory,
+          context: background,
+          deadlineMs: DEADLINE_MS,
+        }),
+      });
+    const state = { ...h, ...prepared, checkouts };
     assert.equal(await refreshAtClaim(state), RefreshResult.Merged);
     assert.equal(
       readFileSync(join(prepared.root, "other"), "utf8"),
@@ -341,7 +353,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     } as unknown as Revision;
   }
 
-  test("an implement node with no task plans the node unit until a done record matches the node content", async (t) => {
+  test("an implement node with no task plans the node unit until a valid unit record matches the node content", async (t) => {
     const h = await fixture(t, [], []);
     h.revision = nodeUnitRevision("true");
     const nodeId = h.input.claim.node_id;
@@ -349,7 +361,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       (await startCheck(h)).pending.map((pending) => pending.task.id),
       [nodeId],
     );
-    await recordDone(h, nodeUnitOf(nodeId, h.revision));
+    await recordUnit(h, nodeUnitOf(nodeId, h.revision));
     assert.deepEqual((await startCheck(h)).pending, []);
     h.revision = nodeUnitRevision("false");
     assert.deepEqual(

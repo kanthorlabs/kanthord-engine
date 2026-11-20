@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   appendFileSync,
   existsSync,
@@ -18,7 +19,7 @@ import {
 import { CodedError } from "../../kernel/errors.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
-import { childEnvironment } from "./tool-table.ts";
+import { childEnvironment } from "../../agent/environment.ts";
 const EXPIRED = 0;
 const CLEAN_STATUS = "";
 const NO_CONFLICTS = 0;
@@ -26,12 +27,16 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const RECORD_SEPARATOR = "\x1e";
+const RECORD_SEPARATOR_FORMAT = "%x1e";
+const LITERAL_PATHSPECS = "--literal-pathspecs";
 const NO_VALUE = "";
 const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
 const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
+const TAB = "\t";
 const STATUS_PREFIX_LENGTH = 3;
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
@@ -44,6 +49,36 @@ const RENAMED_PATH_OFFSET = 2;
 const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
 const RAW_RECORD_WIDTH = 2;
+const STATUS_HEADER = "# ";
+const BRANCH_OID_HEADER = "# branch.oid ";
+const BRANCH_HEAD_HEADER = "# branch.head ";
+const DETACHED_BRANCH = "(detached)";
+const RENAMED_ENTRY = "2";
+const UNTRACKED_ENTRY = "?";
+const STATUS_INDEX_COLUMN = 2;
+const STATUS_MODES_START = 3;
+const STATUS_MODES_END = 6;
+const GITLINK_MODE = "160000";
+const NO_PROCESSES = 0;
+const ONE_PROCESS = 1;
+const processCounts = new AsyncLocalStorage<GitProcessCount>();
+
+export class GitProcessCount {
+  private value = NO_PROCESSES;
+
+  get count(): number {
+    return this.value;
+  }
+
+  add(): void {
+    this.value += ONE_PROCESS;
+  }
+
+  within<T>(work: () => Promise<T>): Promise<T> {
+    return processCounts.run(this, work);
+  }
+}
+export const HEAD_OUTSIDE_BRANCHES = "(null)";
 const GIT_DIRECTORY = ".git";
 const LOCK_SUFFIX = ".lock";
 const NO_ENTRIES = 0;
@@ -117,24 +152,48 @@ const failNonzeroExit: NonNullable<SimpleGitOptions["errors"]> = (
     ? error
     : (error ?? new Error(`git exited with ${result.exitCode}`));
 
-export async function commitWork(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  message: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string | null> {
-  assert.ok(directory);
-  assert.ok(message);
-  const end = performance.now() + deadlineMs;
+export async function stageWork(call: GitCall): Promise<string[]> {
+  assert.ok(call.directory);
+  const end = performance.now() + call.deadlineMs;
   const remaining = () => {
     const duration = end - performance.now();
     assert.ok(duration > EXPIRED, "Commit deadline reached");
     return duration;
   };
-  if (!(await stageChanges(env, directory, context, remaining))) return null;
-  await runCommit(env, directory, message, context, remaining());
-  return headCommit(env, directory, context, remaining());
+  const { env, directory, context } = call;
+  await run(env, directory, ["add", "--all"], context, remaining());
+  const { staged, converted } = await stagedChanges(
+    env,
+    directory,
+    context,
+    remaining,
+  );
+  for (const batch of pathBatches(
+    converted.map(({ mode, blob, path }) => `${mode},${blob},${path}`),
+  ))
+    await run(
+      env,
+      directory,
+      ["update-index", ...batch.flatMap((entry) => ["--cacheinfo", entry])],
+      context,
+      remaining(),
+    );
+  const unchanged = new Set(converted.map(({ path }) => path));
+  return staged.filter((path) => !unchanged.has(path));
+}
+
+export async function commitStaged(
+  call: GitCall,
+  message: string,
+): Promise<void> {
+  assert.ok(message);
+  await runCommit(
+    call.env,
+    call.directory,
+    message,
+    call.context,
+    call.deadlineMs,
+  );
 }
 
 async function runCommit(
@@ -166,38 +225,17 @@ interface IndexEntry {
   path: string;
 }
 
-async function stageChanges(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  remaining: () => number,
-): Promise<boolean> {
-  await run(env, directory, ["add", "--all"], context, remaining());
-  const converted = await conversionOnlyPaths(
-    env,
-    directory,
-    context,
-    remaining,
-  );
-  for (const batch of pathBatches(
-    converted.map(({ mode, blob, path }) => `${mode},${blob},${path}`),
-  ))
-    await run(
-      env,
-      directory,
-      ["update-index", ...batch.flatMap((entry) => ["--cacheinfo", entry])],
-      context,
-      remaining(),
-    );
-  return !(await indexMatchesHead(env, directory, context, remaining()));
+interface StagedChanges {
+  staged: string[];
+  converted: IndexEntry[];
 }
 
-async function conversionOnlyPaths(
+async function stagedChanges(
   env: NodeJS.ProcessEnv,
   directory: string,
   context: Context,
   remaining: () => number,
-): Promise<IndexEntry[]> {
+): Promise<StagedChanges> {
   const fields = (
     await run(
       env,
@@ -207,11 +245,13 @@ async function conversionOnlyPaths(
       remaining(),
     )
   ).split(NUL);
+  const staged: string[] = [];
   const modified: IndexEntry[] = [];
   for (let index = 0; index + 1 < fields.length; index += RAW_RECORD_WIDTH) {
     const [oldMode, newMode, blob, , status] =
       fields[index]!.slice(1).split(" ");
     assert.ok(status !== undefined && blob !== undefined);
+    staged.push(fields[index + 1]!);
     if (
       status === MODIFIED &&
       oldMode === newMode &&
@@ -231,7 +271,10 @@ async function conversionOnlyPaths(
     hashes.push(...output.trim().split("\n"));
   }
   assert.equal(hashes.length, modified.length);
-  return modified.filter(({ blob }, index) => hashes[index] === blob);
+  return {
+    staged,
+    converted: modified.filter(({ blob }, index) => hashes[index] === blob),
+  };
 }
 
 function pathBatches(paths: readonly string[]): string[][] {
@@ -252,22 +295,6 @@ function pathBatches(paths: readonly string[]): string[][] {
   return batches;
 }
 
-async function indexMatchesHead(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<boolean> {
-  const { matched } = await runMatch(
-    env,
-    directory,
-    ["diff", "--cached", "--quiet", "--"],
-    context,
-    deadlineMs,
-  );
-  return matched;
-}
-
 async function run(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -279,6 +306,7 @@ async function run(
   assert.ok(directory);
   assert.ok(deadlineMs > EXPIRED);
   context.signal.throwIfAborted();
+  processCounts.getStore()?.add();
   return await simpleGit({
     baseDir: directory,
     abort: context.signal,
@@ -396,18 +424,13 @@ export async function treeOf(
   return tree;
 }
 
-export async function symbolicHead(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string | null> {
+export async function symbolicHead(call: GitCall): Promise<string | null> {
   const { matched, output } = await runMatch(
-    env,
-    directory,
+    call.env,
+    call.directory,
     ["symbolic-ref", "--quiet", "HEAD"],
-    context,
-    deadlineMs,
+    call.context,
+    call.deadlineMs,
   );
   return matched ? output.trim() : null;
 }
@@ -532,24 +555,8 @@ export async function forceBranch(
   );
 }
 
-export async function isCommitted(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<boolean> {
-  const end = performance.now() + deadlineMs;
-  if (!(await indexMatchesHead(env, directory, context, deadlineMs)))
-    return false;
-  const untracked = await run(
-    env,
-    directory,
-    ["ls-files", "--others", "--exclude-standard", "-z"],
-    context,
-    end - performance.now(),
-  );
-  return untracked === CLEAN_STATUS;
-}
+export type GitOperation = (typeof GIT_OPERATIONS)[number]["state"];
+export type GitPaths = Readonly<Record<GitOperation, string>>;
 
 async function gitPaths(
   env: NodeJS.ProcessEnv,
@@ -570,23 +577,17 @@ async function gitPaths(
   return paths.map((path) => resolve(directory, path));
 }
 
-async function operationPaths(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
-) {
+export async function resolveGitPaths(call: GitCall): Promise<GitPaths> {
   const paths = await gitPaths(
-    env,
-    directory,
+    call.env,
+    call.directory,
     GIT_OPERATIONS.map(({ state }) => state),
-    context,
-    deadlineMs,
+    call.context,
+    call.deadlineMs,
   );
-  return GIT_OPERATIONS.map((operation, index) => ({
-    ...operation,
-    path: paths[index]!,
-  }));
+  return Object.fromEntries(
+    GIT_OPERATIONS.map(({ state }, index) => [state, paths[index]!]),
+  ) as Record<GitOperation, string>;
 }
 
 export async function operationsInProgress(
@@ -595,55 +596,112 @@ export async function operationsInProgress(
   context: Context,
   deadlineMs: number,
 ): Promise<string[]> {
-  return (await operationPaths(env, directory, context, deadlineMs))
-    .filter(({ path }) => existsSync(path))
-    .map(({ state }) => state);
+  const paths = await resolveGitPaths({ env, directory, context, deadlineMs });
+  return GIT_OPERATIONS.filter(({ state }) => existsSync(paths[state])).map(
+    ({ state }) => state,
+  );
 }
 
-export async function mergeHeadOf(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string | null> {
-  const [path] = await gitPaths(
-    env,
-    directory,
-    [MERGE_HEAD],
-    context,
-    deadlineMs,
+export async function livePaths(
+  call: GitCall,
+  paths: GitPaths,
+): Promise<GitPaths> {
+  return isDirectory(join(call.directory, GIT_DIRECTORY))
+    ? paths
+    : resolveGitPaths(call);
+}
+
+export function operationsOf(paths: GitPaths): GitOperation[] {
+  return GIT_OPERATIONS.filter(({ state }) => existsSync(paths[state])).map(
+    ({ state }) => state,
   );
-  return existsSync(path!) ? readFileSync(path!, "utf8").trim() : null;
+}
+
+export function mergeHeadAt(paths: GitPaths): string | null {
+  const path = paths[MERGE_HEAD];
+  return existsSync(path) ? readFileSync(path, "utf8").trim() : null;
 }
 
 export async function quitOperations(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  context: Context,
-  deadlineMs: number,
+  call: GitCall,
+  paths: GitPaths,
 ): Promise<void> {
-  const end = performance.now() + deadlineMs;
-  for (const { path, quit } of await operationPaths(
-    env,
-    directory,
-    context,
-    deadlineMs,
-  ))
-    if (existsSync(path))
-      await run(env, directory, [...quit], context, end - performance.now());
+  const end = performance.now() + call.deadlineMs;
+  for (const { state, quit } of GIT_OPERATIONS)
+    if (existsSync(paths[state]))
+      await run(
+        call.env,
+        call.directory,
+        [...quit],
+        call.context,
+        end - performance.now(),
+      );
 }
 
-export async function diffText(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  from: string,
-  to: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string> {
-  assert.match(from, /^[a-f0-9]{40,64}$/);
-  assert.match(to, /^[a-f0-9]{40,64}$/);
-  return run(env, directory, ["diff", from, to], context, deadlineMs);
+export interface StatusEntry {
+  kind: string;
+  index: string;
+  gitlink: boolean;
+}
+
+export interface GitStatus {
+  branch: string | null;
+  head: string;
+  entries: StatusEntry[];
+}
+
+export async function readStatus(call: GitCall): Promise<GitStatus> {
+  const records = (
+    await run(
+      call.env,
+      call.directory,
+      [
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "--no-ahead-behind",
+        "-z",
+        "--untracked-files=all",
+      ],
+      call.context,
+      call.deadlineMs,
+    )
+  ).split(NUL);
+  const status: GitStatus = { branch: null, head: NO_VALUE, entries: [] };
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]!;
+    if (record === NO_VALUE) continue;
+    if (record.startsWith(STATUS_HEADER)) {
+      statusHeader(status, record);
+      continue;
+    }
+    const entry = statusEntry(record);
+    if (entry.kind === RENAMED_ENTRY) index++;
+    status.entries.push(entry);
+  }
+  assert.ok(status.head !== NO_VALUE);
+  return status;
+}
+
+function statusEntry(record: string): StatusEntry {
+  const kind = record.charAt(LETTER_START);
+  if (kind === UNTRACKED_ENTRY) return { kind, index: kind, gitlink: false };
+  const modes = record.split(" ").slice(STATUS_MODES_START, STATUS_MODES_END);
+  return {
+    kind,
+    index: record.charAt(STATUS_INDEX_COLUMN),
+    gitlink:
+      modes.length > NO_ENTRIES && modes.every((mode) => mode === GITLINK_MODE),
+  };
+}
+
+function statusHeader(status: GitStatus, record: string): void {
+  if (record.startsWith(BRANCH_OID_HEADER))
+    status.head = record.slice(BRANCH_OID_HEADER.length);
+  else if (record.startsWith(BRANCH_HEAD_HEADER)) {
+    const branch = record.slice(BRANCH_HEAD_HEADER.length);
+    status.branch = branch === DETACHED_BRANCH ? null : branch;
+  }
 }
 
 export async function unmergedFiles(
@@ -655,11 +713,11 @@ export async function unmergedFiles(
   const output = await run(
     env,
     directory,
-    ["diff", "--name-only", "--diff-filter=U"],
+    ["diff", "-z", "--name-only", "--diff-filter=U"],
     context,
     deadlineMs,
   );
-  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+  return output.split(NUL).filter((path) => path !== NO_VALUE);
 }
 
 export async function addedFiles(
@@ -735,6 +793,8 @@ export async function roundPatch(
       "--diff-merges=remerge",
       "--patch",
       "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
       "--format=fuller",
       `${base}..HEAD`,
       "--",
@@ -756,7 +816,14 @@ export async function changePatch(
   return run(
     env,
     directory,
-    ["diff", "--no-color", `${base}...HEAD`, "--"],
+    [
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      `${base}...HEAD`,
+      "--",
+    ],
     context,
     deadlineMs,
   );
@@ -790,26 +857,6 @@ export async function roundFiles(
     deadlineMs,
   );
   return [...new Set(output.split(NUL).filter(Boolean))].toSorted();
-}
-
-export async function changedFiles(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  from: string,
-  to: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<string[]> {
-  assert.ok(from && !from.startsWith("-"));
-  assert.ok(to && !to.startsWith("-"));
-  const output = await run(
-    env,
-    directory,
-    ["diff", "--name-only", "-z", "--no-renames", from, to, "--"],
-    context,
-    deadlineMs,
-  );
-  return output.split(NUL).filter(Boolean);
 }
 
 export async function changedEntries(
@@ -932,50 +979,58 @@ export async function mergeRef(
 }
 
 export async function concludeMerge(
-  env: NodeJS.ProcessEnv,
-  directory: string,
+  call: GitCall,
   message: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<void> {
+): Promise<string[]> {
   assert.ok(message);
-  const end = performance.now() + deadlineMs;
+  const { env, directory, context } = call;
+  const end = performance.now() + call.deadlineMs;
   const remaining = () => end - performance.now();
-  await stageChanges(env, directory, context, remaining);
-  await runCommit(env, directory, message, context, remaining());
-}
-
-export async function amendTrailer(
-  env: NodeJS.ProcessEnv,
-  directory: string,
-  trailer: string,
-  context: Context,
-  deadlineMs: number,
-): Promise<void> {
-  assert.ok(trailer && !trailer.startsWith("-"));
-  await run(
+  const staged = await stageWork({
     env,
     directory,
-    ["commit", "--amend", "--no-edit", "--trailer", trailer],
     context,
-    deadlineMs,
-  );
+    deadlineMs: remaining(),
+  });
+  await runCommit(env, directory, message, context, remaining());
+  return staged;
 }
 
-export async function trailerValues(
+export async function unmergedPaths(
+  call: GitCall,
+  files: readonly string[],
+): Promise<string[]> {
+  const wanted = new Set(files);
+  const output = await run(
+    call.env,
+    call.directory,
+    [LITERAL_PATHSPECS, "ls-files", "-u", "-z"],
+    call.context,
+    call.deadlineMs,
+  );
+  return [
+    ...new Set(
+      output
+        .split(NUL)
+        .filter((record) => record !== NO_VALUE)
+        .map((record) => record.slice(record.indexOf(TAB) + TAB.length))
+        .filter((path) => wanted.has(path)),
+    ),
+  ];
+}
+
+export async function rangeCommits(
   env: NodeJS.ProcessEnv,
   directory: string,
-  key: string,
   base: string,
   context: Context,
   deadlineMs: number,
 ): Promise<string[]> {
-  assert.ok(key && !key.startsWith("-"));
   assert.ok(base && !base.startsWith("-"));
   const output = await run(
     env,
     directory,
-    ["log", `--format=%(trailers:key=${key},valueonly)`, `${base}..HEAD`, "--"],
+    ["rev-list", `${base}..HEAD`, "--"],
     context,
     deadlineMs,
   );
@@ -983,6 +1038,91 @@ export async function trailerValues(
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== NO_VALUE);
+}
+
+export interface FileRange {
+  from: string;
+  to: string;
+  file: string;
+}
+
+function rangeArgs(range: FileRange): string[] {
+  assert.match(range.from, COMMIT_PATTERN);
+  assert.match(range.to, COMMIT_PATTERN);
+  assert.ok(range.file);
+  return [range.from, range.to, "--", range.file];
+}
+
+export function rangeLog(call: GitCall, range: FileRange): Promise<string> {
+  const [from, to, ...path] = rangeArgs(range);
+  return run(
+    call.env,
+    call.directory,
+    [LITERAL_PATHSPECS, "log", "--format=%h %s", `${from}..${to}`, ...path],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export function rangeFileDiff(
+  call: GitCall,
+  range: FileRange,
+): Promise<string> {
+  return run(
+    call.env,
+    call.directory,
+    [
+      "-c",
+      "core.quotePath=false",
+      LITERAL_PATHSPECS,
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      ...rangeArgs(range),
+    ],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export interface NodeSideTouch {
+  merged: string;
+  files: readonly string[];
+}
+
+export async function nodeSideBodies(
+  call: GitCall,
+  touch: NodeSideTouch,
+): Promise<string[]> {
+  assert.match(touch.merged, COMMIT_PATTERN);
+  assert.ok(touch.files.length > NO_PATHS);
+  const bodies: string[] = [];
+  for (const files of pathBatches(touch.files)) {
+    const output = await run(
+      call.env,
+      call.directory,
+      [
+        LITERAL_PATHSPECS,
+        "log",
+        "--no-merges",
+        `--format=${RECORD_SEPARATOR_FORMAT}%b`,
+        "HEAD",
+        `^${touch.merged}`,
+        "--",
+        ...files,
+      ],
+      call.context,
+      call.deadlineMs,
+    );
+    bodies.push(
+      ...output
+        .split(RECORD_SEPARATOR)
+        .map((body) => body.trim())
+        .filter((body) => body !== NO_VALUE),
+    );
+  }
+  return bodies;
 }
 
 export async function abortMerge(
@@ -1089,11 +1229,21 @@ export async function conflictMarkerFiles(
   const { output } = await runMatch(
     env,
     directory,
-    ["grep", "--no-index", "-l", "-E", "^(<{7}|>{7})( |$)", "--", ...files],
+    [
+      LITERAL_PATHSPECS,
+      "grep",
+      "--no-index",
+      "-z",
+      "-l",
+      "-E",
+      "^(<{7}|>{7})( |$)",
+      "--",
+      ...files,
+    ],
     context,
     deadlineMs,
   );
-  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+  return output.split(NUL).filter((path) => path !== NO_VALUE);
 }
 
 export async function fileAtRevision(

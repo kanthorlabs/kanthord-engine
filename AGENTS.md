@@ -79,7 +79,8 @@ document.
    `gateway.request.validation_failed`.
 6. **Mandated tests.** Keep each case of `src/config/upgrade.test.ts`, of each
    `migrations.test.ts`, of `import-boundaries.test.ts`,
-   `unwired-import.test.ts`, `unwired.test.ts` and `container-live.test.ts`,
+   `unwired-import.test.ts`, `unwired.test.ts`, `container-live.test.ts`,
+   `chain-golden.test.ts` and `foundry-boundary.test.ts`,
    and of each file of `always_run` of `.kanthord/suite-pass.json`. In each
    other file that calls `startTestSshd`, keep one case that calls it.
 7. **No other test.** Write no other test. Assert the observed result and the
@@ -98,7 +99,7 @@ document.
    or type. Write no object type inline in a parameter list. When a third-party
    type fixes the signature of a callback, take `...args: Parameters<T>` with
    `T` the callback type. For example, the bash tool `execute` of
-   `src/worker/unit/tool-table.ts:128-137` takes
+   `src/agent/tool-table.ts:128-136` takes
    `...args: Parameters<typeof declared.execute>`.
 3. **Small functions.** Keep the cyclomatic complexity of a function at 10 or
    below. A function above 10 holds more than one job. Split it. Keep each new

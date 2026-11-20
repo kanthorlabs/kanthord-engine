@@ -5,7 +5,7 @@ import { HttpStatus } from "../kernel/http.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import type { Transaction } from "../kernel/store.ts";
-import type { RevokeCause } from "./contract.ts";
+import { RevokeCause } from "./contract.ts";
 import {
   type Actor,
   AssessmentResult,
@@ -254,13 +254,19 @@ export function reportEnds(
 ): void {
   if (ends.lost.length > NO_ENDS)
     dependencies.schedulerClaims.executionsLost(ends.lost);
-  for (const claim of ends.revoked)
+  for (const claim of ends.revoked) {
     dependencies.schedulerClaims.executionRevoked(
       claim.execution,
       claim.cause,
       claim.transition,
       claim.failure_cause,
     );
+    if (claim.cause !== RevokeCause.Assessment)
+      dependencies.workerStopOrders.sendRevokedOrder(
+        claim.execution.execution_id,
+        claim.execution.runtime_identity,
+      );
+  }
 }
 
 export function transition(
@@ -277,6 +283,8 @@ export function transition(
   if (before.get(node.id)) dependencies.workQueue.delete(tx, node.id);
   before.set(node.id, false);
   setNodeState(tx, node.id, state);
+  if (state === NodeState.Completed || state === NodeState.Discarded)
+    dependencies.unitRecords.deleteNode(tx, node.id);
   routeMission(tx, mission.id);
   reconcileMission(
     tx,

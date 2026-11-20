@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { setImmediate } from "node:timers/promises";
 import {
@@ -37,9 +39,11 @@ import { projectOperations } from "../../project/contract.ts";
 import {
   connectionPayloadSchema,
   HANDOVER_TIMEOUT_MS,
+  HEAD_COMMIT_SUBJECT,
   INSTANCE_CONNECTION_INFO,
   InstancePlacement,
   type PromptBase,
+  withoutEnvironmentMaps,
   WORKER_TOKEN_INFO,
   WorkerErrorCode,
   workerOperations,
@@ -58,7 +62,11 @@ import {
   ChainLevel,
   PromptPart,
 } from "../../agent/contract.ts";
-import { Intent, missionOperations } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  Intent,
+  missionOperations,
+} from "../../mission/contract.ts";
 import {
   AdvancingProviderFailure,
   ExecutionStopReason,
@@ -87,6 +95,21 @@ import {
   FAKE_COMMIT,
   fakeRepositoryFiles,
 } from "./container-fakes-test-support.ts";
+import { environment, kanthord } from "./cli-test-support.ts";
+import { tasksRun } from "../cli/worker-tasks.ts";
+import {
+  readJson,
+  runOptions,
+  sourceRepository,
+  commandRun as tasksCommandRun,
+  TEST_TIMEOUT_MS,
+} from "../cli/tasks-test-support.ts";
+import { RunEndKind, TasksExit } from "../worker/index.ts";
+import {
+  fauxAssistantMessage,
+  scriptedProvider,
+} from "../../worker/unit/test-support.ts";
+import { temporary } from "../../kernel/test-support.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import {
   COVERING_WORKER_BINDINGS,
@@ -338,7 +361,163 @@ for (const adapter of ["direct", "http"] as const) {
       "worker.execution.no_native_agent",
     );
   });
+
+  test(`${adapter} a unit record put of a live execution replaces the record of the unit, the setup answers it, and an unknown unit or binding and a foreign or closed execution are refused`, async (t) => {
+    const h = await setup(t, adapter, undefined, { instanceCount: 2 });
+    const executionId = h.execution.execution_id;
+    const record = (unitId: string, bindingId: string, commit: string) => ({
+      unit_id: unitId,
+      content_digest: digest({ unit: unitId, commit }),
+      commits: [{ binding_id: bindingId, commit }],
+    });
+    const put = (body: ReturnType<typeof record>, token = h.token) =>
+      h.call(
+        workerOperations["execution.unit_record.put"],
+        { params: { execution_id: executionId }, query: {}, body },
+        token,
+        { idempotencyKey: createIdempotencyKey() },
+      );
+    const setupRecords = async () =>
+      completed(
+        await h.call(
+          workerOperations["execution.setup.get"],
+          { params: { execution_id: executionId }, query: {}, body: null },
+          h.token,
+        ),
+      ).unit_records;
+    const nodeId = h.execution.node_id;
+    const bindingId = h.bindings.repo!.id;
+    completed(await h.handover());
+    assert.deepEqual(await setupRecords(), []);
+    const first = record(nodeId, bindingId, PINNED_HEAD);
+    assert.deepEqual(completed(await put(first)), first);
+    assert.deepEqual(await setupRecords(), [first]);
+    const replaced = record(nodeId, bindingId, MOVED_HEAD);
+    completed(await put(replaced));
+    assert.deepEqual(await setupRecords(), [replaced]);
+    refused(
+      await put(record(createIdentity("task"), bindingId, PINNED_HEAD)),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordUnitUnknown,
+    );
+    refused(
+      await put(record(nodeId, createIdentity("binding"), PINNED_HEAD)),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordBindingUnknown,
+    );
+    const other = (
+      await h.f.slotClient(h.execution.project_id, "general", SECOND_SLOT)
+    ).token;
+    completed(await h.call(workerOperations.register, NO_INPUT, other));
+    refused(await put(first, other), HttpStatus.Forbidden, PROOF_FAILED);
+    completed(await h.release());
+    refused(await put(first), HttpStatus.Forbidden, PROOF_FAILED);
+    assert.deepEqual(
+      h.f.store.database
+        .prepare(
+          "SELECT unit_id, commits FROM worker_unit_record WHERE node_id = ?",
+        )
+        .all(nodeId)
+        .map((row) => ({ ...row })),
+      [{ unit_id: nodeId, commits: canonicalJSON(replaced.commits) }],
+    );
+  });
 }
+
+for (const adapter of ["direct", "http"] as const) {
+  test(`${adapter} the setup answers only the unit records of its own node, an examine execution answers none, and a put of an examine execution is refused with intent_invalid`, async (t) => {
+    const h = await setup(t, adapter, undefined, { instanceCount: 2 });
+    const executionId = h.execution.execution_id;
+    const nodeId = h.execution.node_id;
+    const record = {
+      unit_id: nodeId,
+      content_digest: digest({ unit: nodeId }),
+      commits: [{ binding_id: h.bindings.repo!.id, commit: PINNED_HEAD }],
+    };
+    const put = () =>
+      h.call(
+        workerOperations["execution.unit_record.put"],
+        { params: { execution_id: executionId }, query: {}, body: record },
+        h.token,
+        { idempotencyKey: createIdempotencyKey() },
+      );
+    const setupRecords = async () =>
+      completed(
+        await h.call(
+          workerOperations["execution.setup.get"],
+          { params: { execution_id: executionId }, query: {}, body: null },
+          h.token,
+        ),
+      ).unit_records;
+    completed(await h.handover());
+    completed(await put());
+    h.f.store.database
+      .prepare(
+        "INSERT INTO worker_unit_record (node_id, unit_id, content_digest, commits) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        OTHER_NODE,
+        OTHER_NODE,
+        record.content_digest,
+        canonicalJSON(record.commits),
+      );
+    assert.deepEqual(await setupRecords(), [record]);
+    h.f.store.database
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Examine, nodeId);
+    assert.deepEqual(await setupRecords(), []);
+    refused(
+      await put(),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordIntentInvalid,
+    );
+  });
+}
+
+test("a discard of a node deletes its unit records and keeps the unit records of another node", async (t) => {
+  const h = await setup(t, "direct", undefined, { instanceCount: 2 });
+  const nodeId = h.execution.node_id;
+  const insert = h.f.store.database.prepare(
+    "INSERT INTO worker_unit_record (node_id, unit_id, content_digest, commits) VALUES (?, ?, ?, ?)",
+  );
+  for (const owner of [nodeId, OTHER_NODE])
+    insert.run(owner, owner, digest({ owner }), "[]");
+  completed(await h.release());
+  const mission = completed(
+    await h.call(missionOperations.get, {
+      params: { project_id: h.execution.project_id },
+      query: {},
+      body: null,
+    }),
+  );
+  const node = completed(
+    await h.call(missionOperations["node.get"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: null,
+    }),
+  );
+  const discarded = completed(
+    await h.call(missionOperations["node.discard"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: {
+        reason: "discard",
+        expected_mission_version: mission.version,
+        expected_state: node.state,
+        expected_attempt: node.attempt,
+      },
+    }),
+  );
+  assert.equal(discarded.node.state, DISCARDED_STATE);
+  assert.deepEqual(
+    h.f.store.database
+      .prepare("SELECT node_id FROM worker_unit_record")
+      .all()
+      .map((row) => ({ ...row })),
+    [{ node_id: OTHER_NODE }],
+  );
+});
 
 function offlineProvider(credential: OAuthCredential) {
   return createProvider({
@@ -427,6 +606,7 @@ async function setup(
     instructionFile?: string;
     implementBindsOther?: boolean;
     secondNode?: boolean;
+    environment?: Record<string, unknown>;
   } = {},
 ) {
   const oauth = boundary?.type === SecretShape.OAuth ? boundary : undefined;
@@ -643,6 +823,9 @@ async function setup(
       ssh_credential: FAKE_SSH_CREDENTIAL,
       strategy: { base_branch: "main" },
       credential: "github",
+      ...(setupOptions.environment === undefined
+        ? {}
+        : { environment: setupOptions.environment }),
       prompts: {
         ...(setupOptions.instructionFile === undefined
           ? {}
@@ -776,6 +959,7 @@ async function setup(
       }),
     );
   const instanceTokens: string[] = [];
+  const workerTokens: string[] = [];
   for (const [name, key] of instanceKeys) {
     const worker = workerTokenPayloadSchema.parse(
       await openJSON(
@@ -791,6 +975,7 @@ async function setup(
         ).sealed,
       ),
     );
+    workerTokens.push(worker.token);
     const connected = completed(
       await call(
         workerOperations["instance.connect"],
@@ -1060,6 +1245,7 @@ async function setup(
     sign,
     openSigned,
     instanceTokens,
+    workerTokens,
     instanceKeys,
     bindings: bindingSet.bindings,
     sshPublicKey: String(sshRecord.revisions[0]!.metadata!.public_key),
@@ -1609,6 +1795,339 @@ test("the first handover of an attempt pins its prompt commits and a later execu
   assert.equal(reads, FIRST_HEAD_READ);
   assert.equal(storedPromptCommits(h), pinned);
 });
+
+const PUSHED_HEAD = "c".repeat(40);
+const LIVE_BASE_HEAD = "d".repeat(40);
+const PUSHED_OTHER_HEAD = "e".repeat(40);
+const ENV_CANARY = "seed-environment-canary-0123456789";
+const ENV_REMOTE_CANARY = "seed-remote-canary-0123456789";
+const BUILD_ARGS_CANARY = "seed-build-canary-0123456789";
+const CLOSED_STATE = "Completed";
+const DISCARDED_STATE = "Discarded";
+const OTHER_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
+const SEED_ENVIRONMENT = {
+  image: "mcr.microsoft.com/devcontainers/base:ubuntu",
+  build: { dockerfile: "Dockerfile", args: { CANARY: BUILD_ARGS_CANARY } },
+  containerEnv: { SEED_CANARY: ENV_CANARY },
+  remoteEnv: { SEED_REMOTE: ENV_REMOTE_CANARY },
+};
+const AGENT_PROMPT = "agent.prompt";
+const NO_ROWS = 0;
+
+type SeedHarness = Awaited<ReturnType<typeof setup>>;
+
+function seedInput(executionId: string) {
+  return { params: { execution_id: executionId }, query: {}, body: null };
+}
+
+function seedOf(h: SeedHarness, executionId: string, token = h.f.token) {
+  return h.call(
+    workerOperations["execution.seed.get"],
+    seedInput(executionId),
+    token,
+  );
+}
+
+function promptSpans(h: SeedHarness): number {
+  return (
+    h.f.trackingStore.database
+      .prepare(
+        "SELECT COUNT(*) AS count FROM tracking_span WHERE operation = ?",
+      )
+      .get(AGENT_PROMPT) as { count: number }
+  ).count;
+}
+
+function assertNoSecret(text: string, secrets: readonly string[]): void {
+  for (const secret of secrets)
+    assert.equal(text.includes(secret), false, secret);
+}
+
+async function submitHeads(
+  h: SeedHarness,
+  heads: Record<string, string>,
+): Promise<void> {
+  completed(
+    await h.call(
+      missionOperations["evidence.submit"],
+      {
+        params: { node_id: h.execution.node_id },
+        query: {},
+        body: {
+          execution_id: h.execution.execution_id,
+          attempt: h.execution.attempt,
+          node_revision: h.execution.pinned_revision,
+          subject: HEAD_COMMIT_SUBJECT,
+          assets: Object.entries(heads).map(([binding_id, commit]) => ({
+            kind: AssetKind.Repository,
+            address: { kind: AssetKind.Repository, binding_id, commit },
+          })),
+        },
+      },
+      h.token,
+      { idempotencyKey: createIdempotencyKey() },
+    ),
+  );
+}
+
+for (const adapter of ["direct", "http"] as const)
+  test(`${adapter} the seed export answers the setup of execution.setup.get with no environment value before the first setup read, the attempt pin or else the live base, then the pushed head of the execution and of an earlier execution, and refuses a client connection token, an unknown execution and a closed node`, async (t) => {
+    let base = PINNED_HEAD;
+    let instructed = "";
+    const h = await setup(t, adapter, undefined, {
+      extraRepository: true,
+      implementBindsOther: true,
+      environment: SEED_ENVIRONMENT,
+      promptBase: {
+        instructionBindingsOf: (_tx, bindingIds) =>
+          bindingIds.filter((bindingId) => bindingId === instructed),
+        instructionFileOf: async () => null,
+        baseCommitOf: async () => base,
+      },
+    });
+    const repo = h.bindings.repo!.id;
+    const other = h.bindings.other!.id;
+    instructed = repo;
+    const executionId = h.execution.execution_id;
+    completed(await h.handover());
+    base = LIVE_BASE_HEAD;
+    const first = completed(await seedOf(h, executionId));
+    assert.equal(promptSpans(h), NO_ROWS);
+    assert.deepEqual(first.heads, {
+      [repo]: PINNED_HEAD,
+      [other]: LIVE_BASE_HEAD,
+    });
+    base = MOVED_HEAD;
+    const served = completed(
+      await h.call(
+        workerOperations["execution.setup.get"],
+        seedInput(executionId),
+        h.token,
+      ),
+    );
+    assert.ok(JSON.stringify(served).includes(ENV_CANARY));
+    assert.ok(JSON.stringify(served).includes(BUILD_ARGS_CANARY));
+    assert.deepEqual(first.setup, withoutEnvironmentMaps(served));
+    const seed = completed(await seedOf(h, executionId));
+    assert.deepEqual(seed.setup, first.setup);
+    assert.deepEqual(seed.claim, {
+      execution_id: executionId,
+      node_id: h.execution.node_id,
+      attempt: h.execution.attempt,
+      pinned_revision: h.execution.pinned_revision,
+      node_branch: h.execution.node_branch,
+      created_at: h.execution.created_at,
+      expired_at: h.execution.expired_at,
+      trace_id: h.execution.trace_id,
+      root_span_id: h.execution.root_span_id,
+    });
+    assert.equal(seed.revision.node_id, h.execution.node_id);
+    assert.equal(seed.revision.revision, h.execution.pinned_revision);
+    assert.deepEqual(seed.heads, { [repo]: PINNED_HEAD, [other]: MOVED_HEAD });
+    const secrets = [
+      ENV_CANARY,
+      ENV_REMOTE_CANARY,
+      BUILD_ARGS_CANARY,
+      SECRET,
+      h.token,
+      h.clientSecretOf(h.token),
+      "ssh_identities",
+      "PRIVATE KEY",
+    ];
+    assertNoSecret(JSON.stringify([first, seed]), secrets);
+    const pushed = { [repo]: PUSHED_HEAD, [other]: PUSHED_OTHER_HEAD };
+    await submitHeads(h, pushed);
+    completed(await h.release());
+    const ended = completed(await seedOf(h, executionId));
+    assert.deepEqual(ended.heads, pushed);
+    assert.deepEqual(ended.setup, seed.setup);
+    const next = await h.pull();
+    assert.notEqual(next.execution_id, executionId);
+    assert.equal(next.node_branch, h.execution.node_branch);
+    completed(await h.handover(next.execution_id));
+    const later = completed(await seedOf(h, next.execution_id));
+    assert.deepEqual(later.heads, pushed);
+    assertNoSecret(JSON.stringify([ended, later]), secrets);
+    const reference = await h.call(
+      schedulerOperations.executionGet,
+      seedInput(executionId),
+      h.token,
+    );
+    assert.ok(reference.type === OperationResultType.Failure);
+    refused(
+      await seedOf(h, executionId, h.token),
+      reference.status,
+      reference.error.error.code,
+    );
+    refused(
+      await seedOf(h, createIdentity("execution")),
+      HttpStatus.NotFound,
+      "scheduler.execution.not_found",
+    );
+    h.f.store.database
+      .prepare("UPDATE mission_node SET state = ? WHERE id = ?")
+      .run(CLOSED_STATE, h.execution.node_id);
+    refused(
+      await seedOf(h, executionId),
+      HttpStatus.Conflict,
+      WorkerErrorCode.ExecutionSeedUnavailable,
+    );
+  });
+
+const SEED_REFRESH = "test_seed-oauth-refresh-0123456789";
+const SEED_ACCESS = "test_seed-oauth-access-0123456789";
+const SEED_OAUTH: Credential = {
+  type: SecretShape.OAuth,
+  refresh: SEED_REFRESH,
+  access: SEED_ACCESS,
+  expires: 4102444800000,
+};
+
+test("the seed export of an OAuth credential holds no access token, no refresh token and no worker token", async (t) => {
+  const h = await setup(t, "http", SEED_OAUTH);
+  completed(await h.handover());
+  const seed = completed(await seedOf(h, h.execution.execution_id));
+  assertNoSecret(JSON.stringify(seed), [
+    SEED_ACCESS,
+    SEED_REFRESH,
+    h.token,
+    h.clientSecretOf(h.token),
+  ]);
+});
+
+for (const adapter of ["direct", "http"] as const)
+  test(`${adapter} the seed export refuses the instance worker token and holds no worker token`, async (t) => {
+    const h = await setup(t, adapter, undefined, {
+      workerInstances: RELAY_INSTANCES,
+    });
+    const [workerToken] = h.workerTokens;
+    assert.ok(workerToken);
+    const reference = await h.call(
+      schedulerOperations.executionGet,
+      seedInput(h.execution.execution_id),
+      workerToken,
+    );
+    assert.ok(reference.type === OperationResultType.Failure);
+    refused(
+      await seedOf(h, h.execution.execution_id, workerToken),
+      reference.status,
+      reference.error.error.code,
+    );
+    completed(await h.handover());
+    const seed = completed(await seedOf(h, h.execution.execution_id));
+    assertNoSecret(JSON.stringify(seed), [
+      SECRET,
+      ...h.workerTokens,
+      ...h.instanceTokens,
+    ]);
+  });
+
+test("the seed read of an ended execution with an undrained older revision ends no revision, stores no prompt span and claims no environment, and a revoked pinned revision answers 409", async (t) => {
+  const h = await setup(t, "direct");
+  completed(await h.handover());
+  completed(
+    await h.call(llmOperations.rotate, {
+      params: { credential_name: "anthro-1" },
+      query: {},
+      body: { expected_revision: FIRST_REVISION, secret: { key: ROTATED } },
+    }),
+  );
+  h.f.store.database
+    .prepare("UPDATE scheduler_execution SET ended_at = ? WHERE id = ?")
+    .run(Date.now(), h.execution.execution_id);
+  const revisions = () =>
+    h.f.store.database
+      .prepare("SELECT id, ended_at FROM credential ORDER BY id")
+      .all();
+  const before = revisions();
+  const claimed = t.mock.method(h.f.project, "environmentClaimed");
+  completed(await seedOf(h, h.execution.execution_id));
+  assert.deepEqual(revisions(), before);
+  assert.equal(promptSpans(h), NO_ROWS);
+  assert.equal(claimed.mock.callCount(), NO_ROWS);
+  completed(
+    await h.call(llmOperations.revoke, {
+      params: { credential_name: "anthro-1", revision: FIRST_REVISION },
+      query: {},
+      body: null,
+    }),
+  );
+  refused(
+    await seedOf(h, h.execution.execution_id),
+    HttpStatus.Conflict,
+    "credential.revision.revoked",
+  );
+});
+
+const CLI_SUCCESS = 0;
+const SEED_FOLDER_MODE = 0o700;
+const SEED_FILE_MODE = 0o600;
+const MODE_BITS = 0o777;
+
+test(
+  "worker tasks seed writes the seed of the route, and worker tasks run completes that seed with a scripted provider",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const root = temporary(t);
+    const { source, head } = await sourceRepository(root);
+    const h = await setup(t, "http", undefined, {
+      environment: SEED_ENVIRONMENT,
+      promptBase: {
+        instructionBindingsOf: (_tx, bindingIds) => [...bindingIds],
+        instructionFileOf: async () => null,
+        baseCommitOf: async () => head,
+      },
+    });
+    completed(await h.handover());
+    const seedFolder = join(root, "seed");
+    const exported = await kanthord(
+      [
+        "worker",
+        "tasks",
+        "seed",
+        h.execution.execution_id,
+        "--output",
+        seedFolder,
+      ],
+      {
+        ...environment(root),
+        KANTHORD_ENDPOINT: h.f.endpoint,
+        KANTHORD_TOKEN: h.f.token,
+      },
+    );
+    assert.equal(exported.code, CLI_SUCCESS, exported.stderr);
+    const printed = JSON.parse(exported.stdout) as Record<string, unknown>;
+    assert.equal(printed.output, seedFolder);
+    assert.equal(statSync(seedFolder).mode & MODE_BITS, SEED_FOLDER_MODE);
+    const seedFile = join(seedFolder, "seed.json");
+    assert.equal(statSync(seedFile).mode & MODE_BITS, SEED_FILE_MODE);
+    const seedText = readFileSync(seedFile, "utf8");
+    assertNoSecret(seedText, [
+      ENV_CANARY,
+      ENV_REMOTE_CANARY,
+      BUILD_ARGS_CANARY,
+      SECRET,
+      h.token,
+      h.clientSecretOf(h.token),
+      "ssh_identities",
+      "PRIVATE KEY",
+    ]);
+    const seed = JSON.parse(seedText) as Record<string, unknown>;
+    assert.equal(printed.seed_digest, digest(seed));
+    const bindingId = h.bindings.repo!.id;
+    const fixture = { root, seedFolder, source, bindingId, head, seed };
+    const run = tasksCommandRun(
+      fixture,
+      scriptedProvider([fauxAssistantMessage("done")]),
+    );
+    const code = await tasksRun(seedFolder, runOptions(fixture), run.io);
+    assert.equal(code, TasksExit.Success, run.stderr.join(""));
+    assert.equal(
+      readJson(join(root, "out"), "result.json").end,
+      RunEndKind.Completed,
+    );
+  },
+);
 
 test("the server setup stores the agent.prompt span with the references and the engine version, and a retried setup answers the stored text", async (t) => {
   const h = await setup(t, "direct", undefined, {

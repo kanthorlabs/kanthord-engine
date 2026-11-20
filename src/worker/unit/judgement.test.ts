@@ -23,7 +23,7 @@ import {
 } from "./affected.ts";
 import type { Verification } from "./verification.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import type { NativeAgent } from "./native-agent.ts";
+import type { NativeAgent } from "./native-agent-session.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { WorkPrompt } from "../../agent/prompt-composer.ts";
 import {

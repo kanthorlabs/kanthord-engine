@@ -32,13 +32,10 @@ import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import {
-  hostEnvironment,
-  stopAfter,
-  temporary,
-} from "../../kernel/test-support.ts";
+import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { openNativeAgent, promptStop } from "./native-agent.ts";
-import { EndReason, ExecutionStop } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { ExecutionIntent } from "../contract.ts";
 import type { ExecutionSetup, HostTools } from "../contract.ts";
@@ -56,6 +53,8 @@ import {
   SETUP_PROMPT,
   TEST_SSH_HOST_KEY,
   TEST_SSH_PUBLIC_KEY,
+  testSessions,
+  workspaceRequest,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 import {
@@ -71,7 +70,6 @@ import { SessionReadOutcome } from "../contract.ts";
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PROVIDER_CALL_COUNT = 3;
-const CALLS_BEFORE_FAILED_CHECK = 1;
 const TRANSCRIPT_LENGTH_BEFORE = 3;
 const SINGLE_TURN_BUDGET = 1;
 const SINGLE_CALL_COUNT = 1;
@@ -108,7 +106,6 @@ async function fixture(
   hostTools: HostTools = unusedHostTools,
   options: {
     prepare?: (workspace: string, hostHome: string) => void;
-    turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
     sessionRoot?: false | string;
   } = {},
@@ -141,38 +138,33 @@ async function fixture(
     options.sessionRoot === false
       ? undefined
       : (options.sessionRoot ?? temporary(t));
-  const agent = await openNativeAgent({
-    spans,
-    sessionRoot,
-    hostTools,
-    setup,
-    claim: {
-      execution_id: setup.execution_id,
-      node_id: NODE,
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-    },
-    intent: options.intent ?? ExecutionIntent.Implement,
-    agent: setup.agents[0]!,
-    credential: {
-      credential_id: setup.agents[0]!.credential_id,
-      provider_id: "anthropic",
-      store: credentials,
-    },
-    knownSecrets: credentialSecrets(credentials, "anthropic"),
-    budget: new ExecutionBudget({
-      created_at: Date.now(),
-      expired_at: Date.now() + 60000,
-      resource_budget: setup.resource_budget,
-    }),
-    workspace,
-    hostHome,
-    env: hostEnvironment(),
-    modelRuntimeFactory: scriptedModelRuntime(provider),
-    context,
-    turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
+  const knownSecrets = credentialSecrets(credentials, "anthropic");
+  const budget = new ExecutionBudget({
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    resource_budget: setup.resource_budget,
   });
-  stopAfter(t, () => agent.dispose());
+  const agent = await openNativeAgent({
+    sessions: testSessions({
+      credential: {
+        credential_id: setup.agents[0]!.credential_id,
+        provider_id: "anthropic",
+        store: credentials,
+      },
+      modelRuntimeFactory: scriptedModelRuntime(provider),
+      knownSecrets,
+      budget,
+      hostHome,
+      hostTools,
+      spans,
+      sessionRoot,
+    }),
+    request: workspaceRequest(setup, setup, workspace),
+    knownSecrets,
+    budget,
+    context,
+  });
+  stopAfter(t, () => agent.close());
   return {
     agent,
     provider,
@@ -243,14 +235,14 @@ test("native software agent writes and runs bounded bash with execution credenti
 test("dispose ends the agent.session span once with the entry count", async (t) => {
   const h = await fixture(t, [fauxAssistantMessage("done")]);
   await h.agent.prompt(WORK);
-  h.agent.dispose();
+  await h.agent.close();
   const [end] = sessionEnds(h);
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
   assert.equal(end?.status, SpanStatus.Ok);
   assert.ok(
     Number(end?.attributes?.["kanthord.session.entry_count"]) > NO_ENTRIES,
   );
-  h.agent.dispose();
+  await h.agent.close();
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
 });
 
@@ -259,7 +251,7 @@ test("closeTrace ends the agent.session span with its status and dispose writes 
   await h.agent.prompt(WORK);
   h.agent.closeTrace(SpanStatus.Error);
   h.agent.closeTrace(SpanStatus.Ok);
-  h.agent.dispose();
+  await h.agent.close();
   assert.equal(sessionEnds(h).length, SINGLE_CALL_COUNT);
   assert.equal(sessionEnds(h)[0]?.status, SpanStatus.Error);
 });
@@ -564,13 +556,13 @@ test("the node work and the task work name the affected command of a declaring c
   assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
 });
 
-test("an invalid affected declaration gives no entry and no stop", async (t) => {
-  const current = task("invalid", "true");
-  const first = await implementFixture(t, [current], []);
+test("an invalid affected declaration at the base stops the prepare of the next execution with environment_failed affected_invalid", async (t) => {
+  const first = await implementFixture(t, [task("invalid", "true")], []);
   await declareAffected(first, t, BLANK_COMMAND);
-  const h = await nextExecution(t, first, []);
-  assert.deepEqual(h.affectedTests, []);
-  assert.ok(!taskWork(h, current).text.includes(AFFECTED_SECTION));
+  await assert.rejects(nextExecution(t, first, []), {
+    reason: EndReason.EnvironmentFailed,
+    code: EnvironmentFailure.AffectedInvalid,
+  });
 });
 
 test("native reviewer refuses a scripted write tool", async (t) => {
@@ -704,11 +696,22 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
   h.context.cancel();
   await pending;
   assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
-  h.agent.dispose();
+  await h.agent.close();
   await assert.rejects(h.agent.prompt(WORK));
   await assert.rejects(
     h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
   );
+});
+
+test("the last text masks a pattern value that the session keeps", async (t) => {
+  const value = "Q7xR2mK9vL4pW8nZ";
+  const line = ["pass", 'word = "', value, '"'].join("");
+  const h = await fixture(t, [fauxAssistantMessage(line)]);
+  await h.agent.prompt(WORK);
+  const text = h.agent.lastText()!;
+  assert.ok(!text.includes(value));
+  assert.ok(text.includes("<redacted:quoted_assignment:"));
+  assert.ok(JSON.stringify(sessionMessages(h)).includes(value));
 });
 
 test("native instructions preserve pinned work and persist the session and last text", async (t) => {
@@ -736,29 +739,6 @@ test("native instructions preserve pinned work and persist the session and last 
     sessionMessages(h).map((message) => (message as { role: string }).role),
     ["system", "user", "assistant", "user", "assistant"],
   );
-});
-
-test("a failed turn check ends the prompt before the next model call", async (t) => {
-  const h = await fixture(
-    t,
-    [
-      tool("write", { path: "first.txt", content: CONTENT }),
-      tool("write", { path: "second.txt", content: CONTENT }),
-      fauxAssistantMessage("done"),
-    ],
-    {},
-    unusedHostTools,
-    {
-      turnCheck: async (context) => {
-        context.cancel();
-        throw new Error("claim revoked");
-      },
-    },
-  );
-  await h.agent.prompt(WORK);
-  assert.ok(existsSync(join(h.workspace, "first.txt")));
-  assert.equal(existsSync(join(h.workspace, "second.txt")), false);
-  assert.equal(h.provider.calls.length, CALLS_BEFORE_FAILED_CHECK);
 });
 
 const AUTH_FAILED = "llm.auth.failed";

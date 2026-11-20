@@ -9,6 +9,7 @@ const WORKER_REGISTRATION_TABLE = "worker_registration";
 const WORKER_REGISTRATION_INDEX = "worker_registration_live_client";
 const WORKER_INSTANCE_TABLE = "worker_instance";
 const WORKER_MACHINE_TABLE = "worker_machine";
+const WORKER_UNIT_RECORD_TABLE = "worker_unit_record";
 const PROJECT_ID = "project_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const RESOURCE_IDENTITY = "worker:kanthord:general";
 const CLIENT_ID = "client_identity_01ARZ3NDEKTSV4RRFFQ69G5FAV";
@@ -17,7 +18,7 @@ const REGISTERED_AT = 1000;
 const ENDED_AT = 2000;
 const EXPECTED_REGISTRATIONS = 3;
 
-test("worker migrations end with the registration, the instance and the machine tables", () => {
+test("worker migrations end with the registration, the instance, the machine and the unit record tables", () => {
   const store = new Store(IN_MEMORY_DATABASE);
   try {
     store.migrate([
@@ -30,7 +31,12 @@ test("worker migrations end with the registration, the instance and the machine 
         )
         .all()
         .map((row) => row.name),
-      [WORKER_REGISTRATION_TABLE, WORKER_INSTANCE_TABLE, WORKER_MACHINE_TABLE],
+      [
+        WORKER_REGISTRATION_TABLE,
+        WORKER_INSTANCE_TABLE,
+        WORKER_MACHINE_TABLE,
+        WORKER_UNIT_RECORD_TABLE,
+      ],
     );
   } finally {
     store.close();
@@ -153,6 +159,7 @@ test("worker instance schema holds only the name revision and fingerprint unique
         { name: "fingerprint", type: "TEXT", notnull: 0, pk: 0 },
         { name: "created_at", type: "INTEGER", notnull: 1, pk: 0 },
         { name: "ended_at", type: "INTEGER", notnull: 0, pk: 0 },
+        { name: "archive_actor", type: "TEXT", notnull: 0, pk: 0 },
       ],
     );
     assert.deepEqual(

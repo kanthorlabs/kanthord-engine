@@ -20,14 +20,14 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { fauxAssistantMessage, fauxToolCall } from "./test-support.ts";
-import { EndReason } from "./execution-run.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import type { MethodClients } from "./method-clients.ts";
 import type { TaskRunner } from "./steps-implement.ts";
-import { runStepsImplement, runTask } from "./steps-implement.ts";
-import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
+import { runStepsImplement, runTask } from "./steps-implement-host.ts";
+import { nodeUnitOf, ReleaseGateKind } from "./release-gate.ts";
+import { releaseGate } from "./steps-implement-host.ts";
 import { background } from "../../kernel/context.ts";
-import { commitWork } from "./local-git.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
 import { SpanOperation, SpanRecorder } from "./telemetry.ts";
 import { GitStep } from "./method-telemetry.ts";
@@ -36,18 +36,20 @@ import {
   advanceBase,
   affectedCommand,
   agentTrees,
+  commitWork,
   declareAffected,
   implementFixture as fixture,
   NO_PROVIDER_CALLS,
   ONE_FREE_TREE,
-  recordDone,
   recordReleases,
+  recordUnit,
   releasedRoot,
   STEPS_KEY,
   task,
   transport,
 } from "./test-support.ts";
 
+const ROUTED_LOG = "release failure routed";
 const NO_PUSHES = 0;
 const PARTIAL_HEADER = "feat: partial";
 const STOPPED_HEADER = "feat: stopped";
@@ -56,7 +58,7 @@ const BROKEN_CONTENT = "broken";
 const FIXED_CONTENT = "fixed";
 
 async function recordNodeDone(h: Awaited<ReturnType<typeof fixture>>) {
-  await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+  await recordUnit(h, nodeUnitOf(h.input.claim.node_id, h.revision));
 }
 
 suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
@@ -190,6 +192,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const STOP_REASONS = [
     EndReason.OperationFailed,
+    EndReason.ProviderFailed,
+    EndReason.EnvironmentFailed,
+    EndReason.NoProgress,
     EndReason.JudgementInvalid,
     EndReason.ReportAbsent,
     EndReason.ActionUnsettled,
@@ -198,6 +203,13 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
   const STOP_CODE = "test.operation.failed";
   const STOP_CAUSES: Readonly<Record<string, FailureCause>> = {
     [EndReason.OperationFailed]: unattributed([]),
+    [EndReason.ProviderFailed]: unattributed([]),
+    [EndReason.EnvironmentFailed]: unattributed([]),
+    [EndReason.NoProgress]: unattributed([
+      CauseCategory.Model,
+      CauseCategory.Prompt,
+      CauseCategory.Plan,
+    ]),
     [EndReason.JudgementInvalid]: unattributed([
       CauseCategory.Model,
       CauseCategory.Prompt,
@@ -217,7 +229,7 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
   function stoppingRunner(reason: EndReason): TaskRunner {
     return async (state) => {
       writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
-      return state.run.stop(reason, STOP_CODE);
+      throw new ExecutionStop(reason, STOP_CODE);
     };
   }
 
@@ -279,6 +291,60 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
         runStepsImplement(refused, stoppingRunner(EndReason.OperationFailed)),
       ),
       { kind: "ended", reason: stop.reason, code: stop.code },
+    );
+  });
+
+  const REACHED_WORK = "reached";
+  const REACHED_HEADER = "feat: reached";
+  const UNKNOWN_ERROR = "unknown failure";
+  const TWO_COMMITS = "-2";
+
+  test("an unknown error in a unit checkpoints and pushes on the head that the walk reached", async (t) => {
+    const reached = task("reached", "false");
+    const h = await fixture(t, [reached, task("stopped", "false")], []);
+    const bodies = recordReleases(h);
+    const runner: TaskRunner = async (state, unit) => {
+      if (unit.id !== reached.id) {
+        writeFileSync(join(state.root, PARTIAL_WORK), PARTIAL_WORK);
+        throw new Error(UNKNOWN_ERROR);
+      }
+      const checkout = state.checkouts[0]!;
+      writeFileSync(join(checkout.directory, REACHED_WORK), REACHED_WORK);
+      const head = await commitWork(
+        state.input.env,
+        checkout.directory,
+        REACHED_HEADER,
+        background,
+        COMMIT_DEADLINE_MS,
+      );
+      assert.ok(head);
+      checkout.head = head;
+      return { kind: "complete", committed: false };
+    };
+    const stop = {
+      reason: EndReason.OperationFailed,
+      code: null,
+      detail: `Error: ${UNKNOWN_ERROR}`,
+      cause: unattributed([
+        CauseCategory.Infrastructure,
+        CauseCategory.WorkerAction,
+      ]),
+    };
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h, runner)),
+      { kind: "released", furtherWork: true, stop },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    const branch = `refs/heads/${h.nodeBranch}`;
+    const pushed = (
+      await simpleGit(h.bare).raw(["log", TWO_COMMITS, "--format=%s", branch])
+    )
+      .trim()
+      .split("\n");
+    assert.deepEqual(pushed, [STOPPED_HEADER, REACHED_HEADER]);
+    assert.equal(
+      await simpleGit(h.bare).raw(["show", `${branch}:${PARTIAL_WORK}`]),
+      PARTIAL_WORK,
     );
   });
 
@@ -446,11 +512,9 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
       kind: "released",
       furtherWork: false,
     });
-    assert.deepEqual(order, [
-      ...h.checkouts.map((checkout) => `push:${checkout.directory}`),
-      "evidence",
-      "release",
-    ]);
+    const pushes = h.checkouts.map((checkout) => `push:${checkout.directory}`);
+    assert.deepEqual(order.slice(0, pushes.length).sort(), pushes.sort());
+    assert.deepEqual(order.slice(pushes.length), ["evidence", "release"]);
     for (const [index, checkout] of h.checkouts.entries())
       assert.equal(
         (
@@ -476,10 +540,11 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(submitted, []);
   });
 
-  test("a node whose change breaks an unlisted test gets a revision turn, fixes the test and releases", async (t) => {
+  test("a node whose change breaks an unlisted test gets a routed node unit turn, fixes the test, writes no node unit record and releases", async (t) => {
+    const change = task("change", "true");
     const h = await fixture(
       t,
-      [task("change", "true")],
+      [change],
       [
         fauxAssistantMessage(
           fauxToolCall("write", { path: "file", content: BROKEN_CONTENT }),
@@ -506,11 +571,24 @@ suite("steps implement release", { concurrency: SUITE_CONCURRENCY }, () => {
         data: { evidence: {} },
       }),
     } as unknown as MethodClients["mission"];
+    const routed: unknown[] = [];
+    const log = h.run.log.bind(h.run);
+    h.run.log = (message, fields) => {
+      if (message === ROUTED_LOG) routed.push(fields.task_id);
+      log(message, fields);
+    };
+    const firstHead = h.checkouts[0]!.head;
     assert.deepEqual(await runStepsImplement(h), {
       kind: "released",
       furtherWork: false,
     });
     assert.deepEqual(bodies, [{ further_work: false, stop: null }]);
+    assert.deepEqual(routed, [h.input.claim.node_id]);
+    assert.notEqual(h.checkouts[0]!.head, firstHead);
+    assert.deepEqual(
+      h.input.setup.unit_records.map(({ unit_id }) => unit_id),
+      [change.id],
+    );
     assert.match(
       JSON.stringify(h.provider.calls.at(-1)),
       /The affected test run of repository repo failed/,
