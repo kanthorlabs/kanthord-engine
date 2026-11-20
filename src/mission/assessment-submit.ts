@@ -224,7 +224,12 @@ function reworkDueOf(facts: ReworkFacts): boolean {
 }
 
 function limitedOf(facts: ReworkFacts): TransitionLimit {
-  if (facts.personOnly) return null;
+  if (
+    facts.personOnly ||
+    (facts.result === AssessmentResult.Success &&
+      facts.intent === Intent.Examine)
+  )
+    return { rule: TransitionRule.HumanAcceptance, count: null, limit: null };
   if (facts.planDefect)
     return { rule: TransitionRule.PlanDefect, count: null, limit: null };
   if (facts.result !== AssessmentResult.CriterionNotMet || facts.requested)
@@ -331,6 +336,13 @@ function insertProposals(round: SubmitRound): void {
     });
 }
 
+function closedStateOf(round: SubmitRound): NodeState {
+  if (round.body.result !== AssessmentResult.Success) return NodeState.Blocked;
+  return round.revision.content.intent === Intent.Examine
+    ? NodeState.Blocked
+    : NodeState.Completed;
+}
+
 function closeNode(round: SubmitRound): OutcomeRow {
   const { tx, dependencies, node, attempt, assessment, body, now } = round;
   if (body.result === AssessmentResult.Success)
@@ -355,9 +367,7 @@ function closeNode(round: SubmitRound): OutcomeRow {
     dependencies,
     requireMission(tx, node.mission_id),
     node,
-    body.result === AssessmentResult.Success
-      ? NodeState.Completed
-      : NodeState.Blocked,
+    closedStateOf(round),
     now,
   );
   if (revoked !== null)

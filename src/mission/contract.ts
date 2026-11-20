@@ -185,6 +185,7 @@ export const TransitionRule = {
   FurtherWorkLimit: "further_work_limit",
   ReworkLimit: "rework_limit",
   PlanDefect: "plan_defect",
+  HumanAcceptance: "human_acceptance",
 } as const;
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;
@@ -1536,6 +1537,7 @@ export type ExternalAction = z.infer<typeof externalActionSchema>;
 export const blockedContextSchema = z.strictObject({
   outcome: outcomeSchema,
   requests: z.array(evidenceSchema),
+  rule: z.literal(TransitionRule.HumanAcceptance).nullable(),
 });
 export type BlockedContext = z.infer<typeof blockedContextSchema>;
 export const lastStopSchema = z.strictObject({
