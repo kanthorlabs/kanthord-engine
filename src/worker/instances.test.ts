@@ -2179,6 +2179,22 @@ test("a pause order is connected, raises the work version and appears in the wor
   );
 });
 
+test("worker.instance.work answers a revoked entry for a revoked order", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  const version = f.worker().instances.workVersionOf(INSTANCE);
+  f.worker().sendRevokedOrder(
+    box.executionId,
+    box.registration.runtime_identity,
+  );
+  assert.ok(f.worker().instances.workVersionOf(INSTANCE) > version);
+  const orders = (await box.work()).stop_orders;
+  assert.deepEqual(
+    orders.map((order) => stopOrderEntrySchema.parse(order)),
+    [{ execution_id: box.executionId, reason: StopOrderReason.Revoked }],
+  );
+});
+
 test("a revoked order past the deadline leaves the sweep with no Mission call", async (t) => {
   const f = instanceFixture(t);
   const box = await connectedBusy(f);

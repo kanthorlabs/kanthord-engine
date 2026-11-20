@@ -893,6 +893,30 @@ test(
   },
 );
 
+test(
+  "a revoked stop order that arrives before the claim ends the run as revoked with no push and no release",
+  { timeout: RELEASE_WAIT_MS * 2 },
+  async (t) => {
+    const live = await liveStopUnit(t, {
+      evaluation: false,
+      earlyOrder: REVOKED,
+    });
+    live.resume();
+    await live.pulledAgain;
+    assert.deepEqual(live.events, []);
+    assert.deepEqual(live.releases, []);
+    assert.deepEqual(
+      live.records
+        .filter((record) => record.msg === EXECUTION_ENDED)
+        .map(({ reason }) => reason),
+      [REVOKED],
+    );
+    assert.equal(await live.unit.stop(), null);
+    assert.equal(await live.running, null);
+    assert.deepEqual(live.events, ["deregister"]);
+  },
+);
+
 test("a stop order of another execution leaves the live execution running", async (t) => {
   const live = await liveStopUnit(t, { evaluation: false });
   live.unit.stopOrders([
