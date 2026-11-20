@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   attributed,
   CauseCategory,
@@ -698,6 +699,7 @@ test("a tasks walk with until ends with completed on entering the named loop", a
 });
 
 const LATE_CODE = "test.late";
+const SIBLING_ABORT_MS = 2000;
 const GROUP = "group";
 
 interface StepCall {
@@ -738,7 +740,7 @@ test("a stop of one parallel branch aborts its siblings, and the first stop in t
           contextStepOf(h, "stopper", {
             call: async () => {
               await Promise.resolve();
-              h.io.run.stop(EndReason.OperationFailed, STOP_CODE);
+              throw new ExecutionStop(EndReason.OperationFailed, STOP_CODE);
             },
           }),
         ),
@@ -747,9 +749,14 @@ test("a stop of one parallel branch aborts its siblings, and the first stop in t
         stepNode(
           contextStepOf(h, "waiter", {
             call: async ({ context }) => {
-              await cancelled(context.signal);
-              h.trace.push("waiter aborted");
-              h.io.run.stop(EndReason.OperationFailed, LATE_CODE);
+              await Promise.race([
+                cancelled(context.signal),
+                delay(SIBLING_ABORT_MS),
+              ]);
+              h.trace.push(
+                context.signal.aborted ? "waiter aborted" : "waiter running",
+              );
+              throw new ExecutionStop(EndReason.OperationFailed, LATE_CODE);
             },
           }),
         ),

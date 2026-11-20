@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -251,7 +252,12 @@ function countGit(t: TestContext, h: Fixture): () => string[] {
     existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
 }
 
-function timedStatus(t: TestContext, h: Fixture, log: string): string {
+function timedStatus(
+  t: TestContext,
+  h: Fixture,
+  log: string,
+  slow: string,
+): string {
   const bin = temporary(t);
   const git = (h.input.env.PATH ?? "")
     .split(delimiter)
@@ -267,7 +273,7 @@ function timedStatus(t: TestContext, h: Fixture, log: string): string {
   assert.ok(git);
   writeFileSync(
     join(bin, GIT_BINARY),
-    `#!/bin/sh\nif [ "$1" = status ]; then printf 'start %s\\n' "$PWD" >> '${log}'; sleep 0.3; printf 'end %s\\n' "$PWD" >> '${log}'; fi\nexec '${git}' "$@"\n`,
+    `#!/bin/sh\nif [ "$1" = status ]; then here="$(pwd -P)"; printf 'start %s\\n' "$here" >> '${log}'; if [ "$here" = '${slow}' ]; then sleep 0.6; else sleep 0.1; fi; printf 'end %s\\n' "$here" >> '${log}'; fi\nexec '${git}' "$@"\n`,
     { mode: WRAPPER_MODE },
   );
   return bin;
@@ -1045,7 +1051,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.ok(first && second);
     const before = [first.head, second.head];
     const log = join(temporary(t), "status");
-    const bin = timedStatus(t, h, log);
+    const bin = timedStatus(t, h, log, realpathSync(first.directory));
     h.input.env.PATH = `${bin}${delimiter}${h.input.env.PATH}`;
     await assert.rejects(
       gatedTurn(h, t, async () => {
@@ -1059,6 +1065,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       events.slice(0, 2).map((event) => event.split(" ")[0]),
       ["start", "start"],
     );
+    assert.equal(events[2], `end ${realpathSync(second.directory)}`);
     assert.equal(
       existsSync(join(first.directory, ".git", "rebase-merge")),
       false,
