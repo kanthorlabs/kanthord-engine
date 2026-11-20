@@ -46,6 +46,8 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
       "415":
         $ref: ../shared/components.yaml#/components/responses/Error
+      "422":
+        $ref: ../shared/components.yaml#/components/responses/Error
       "500":
         $ref: ../shared/components.yaml#/components/responses/Error
       "503":
@@ -105,6 +107,8 @@ pathItem:
       "413":
         $ref: ../shared/components.yaml#/components/responses/Error
       "415":
+        $ref: ../shared/components.yaml#/components/responses/Error
+      "422":
         $ref: ../shared/components.yaml#/components/responses/Error
       "500":
         $ref: ../shared/components.yaml#/components/responses/Error

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { HttpMethod, HttpStatus } from "../../kernel/http.ts";
-import { MissionErrorCode } from "../../mission/contract.ts";
+import { emitOpenAPIFiles } from "../../gateway/local.ts";
+import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
 import { fakeS3, gatewayFixture } from "./test-support.ts";
 import { seedEvidence } from "./evidence-test-support.ts";
 
@@ -147,6 +148,17 @@ test(
         assert.ok(!text.includes(SIGNED_QUERY_MARKER));
         for (const line of h.logs)
           assert.ok(!line.includes(SIGNED_QUERY_MARKER));
+        const published = Object.values(
+          emitOpenAPIFiles([
+            missionOperations["evidence.asset.content.download"],
+          ]),
+        ).find((file) => "pathItem" in file) as {
+          pathItem: { get: { responses: Record<string, unknown> } };
+        };
+        assert.deepEqual(
+          published.pathItem.get.responses[String(HttpStatus.BadGateway)],
+          { $ref: "../shared/components.yaml#/components/responses/Error" },
+        );
       },
     );
   },

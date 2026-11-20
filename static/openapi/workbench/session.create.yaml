@@ -205,10 +205,37 @@ components:
                 type: string
               display_name:
                 type: string
+              configuration:
+                type: object
+                properties:
+                  agent_provider:
+                    type: string
+                    minLength: 1
+                    maxLength: 256
+                  model_identifier:
+                    type: string
+                    minLength: 1
+                    maxLength: 256
+                  reasoning_effort:
+                    type: string
+                    enum:
+                      - off
+                      - minimal
+                      - low
+                      - medium
+                      - high
+                      - xhigh
+                      - max
+                required:
+                  - agent_provider
+                  - model_identifier
+                  - reasoning_effort
+                additionalProperties: false
             required:
               - session_id
               - agent_name
               - display_name
+              - configuration
             additionalProperties: false
         entries:
           type: array

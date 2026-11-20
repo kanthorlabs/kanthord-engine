@@ -14,6 +14,7 @@ export const HttpStatus = {
   Conflict: 409,
   PayloadTooLarge: 413,
   UnsupportedMediaType: 415,
+  UnprocessableEntity: 422,
   TooManyRequests: 429,
   InternalServerError: 500,
   BadGateway: 502,

@@ -111,6 +111,8 @@ pathItem:
         $ref: ../shared/components.yaml#/components/responses/Error
       "500":
         $ref: ../shared/components.yaml#/components/responses/Error
+      "502":
+        $ref: ../shared/components.yaml#/components/responses/Error
       "503":
         $ref: ../shared/components.yaml#/components/responses/Error
       "504":
