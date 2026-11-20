@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { temporary } from "../../kernel/test-support.ts";
 import { writePrivate } from "../../kernel/files.ts";
 import {
@@ -14,6 +15,7 @@ import {
   type ExternalAction,
   Intent,
   type Mission,
+  missionOperations,
   type Node,
   type NodeChange,
   NodeState,
@@ -27,9 +29,19 @@ import { environment, kanthord } from "./cli-test-support.ts";
 import {
   COVERING_WORKER_BINDINGS,
   createFakeSshCredential,
+  createInstances,
   enableCoveringAgents,
   gatewayFixture,
+  humanCaller,
+  instanceNames,
 } from "./test-support.ts";
+import { projectOperations } from "../../project/contract.ts";
+import {
+  ExecutionStopReason,
+  schedulerOperations,
+  WorkPullKind,
+} from "../../scheduler/contract.ts";
+import { InstancePlacement, workerOperations } from "../../worker/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 
 const SUCCESS = 0;
@@ -661,5 +673,166 @@ test(
         "mission.record.not_found",
       );
     });
+  },
+);
+
+const REPEATED_STOP_BINDING = "steps";
+const REVIEWER_BINDING = "reviewer";
+const REPEATED_STOP_DETAIL = "fd download failed: 504";
+const REPEATED_STOP_BACKOFF_SECONDS = 1;
+const BACKOFF_WAIT_MS = 1100;
+const REPEATED_STOP_CONFIGURATION = {
+  agent_provider: "default",
+  model_identifier: "claude-sonnet-4-5",
+  reasoning_effort: "off",
+} as const;
+
+test(
+  "two equal stops in one attempt pause the node with repeated_stop and resume makes it Available",
+  { timeout: SCENARIO_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await gatewayFixture(t, {
+      fakeSlots: true,
+      scheduler: { stop_backoff: REPEATED_STOP_BACKOFF_SECONDS },
+    });
+    await enableCoveringAgents({
+      KANTHORD_ENDPOINT: fixture.endpoint,
+      KANTHORD_TOKEN: fixture.token,
+    });
+    const human = humanCaller(fixture);
+    const project = await human(projectOperations.create, {
+      params: {},
+      query: {},
+      body: { name: "repeated" },
+    });
+    await createInstances(fixture, instanceNames(REPEATED_STOP_BINDING, 1));
+    await createInstances(
+      fixture,
+      instanceNames(REVIEWER_BINDING, 1),
+      InstancePlacement.Server,
+      "reviewer@1",
+    );
+    await human(projectOperations["bindingSet.write"], {
+      params: { project_id: project.id },
+      query: {},
+      body: {
+        version: FIRST_REVISION,
+        bindings: {
+          [REPEATED_STOP_BINDING]: {
+            kind: "worker",
+            config: {
+              worker: "coder@1",
+              worker_instances: instanceNames(REPEATED_STOP_BINDING, 1),
+              entries: [{ agent: "swe@1", ...REPEATED_STOP_CONFIGURATION }],
+            },
+          },
+          [REVIEWER_BINDING]: {
+            kind: "worker",
+            config: {
+              worker: "reviewer@1",
+              worker_instances: instanceNames(REVIEWER_BINDING, 1),
+              entries: [{ agent: "re@1", ...REPEATED_STOP_CONFIGURATION }],
+            },
+          },
+        },
+      },
+    });
+    const mission = await human(missionOperations.get, {
+      params: { project_id: project.id },
+      query: {},
+      body: null,
+    });
+    const created = await human(missionOperations["node.create"], {
+      params: { mission_id: mission.id },
+      query: {},
+      body: {
+        filename: "examine-1.md",
+        content: { ...CONTENT, intent: Intent.Examine },
+        tasks: [],
+        reason: "plan",
+        expected_mission_version: mission.version,
+      },
+    });
+    const nodeId = created.revisions[FIRST_INDEX]!.node_id;
+    const { token } = await fixture.slotClient(
+      project.id,
+      REPEATED_STOP_BINDING,
+    );
+    const worker = humanCaller({ endpoint: fixture.endpoint, token });
+    const registration = await worker(workerOperations.register, {
+      params: {},
+      query: {},
+      body: null,
+    });
+    const stopOnce = async () => {
+      const pulled = await worker(schedulerOperations.workPull, {
+        params: {},
+        query: {},
+        body: {
+          resource_identity: registration.resource_identity,
+          runtime_identity: registration.runtime_identity,
+        },
+      });
+      assert.equal(pulled.kind, WorkPullKind.Claimed);
+      await worker(schedulerOperations.executionRelease, {
+        params: { execution_id: pulled.execution.execution_id },
+        query: {},
+        body: {
+          further_work: true,
+          stop: {
+            reason: ExecutionStopReason.OperationFailed,
+            code: null,
+            detail: REPEATED_STOP_DETAIL,
+          },
+        },
+      });
+      return pulled.execution.execution_id;
+    };
+    const nodeOf = async () => {
+      const answer = await human(missionOperations["node.get"], {
+        params: { node_id: nodeId },
+        query: {},
+        body: null,
+      });
+      assert.ok("state" in answer);
+      return answer;
+    };
+    await stopOnce();
+    assert.equal((await nodeOf()).state, NodeState.Available);
+    await delay(BACKOFF_WAIT_MS);
+    const lastExecutionId = await stopOnce();
+    const paused = await nodeOf();
+    assert.equal(paused.state, NodeState.Paused);
+    assert.deepEqual(paused.paused_context, {
+      rule: PauseRule.RepeatedStop,
+      count: null,
+      limit: null,
+      last_stop: {
+        execution_id: lastExecutionId,
+        reason: ExecutionStopReason.OperationFailed,
+        code: null,
+        detail: REPEATED_STOP_DETAIL,
+        trace_id: paused.paused_context!.last_stop!.trace_id,
+      },
+    });
+    const resumed = await human(missionOperations["node.resume"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: {
+        reason: "retry",
+        expected_mission_version: (
+          await human(missionOperations.get, {
+            params: { project_id: project.id },
+            query: {},
+            body: null,
+          })
+        ).version,
+        expected_state: NodeState.Paused,
+        expected_attempt: paused.attempt,
+        target: NodeState.Available,
+      },
+    });
+    assert.ok("state" in resumed.node);
+    assert.equal(resumed.node.state, NodeState.Available);
   },
 );

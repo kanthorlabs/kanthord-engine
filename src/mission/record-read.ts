@@ -323,6 +323,13 @@ export function pausedContextOf(
       limit: null,
       last_stop: facts.last_stop,
     };
+  if (facts.repeated_stop)
+    return {
+      rule: PauseRule.RepeatedStop,
+      count: null,
+      limit: null,
+      last_stop: facts.last_stop,
+    };
   if (facts.consecutive_failures >= failureLimit)
     return {
       rule: PauseRule.FailureLimit,

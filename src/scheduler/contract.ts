@@ -266,6 +266,7 @@ export const TransitionRule = {
   ReworkLimit: "rework_limit",
   PlanDefect: "plan_defect",
   HumanAcceptance: "human_acceptance",
+  RepeatedStop: "repeated_stop",
 } as const;
 export const transitionRuleSchema = z.enum(TransitionRule);
 export type TransitionRule = z.infer<typeof transitionRuleSchema>;
@@ -351,6 +352,7 @@ export interface ExecutionAttribution {
 export interface PauseFactsRecord {
   consecutive_failures: number;
   consecutive_stalls: number;
+  repeated_stop: boolean;
   last_stop: {
     execution_id: string;
     reason: string;
@@ -358,6 +360,9 @@ export interface PauseFactsRecord {
     detail: string | null;
     trace_id: string;
   } | null;
+}
+export interface FailureOptions {
+  repeated: boolean;
 }
 export interface MissionTransitions {
   claim(
@@ -389,6 +394,7 @@ export interface MissionTransitions {
     nodeId: string,
     consecutiveFailures: number,
     now: number,
+    options: FailureOptions,
   ): NodeTransition;
   stopped(tx: Transaction, nodeId: string, now: number): NodeTransition;
 }

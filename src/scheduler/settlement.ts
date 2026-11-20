@@ -13,6 +13,7 @@ import {
   type ExecutionRow,
   ExecutionStopReason,
   type FailureHold,
+  type FailureOptions,
   isAdvancingStop,
   type MissionTransitions,
   type NodeTransition,
@@ -28,6 +29,7 @@ import {
   endExecution,
   readExecution,
   readLastEndedOfAttempt,
+  readPreviousEndedOfAttempt,
   readUnendedOfNode,
   readUnendedOfRuntime,
   storedStop,
@@ -99,12 +101,14 @@ export function recordFailure(
   nodeId: string,
   failures: number,
   now: number,
+  options: FailureOptions,
 ): { transition: NodeTransition; hold: FailureHold } {
   const transition = dependencies.transitions.failure(
     tx,
     nodeId,
     failures,
     now,
+    options,
   );
   const until = heldUntil(failures, now, dependencies.config.stop_backoff);
   if (until === null || isPausedStay(transition))
@@ -122,13 +126,16 @@ interface HostFault {
   node_id: string;
   failures: number;
   now: number;
+  repeated: boolean;
 }
 
 export function recordHostFault(
   tx: Transaction,
   dependencies: SettlementDependencies,
-  { node_id: nodeId, failures, now }: HostFault,
+  { node_id: nodeId, failures, now, repeated }: HostFault,
 ): { transition: NodeTransition; hold: FailureHold } {
+  if (repeated)
+    return recordFailure(tx, dependencies, nodeId, failures, now, { repeated });
   const transition = dependencies.transitions.stopped(tx, nodeId, now);
   const until = heldUntil(
     ENDING_FAILURE,
@@ -250,6 +257,20 @@ export function countsFailure(stop: ReleaseStop | null): boolean {
   );
 }
 
+export function repeatsStop(
+  earlier: ReleaseStop | null,
+  stop: ReleaseStop | null,
+): boolean {
+  if (earlier === null || stop === null) return false;
+  if (NO_FAILURE_STOPS.includes(stop.reason)) return false;
+  if (stop.reason === ExecutionStopReason.BudgetEnd) return false;
+  return (
+    earlier.reason === stop.reason &&
+    earlier.code === stop.code &&
+    (earlier.detail ?? null) === (stop.detail ?? null)
+  );
+}
+
 export function consecutiveFailures(
   tx: Transaction,
   ending: ExecutionRow,
@@ -293,6 +314,7 @@ export function pauseFacts(
   assert.ok(tx.database.isTransaction);
   const ending = readLastEndedOfAttempt(tx, nodeId, attempt);
   const stop = ending?.stop ?? null;
+  const earlier = readPreviousEndedOfAttempt(tx, nodeId, attempt);
   return {
     consecutive_failures:
       ending === null
@@ -303,6 +325,7 @@ export function pauseFacts(
             ending.ended_at! >= ending.expired_at || countsFailure(stop),
           ),
     consecutive_stalls: consecutiveStalls(tx, nodeId, attempt),
+    repeated_stop: repeatsStop(earlier?.stop ?? null, stop),
     last_stop:
       ending === null || stop === null
         ? null
@@ -331,6 +354,7 @@ export function declareLoss(
     row.node_id,
     consecutiveFailures(tx, row),
     now,
+    { repeated: false },
   );
   return {
     execution_id: row.execution_id,

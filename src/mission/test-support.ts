@@ -522,6 +522,7 @@ export function missionHarness(
         return {
           consecutive_failures: 0,
           consecutive_stalls: 0,
+          repeated_stop: false,
           last_stop: null,
         };
       },

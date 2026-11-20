@@ -51,6 +51,7 @@ const FIRST_INDEX = 0;
 
 const IDENTITY = testHumanIdentity("ulrich", "Ulrich", "token");
 const FIRST_ATTEMPT = 1;
+const NOT_REPEATED = { repeated: false };
 const SECOND_ATTEMPT = 2;
 const THIRD_ATTEMPT = 3;
 const NOW = 100;
@@ -430,7 +431,7 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
   const h = fixture(t);
   h.claim();
   h.store.transaction((tx) =>
-    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW),
+    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW, NOT_REPEATED),
   );
   assert.equal(h.node().state, NodeState.Available);
   h.claim();
@@ -440,6 +441,7 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
       h.node_id,
       h.dependencies.config.consecutive_failure_limit,
       NOW,
+      NOT_REPEATED,
     ),
   );
   assert.equal(h.node().state, NodeState.Paused);
@@ -458,9 +460,21 @@ test("a failure routes below the limit, pauses at the limit and resume permits a
   assert.ok(h.claim());
   h.store.transaction((tx) => {
     setNodeState(tx, h.node_id, NodeState.Evaluating);
-    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW);
+    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW, NOT_REPEATED);
   });
   assert.equal(h.node().state, NodeState.Waiting);
+});
+
+test("a repeated failure pauses the node below the limit with the repeated_stop rule and no count", (t) => {
+  const h = fixture(t);
+  h.claim();
+  const answer = h.store.transaction((tx) =>
+    h.service.failure(tx, h.node_id, FIRST_ATTEMPT, NOW, { repeated: true }),
+  );
+  assert.equal(h.node().state, NodeState.Paused);
+  assert.equal(answer.rule, TransitionRule.RepeatedStop);
+  assert.equal(answer.count, null);
+  assert.equal(answer.limit, null);
 });
 
 test("stopped moves Executing to Available and Evaluating to Waiting and writes no count", (t) => {
@@ -1423,7 +1437,9 @@ test("a failure of a Paused node keeps it Paused below and at the limit", (t) =>
   for (const count of [FIRST_ATTEMPT, limit]) {
     const h = pausedWithClaim(t);
     assert.deepEqual(
-      h.store.transaction((tx) => h.service.failure(tx, h.node_id, count, NOW)),
+      h.store.transaction((tx) =>
+        h.service.failure(tx, h.node_id, count, NOW, NOT_REPEATED),
+      ),
       PAUSED_ANSWER,
     );
     assert.equal(h.node().state, NodeState.Paused);

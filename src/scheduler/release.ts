@@ -20,7 +20,11 @@ import { ExecutionEnd } from "../tracking/contract.ts";
 import { executionTrace, executionTransition } from "./telemetry.ts";
 import type { Dependencies } from "./service.ts";
 import type { Transaction } from "../kernel/store.ts";
-import { consecutiveStalls, endExecution } from "./execution-store.ts";
+import {
+  consecutiveStalls,
+  endExecution,
+  readLastEndedOfAttempt,
+} from "./execution-store.ts";
 import {
   consecutiveFailures,
   countsFailure,
@@ -29,6 +33,7 @@ import {
   NO_FAILURE_STOPS,
   recordFailure,
   recordHostFault,
+  repeatsStop,
   requireRunning,
 } from "./settlement.ts";
 
@@ -131,12 +136,17 @@ function recordStop(
   stop: ReleaseStopBody,
 ): StopEffects {
   const { tx, dependencies, executionId, row, now } = context;
+  const repeated = repeatsStop(
+    readLastEndedOfAttempt(tx, row.node_id, row.attempt)?.stop ?? null,
+    stop,
+  );
   endExecution(tx, executionId, now, stop);
   if (isHostFault(stop)) {
     const { transition, hold } = recordHostFault(tx, dependencies, {
       node_id: row.node_id,
       failures: consecutiveFailures(tx, row, false),
       now,
+      repeated,
     });
     return { transition, hold, environmentRepositories: null };
   }
@@ -160,6 +170,7 @@ function recordStop(
     row.node_id,
     consecutiveFailures(tx, row, countsFailure(stop)),
     now,
+    { repeated },
   );
   return { transition, hold, environmentRepositories };
 }

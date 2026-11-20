@@ -527,6 +527,7 @@ function pausedNode(
   facts: {
     consecutive_failures: number;
     consecutive_stalls: number;
+    repeated_stop: boolean;
     last_stop: ReturnType<typeof lastStop> | null;
   },
 ) {
@@ -549,6 +550,7 @@ test("a node paused by failed executions answers failure_limit with the count, t
   const h = pausedNode(t, {
     consecutive_failures: FAILURE_LIMIT,
     consecutive_stalls: FURTHER_WORK_LIMIT,
+    repeated_stop: false,
     last_stop: stop,
   });
   assert.deepEqual(pausedRecord(h).paused_context, {
@@ -564,6 +566,7 @@ test("a node paused by stalled releases answers further_work_limit with the coun
   const h = pausedNode(t, {
     consecutive_failures: ONE_STALL,
     consecutive_stalls: FURTHER_WORK_LIMIT,
+    repeated_stop: false,
     last_stop: stop,
   });
   assert.deepEqual(pausedRecord(h).paused_context, {
@@ -574,11 +577,28 @@ test("a node paused by stalled releases answers further_work_limit with the coun
   });
 });
 
+test("a node paused by a repeated stop answers repeated_stop with no count, no limit and the last stop", (t) => {
+  const stop = lastStop();
+  const h = pausedNode(t, {
+    consecutive_failures: FAILURE_LIMIT,
+    consecutive_stalls: FURTHER_WORK_LIMIT,
+    repeated_stop: true,
+    last_stop: stop,
+  });
+  assert.deepEqual(pausedRecord(h).paused_context, {
+    rule: PauseRule.RepeatedStop,
+    count: null,
+    limit: null,
+    last_stop: stop,
+  });
+});
+
 for (const stop of [lastStop(), null]) {
   test(`a node paused by a human answers human with no count, no limit and ${stop === null ? "no last stop" : "the last stop"}`, (t) => {
     const h = pausedNode(t, {
       consecutive_failures: FAILURE_LIMIT - ONE_STALL,
       consecutive_stalls: ONE_STALL,
+      repeated_stop: false,
       last_stop: stop,
     });
     assert.deepEqual(pausedRecord(h).paused_context, {

@@ -9,6 +9,7 @@ import {
   type ClaimAdmission,
   ClaimKind,
   type ExecutionActor,
+  type FailureOptions,
   Intent,
   NodeState,
   type NodeTransition,
@@ -256,12 +257,23 @@ export function release(
   );
 }
 
+function pausedRuleOf(
+  options: FailureOptions,
+  consecutiveFailures: number,
+  limit: number,
+) {
+  return options.repeated
+    ? { rule: TransitionRule.RepeatedStop, count: null, limit: null }
+    : { rule: TransitionRule.FailureLimit, count: consecutiveFailures, limit };
+}
+
 export function failure(
   tx: Transaction,
   dependencies: Dependencies,
   nodeId: string,
   consecutiveFailures: number,
   now: number,
+  options: FailureOptions,
 ): NodeTransition {
   const node = requireNode(tx, nodeId);
   assert.ok(
@@ -275,7 +287,9 @@ export function failure(
   );
   const limit = dependencies.config.consecutive_failure_limit;
   const state =
-    node.state === NodeState.Paused || consecutiveFailures >= limit
+    node.state === NodeState.Paused ||
+    options.repeated ||
+    consecutiveFailures >= limit
       ? NodeState.Paused
       : node.state === NodeState.Executing
         ? NodeState.Available
@@ -294,11 +308,7 @@ export function failure(
     node.id,
     node.state,
     state === NodeState.Paused && node.state !== NodeState.Paused
-      ? {
-          rule: TransitionRule.FailureLimit,
-          count: consecutiveFailures,
-          limit,
-        }
+      ? pausedRuleOf(options, consecutiveFailures, limit)
       : null,
   );
 }

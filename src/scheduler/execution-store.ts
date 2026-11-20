@@ -19,6 +19,8 @@ import {
 
 const NO_ROWS = 0;
 const ONE_ROW = 1;
+const FIRST_ROW = 0;
+const SECOND_ROW = 1;
 const credentialList = z.array(identitySchema("credential"));
 const pinList = z.array(agentPinSchema);
 export const storedStop = releaseStopSchema.nullable();
@@ -114,20 +116,35 @@ export function readUnendedOfNode(
 ): ExecutionRow | null {
   return readBy(tx, "node_id", nodeId, true);
 }
+function readLastTwoEndedOfAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): ExecutionRow[] {
+  assert.ok(nodeId.length > NO_ROWS);
+  return (
+    tx.database
+      .prepare(
+        `SELECT ${COLUMNS} FROM scheduler_execution
+    WHERE node_id = ? AND attempt = ? AND ended_at IS NOT NULL
+    ORDER BY rowid DESC LIMIT 2`,
+      )
+      .all(nodeId, attempt) as StoredRow[]
+  ).map(decode);
+}
 export function readLastEndedOfAttempt(
   tx: Transaction,
   nodeId: string,
   attempt: number,
 ): ExecutionRow | null {
-  assert.ok(nodeId.length > NO_ROWS);
-  const row = tx.database
-    .prepare(
-      `SELECT ${COLUMNS} FROM scheduler_execution
-    WHERE node_id = ? AND attempt = ? AND ended_at IS NOT NULL
-    ORDER BY rowid DESC LIMIT 1`,
-    )
-    .get(nodeId, attempt) as StoredRow | undefined;
-  return row ? decode(row) : null;
+  return readLastTwoEndedOfAttempt(tx, nodeId, attempt)[FIRST_ROW] ?? null;
+}
+export function readPreviousEndedOfAttempt(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number,
+): ExecutionRow | null {
+  return readLastTwoEndedOfAttempt(tx, nodeId, attempt)[SECOND_ROW] ?? null;
 }
 export function readEndTimes(
   tx: Transaction,

@@ -6,7 +6,12 @@ import {
   CauseSubcategory,
 } from "../kernel/cause.ts";
 import { createIdentity } from "../kernel/identity.ts";
-import { BudgetLimit, ClaimState, ExecutionStopReason } from "./contract.ts";
+import {
+  BudgetLimit,
+  ClaimState,
+  ExecutionStopReason,
+  type ReleaseStop,
+} from "./contract.ts";
 import {
   executionFixture,
   FIRST_LOSS_WITHOUT_JOB,
@@ -179,6 +184,7 @@ test("settlement records exactly one loss at the transaction reading", (t) => {
     row.node_id,
     ONE_LOSS,
     FIXTURE_DEADLINE,
+    { repeated: false },
   ]);
 });
 
@@ -355,6 +361,7 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
       consecutive_failures: 0,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: null,
     });
     const lost = at(1);
@@ -386,6 +393,7 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.deepEqual(h.service.pauseFacts(tx, nodeId, 1), {
       consecutive_failures: 0,
       consecutive_stalls: 0,
+      repeated_stop: false,
       last_stop: null,
     });
     for (const offset of [6, 7]) {
@@ -400,6 +408,27 @@ test("pause facts answer the counts of the count functions and the last stop of 
     assert.equal(stalls.last_stop?.reason, stalled.reason);
     assert.equal(stalls.last_stop?.code, BudgetLimit.Turns);
     assert.equal(stalls.last_stop?.detail, null);
+  });
+});
+
+test("pause facts answer repeated_stop after two equal stops of the attempt only", (t) => {
+  const h = schedulerHarness(t);
+  const node = createIdentity("node");
+  const stop = { ...STOP, detail: "download failed" };
+  h.store.transaction((tx) => {
+    const ended = (offset: number, stored: ReleaseStop) => {
+      const row = executionFixture({
+        node_id: node,
+        created_at: FIXTURE_NOW + offset,
+      });
+      insertExecution(tx, row);
+      endExecution(tx, row.execution_id, FIXTURE_NOW + 10, stored);
+    };
+    ended(1, { ...stop, cause: HOST_FAULT_CAUSE });
+    ended(2, stop);
+    assert.equal(pauseFacts(tx, node, 1).repeated_stop, true);
+    ended(3, { ...stop, detail: "another detail" });
+    assert.equal(pauseFacts(tx, node, 1).repeated_stop, false);
   });
 });
 
