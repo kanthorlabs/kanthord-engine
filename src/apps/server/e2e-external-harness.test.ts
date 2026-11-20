@@ -437,7 +437,7 @@ test(
           },
           auth.token,
         );
-        assert.equal(assessed.node.state, NodeState.Completed);
+        assert.equal(assessed.node.state, NodeState.Blocked);
         assert.deepEqual(assessed.assessment.dependency_node_ids, [implement]);
         assert.equal(assessed.outcome.result, SUCCESS);
       },
@@ -446,7 +446,7 @@ test(
       "EX10.10 terminal graph has four finished executions and empty queue",
       async () => {
         assert.equal((await node(implement)).state, NodeState.Completed);
-        assert.equal((await node(examine)).state, NodeState.Completed);
+        assert.equal((await node(examine)).state, NodeState.Blocked);
         assert.deepEqual(
           (
             await cli.read<{ items: unknown[] }>([

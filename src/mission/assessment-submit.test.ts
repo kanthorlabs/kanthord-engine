@@ -48,6 +48,7 @@ import {
   insertDependency,
   insertNode,
   insertRevision,
+  readNode,
   setNodeState,
 } from "./store.ts";
 import { getRevision } from "./node-read.ts";
@@ -114,7 +115,7 @@ function revokedFailureCause(
   return ends.at(-1)!.arguments[FAILURE_CAUSE_ARGUMENT];
 }
 
-test("examine currency follows real dependency outcomes and only current closure releases dependent work", async (t) => {
+test("examine currency follows real dependency outcomes and a current examine success holds dependent work", async (t) => {
   const h = executionHarness(t, IDENTITY);
   const childId = createIdentity("node");
   const dependentId = createIdentity("node");
@@ -253,11 +254,18 @@ test("examine currency follows real dependency outcomes and only current closure
   const final = await submit();
   assert.equal(final.assessment.currency?.current, true);
   assert.equal(final.outcome?.result, AssessmentResult.Success);
-  assert.ok(
+  assert.ok("state" in final.node);
+  assert.equal(final.node.state, NodeState.Blocked);
+  assert.equal(
     h.calls.some(
       (call) =>
         call.method === QUEUE_INSERT && call.arguments.includes(dependentId),
     ),
+    false,
+  );
+  assert.equal(
+    h.store.transaction((tx) => readNode(tx, dependentId))?.state,
+    NodeState.Pending,
   );
 });
 
@@ -1479,13 +1487,48 @@ test("a non-current submit stores its findings as records and changes no earlier
   const current = await h.submit({ dependency_outcome_ids: [outcomeId] });
   assert.equal(current.assessment.currency?.current, true);
   assert.ok("state" in current.node);
-  assert.equal(current.node.state, NodeState.Completed);
+  assert.equal(current.node.state, NodeState.Blocked);
   const routes = (await h.findings()).map((item) => [item.label, item.route]);
   assert.deepEqual(routes.sort(), [
     ["B1", FindingRoute.Record],
     ["S1", FindingRoute.Record],
     ["S9", FindingRoute.Report],
   ]);
+});
+
+test("a current success of an examine node blocks it with the rule human_acceptance and keeps the success outcome", async (t) => {
+  const h = await examineFixture(t);
+  h.dependencies.schedulerClaims.revoke = (_tx, nodeId, now) =>
+    revokedExecution(h.claim.executionId, nodeId, now);
+  const outcomeId = h.completeChild();
+  const answer = await h.submit({ dependency_outcome_ids: [outcomeId] });
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Blocked);
+  assert.equal(answer.outcome?.result, AssessmentResult.Success);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Blocked,
+    rule: TransitionRule.HumanAcceptance,
+    count: null,
+    limit: null,
+    first_available_at: null,
+  });
+});
+
+test("a current success of an implement node with no required action reaches Completed", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  const answer = await h.submit();
+  assert.ok("state" in answer.node);
+  assert.equal(answer.node.state, NodeState.Completed);
+  assert.equal(answer.outcome?.result, AssessmentResult.Success);
+  assert.deepEqual(revokedTransition(h.calls), {
+    from: NodeState.Evaluating,
+    to: NodeState.Completed,
+    rule: TransitionRule.None,
+    count: null,
+    limit: null,
+    first_available_at: null,
+  });
 });
 
 test("an examine finding never gets the route fix, causes no rework and is reported only by the closing round", async (t) => {
@@ -1523,7 +1566,7 @@ test("an examine finding never gets the route fix, causes no rework and is repor
     findings: [reviewerFinding("S2")],
   });
   assert.ok("state" in closing.node);
-  assert.equal(closing.node.state, NodeState.Completed);
+  assert.equal(closing.node.state, NodeState.Blocked);
   const routes = (await h.findings()).map((item) => [item.label, item.route]);
   assert.deepEqual(routes.sort(), [
     ["B1", FindingRoute.Record],
@@ -1537,7 +1580,7 @@ test("a success of an examine node in a later attempt leaves the earlier report 
   const outcomeId = h.completeChild();
   const answer = await h.submit({ dependency_outcome_ids: [outcomeId] });
   assert.ok("state" in answer.node);
-  assert.equal(answer.node.state, NodeState.Completed);
+  assert.equal(answer.node.state, NodeState.Blocked);
   const earlier = (await h.findings()).find(
     (item) => item.id === h.earlierFindingId,
   );
@@ -1803,7 +1846,7 @@ test("a success with a person suggestion reports it, starts no rework and leaves
   assert.equal((await h.byLabel("S1")).route, FindingRoute.Report);
 });
 
-test("a criterion-not-met round with only a person blocker blocks the attempt with the rule none", async (t) => {
+test("a criterion-not-met round with only a person blocker blocks the attempt with the rule human_acceptance", async (t) => {
   const h = await reviewHarness(t, IDENTITY);
   const answer = await h.submit({
     ...h.notMet,
@@ -1815,7 +1858,7 @@ test("a criterion-not-met round with only a person blocker blocks the attempt wi
   assert.deepEqual(revokedTransition(h.calls), {
     from: NodeState.Evaluating,
     to: NodeState.Blocked,
-    rule: TransitionRule.None,
+    rule: TransitionRule.HumanAcceptance,
     count: null,
     limit: null,
     first_available_at: null,

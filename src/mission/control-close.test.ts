@@ -196,6 +196,37 @@ test("attempt-zero success override publishes a human repository evidence and sa
   });
 });
 
+test("an override with success of a Blocked examine node reaches Completed and makes its dependent claimable", async (t) => {
+  const h = controlHarness(t, IDENTITY);
+  const dependent = createIdentity("node");
+  h.store.transaction((tx) => {
+    insertNode(tx, {
+      id: dependent,
+      mission_id: h.mission_id,
+      filename: "dependent.md",
+      created_at: NOW,
+    });
+    insertDependency(tx, h.mission_id, dependent, h.node_id);
+    openAttempt(tx, h.node_id, FIRST_ATTEMPT, h.actor, NOW);
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, NOW);
+    setNodeState(tx, h.node_id, NodeState.Blocked);
+  });
+  const result = await h.invoke("node.override", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.body(NodeState.Blocked, FIRST_ATTEMPT),
+      result: AssessmentResult.Success,
+    },
+  });
+  assert.equal(result.outcome?.result, AssessmentResult.Success);
+  assert.equal(h.node().state, NodeState.Completed);
+  assert.equal(
+    h.store.transaction((tx) => readNode(tx, dependent))?.state,
+    NodeState.Available,
+  );
+});
+
 test("override rejects another binding and Evaluating before any evidence write", async (t) => {
   const h = controlHarness(t, IDENTITY);
   const bindingId = createIdentity("binding");

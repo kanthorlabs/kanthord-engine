@@ -606,26 +606,29 @@ test("E10 integration journey", { timeout: JOURNEY_TIMEOUT }, async (t) => {
       ],
     },
   });
-  await t.test("EJ10.6 the examine assessment completes I", async () => {
-    const assessed = await j.write<{
-      node: { state: string };
-      outcome: { result: string };
-    }>(
-      ["mission", "assessment", "submit", h.I],
-      {
-        ...executionContext(x2),
-        evidence_ids: [ir.evidence.id, rep.evidence.id],
-        dependency_outcome_ids: [oP, oQ],
-        result: AssessmentResult.Success,
-        rationale: "P and Q are complete.",
-        tested_input: testedInput,
-      },
-      h.machine.T,
-    );
-    assert.equal(assessed.node.state, NodeState.Completed);
-    assert.equal(assessed.outcome.result, AssessmentResult.Success);
-    assert.equal(await j.state(h.I), NodeState.Completed);
-  });
+  await t.test(
+    "EJ10.6 the examine assessment blocks I for human acceptance",
+    async () => {
+      const assessed = await j.write<{
+        node: { state: string };
+        outcome: { result: string };
+      }>(
+        ["mission", "assessment", "submit", h.I],
+        {
+          ...executionContext(x2),
+          evidence_ids: [ir.evidence.id, rep.evidence.id],
+          dependency_outcome_ids: [oP, oQ],
+          result: AssessmentResult.Success,
+          rationale: "P and Q are complete.",
+          tested_input: testedInput,
+        },
+        h.machine.T,
+      );
+      assert.equal(assessed.node.state, NodeState.Blocked);
+      assert.equal(assessed.outcome.result, AssessmentResult.Success);
+      assert.equal(await j.state(h.I), NodeState.Blocked);
+    },
+  );
   await t.test("EJ10.8 the evidence delete removes the object", async () => {
     const M = await h.missionVersion();
     await j.read([

@@ -684,7 +684,7 @@ test(
       "EI10.5 examine report and assessment reference both current outcomes",
       { timeout: JOURNEY_TIMEOUT_MS },
       async (t) => {
-        await waitForNode(f.cli, f.examine, NodeState.Completed, t.signal);
+        await waitForNode(f.cli, f.examine, NodeState.Blocked, t.signal);
         await finishedExecutions(f.cli, f.project_id, f.examine, runtimes);
         const evidence = await f.cli.read<Page<Evidence>>([
           "mission",
