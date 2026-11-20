@@ -144,6 +144,13 @@ export function agentTrees(workspaces: WorkspaceRoot): string[] {
     .filter((path) => basename(dirname(path)) === PoolClass.Agent);
 }
 
+export function commandTrees(workspaces: WorkspaceRoot): string[] {
+  return workspaces.pool
+    .trees()
+    .map((tree) => tree.path)
+    .filter((path) => basename(dirname(path)) === PoolClass.Command);
+}
+
 export async function remapOrigin(
   directory: string,
   map: (url: string) => string,

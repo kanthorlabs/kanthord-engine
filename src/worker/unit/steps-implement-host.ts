@@ -5,7 +5,6 @@ import { ExecutionBudget } from "./budget.ts";
 import { loopNode, StepKind, stepNode } from "./chain.ts";
 import { implementChain } from "./chain-implement.ts";
 import { affectedDeclaration } from "./step-affected-declaration.ts";
-import { envSetupLive } from "./step-env-setup-host.ts";
 import { inputsReadAttemptEvidence } from "./step-inputs-read-host.ts";
 import { setupEntriesLive } from "./step-setup-entries-host.ts";
 import { workspaceNode } from "./step-workspace-node.ts";
@@ -125,7 +124,6 @@ export async function prepareStepsWorkspace(
           stepNode(workspaceNode),
           stepNode(setupEntriesLive),
           stepNode(affectedDeclaration),
-          stepNode(envSetupLive),
         ],
         seed: seedOf(input),
       },
@@ -151,8 +149,8 @@ export async function prepareStepsWorkspace(
       setup: ctx.setupEntries,
       affectedTests: ctx.affectedTests,
       base: ctx.baseHead,
-      setupPending: ctx.setupPending,
-      setupInstruction: ctx.setupInstruction,
+      setupPending: false,
+      setupInstruction: null,
     };
   } catch (error) {
     await resources.disposeAsync();

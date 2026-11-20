@@ -308,12 +308,15 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [task("timed", "touch transient; sleep 30")],
       [NOTHING],
     );
+    const transient = join(h.checkouts[0]!.directory, "transient");
+    let verifying = false;
     let deadline = Date.now() + 60000;
     h.agent.budget.wallDeadline = () => {
       deadline = Date.now() + 30;
       return deadline;
     };
-    h.agent.budget.exhausted = () => Date.now() >= deadline;
+    h.agent.budget.exhausted = () =>
+      (verifying ||= existsSync(transient)) && Date.now() >= deadline;
     const bodies = recordReleases(h);
     acceptEvidence(h);
     assert.deepEqual(await runStepsImplement(h), {

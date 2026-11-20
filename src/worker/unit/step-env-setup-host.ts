@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { DeadlineKind, type ExecutionCtx } from "./chain.ts";
 import type { Step, StepIo } from "./chain-host.ts";
 import { SetupEnd, setUpHeads, type SetupResult } from "./environment-setup.ts";
+import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import { perCheckout } from "./per-checkout.ts";
 import { restoreCheckout } from "./turn-gate.ts";
 import { taskRevisionInstruction } from "./judgement.ts";
@@ -23,7 +24,7 @@ async function restoreHeads(
   ctx: Readonly<Pick<ExecutionCtx, LiveKeys>>,
   io: StepIo,
 ): Promise<void> {
-  const context = io.budget.cleanupContext(io.context);
+  const context = io.run.cleanupContext();
   try {
     await perCheckout(ctx.workspace.checkouts, (checkout) =>
       restoreCheckout(
@@ -40,6 +41,11 @@ async function restoreHeads(
   }
 }
 
+function revoked(io: StepIo): boolean {
+  const stored = io.run.operationContext.signal.reason;
+  return stored instanceof ExecutionStop && stored.reason === EndReason.Revoked;
+}
+
 async function setUpLive(
   ctx: Readonly<Pick<ExecutionCtx, LiveKeys>>,
   io: StepIo,
@@ -53,7 +59,7 @@ async function setUpLive(
       ctx.workspace.checkouts.map((checkout) => checkout.head),
     );
   } catch (error) {
-    if (!io.context.signal.aborted) await restoreHeads(ctx, io);
+    if (!revoked(io)) await restoreHeads(ctx, io);
     throw error;
   }
 }
