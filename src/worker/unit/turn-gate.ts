@@ -4,6 +4,7 @@ import { perCheckout } from "./per-checkout.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type { Context } from "../../kernel/context.ts";
+import { REASON_MAX_LENGTH } from "../../kernel/probe.ts";
 import {
   commitMessage,
   commitTypeOf,
@@ -30,6 +31,7 @@ import {
   type GitCall,
   type GitOperation,
   type GitPaths,
+  GitProcessCount,
   type GitStatus,
   HEAD_OUTSIDE_BRANCHES,
   livePaths,
@@ -75,6 +77,7 @@ const GATE_CHANGED_ATTRIBUTE = "kanthord.gate.changed";
 const GATE_VIOLATION_ATTRIBUTE = "kanthord.gate.violation";
 const CHANGED_FILE_COUNT_ATTRIBUTE = "kanthord.git.changed_file_count";
 const CHANGED_FILES_ATTRIBUTE = "kanthord.git.changed_files";
+const PROCESS_COUNT_ATTRIBUTE = "kanthord.git.process_count";
 const CHANGED_FILES_MAX_BYTES = 16384;
 const PATH_PREFIX_SEPARATOR = ":";
 
@@ -82,6 +85,16 @@ export interface ConflictMerge {
   directory: string;
   commit: string;
   files: readonly string[];
+  message: string;
+}
+export interface OpenMerge extends ConflictMerge {
+  resolved: boolean;
+}
+export interface CheckpointTurn {
+  message: string;
+  merge: ConflictMerge | null;
+  context: Context;
+  violationEnd: ViolationEnd;
 }
 interface GateTurn {
   mode: GateMode;
@@ -182,16 +195,33 @@ export function gatedAgent(
 
 export async function checkpointGate(
   state: StepsState,
-  message: string,
-  context: Context,
-  violationEnd: ViolationEnd,
+  turn: CheckpointTurn,
 ): Promise<boolean> {
-  assert.ok(isCommitMessage(message));
+  assert.ok(isCommitMessage(turn.message));
   return runGate(
     state,
-    { mode: GateMode.Checkpoint, message, merge: null, violationEnd },
+    {
+      mode: GateMode.Checkpoint,
+      message: turn.message,
+      merge: turn.merge,
+      violationEnd: turn.violationEnd,
+    },
     state.checkouts.map((checkout) => checkout.head),
-    context,
+    turn.context,
+  );
+}
+
+function gateMerges(
+  state: StepsState,
+  turn: GateTurn,
+  context: Context,
+): Promise<(ConflictMerge | null)[]> {
+  if (turn.mode !== GateMode.Checkpoint)
+    return Promise.resolve(
+      state.checkouts.map((checkout) => mergeOf(turn, checkout)),
+    );
+  return perCheckout(state.checkouts, (checkout) =>
+    keptMerge(state, checkout, { merge: mergeOf(turn, checkout), context }),
   );
 }
 
@@ -204,62 +234,63 @@ async function runGate(
   assert.equal(before.length, state.checkouts.length);
   let violated: TurnViolation | null = null;
   const changedPaths: string[] = [];
+  const processes = new GitProcessCount();
   return state.ports.telemetry.within(
     {
       key: state.ports.telemetry.key(SpanOperation.Gate),
       operation: SpanOperation.Gate,
       attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
     },
-    async () => {
-      if (turn.mode === GateMode.Checkpoint)
-        await perCheckout(state.checkouts, (checkout) =>
-          abortOpenMerge(state, checkout, context),
+    () =>
+      processes.within(async () => {
+        const merges = await gateMerges(state, turn, context);
+        const inspections = await perCheckout(
+          state.checkouts,
+          (checkout, index) =>
+            inspect(state, checkout, before[index]!, {
+              merge: merges[index]!,
+              context,
+            }),
         );
-      const inspections = await perCheckout(
-        state.checkouts,
-        (checkout, index) =>
-          inspect(state, checkout, before[index]!, {
-            merge: mergeOf(turn, checkout),
+        const violation =
+          inspections.find((inspection) => inspection.violation !== null)
+            ?.violation ?? null;
+        if (violation !== null) {
+          violated = violation.code;
+          const detail = await violate(state, before, violation, context);
+          if (turn.violationEnd === ViolationEnd.Restore) return false;
+          throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
+            detail,
+          });
+        }
+        const settled = await perCheckout(state.checkouts, (checkout, index) =>
+          settleCheckout(state, checkout, {
+            before: before[index]!,
+            status: inspections[index]!.status,
+            turn,
+            merge: merges[index]!,
             context,
           }),
-      );
-      const violation =
-        inspections.find((inspection) => inspection.violation !== null)
-          ?.violation ?? null;
-      if (violation !== null) {
-        violated = violation.code;
-        const detail = await violate(state, before, violation, context);
-        if (turn.violationEnd === ViolationEnd.Restore) return false;
-        throw new ExecutionStop(EndReason.OperationFailed, violation.code, {
-          detail,
-        });
-      }
-      const settled = await perCheckout(state.checkouts, (checkout, index) =>
-        settleCheckout(state, checkout, {
-          before: before[index]!,
-          status: inspections[index]!.status,
-          turn,
-          context,
-        }),
-      );
-      for (const [index, checkout] of state.checkouts.entries())
-        changedPaths.push(
-          ...prefixedPaths(state, checkout, settled[index]!.paths),
         );
-      const changed = settled.some((entry) => entry.changed);
-      removeRootEntries(state);
-      return changed;
-    },
+        for (const [index, checkout] of state.checkouts.entries())
+          changedPaths.push(
+            ...prefixedPaths(state, checkout, settled[index]!.paths),
+          );
+        const changed = settled.some((entry) => entry.changed);
+        removeRootEntries(state);
+        return changed;
+      }),
     (changed) => ({
       status: SpanStatus.Ok,
       attributes: {
         [GATE_CHANGED_ATTRIBUTE]: changed,
         [CHANGED_FILE_COUNT_ATTRIBUTE]: changedPaths.length,
         [CHANGED_FILES_ATTRIBUTE]: boundedPaths(changedPaths),
+        [PROCESS_COUNT_ATTRIBUTE]: processes.count,
         ...violationAttributes(violated),
       },
     }),
-    (error) => gateFailure(violated)(error),
+    (error) => gateFailure(violated, processes)(error),
   );
 }
 
@@ -289,9 +320,13 @@ function violationAttributes(violation: TurnViolation | null): Attributes {
 
 function gateFailure(
   violation: TurnViolation | null,
+  processes: GitProcessCount,
 ): (error: unknown) => SpanEnd {
   return (error) => {
-    const attributes = violationAttributes(violation);
+    const attributes = {
+      [PROCESS_COUNT_ATTRIBUTE]: processes.count,
+      ...violationAttributes(violation),
+    };
     if (error instanceof ExecutionStop)
       return { status: SpanStatus.Error, attributes };
     return { ...gitFailure(error), attributes };
@@ -416,22 +451,25 @@ function operationViolation(
   return null;
 }
 
-async function abortOpenMerge(
+async function keptMerge(
   state: StepsState,
   checkout: NodeCheckout,
-  context: Context,
-): Promise<void> {
+  options: InspectOptions,
+): Promise<ConflictMerge | null> {
+  const { merge, context } = options;
   const paths = await livePaths(
     callOf(state, checkout, context),
     checkout.gitPaths,
   );
-  if (operationsOf(paths).includes(MERGE_HEAD))
-    await abortMerge(
-      state.input.env,
-      checkout.directory,
-      context,
-      remainingOf(state)(),
-    );
+  if (!operationsOf(paths).includes(MERGE_HEAD)) return null;
+  if (merge !== null && mergeHeadAt(paths) === merge.commit) return merge;
+  await abortMerge(
+    state.input.env,
+    checkout.directory,
+    context,
+    remainingOf(state)(),
+  );
+  return null;
 }
 
 async function violate(
@@ -452,6 +490,7 @@ async function violate(
   );
   const detail = await state.ports.secrets.redact(
     String(new Error(violation.detail)),
+    REASON_MAX_LENGTH,
   );
   state.ports.log.log("turn violation", { code: violation.code, detail });
   return detail;
@@ -461,6 +500,7 @@ interface SettleInput {
   before: string;
   status: GitStatus;
   turn: GateTurn;
+  merge: ConflictMerge | null;
   context: Context;
 }
 
@@ -469,8 +509,7 @@ async function settleCheckout(
   checkout: NodeCheckout,
   input: SettleInput,
 ): Promise<Settled> {
-  const { before, status, context } = input;
-  const merge = mergeOf(input.turn, checkout);
+  const { before, status, merge, context } = input;
   if (
     merge === null &&
     status.head === before &&
@@ -528,12 +567,12 @@ async function concludeConflict(
   checkout: NodeCheckout,
   conflict: ConflictSettle,
 ): Promise<Settled> {
-  const { context, turn } = conflict.input;
+  const { context } = conflict.input;
   await refuseMarkers(state, checkout, conflict.merge, context);
   const paths = await concludeMerge(
     state.input.env,
     checkout.directory,
-    turn.message,
+    conflict.merge.message,
     context,
     remainingOf(state)(),
   );

@@ -53,6 +53,7 @@ export interface Step<
   writes: readonly W[];
   stops: readonly StopCode[];
   llm?: boolean;
+  final?: boolean;
   note?: string;
   run(
     ctx: Readonly<Pick<ExecutionCtx, R>>,

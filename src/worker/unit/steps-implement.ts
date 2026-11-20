@@ -7,7 +7,11 @@ import {
   type WorkspaceCheckout,
 } from "./workspace-layout.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
-import { removeRootEntries, restoreCheckout } from "./turn-gate.ts";
+import {
+  type OpenMerge,
+  removeRootEntries,
+  restoreCheckout,
+} from "./turn-gate.ts";
 import { perCheckout } from "./per-checkout.ts";
 import type { CancellationContext } from "../../kernel/context.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
@@ -122,6 +126,7 @@ export interface StepsState extends ProgressCtx {
   memo: VerificationMemo;
   verificationTimedOut: boolean;
   task?: TaskContent;
+  openMerge?: OpenMerge;
 }
 
 export interface StartState extends StepsState {

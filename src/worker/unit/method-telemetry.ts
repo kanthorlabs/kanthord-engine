@@ -6,6 +6,7 @@ import {
 } from "../../tracking/contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
 import {
+  type EndPhase,
   type Phase,
   type SpanEnd,
   SpanOperation,
@@ -38,7 +39,7 @@ const DIGEST_SEPARATOR = ",";
 const LIST_BYTES_MAX = 16384;
 const INVALID_SELECTION = "invalid";
 
-export function phaseSpan(phase: Phase): SpanStart {
+export function phaseSpan(phase: Phase | EndPhase): SpanStart {
   assert.ok(phase);
   const span = {
     key: `phase:${phase}`,

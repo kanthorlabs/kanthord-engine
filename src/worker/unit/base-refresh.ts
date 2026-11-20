@@ -4,14 +4,24 @@ import type { Context } from "../../kernel/context.ts";
 import { PromptTemplate, type PromptTemplates } from "../../agent/contract.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { renderTemplate } from "../../agent/prompt-templates.ts";
-import { commitOf, headCommit, isAncestor, mergeRef } from "./local-git.ts";
+import {
+  commitOf,
+  conflictMarkerFiles,
+  headCommit,
+  isAncestor,
+  mergeRef,
+} from "./local-git.ts";
 import { implementRepositoriesOf, type StepsState } from "./steps-implement.ts";
 import { mergedBranchesOf } from "./setup-repository.ts";
 import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { portStop } from "./execution-stop.ts";
-import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
+import {
+  type ConflictMerge,
+  gatedAgent,
+  mergeCommitMessage,
+} from "./turn-gate.ts";
 
 const NO_FILES = 0;
 
@@ -96,11 +106,20 @@ async function mergeUnder(
     () => mergeRef(env, directory, ref, message, context, remaining()),
   );
   if (conflicts.length > NO_FILES) {
-    await gatedAgent(state, message, {
+    const marked = await conflictMarkerFiles(
+      env,
+      directory,
+      conflicts,
+      context,
+      remaining(),
+    );
+    const merge: ConflictMerge = {
       directory,
       commit,
       files: conflicts,
-    }).instruct(
+      message,
+    };
+    await gatedAgent(state, message, merge).instruct(
       nodeWork(state),
       conflictInstruction(
         state.input.setup.templates,
@@ -113,7 +132,15 @@ async function mergeUnder(
       ),
       PromptTemplate.Conflict,
     );
-    if (state.agent.budget.exhausted()) return RefreshResult.BudgetEnd;
+    if (state.agent.budget.exhausted()) {
+      const left = await markersLeft(state, merge, context);
+      const everyMarked = conflicts.every((file) => marked.includes(file));
+      state.openMerge = {
+        ...merge,
+        resolved: everyMarked && left.length === NO_FILES,
+      };
+      return RefreshResult.BudgetEnd;
+    }
   } else checkout.head = await headCommit(env, directory, context, remaining());
   state.ports.log.log("base merged", {
     binding: checkout.name,
@@ -122,6 +149,20 @@ async function mergeUnder(
     conflicts: conflicts.length,
   });
   return RefreshResult.Merged;
+}
+
+function markersLeft(
+  state: StepsState,
+  merge: ConflictMerge,
+  context: Context,
+): Promise<string[]> {
+  return conflictMarkerFiles(
+    state.input.env,
+    merge.directory,
+    merge.files,
+    context,
+    state.input.claim.expired_at - Date.now(),
+  );
 }
 
 export async function fetchAtRelease(

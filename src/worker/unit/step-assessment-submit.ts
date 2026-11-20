@@ -19,6 +19,7 @@ export const assessmentSubmit: Step<
 > = {
   id: "assessment.submit",
   deadline: DeadlineKind.Cleanup,
+  final: true,
   reads: [
     "claim",
     "judgement",

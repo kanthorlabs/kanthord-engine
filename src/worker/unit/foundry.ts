@@ -20,6 +20,7 @@ import {
   type Walked,
   type Walker,
   walkNodes,
+  withinStep,
 } from "./chain-walk.ts";
 import { ExecutionStop } from "./execution-stop.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
@@ -76,7 +77,20 @@ function walkedOf(run: TasksRun, result: ChainStepResult): Walked {
   return result.kind;
 }
 
-async function walkStep(
+function walkStep(
+  run: TasksRun,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<Walked> {
+  const io = {
+    spans: run.ports.telemetry,
+    budget: run.control.budget,
+    cancel: run.control.cancel,
+  };
+  return withinStep(io, step, () => runStep(run, step, holder));
+}
+
+async function runStep(
   run: TasksRun,
   step: ChainStep,
   holder: ScopeHolder,

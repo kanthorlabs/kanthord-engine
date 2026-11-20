@@ -403,6 +403,9 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: current.id,
+      template: PromptTemplate.TaskRevision,
+      agent_reason: "still nothing",
     });
     assert.deepEqual(
       events.mock.calls
@@ -410,6 +413,62 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         .filter((msg) => msg === TASK_VERIFIED).length,
       VERIFIED_BEFORE_NO_PROGRESS,
     );
+  });
+
+  const REASON_PREFIX = "word ".repeat(100);
+  const REASON_SUFFIX = " tail".repeat(40);
+  const AGENT_REASON_MAX_LENGTH = 512;
+
+  test("a no_progress detail redacts a secret of the agent text that crosses the 512-character cut", async (t) => {
+    const current = task("stuck", "false");
+    const h = await fixture(
+      t,
+      [current],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
+      ],
+    );
+    t.mock.method(
+      h.agent,
+      "lastText",
+      () => `${REASON_PREFIX}${STEPS_KEY}${REASON_SUFFIX}`,
+    );
+    const stopped = await stopOf(runTask(h, current));
+    assert.equal(stopped.reason, EndReason.NoProgress);
+    assert.equal(stopped.detail?.includes(STEPS_KEY), false);
+    const { agent_reason } = JSON.parse(stopped.detail!);
+    assert.equal(
+      agent_reason,
+      `${REASON_PREFIX}[redacted]${REASON_SUFFIX}`.slice(
+        0,
+        AGENT_REASON_MAX_LENGTH,
+      ),
+    );
+  });
+
+  test("a no_progress detail holds no agent_reason when the secret list of the execution cannot be read for the redaction", async (t) => {
+    const current = task("stuck", "false");
+    const h = await fixture(
+      t,
+      [current],
+      [
+        fauxAssistantMessage("nothing"),
+        fauxAssistantMessage("nothing again"),
+        fauxAssistantMessage("still nothing"),
+      ],
+    );
+    t.mock.method(h.agent, "lastText", () => `still nothing ${STEPS_KEY}`);
+    (h.run as unknown as { secrets: () => Promise<string[]> }).secrets =
+      async () => {
+        throw new Error("The secret list cannot be read.");
+      };
+    const stopped = await stopOf(runTask(h, current));
+    assert.equal(stopped.reason, EndReason.NoProgress);
+    const detail = JSON.parse(stopped.detail!);
+    assert.equal("agent_reason" in detail, false);
+    assert.equal(detail.unit_id, current.id);
   });
 
   test("a live failure runs again on the next turn with an unchanged tree", async (t) => {

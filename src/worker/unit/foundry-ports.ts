@@ -124,7 +124,7 @@ export interface DependencyRead {
 }
 
 export interface SecretPort {
-  redact(text: string): Promise<string | null>;
+  redact(text: string, limit: number): Promise<string | null>;
 }
 
 export interface LogPort {

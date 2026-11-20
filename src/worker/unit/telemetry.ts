@@ -20,6 +20,7 @@ export const noTelemetry: TelemetrySink = {
 
 export const SpanOperation = {
   Phase: "worker.phase",
+  Step: "worker.step",
   Task: "worker.task",
   Verification: "worker.verification",
   Evaluation: "worker.evaluation",
@@ -43,6 +44,9 @@ export const Phase = {
   Finish: "finish",
 } as const;
 export type Phase = (typeof Phase)[keyof typeof Phase];
+
+export const EndPhase = { OnExit: "on_exit", OnStop: "on_stop" } as const;
+export type EndPhase = (typeof EndPhase)[keyof typeof EndPhase];
 
 export interface SpanClaim {
   execution_id: string;

@@ -84,3 +84,4 @@ export {
   type LocalTasksInput,
 } from "./tasks-run.ts";
 export { RunEndKind } from "./tasks-verify.ts";
+export { loggedNoProgressDetail } from "./progress-rule.ts";

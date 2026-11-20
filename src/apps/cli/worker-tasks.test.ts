@@ -109,6 +109,8 @@ const TASKS_FAILED = "tasks failed";
 const KEPT_TEXT = "kept";
 const DIAGNOSTIC_END = "diagnostic";
 const UNIT_COMPLETE = "complete";
+const STUCK_TURNS = 3;
+const STUCK_PREFIX = "stuck ";
 
 function sha256Of(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
@@ -335,6 +337,35 @@ suite("worker tasks run", () => {
       assert.match(shown, /helper=\\n/);
       assert.match(shown, /nosystem=1\\n/);
       assert.match(shown, /ssh=ssh -F \/dev\/null -o IdentitiesOnly=yes/);
+    },
+  );
+
+  test(
+    "the agent_reason of a no_progress stop redacts the credential and each --pass-env value of the standalone run",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const stuck = `${STUCK_PREFIX}${CREDENTIAL_CANARY} ${PASS_VALUE}`;
+      const provider = scriptedProvider(
+        Array.from({ length: STUCK_TURNS }, () => fauxAssistantMessage(stuck)),
+      );
+      const run = commandRun(fixture, provider, {
+        shellEnv: { ...hostEnvironment(), [PASS_NAME]: PASS_VALUE },
+      });
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { passEnv: [PASS_NAME] }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Stopped, run.stderr.join(""));
+      const result = readJson(join(fixture.root, "out"), "result.json") as {
+        stop: { reason: string; detail: string };
+      };
+      assert.equal(result.stop.reason, EndReason.NoProgress);
+      const reason: string = JSON.parse(result.stop.detail).agent_reason;
+      assert.ok(reason.startsWith(STUCK_PREFIX), reason);
+      for (const canary of [CREDENTIAL_CANARY, PASS_VALUE])
+        assert.equal(reason.includes(canary), false, canary);
     },
   );
 

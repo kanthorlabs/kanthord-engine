@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
+import { PromptTemplate } from "../../agent/contract.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import type { TaskContent } from "../../mission/contract.ts";
@@ -47,14 +48,17 @@ import {
   fauxToolCall,
   implementFixture as fixture,
   listedVerificationSpans,
+  phaseSpanNames,
   recordReleases,
   recordSpans,
   releasedRoot,
   spanEnds,
+  stepSpanOutcomes,
   task,
 } from "./test-support.ts";
 import { RecordKind } from "../../tracking/contract.ts";
-import { SpanOperation } from "./telemetry.ts";
+import { Phase, SpanOperation } from "./telemetry.ts";
+import { FrameOutcome } from "./chain.ts";
 import { VerificationContext } from "./method-telemetry.ts";
 import { VERIFICATION_RERUNS } from "./verification.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -65,6 +69,7 @@ type Fixture = Awaited<ReturnType<typeof fixture>>;
 
 const NOTHING = fauxAssistantMessage("nothing");
 const NO_PROGRESS_LIMIT = 2;
+const LAST_AGENT_TEXT = "still nothing";
 const RELEASE_COMMANDS_RAN = 2;
 const FAILED_EXIT_CODE = 1;
 const LAST_COMMAND_INDEX = 1;
@@ -219,6 +224,44 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  test("an implement execution writes one worker.phase span per phase and one worker.step span per step", async (t) => {
+    const h = await fixture(t, [task("plain", "true")], [NOTHING]);
+    const records = recordSpans(h);
+    recordReleases(h);
+    acceptEvidence(h);
+    assert.deepEqual(await runStepsImplement(h), {
+      kind: "released",
+      furtherWork: false,
+    });
+    assert.deepEqual(phaseSpanNames(records), [
+      Phase.Start,
+      Phase.Tasks,
+      Phase.Finish,
+    ]);
+    assert.deepEqual(
+      stepSpanOutcomes(records),
+      [
+        "base.refresh(claim)",
+        "env.setup(live)",
+        "units.plan",
+        "budget.check",
+        "unit.enter",
+        "unit.turn",
+        "verify.own",
+        "unit_record.put",
+        "unit.leave",
+        "base.fetch",
+        "base.refresh(release)",
+        "release.verify",
+        "release.route",
+        "report.coder",
+        "branch.push",
+        "evidence.head",
+        "execution.release",
+      ].map((id) => [id, FrameOutcome.Next]),
+    );
+  });
+
   test("a release failure that no revision changes stops with no_progress and never releases further work false", async (t) => {
     const current = task("ignored", `test -e ${SECRET}`);
     const h = await fixture(
@@ -227,7 +270,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [
         NOTHING,
         fauxAssistantMessage("nothing again"),
-        fauxAssistantMessage("still nothing"),
+        fauxAssistantMessage(LAST_AGENT_TEXT),
       ],
     );
     appendFileSync(join(h.root, ".git", "info", "exclude"), `${SECRET}\n`);
@@ -261,6 +304,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
             exit_code: FAILED_EXIT_CODE,
             timed_out: false,
           },
+          unit_id: current.id,
+          template: PromptTemplate.TaskRevision,
+          agent_reason: LAST_AGENT_TEXT,
         }),
       },
     });
@@ -288,6 +334,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
               exit_code: FAILED_EXIT_CODE,
               timed_out: false,
             },
+            unit_id: current.id,
+            template: PromptTemplate.TaskRevision,
+            agent_reason: LAST_AGENT_TEXT,
           }),
         },
       },
@@ -394,7 +443,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
       [
         NOTHING,
         fauxAssistantMessage("nothing again"),
-        fauxAssistantMessage("still nothing"),
+        fauxAssistantMessage(LAST_AGENT_TEXT),
       ],
     );
     h.revision = {
@@ -425,6 +474,9 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
         exit_code: FAILED_EXIT_CODE,
         timed_out: false,
       },
+      unit_id: node.id,
+      template: PromptTemplate.TaskRevision,
+      agent_reason: LAST_AGENT_TEXT,
     });
     const spans = listedVerificationSpans(records);
     assert.deepEqual(

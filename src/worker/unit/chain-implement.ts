@@ -8,9 +8,8 @@ import {
   type ChainNode,
   type ChainTasks,
   type ExecutionCtx,
+  type FrameEnd,
   FrameOutcome,
-  type LoopFrame,
-  loopNode,
   namedBranch,
   parallelNode,
   soloBranch,
@@ -27,7 +26,6 @@ import {
   type ImplementInput,
   type ImplementResult,
   implementTasksNodes,
-  phaseFrame,
   runImplementTasks,
 } from "./foundry-implement.ts";
 import { verificationCommands } from "./review-scope.ts";
@@ -91,20 +89,10 @@ export function startInputsNode(): ChainNode {
   ]);
 }
 
-function prepareFrame(): LoopFrame<true> {
-  return {
-    ...phaseFrame(Phase.Prepare, [
-      parallelNode("prepare.inputs", [
-        soloBranch(stepNode(inputsReadRevisionPrior)),
-        namedBranch("workspace", implementWorkspaceNodes()),
-      ]),
-    ]),
-    endReads: ["revision"],
-    end: (ctx, _scope, ended) =>
-      ended.outcome === FrameOutcome.Next
-        ? nodeShapeEnd(ctx.revision)
-        : { status: SpanStatus.Error },
-  };
+function prepareEnd(ctx: ExecutionCtx, ended: FrameEnd): SpanEnd {
+  return ended.outcome === FrameOutcome.Next
+    ? nodeShapeEnd(ctx.revision)
+    : { status: SpanStatus.Error };
 }
 
 export function implementInputOf(
@@ -160,6 +148,7 @@ function mergeImplement(ctx: ExecutionCtx, result: ImplementResult): void {
   ctx.completedUnits = result.completedUnits;
   ctx.reports = result.reports;
   if (result.route !== null) ctx.route = result.route;
+  if (result.openMerge !== undefined) state.openMerge = result.openMerge;
 }
 
 function implementPortsOf(ports: ImplementHostPorts): ImplementPorts {
@@ -201,35 +190,26 @@ export function implementChain(
   runner: TaskRunner | null = null,
 ): Chain<ImplementHostPorts> {
   return chain<ImplementHostPorts>(ChainId.Implement, IMPLEMENT_HOST_PORTS)
-    .phase(Phase.Prepare)
-    .loop("prepare", prepareFrame())
+    .phase(Phase.Prepare, prepareEnd)
+    .parallel("prepare.inputs", [
+      soloBranch(stepNode(inputsReadRevisionPrior)),
+      namedBranch("workspace", implementWorkspaceNodes()),
+    ])
     .step(stateOpen)
     .phase(Phase.Start)
-    .loop(
-      "start",
-      phaseFrame(Phase.Start, [stepNode(baseRefreshClaim), startInputsNode()]),
-    )
+    .step(baseRefreshClaim)
+    .nodes([startInputsNode()])
     .tasks(implementTasks(runner))
     .phase(Phase.Finish)
-    .loop(
-      "finish",
-      phaseFrame(Phase.Finish, [
-        stepNode(reportCoder),
-        stepNode(branchPush),
-        stepNode(evidenceHead),
-      ]),
-    )
+    .step(reportCoder)
+    .step(branchPush)
+    .step(evidenceHead)
     .step(executionRelease)
     .budgetEnd({
       kind: BudgetEndKind.Exit,
       nodes: [
-        loopNode(
-          "finish",
-          phaseFrame(Phase.Finish, [
-            stepNode(checkpointGateExit),
-            stepNode(branchPush),
-          ]),
-        ),
+        stepNode(checkpointGateExit),
+        stepNode(branchPush),
         stepNode(executionReleaseBudgetEnd),
       ],
     })

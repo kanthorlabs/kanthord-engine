@@ -605,6 +605,37 @@ export function spanEnds(
   );
 }
 
+function spanStarts(
+  records: readonly TelemetryRecord[],
+  operation: SpanOperation,
+) {
+  return records.flatMap((record) =>
+    record.kind === RecordKind.Span &&
+    record.operation === operation &&
+    record.start_time !== undefined
+      ? [record]
+      : [],
+  );
+}
+
+export function phaseSpanNames(records: readonly TelemetryRecord[]): unknown[] {
+  return spanStarts(records, SpanOperation.Phase).map(
+    (record) => record.attributes?.["kanthord.phase"],
+  );
+}
+
+export function stepSpanOutcomes(
+  records: readonly TelemetryRecord[],
+): unknown[][] {
+  const ends = spanEnds(records, SpanOperation.Step);
+  return spanStarts(records, SpanOperation.Step).map((start) => [
+    start.attributes?.["kanthord.step.id"],
+    ends.find((end) => end.span_id === start.span_id)?.attributes?.[
+      "kanthord.step.outcome"
+    ],
+  ]);
+}
+
 export function listedVerificationSpans(records: readonly TelemetryRecord[]) {
   return records.flatMap((record) =>
     record.kind === RecordKind.Span &&

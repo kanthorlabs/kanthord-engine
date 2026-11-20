@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import { type CancellationContext, reasonOf } from "../../kernel/context.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import {
   BudgetEndKind,
   type Chain,
   type ChainNode,
+  type ChainPhase,
   type ChainSeed,
   type ChainStep,
   type ChainStepResult,
@@ -14,19 +16,25 @@ import {
   type ExecutionCtx,
   type FoundryEnd,
   FoundryEndKind,
+  type FrameEnd,
+  FrameOutcome,
   type Key,
+  NodeKind,
   phaseReads,
+  type PhaseSpanEnd,
   StepKind,
 } from "./chain.ts";
 import type { StepHost } from "./chain-host.ts";
 import {
   CANCELLED,
+  markStep,
   type ScopeHolder,
   sliceOf,
   UNTIL,
   type Walked,
   type Walker,
   walkNodes,
+  withinStep,
 } from "./chain-walk.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import {
@@ -38,12 +46,14 @@ import {
 import type { StepWatch } from "./foundry.ts";
 import type { TasksCapture } from "./tasks-capture.ts";
 import type { CommonPorts } from "./foundry-ports.ts";
-import { Phase } from "./telemetry.ts";
+import { phaseSpan } from "./method-telemetry.ts";
+import { EndPhase, Phase, type SpanEnd } from "./telemetry.ts";
 
 const CHECKPOINT_FAILED = "checkpoint failed";
 const CAPTURE_FAILED = "tasks capture failed";
 const FIRST_PHASE = 0;
 const UNKNOWN_PHASE = -1;
+const BEFORE_LAST = -1;
 
 export interface ChainIo<P extends CommonPorts = CommonPorts> {
   run: ExecutionRun;
@@ -139,7 +149,21 @@ interface StepCall {
   holder: ScopeHolder;
 }
 
-async function walkStep(
+function walkStep(
+  walk: Walk,
+  step: ChainStep,
+  holder: ScopeHolder,
+): Promise<Walked> {
+  if (step.final === true) return runStep(walk, step, holder);
+  const io = {
+    spans: walk.io.run.spans,
+    budget: walk.io.budget,
+    cancel: walk.cancel,
+  };
+  return withinStep(io, step, () => runStep(walk, step, holder));
+}
+
+async function runStep(
   walk: Walk,
   step: ChainStep,
   holder: ScopeHolder,
@@ -197,6 +221,62 @@ async function hostNodes(
       walked !== UNTIL,
   );
   return walked;
+}
+
+interface SpannedPhase {
+  phase: Phase | EndPhase;
+  end: PhaseSpanEnd | null;
+}
+
+function defaultPhaseEnd(_ctx: ExecutionCtx, ended: FrameEnd): SpanEnd {
+  return {
+    status:
+      ended.outcome === FrameOutcome.Stop ? SpanStatus.Error : SpanStatus.Ok,
+  };
+}
+
+function withinPhase(
+  walk: Walk,
+  phase: SpannedPhase,
+  work: () => Promise<StepKind>,
+): Promise<StepKind> {
+  const end = phase.end ?? defaultPhaseEnd;
+  return walk.io.run.spans.within(
+    phaseSpan(phase.phase),
+    work,
+    (kind) =>
+      end(walk.ctx, {
+        outcome:
+          kind === StepKind.BudgetEnd
+            ? FrameOutcome.BudgetEnd
+            : FrameOutcome.Next,
+      }),
+    (error) => end(walk.ctx, { outcome: FrameOutcome.Stop, error }),
+  );
+}
+
+function finalStepOf(nodes: readonly ChainNode[]): ChainStep | null {
+  const last = nodes.at(BEFORE_LAST);
+  return last?.kind === NodeKind.Step && last.step.final === true
+    ? last.step
+    : null;
+}
+
+async function spannedNodes(
+  walk: Walk,
+  phase: SpannedPhase,
+  nodes: readonly ChainNode[],
+): Promise<StepKind> {
+  const final = finalStepOf(nodes);
+  const body = final === null ? nodes : nodes.slice(FIRST_PHASE, BEFORE_LAST);
+  const kind = await withinPhase(walk, phase, async () => {
+    const walked = await hostNodes(walk, body, { scope: null });
+    if (walked === StepKind.Next && final !== null)
+      markStep(walk.io.run.spans, final);
+    return walked;
+  });
+  if (kind !== StepKind.Next || final === null) return kind;
+  return hostNodes(walk, nodes.slice(BEFORE_LAST), { scope: null });
 }
 
 function childEnvironmentOf(
@@ -281,7 +361,7 @@ async function budgetEnd(
     throw new ExecutionStop(EndReason.BudgetEnd, BudgetLimit.WallTime);
   return closedEnd(
     walk.ctx,
-    await hostNodes(walk, rule.nodes, { scope: null }),
+    await spannedNodes(walk, { phase: EndPhase.OnExit, end: null }, rule.nodes),
   );
 }
 
@@ -300,11 +380,14 @@ async function walkPhases<P extends CommonPorts>(
   walk: Walk<P>,
   progress: Progress,
 ): Promise<ExecutionEnd> {
-  for (const { phase, nodes } of built.phases.slice(progress.from)) {
+  for (const { phase, nodes, end } of built.phases.slice(progress.from)) {
+    const spanned = { phase, end: end ?? null };
     const kind =
       phase === Phase.Tasks
-        ? await tasksKind(walk, await tasksEnd(built, walk))
-        : await hostNodes(walk, nodes, { scope: null });
+        ? await withinPhase(walk, spanned, async () =>
+            tasksKind(walk, await tasksEnd(built, walk)),
+          )
+        : await spannedNodes(walk, spanned, nodes);
     if (kind === StepKind.BudgetEnd)
       return budgetEnd(built, walk, progress.prepared);
     if (kind === StepKind.Closed) return closedEnd(walk.ctx, kind);
@@ -323,9 +406,11 @@ async function stopNodes(
   const { run } = walk.io;
   walk.ctx.stop = stop;
   try {
-    await hostNodes({ ...walk, stopping: true }, built.onStop, {
-      scope: null,
-    });
+    await spannedNodes(
+      { ...walk, stopping: true },
+      { phase: EndPhase.OnStop, end: null },
+      built.onStop,
+    );
   } catch (error) {
     if (!(error instanceof Error)) throw error;
     const reason = await run.reasonOf(error);
@@ -420,10 +505,10 @@ export class PhaseSeedMissing extends Error {
   }
 }
 
-function phaseNodes(built: Chain, phase: Phase): readonly ChainNode[] {
+function chainPhaseOf(built: Chain, phase: Phase): ChainPhase {
   const found = built.phases.find((entry) => entry.phase === phase);
   assert.ok(found, "A phase run names a phase of the chain.");
-  return found.nodes;
+  return found;
 }
 
 export async function runPhase<P extends CommonPorts>(
@@ -431,12 +516,16 @@ export async function runPhase<P extends CommonPorts>(
   input: PhaseInput,
   io: ChainIo<NoInfer<P>>,
 ): Promise<PhaseEnd> {
-  const nodes = phaseNodes(built, input.phase);
+  const { nodes, end } = chainPhaseOf(built, input.phase);
   const missing = phaseReads(nodes).filter((key) => !(key in input.seed.keys));
   if (missing.length > NO_NODES) throw new PhaseSeedMissing(missing);
   const walk = walkOf(seededContext(input.seed.keys), io);
   try {
-    const kind = await hostNodes(walk, nodes, { scope: null });
+    const kind = await spannedNodes(
+      walk,
+      { phase: input.phase, end: end ?? null },
+      nodes,
+    );
     return kind === StepKind.BudgetEnd
       ? { kind: PhaseEndKind.BudgetEnd, ctx: walk.ctx }
       : { kind: PhaseEndKind.Completed, ctx: walk.ctx };

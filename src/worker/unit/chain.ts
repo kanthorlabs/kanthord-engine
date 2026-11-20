@@ -236,6 +236,7 @@ interface ChainStepShape {
   writes: readonly Key[];
   stops: readonly StopCode[];
   llm?: boolean;
+  final?: boolean;
   note?: string;
 }
 
@@ -304,9 +305,12 @@ export type BudgetEndRule =
   | { kind: typeof BudgetEndKind.Exit; nodes: readonly ChainNode[] }
   | { kind: typeof BudgetEndKind.Stop; reason: EndReason };
 
+export type PhaseSpanEnd = (ctx: ExecutionCtx, ended: FrameEnd) => SpanEnd;
+
 export interface ChainPhase {
   phase: Phase;
   nodes: readonly ChainNode[];
+  end?: PhaseSpanEnd;
 }
 
 export interface ChainTasks<P extends CommonPorts> {
@@ -330,7 +334,7 @@ export interface Chain<P extends CommonPorts = CommonPorts> {
 }
 
 export interface ChainBuilder<P extends CommonPorts> {
-  phase(phase: Phase): ChainBuilder<P>;
+  phase(phase: Phase, end?: PhaseSpanEnd): ChainBuilder<P>;
   tasks(tasks: ChainTasks<P>): ChainBuilder<P>;
   step(step: ChainStep): ChainBuilder<P>;
   loop<S>(id: string, frame: LoopFrame<S>): ChainBuilder<P>;
@@ -394,13 +398,14 @@ const PHASE_ORDER: readonly Phase[] = [
 const UNKNOWN_PHASE = -1;
 
 interface BuiltPhases<P extends CommonPorts> {
-  phases: { phase: Phase; nodes: ChainNode[] }[];
+  phases: { phase: Phase; nodes: ChainNode[]; end?: PhaseSpanEnd }[];
   tasks: ChainTasks<P> | null;
 }
 
 function openPhase<P extends CommonPorts>(
   built: BuiltPhases<P>,
   phase: Phase,
+  end?: PhaseSpanEnd,
 ): void {
   const order = PHASE_ORDER.indexOf(phase);
   assert.notEqual(order, UNKNOWN_PHASE);
@@ -409,7 +414,9 @@ function openPhase<P extends CommonPorts>(
     last === undefined || PHASE_ORDER.indexOf(last.phase) < order,
     "The phases of a chain follow the phase order.",
   );
-  built.phases.push({ phase, nodes: [] });
+  built.phases.push(
+    end === undefined ? { phase, nodes: [] } : { phase, nodes: [], end },
+  );
 }
 
 export function chain<P extends CommonPorts>(
@@ -425,9 +432,9 @@ export function chain<P extends CommonPorts>(
     return last.nodes;
   };
   const builder: ChainBuilder<P> = {
-    phase(phase) {
+    phase(phase, end) {
       assert.notEqual(phase, Phase.Tasks, "A tasks phase holds a tasks call.");
-      openPhase(built, phase);
+      openPhase(built, phase, end);
       return builder;
     },
     tasks(tasks) {

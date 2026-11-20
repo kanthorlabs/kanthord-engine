@@ -17,12 +17,7 @@ import type { MethodClaim } from "./execution-stop.ts";
 import type { CheckoutRef, Commit, ImplementPorts } from "./foundry-ports.ts";
 import type { GitPaths } from "./local-git.ts";
 import { type FoundryControl, type FoundryHost, runTasks } from "./foundry.ts";
-import {
-  phaseSpan,
-  taskEnd,
-  taskFailure,
-  taskSpan,
-} from "./method-telemetry.ts";
+import { taskEnd, taskFailure, taskSpan } from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import {
   type AffectedNote,
@@ -59,11 +54,10 @@ import {
   type TaskRunner,
   workUnitsOf,
 } from "./steps-implement.ts";
-import { Phase, SpanOperation } from "./telemetry.ts";
-import { NO_UNCHANGED_TURNS } from "./turn-gate.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { NO_UNCHANGED_TURNS, type OpenMerge } from "./turn-gate.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 
-const ONE_FRAME = true;
 const FIRST_UNIT = 0;
 const NEXT_UNIT = 1;
 
@@ -95,20 +89,7 @@ export interface ImplementResult {
   reports: ReadonlyMap<string, string>;
   route: ReleaseGate | null;
   progress: ProgressCtx;
-}
-
-export function phaseFrame(
-  phase: Phase,
-  body: readonly ChainNode[],
-): LoopFrame<true> {
-  return {
-    reads: [],
-    note: `one frame; span worker.phase ${phase}`,
-    init: () => ONE_FRAME,
-    body,
-    next: () => null,
-    span: () => phaseSpan(phase),
-  };
+  openMerge?: OpenMerge;
 }
 
 export const revisionsFrame: LoopFrame<UnitScope> = {
@@ -245,14 +226,7 @@ function releaseRoundsFrame(runner: TaskRunner | null): LoopFrame<RoundScope> {
 }
 
 export function implementTasksNodes(runner: TaskRunner | null): ChainNode[] {
-  return [
-    loopNode(
-      "tasks",
-      phaseFrame(Phase.Tasks, [
-        loopNode("release_rounds", releaseRoundsFrame(runner)),
-      ]),
-    ),
-  ];
+  return [loopNode("release_rounds", releaseRoundsFrame(runner))];
 }
 
 function stateOf(input: ImplementInput, ports: ImplementPorts): StartState {
@@ -300,6 +274,7 @@ function resultOf(ctx: ExecutionCtx): ImplementResult {
       lastVerification: state.lastVerification,
       revisionCount: state.revisionCount,
     },
+    ...(state.openMerge === undefined ? {} : { openMerge: state.openMerge }),
   };
 }
 

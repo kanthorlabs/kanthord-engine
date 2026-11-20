@@ -1,4 +1,8 @@
-import { CancellationContext, ContextCancelled } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  ContextCancelled,
+  DeadlineExceeded,
+} from "../../kernel/context.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import {
   type ChainFrame,
@@ -12,8 +16,14 @@ import {
   StepKind,
   writesOf,
 } from "./chain.ts";
+import type { ExecutionBudget } from "./budget.ts";
 import { ExecutionStop } from "./execution-stop.ts";
-import type { SpanEnd, SpanRecorder } from "./telemetry.ts";
+import {
+  type SpanEnd,
+  SpanOperation,
+  type SpanRecorder,
+  type SpanStart,
+} from "./telemetry.ts";
 
 export const CANCELLED = "cancelled";
 export const UNTIL = "until";
@@ -21,6 +31,68 @@ export type Walked = StepKind | typeof CANCELLED | typeof UNTIL | ExecutionStop;
 
 export interface ScopeHolder {
   scope: unknown;
+}
+
+const STEP_ID = "kanthord.step.id";
+const STEP_OUTCOME = "kanthord.step.outcome";
+type StepOutcome = (typeof FrameOutcome)[keyof typeof FrameOutcome];
+
+function stepStart(spans: SpanRecorder, step: ChainStep): SpanStart {
+  return {
+    key: spans.key(SpanOperation.Step),
+    operation: SpanOperation.Step,
+    attributes: { [STEP_ID]: step.id },
+  };
+}
+
+function stepEnd(outcome: StepOutcome): SpanEnd {
+  return {
+    status: outcome === FrameOutcome.Stop ? SpanStatus.Error : SpanStatus.Ok,
+    attributes: { [STEP_OUTCOME]: outcome },
+  };
+}
+
+function stepOutcomeOf(walked: Walked): StepOutcome {
+  if (walked === StepKind.BudgetEnd) return FrameOutcome.BudgetEnd;
+  if (walked === StepKind.Next || walked === StepKind.Closed)
+    return FrameOutcome.Next;
+  return FrameOutcome.Stop;
+}
+
+export interface StepSpans {
+  spans: SpanRecorder;
+  budget: ExecutionBudget;
+  cancel: CancellationContext;
+}
+
+function cancelledBy(io: StepSpans, error: unknown): boolean {
+  if (error instanceof ContextCancelled || error instanceof DeadlineExceeded)
+    return true;
+  const { signal } = io.cancel;
+  return signal.aborted && !(signal.reason instanceof ExecutionStop);
+}
+
+function failureOutcomeOf(io: StepSpans, error: unknown): StepOutcome {
+  if (error instanceof ExecutionStop || !io.budget.exhausted())
+    return FrameOutcome.Stop;
+  return cancelledBy(io, error) ? FrameOutcome.BudgetEnd : FrameOutcome.Stop;
+}
+
+export function withinStep(
+  io: StepSpans,
+  step: ChainStep,
+  work: () => Promise<Walked>,
+): Promise<Walked> {
+  return io.spans.within(
+    stepStart(io.spans, step),
+    work,
+    (walked) => stepEnd(stepOutcomeOf(walked)),
+    (error) => stepEnd(failureOutcomeOf(io, error)),
+  );
+}
+
+export function markStep(spans: SpanRecorder, step: ChainStep): void {
+  spans.end(spans.start(stepStart(spans, step)), stepEnd(FrameOutcome.Next));
 }
 
 export interface Walker {
