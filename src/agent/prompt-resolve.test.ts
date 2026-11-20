@@ -502,6 +502,8 @@ const COMPLETE_VIOLATION_LIST =
   "When a rule is violated, check every changed file against that rule. List each violation as its own finding, with its file and its place. Never report one example of a rule and leave the other violations out.";
 const REPOSITORY_CODE_RULE =
   "Check each code rule of a repository prompt against each changed file. For example, a repository prompt can state that a component body holds no business logic. A component body that holds a derivation, a sequence of calls or an error mapping then violates that rule.";
+const ROUND_LIMIT_RULE =
+  "In a later review round, the round rule below limits these checks to the lines that a patch adds or changes.";
 
 for (const examine of [false, true]) {
   test(`the evaluation template rendered with examine ${examine} holds the citation rule, the complete violation list and the repository code rule`, () => {
@@ -513,6 +515,7 @@ for (const examine of [false, true]) {
     assert.ok(text.includes(CITATION_RULE));
     assert.ok(text.includes(COMPLETE_VIOLATION_LIST));
     assert.ok(text.includes(REPOSITORY_CODE_RULE));
+    assert.ok(text.includes(ROUND_LIMIT_RULE));
   });
 }
 
