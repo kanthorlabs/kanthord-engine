@@ -86,6 +86,7 @@ export const HANDOVER_REFRESH_WAIT_MS =
 export const ACTION_REQUEST_TOOL_NAME = "repository-action-request";
 export const ACTION_REQUEST_TIMEOUT_MS = 900000;
 export const CHANGE_REQUEST_TIMEOUT_MS = 60000;
+export const UNIT_RECORD_TIMEOUT_MS = 30000;
 export const ActionResultKind = {
   Submitted: "submitted",
   AwaitingPrerequisite: "awaiting-prerequisite",
@@ -662,6 +663,12 @@ export const ExecutionIntent = {
 } as const;
 export type ExecutionIntent =
   (typeof ExecutionIntent)[keyof typeof ExecutionIntent];
+export type UnitIdsOf = (
+  tx: Transaction,
+  nodeId: string,
+  nodeRevision: number,
+) => string[];
+
 export type IntentOf = (
   tx: Transaction,
   nodeId: string,
@@ -1047,6 +1054,8 @@ export const WorkerErrorCode = {
   ExecutionPromptNotPinned: "worker.execution.prompt_not_pinned",
   ExecutionPromptRecordFailed: "worker.execution.prompt_record_failed",
   ExecutionSeedUnavailable: "worker.execution.seed_unavailable",
+  UnitRecordUnitUnknown: "worker.unit_record.unit_unknown",
+  UnitRecordBindingUnknown: "worker.unit_record.binding_unknown",
   StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
@@ -1331,6 +1340,19 @@ export const executionEnvironmentSchema = z
   ])
   .nullable();
 export type ExecutionEnvironment = z.infer<typeof executionEnvironmentSchema>;
+export const unitRecordSchema = z.strictObject({
+  unit_id: z.string().min(1),
+  content_digest: z.string().regex(/^[0-9a-f]{64}$/),
+  commits: z
+    .array(
+      z.strictObject({
+        binding_id: identitySchema("binding"),
+        commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+      }),
+    )
+    .min(1),
+});
+export type UnitRecord = z.infer<typeof unitRecordSchema>;
 export const executionSetupSchema = z.strictObject({
   execution_id: identitySchema("execution"),
   worker_name: z.string().min(1),
@@ -1353,6 +1375,7 @@ export const executionSetupSchema = z.strictObject({
       environment: executionEnvironmentSchema,
     }),
   ),
+  unit_records: z.array(unitRecordSchema),
 });
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const seedCommitSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
@@ -2010,6 +2033,28 @@ export const workerOperations = {
     output: executionSeedSchema,
     description:
       "Read the seed of an execution of a node that is not closed: the claim, the setup without containerEnv, remoteEnv and build.args, the pinned revision and the head of each binding. The answer holds no credential, no SSH identity and no handover key.",
+  },
+  "execution.unit_record.put": {
+    service: WORKER_SERVICE_NAME,
+    store: StoreName.Operational,
+    lifetime: OperationLifetime.Unary,
+    id: "worker.execution.unit_record.put",
+    method: HttpMethod.Put,
+    path: "/api/worker/execution/:execution_id/unit_record",
+    access: AccessPolicy.Client,
+    requiresExecution: true,
+    timeoutMs: UNIT_RECORD_TIMEOUT_MS,
+    mutation: true,
+    body: true,
+    status: HttpStatus.OK,
+    input: z.strictObject({
+      params: z.strictObject({ execution_id: identitySchema("execution") }),
+      query: emptyFields,
+      body: unitRecordSchema,
+    }),
+    output: unitRecordSchema,
+    description:
+      "Write the unit record of a passed unit of the node of the live execution: the unit, the digest of its content and the gate commit of each changed checkout. A put replaces the record of the unit.",
   },
   "action.request": {
     service: WORKER_SERVICE_NAME,

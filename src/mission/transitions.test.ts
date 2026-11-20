@@ -42,6 +42,7 @@ import {
 } from "./node-check.ts";
 import { controlHarness, unexpectedCollaboration } from "./test-support.ts";
 
+const UNIT_RECORDS_DELETED = "unitRecords.deleteNode";
 const NO_STALLS = 0;
 const FURTHER_WORK_LIMIT = 3;
 const ONE_CALL = 1;
@@ -488,8 +489,12 @@ test("stopped moves Executing to Available and Evaluating to Waiting and writes 
   }
 });
 
-test("an unblock from the base branch starts a new node branch that later attempts continue", async (t) => {
+test("an unblock from the base branch starts a new node branch that later attempts continue and deletes the unit records of the node", async (t) => {
   const h = fixture(t);
+  const deletions = () =>
+    h.calls
+      .filter((call) => call.method === UNIT_RECORDS_DELETED)
+      .map((call) => call.arguments[1]);
   const restartBranch = `kanthord/${h.node_id}-a2`;
   const blockAndUnblock = async (attempt: number, startPoint?: StartPoint) => {
     h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Paused));
@@ -535,12 +540,14 @@ test("an unblock from the base branch starts a new node branch that later attemp
   const restarted = await blockAndUnblock(FIRST_ATTEMPT, StartPoint.BaseBranch);
   assert.equal(restarted.attempt?.attempt, SECOND_ATTEMPT);
   assert.equal(restarted.attempt?.start_point, StartPoint.BaseBranch);
+  assert.deepEqual(deletions(), [h.node_id]);
   const steps = h.claim();
   assert.equal(steps?.attempt, SECOND_ATTEMPT);
   assert.equal(branchOf(steps), restartBranch);
   const continued = await blockAndUnblock(SECOND_ATTEMPT);
   assert.equal(continued.attempt?.attempt, THIRD_ATTEMPT);
   assert.equal(continued.attempt?.start_point, StartPoint.NodeBranch);
+  assert.deepEqual(deletions(), [h.node_id]);
   assert.equal(branchOf(h.claim()), restartBranch);
   h.store.transaction((tx) => setNodeState(tx, h.node_id, NodeState.Waiting));
   const evaluation = h.claim([NodeState.Waiting]);

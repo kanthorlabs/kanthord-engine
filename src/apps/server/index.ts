@@ -977,6 +977,8 @@ export function composeServices(options: ComposeServicesOptions) {
     repositoryBindingIdsOf: (tx, nodeId, revision) =>
       mission.repositoryBindingIdsOf(tx, nodeId, revision),
     intentOf: (tx, nodeId, revision) => mission.intentOf(tx, nodeId, revision),
+    unitIdsOf: (tx, nodeId, revision) =>
+      mission.unitIdsOf(tx, nodeId, revision),
     pinnedCredentialMetadata: (tx, execution, name, now) =>
       custody.pinnedCredentialMetadata(tx, execution, name, now),
     credentialMetadata: (tx, name) => custody.credentialMetadata(tx, name),
@@ -1168,6 +1170,9 @@ export function composeServices(options: ComposeServicesOptions) {
     config: options.config.mission,
     health: options.health,
     workQueue,
+    unitRecords: {
+      deleteNode: (tx, nodeId) => worker.deleteNodeUnitRecords(tx, nodeId),
+    },
     schedulerClaims: {
       revoke: (...args) => scheduler.revoke(...args),
       executionRevoked: (...args) => scheduler.executionRevoked(...args),

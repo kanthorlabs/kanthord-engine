@@ -100,6 +100,7 @@ test("host takes handover before setup and method, discards on every method end"
         environment: null,
       },
     ],
+    unit_records: [],
   };
   t.mock.method(api.worker, "handover", async () => {
     events.push("handover");

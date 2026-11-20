@@ -116,6 +116,7 @@ export function anthropicSetup(
     resource_budget: { turns: 200, wall_time_ms: 7200000 },
     intent: ExecutionIntent.Implement,
     repositories: [],
+    unit_records: [],
     ...overrides,
   };
   assert.ok(setup.agents.length);

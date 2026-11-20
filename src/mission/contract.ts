@@ -115,6 +115,10 @@ export interface WorkQueue {
   firstQueuedAt(tx: Transaction, nodeId: string): number | null;
 }
 
+export interface UnitRecords {
+  deleteNode(tx: Transaction, nodeId: string): void;
+}
+
 export interface ClaimFacts {
   intent: Intent;
   tags: string[];

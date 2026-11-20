@@ -277,6 +277,8 @@ export function transition(
   if (before.get(node.id)) dependencies.workQueue.delete(tx, node.id);
   before.set(node.id, false);
   setNodeState(tx, node.id, state);
+  if (state === NodeState.Completed || state === NodeState.Discarded)
+    dependencies.unitRecords.deleteNode(tx, node.id);
   routeMission(tx, mission.id);
   reconcileMission(
     tx,
