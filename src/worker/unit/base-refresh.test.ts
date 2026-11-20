@@ -2,12 +2,7 @@ import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import {
-  renderTemplate,
-  resolveTemplateSet,
-  SHIPPED_TEMPLATES,
-} from "../../agent/prompt-templates.ts";
+import { renderTemplate } from "../../agent/prompt-templates.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
 import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
@@ -479,9 +474,6 @@ test("the release gate after a conflict counts no failed command when no owner u
   assertNoConflictText(records);
 });
 
-const CANDIDATE_FOLDER = fileURLToPath(
-  new URL("../../../static/prompt/candidate", import.meta.url),
-);
 const SECOND_FILE = "second-conflicted.txt";
 const BASE_ONLY_FILE = "base-only-change.txt";
 const MERGE_INTRO = "The merge of origin/";
@@ -500,9 +492,14 @@ const NON_ASCII_FILE = "café.txt";
 const STRING_TYPE = "string";
 const CUT_LINE = /^\+line \d+ of the long base change$/;
 
-async function useCandidate(h: Awaited<ReturnType<typeof fixture>>["h"]) {
-  const set = await resolveTemplateSet(CANDIDATE_FOLDER, background);
-  h.input.setup.templates = set.templates;
+const NO_BASE_CHANGES_CONFLICT =
+  "The merge of origin/{{base_branch}} into {{binding}} in `{{directory}}` conflicts: {{files}}.";
+
+function withoutBaseChanges(h: Awaited<ReturnType<typeof fixture>>["h"]) {
+  h.input.setup.templates = {
+    ...h.input.setup.templates,
+    [PromptTemplate.Conflict]: NO_BASE_CHANGES_CONFLICT,
+  };
 }
 
 function conflictPromptOf(provider: { calls: { messages: unknown[] }[] }) {
@@ -540,9 +537,8 @@ async function baseAdvance(
   await git.push("origin", "main");
 }
 
-test("the candidate Conflict template holds the base-side log and diff of each conflicted file and of no other file", async (t) => {
+test("the shipped Conflict template holds the base-side log and diff of each conflicted file and of no other file", async (t) => {
   const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
-  await useCandidate(h);
   for (const file of [CONFLICT_FILE, SECOND_FILE])
     writeFileSync(join(web.directory, file), NODE_SIDE);
   const git = simpleGit(web.directory);
@@ -568,9 +564,8 @@ test("the candidate Conflict template holds the base-side log and diff of each c
   assert.equal(prompt.includes(BASE_ONLY_FILE), false);
 });
 
-test("the base-side changes of the candidate template stop on a line edge at the byte limit and state the cut", async (t) => {
+test("the base-side changes of the shipped template stop on a line edge at the byte limit and state the cut", async (t) => {
   const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
-  await useCandidate(h);
   writeFileSync(join(web.directory, CONFLICT_FILE), NODE_SIDE);
   const git = simpleGit(web.directory);
   await git.add(CONFLICT_FILE);
@@ -615,8 +610,9 @@ function wrapGit(
   return () => readFileSync(log, "utf8").split("\n");
 }
 
-test("the shipped Conflict template runs no base-side git process, one owner log, and renders the prompt of the shipped variables", async (t) => {
+test("a Conflict template without base_changes runs no base-side git process, one owner log, and renders the prompt of its variables", async (t) => {
   const { h, web } = await conflictOnWeb(t, [fauxAssistantMessage("done")]);
+  withoutBaseChanges(h);
   const gitCalls = wrapGit(t, h);
   await assert.rejects(
     refreshAtRelease(h, workerPorts(h.input, h.run)),
@@ -639,16 +635,12 @@ test("the shipped Conflict template runs no base-side git process, one owner log
   );
   assert.equal(
     conflictPromptOf(h.provider),
-    renderTemplate(SHIPPED_TEMPLATES, PromptTemplate.Conflict, {
+    renderTemplate(h.input.setup.templates, PromptTemplate.Conflict, {
       binding: web.name,
       directory: "web",
       base_branch: BASE_BRANCH,
       files: CONFLICT_FILE,
     }),
-  );
-  assert.equal(
-    h.input.setup.templates[PromptTemplate.Conflict],
-    SHIPPED_TEMPLATES[PromptTemplate.Conflict],
   );
 });
 
@@ -699,7 +691,6 @@ test("a failed owner log leaves the release flag unknown and the merge still res
 
 test("pathspec magic in a conflicted file name selects only that file for the base-side changes and the owner log", async (t) => {
   const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
-  await useCandidate(h);
   withTasks(h, ["task_conflicted", "task_glob"]);
   await nodeCommit(
     web.directory,
@@ -737,7 +728,6 @@ test("a non-ASCII conflicted file name reaches the conflict list, the marker che
     ],
     ONE_TURN_BUDGET,
   );
-  await useCandidate(h);
   await nodeCommit(
     web.directory,
     { [NON_ASCII_FILE]: NODE_SIDE },
@@ -760,7 +750,6 @@ test("a non-ASCII conflicted file name reaches the conflict list, the marker che
 
 test("the base-side cut counts bytes, not UTF-16 units, for multibyte lines", async (t) => {
   const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
-  await useCandidate(h);
   await nodeCommit(web.directory, { [CONFLICT_FILE]: NODE_SIDE }, "body");
   web.head = await headOf(web.directory);
   const long = Array.from(
@@ -780,9 +769,8 @@ test("the base-side cut counts bytes, not UTF-16 units, for multibyte lines", as
   assert.ok(changes.split("\n").at(-2)!.endsWith(MULTIBYTE_LINE));
 });
 
-test("a modify/delete and an add/add conflict give the base-side deletion and addition to the candidate template", async (t) => {
+test("a modify/delete and an add/add conflict give the base-side deletion and addition to the shipped template", async (t) => {
   const { h, web, webBare } = await fixture(t, [fauxAssistantMessage("done")]);
-  await useCandidate(h);
   await baseAdvance(webBare, t, { [CONFLICT_FILE]: BASE_SIDE });
   await h.input.transport.fetchBase(
     web.directory,
