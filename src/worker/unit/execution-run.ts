@@ -222,12 +222,18 @@ export class ExecutionRun {
     }
   }
 
+  private finalCall(): void {
+    this.revocation?.[Symbol.dispose]();
+    this.finalStep();
+  }
+
   revoke(code: string | null = null): void {
     this.store(this.stopWith(EndReason.Revoked, code, null, null));
   }
 
   async fence(context: Context): Promise<boolean> {
     this.finalStep();
+    if (this.stopped?.reason === EndReason.Revoked) return false;
     let result: OperationResult<{ claim_state: ClaimState }>;
     try {
       result = await this.clients.scheduler.claimGet(
@@ -480,7 +486,7 @@ export class ExecutionRun {
   }
 
   async submitAssessment(nodeId: string, body: AssessmentBody) {
-    this.finalStep();
+    this.finalCall();
     await this.settleCredentials();
     this.closeTraces(SpanStatus.Ok);
     await this.spans.flush(TELEMETRY_FLUSH_MS);
@@ -515,7 +521,7 @@ export class ExecutionRun {
     budgetEnd: BudgetLimit | null = null,
   ): Promise<ExecutionEnd> {
     assert.ok(budgetEnd === null || furtherWork);
-    this.finalStep();
+    this.finalCall();
     const stop: ReleaseStop | null =
       budgetEnd === null
         ? null
@@ -642,7 +648,7 @@ export class ExecutionRun {
   async releaseStop(stopped: ExecutionStop): Promise<ExecutionEnd> {
     const reason = stopped.reason;
     assert.ok(reason !== EndReason.Revoked);
-    this.finalStep();
+    this.finalCall();
     const stop: ReleaseStop = {
       reason,
       code: stopped.code,

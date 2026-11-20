@@ -92,7 +92,6 @@ export async function runNativeExecution(
     secrets,
     environmentDigests: environmentDigestsOf(input.setup.repositories),
   });
-  const watch = new ClaimWatch(run);
   const opened = new Map<NativeAgent, Disposable>();
   const budget = new ExecutionBudget({
     ...input.claim,
@@ -123,6 +122,7 @@ export async function runNativeExecution(
     hostHome: input.hostHome,
   });
   try {
+    using watch = new ClaimWatch(run);
     return await executionBoundary(run, async () => {
       await secrets();
       const method = getWorkerDeclaration(input.setup.worker_name)?.method;
@@ -178,7 +178,6 @@ export async function runNativeExecution(
       );
     });
   } finally {
-    watch.end();
     try {
       for (const agent of [...opened.keys()]) await close(agent);
     } finally {

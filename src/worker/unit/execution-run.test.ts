@@ -10,7 +10,11 @@ import {
   EXECUTION_PROOF_FAILED,
   ExecutionRun,
 } from "./execution-run.ts";
-import { EndReason, ExecutionStop } from "./execution-stop.ts";
+import {
+  EndReason,
+  ExecutionEndKind,
+  ExecutionStop,
+} from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { ProviderFailure } from "../../scheduler/contract.ts";
 import { CodedError, Diagnostic, OperationError } from "../../kernel/errors.ts";
@@ -561,6 +565,65 @@ test("the fence revokes the run on a claim that is not running and on an executi
     assert.equal(stopped.reason, EndReason.Revoked);
     assert.equal(run.operationContext.signal.aborted, true);
   }
+});
+
+test("the fence of a revoked run answers false and reads no claim", async (t) => {
+  let reads = 0;
+  const run = fencedRun(async () => {
+    reads++;
+    return claimAnswer("running")();
+  });
+  stopAfter(t, () => run.dispose());
+  run.revoke();
+  assert.equal(await run.fence(run.cleanupContext()), false);
+  assert.equal(reads, NO_CALLS);
+});
+
+function lateRevocation(revocation: CancellationContext): void {
+  revocation.cancel(
+    new ExecutionStop(EndReason.Revoked, EXECUTION_PROOF_FAILED),
+  );
+}
+
+test("regression: C3 B1 a late execution-end answer of the proof hook during a final call keeps the end of the final call", async (t) => {
+  const revocation = new CancellationContext();
+  const run = new ExecutionRun({
+    claim: CLAIM,
+    clients: {
+      scheduler: {
+        executionRelease: async () => {
+          lateRevocation(revocation);
+          return {
+            type: OperationResultType.Completed,
+            status: 200,
+            data: { execution_id: CLAIM.execution_id, ended_at: Date.now() },
+          };
+        },
+      },
+      mission: {
+        "assessment.submit": async () => {
+          lateRevocation(revocation);
+          return {
+            type: OperationResultType.Completed,
+            status: 200,
+            data: { outcome: { id: "outcome" } },
+          };
+        },
+      },
+    } as unknown as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+    revocation,
+  });
+  stopAfter(t, () => run.dispose());
+  assert.deepEqual(await run.submitAssessment(CLAIM.node_id, {} as never), {
+    outcome: { id: "outcome" },
+  });
+  assert.deepEqual(await run.release(false), {
+    kind: ExecutionEndKind.Released,
+    furtherWork: false,
+  });
+  assert.equal(run.operationContext.signal.aborted, false);
 });
 
 test("the fence after a stop reads the claim with the cleanup context and keeps the stored stop", async (t) => {
