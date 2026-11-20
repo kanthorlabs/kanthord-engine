@@ -625,6 +625,52 @@ suite("worker tasks run", () => {
   );
 
   test(
+    "metrics.json holds one conflicts entry for each conflict turn, with the release gate facts",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await seedFixture(t);
+      const git = simpleGit(fixture.source);
+      await git.raw(["checkout", "-q", "-b", "node"]);
+      writeFileSync(join(fixture.source, "file"), "node");
+      await git.raw([...COMMIT_IDENTITY, "commit", "-q", "-am", "node"]);
+      const nodeHead = (await git.revparse(["HEAD"])).trim();
+      await git.raw(["checkout", "-q", "main"]);
+      writeFileSync(join(fixture.source, "file"), "main");
+      await git.raw([...COMMIT_IDENTITY, "commit", "-q", "-am", "main"]);
+      fixture.seed.heads = { [fixture.bindingId]: nodeHead };
+      writeFileSync(
+        join(fixture.seedFolder, "seed.json"),
+        JSON.stringify(fixture.seed),
+      );
+      const run = commandRun(
+        fixture,
+        scriptedProvider([
+          writeGood(),
+          fauxAssistantMessage("done"),
+          writeGood(),
+          fauxAssistantMessage("resolved"),
+        ]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const metrics = readJson(join(fixture.root, "out"), "metrics.json");
+      assert.deepEqual(metrics.conflicts, [
+        {
+          file_count: 1,
+          model_turns: 2,
+          end: "resolved",
+          release_owner_failed: false,
+          release_owner_failed_count: 0,
+        },
+      ]);
+    },
+  );
+
+  test(
     "a seed with unit_records skips the unit with a valid record, and the outbox holds the put of the other unit",
     { timeout: TEST_TIMEOUT_MS },
     async (t) => {

@@ -127,6 +127,7 @@ export interface StepsState extends ProgressCtx {
   verificationTimedOut: boolean;
   task?: TaskContent;
   openMerge?: OpenMerge;
+  conflictOwners?: string[];
 }
 
 export interface StartState extends StepsState {

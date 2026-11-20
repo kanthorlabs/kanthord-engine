@@ -26,7 +26,13 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import { frozenStore } from "../../llm/refresh-watch.ts";
 import { AssetKind } from "../../mission/contract.ts";
 import { BudgetLimit } from "../../scheduler/contract.ts";
-import { RecordKind, SpanStatus } from "../../tracking/contract.ts";
+import {
+  type Attributes,
+  type AttributeValue,
+  RecordKind,
+  SpanStatus,
+  type TelemetryRecord,
+} from "../../tracking/contract.ts";
 import { ExecutionBudget } from "./budget.ts";
 import type { ExecutionCtx, FoundryEnd, Key } from "./chain.ts";
 import { FoundryEndKind } from "./chain.ts";
@@ -92,7 +98,7 @@ import {
   RunEndKind,
   verifyRun,
 } from "./tasks-verify.ts";
-import { phaseSpan } from "./method-telemetry.ts";
+import { ConflictAttribute, phaseSpan } from "./method-telemetry.ts";
 import { Phase, SpanOperation } from "./telemetry.ts";
 import { agentOpenPort, commonPorts } from "./worker-ports.ts";
 
@@ -469,6 +475,7 @@ function writeOutputs(composed: Composed, written: Written): void {
   });
   output.writeJson(OutputFile.Metrics, {
     ...metricsOf(output),
+    conflicts: conflictsOf(output.spans()),
     steps: composed.steps.stepTimes(),
   });
 }
@@ -512,6 +519,49 @@ function metricsOf(output: TasksOutput): object {
         ms: ms(span),
       })),
   };
+}
+
+interface ConflictMetric {
+  file_count: AttributeValue | null;
+  model_turns: AttributeValue | null;
+  end: AttributeValue | null;
+  release_owner_failed: AttributeValue | null;
+  release_owner_failed_count: AttributeValue | null;
+}
+
+function conflictMetricOf(attributes: Attributes): ConflictMetric {
+  return {
+    file_count: attributes[ConflictAttribute.FileCount] ?? null,
+    model_turns: attributes[ConflictAttribute.ModelTurns] ?? null,
+    end: attributes[ConflictAttribute.End] ?? null,
+    release_owner_failed: null,
+    release_owner_failed_count: null,
+  };
+}
+
+function conflictsOf(records: readonly TelemetryRecord[]): ConflictMetric[] {
+  const conflicts: ConflictMetric[] = [];
+  let pending: ConflictMetric[] = [];
+  for (const record of records) {
+    if (record.kind !== RecordKind.Span || record.end_time === undefined)
+      continue;
+    const attributes = record.attributes ?? {};
+    if (record.operation === SpanOperation.Conflict) {
+      const conflict = conflictMetricOf(attributes);
+      conflicts.push(conflict);
+      pending.push(conflict);
+    }
+    const failed = attributes[ConflictAttribute.OwnerFailed];
+    if (record.operation !== SpanOperation.ReleaseGate || failed === undefined)
+      continue;
+    for (const conflict of pending) {
+      conflict.release_owner_failed = failed;
+      conflict.release_owner_failed_count =
+        attributes[ConflictAttribute.OwnerFailedCount] ?? null;
+    }
+    pending = [];
+  }
+  return conflicts;
 }
 
 function recordedSessions<T extends SessionTrace>(

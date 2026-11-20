@@ -27,6 +27,8 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const RECORD_SEPARATOR = "\x1e";
+const RECORD_SEPARATOR_FORMAT = "%x1e";
 const NO_VALUE = "";
 const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
@@ -1017,6 +1019,38 @@ export async function rangeCommits(
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line !== NO_VALUE);
+}
+
+export interface NodeSideTouch {
+  merged: string;
+  files: readonly string[];
+}
+
+export async function nodeSideBodies(
+  call: GitCall,
+  touch: NodeSideTouch,
+): Promise<string[]> {
+  assert.match(touch.merged, COMMIT_PATTERN);
+  assert.ok(touch.files.length > NO_PATHS);
+  const output = await run(
+    call.env,
+    call.directory,
+    [
+      "log",
+      "--no-merges",
+      `--format=${RECORD_SEPARATOR_FORMAT}%b`,
+      "HEAD",
+      `^${touch.merged}`,
+      "--",
+      ...touch.files,
+    ],
+    call.context,
+    call.deadlineMs,
+  );
+  return output
+    .split(RECORD_SEPARATOR)
+    .map((body) => body.trim())
+    .filter((body) => body !== NO_VALUE);
 }
 
 export async function abortMerge(

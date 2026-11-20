@@ -34,6 +34,7 @@ import {
 
 const SUCCESS = 0;
 const NO_LENGTH = 0;
+const NO_FAILURES = 0;
 const COMMIT_INPUT_KIND = "repository";
 const DIGEST_SEPARATOR = ",";
 const LIST_BYTES_MAX = 16384;
@@ -421,5 +422,52 @@ export function evaluationEnd(judgement: {
         : { [EvaluationAttribute.Affected]: facts.affected }),
     },
     texts: { rationale: judgement.rationale },
+  };
+}
+
+export const ConflictEnd = {
+  Resolved: "resolved",
+  MarkersLeft: "markers_left",
+  BudgetEnd: "budget_end",
+  Stop: "stop",
+} as const;
+export type ConflictEnd = (typeof ConflictEnd)[keyof typeof ConflictEnd];
+
+export const ConflictAttribute = {
+  FileCount: "kanthord.conflict.file_count",
+  ModelTurns: "kanthord.conflict.model_turns",
+  End: "kanthord.conflict.end",
+  OwnerFailed: "kanthord.conflict.owner_failed",
+  OwnerFailedCount: "kanthord.conflict.owner_failed_count",
+} as const;
+
+export interface ConflictFacts {
+  end: ConflictEnd;
+  fileCount: number;
+  modelTurns: number;
+}
+
+export function conflictEnd(facts: ConflictFacts): SpanEnd {
+  assert.ok(Number.isSafeInteger(facts.fileCount));
+  assert.ok(Number.isSafeInteger(facts.modelTurns));
+  return {
+    status:
+      facts.end === ConflictEnd.Resolved || facts.end === ConflictEnd.BudgetEnd
+        ? SpanStatus.Ok
+        : SpanStatus.Error,
+    attributes: {
+      [ConflictAttribute.FileCount]: facts.fileCount,
+      [ConflictAttribute.ModelTurns]: facts.modelTurns,
+      [ConflictAttribute.End]: facts.end,
+    },
+  };
+}
+
+export function conflictOwnerAttributes(failures: number | null): Attributes {
+  if (failures === null) return {};
+  assert.ok(Number.isSafeInteger(failures));
+  return {
+    [ConflictAttribute.OwnerFailed]: failures > NO_FAILURES,
+    [ConflictAttribute.OwnerFailedCount]: failures,
   };
 }

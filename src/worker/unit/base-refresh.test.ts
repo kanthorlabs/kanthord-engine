@@ -12,6 +12,11 @@ import {
   RefreshResult,
 } from "./base-refresh.ts";
 import { ReleaseGateKind } from "./release-gate.ts";
+import { ConflictAttribute, ConflictEnd } from "./method-telemetry.ts";
+import { ExecutionStop } from "./execution-stop.ts";
+import { MERGE_MARKERS_LEFT } from "./stop-codes.ts";
+import { SpanOperation } from "./telemetry.ts";
+import { RecordKind } from "../../tracking/contract.ts";
 import { releaseGate } from "./steps-implement-host.ts";
 import {
   advanceBase,
@@ -19,6 +24,8 @@ import {
   fauxAssistantMessage,
   fauxToolCall,
   implementFixture,
+  recordSpans,
+  spanEnds,
 } from "./test-support.ts";
 import { sshAccessOf } from "./workspace.ts";
 import { RELEASE_DIRECTORY } from "./workspace-layout.ts";
@@ -54,8 +61,9 @@ const NODE_CONTENT = {
 async function fixture(
   t: TestContext,
   script: Parameters<typeof implementFixture>[2] = [],
+  turns?: number,
 ) {
-  const h = await implementFixture(t, [], script, undefined, BINDINGS);
+  const h = await implementFixture(t, [], script, turns, BINDINGS);
   h.revision = { content: NODE_CONTENT, tasks: [] } as unknown as Revision;
   const [api, web] = h.checkouts;
   assert.ok(api && web);
@@ -289,4 +297,170 @@ test("an upstream conflict runs the conflict turn and the result keeps two paren
   assert.equal((await parentsOf(web.directory, web.head)).length, TWO_PARENTS);
   assert.equal((await parentsOf(web.directory, web.head))[0], before);
   assert.equal((await simpleGit(web.directory).status()).isClean(), true);
+});
+
+const CONFLICT_FILE = "conflicted-secret-name.txt";
+const NODE_SIDE = "node side text of the conflict";
+const BASE_SIDE = "base side text of the conflict";
+const ONE_FILE = 1;
+const TWO_MODEL_TURNS = 2;
+const ONE_MODEL_TURN = 1;
+const ONE_TURN_BUDGET = 1;
+const NO_FAILURES = 0;
+
+async function conflictOnWeb(
+  t: TestContext,
+  script: Parameters<typeof implementFixture>[2],
+  turns?: number,
+) {
+  const opened = await fixture(t, script, turns);
+  const { web, webBare } = opened;
+  writeFileSync(join(web.directory, CONFLICT_FILE), NODE_SIDE);
+  const git = simpleGit(web.directory);
+  await git.add(CONFLICT_FILE);
+  await git.commit(["feat: node side", opened.h.input.claim.node_id]);
+  web.head = await headOf(web.directory);
+  await advanceBase({ bare: webBare }, t, BASE_SIDE, CONFLICT_FILE);
+  return { ...opened, records: recordSpans(opened.h) };
+}
+
+function conflictRecords(records: Parameters<typeof spanEnds>[0]) {
+  return records.filter(
+    (record) =>
+      record.kind === RecordKind.Span &&
+      record.operation === SpanOperation.Conflict,
+  );
+}
+
+function conflictFacts(records: Parameters<typeof spanEnds>[0]) {
+  return spanEnds(records, SpanOperation.Conflict).map((record) => ({
+    files: record.attributes?.[ConflictAttribute.FileCount],
+    turns: record.attributes?.[ConflictAttribute.ModelTurns],
+    end: record.attributes?.[ConflictAttribute.End],
+  }));
+}
+
+function assertNoConflictText(records: Parameters<typeof spanEnds>[0]) {
+  const text = JSON.stringify([
+    ...conflictRecords(records),
+    ...spanEnds(records, SpanOperation.ReleaseGate),
+  ]);
+  for (const secret of [CONFLICT_FILE, NODE_SIDE, BASE_SIDE])
+    assert.equal(text.includes(secret), false);
+}
+
+const writeResolved = () =>
+  fauxAssistantMessage(
+    fauxToolCall("write", {
+      path: `web/${CONFLICT_FILE}`,
+      content: RESOLVED,
+    }),
+    { stopReason: "toolUse" },
+  );
+
+test("a resolved conflict turn records the file count, the model turns and the end resolved", async (t) => {
+  const { h, records } = await conflictOnWeb(t, [
+    writeResolved(),
+    fauxAssistantMessage("resolved"),
+  ]);
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.Merged,
+  );
+  assert.deepEqual(conflictFacts(records), [
+    { files: ONE_FILE, turns: TWO_MODEL_TURNS, end: ConflictEnd.Resolved },
+  ]);
+  assertNoConflictText(records);
+});
+
+test("a conflict turn that leaves a marker records the end markers_left", async (t) => {
+  const { h, records } = await conflictOnWeb(t, [fauxAssistantMessage("done")]);
+  await assert.rejects(
+    refreshAtRelease(h, workerPorts(h.input, h.run)),
+    (error) =>
+      error instanceof ExecutionStop && error.code === MERGE_MARKERS_LEFT,
+  );
+  assert.deepEqual(conflictFacts(records), [
+    { files: ONE_FILE, turns: ONE_MODEL_TURN, end: ConflictEnd.MarkersLeft },
+  ]);
+  assertNoConflictText(records);
+});
+
+test("a conflict turn that ends the budget records the end budget_end", async (t) => {
+  const { h, records } = await conflictOnWeb(
+    t,
+    [writeResolved(), fauxAssistantMessage("resolved")],
+    ONE_TURN_BUDGET,
+  );
+  assert.equal(
+    await refreshAtRelease(h, workerPorts(h.input, h.run)),
+    RefreshResult.BudgetEnd,
+  );
+  assert.deepEqual(conflictFacts(records), [
+    { files: ONE_FILE, turns: ONE_MODEL_TURN, end: ConflictEnd.BudgetEnd },
+  ]);
+  assertNoConflictText(records);
+});
+
+test("a conflict turn that stops on a provider failure records the end stop", async (t) => {
+  const { h, records } = await conflictOnWeb(t, [
+    fauxAssistantMessage("", {
+      stopReason: "error",
+      errorMessage: "terminated",
+    }),
+  ]);
+  await assert.rejects(
+    refreshAtRelease(h, workerPorts(h.input, h.run)),
+    ExecutionStop,
+  );
+  assert.deepEqual(
+    conflictFacts(records).map(({ files, end }) => ({ files, end })),
+    [{ files: ONE_FILE, end: ConflictEnd.Stop }],
+  );
+  assertNoConflictText(records);
+});
+
+function ownerFacts(records: Parameters<typeof spanEnds>[0]) {
+  return spanEnds(records, SpanOperation.ReleaseGate).map((record) => ({
+    failed: record.attributes?.[ConflictAttribute.OwnerFailed],
+    count: record.attributes?.[ConflictAttribute.OwnerFailedCount],
+  }));
+}
+
+const FAILED_NODE_COMMAND = {
+  content: { ...NODE_CONTENT, verifications: ["false"] },
+  tasks: [],
+} as unknown as Revision;
+
+test("the release gate after a conflict counts a failed command whose owner unit touched a conflicted file", async (t) => {
+  const { h, records } = await conflictOnWeb(t, [
+    writeResolved(),
+    fauxAssistantMessage("resolved"),
+  ]);
+  h.revision = FAILED_NODE_COMMAND;
+  assert.equal((await releaseGate(h)).kind, ReleaseGateKind.Routed);
+  assert.deepEqual(ownerFacts(records), [{ failed: true, count: ONE_FILE }]);
+  assertNoConflictText(records);
+});
+
+test("the release gate after a conflict counts no failed command when no owner unit touched a conflicted file", async (t) => {
+  const { h, web, records } = await conflictOnWeb(t, [
+    writeResolved(),
+    fauxAssistantMessage("resolved"),
+  ]);
+  await simpleGit(web.directory).raw([
+    "commit",
+    "--amend",
+    "-q",
+    "-m",
+    "feat: node side",
+    "-m",
+    "other_unit",
+  ]);
+  web.head = await headOf(web.directory);
+  h.revision = FAILED_NODE_COMMAND;
+  assert.equal((await releaseGate(h)).kind, ReleaseGateKind.Routed);
+  assert.deepEqual(ownerFacts(records), [
+    { failed: false, count: NO_FAILURES },
+  ]);
 });

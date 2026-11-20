@@ -133,6 +133,9 @@ export function implementInputOf(
       revisionCount: state.revisionCount,
     },
     agent: state.agent,
+    ...(state.conflictOwners === undefined
+      ? {}
+      : { conflictOwners: state.conflictOwners }),
   };
 }
 

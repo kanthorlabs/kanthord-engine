@@ -10,13 +10,21 @@ import {
   headCommit,
   isAncestor,
   mergeRef,
+  nodeSideBodies,
 } from "./local-git.ts";
 import { implementRepositoriesOf, type StepsState } from "./steps-implement.ts";
 import { mergedBranchesOf } from "./setup-repository.ts";
 import type { WorkspaceCheckout } from "./workspace-layout.ts";
 import { type ImplementPorts, PortResultKind } from "./foundry-ports.ts";
-import { GitStep, withinGit } from "./method-telemetry.ts";
-import { portStop } from "./execution-stop.ts";
+import {
+  ConflictEnd,
+  conflictEnd,
+  GitStep,
+  withinGit,
+} from "./method-telemetry.ts";
+import { ExecutionStop, portStop } from "./execution-stop.ts";
+import { MERGE_MARKERS_LEFT } from "./stop-codes.ts";
+import { SpanOperation } from "./telemetry.ts";
 import {
   type ConflictMerge,
   gatedAgent,
@@ -119,19 +127,7 @@ async function mergeUnder(
       files: conflicts,
       message,
     };
-    await gatedAgent(state, message, merge).instruct(
-      nodeWork(state),
-      conflictInstruction(
-        state.input.setup.templates,
-        {
-          binding: checkout.name,
-          directory: relative(state.root, directory) || ".",
-          base_branch: base,
-        },
-        conflicts,
-      ),
-      PromptTemplate.Conflict,
-    );
+    await conflictTurn(state, { checkout, base, merge, context });
     if (state.agent.budget.exhausted()) {
       const left = await markersLeft(state, merge, context);
       const everyMarked = conflicts.every((file) => marked.includes(file));
@@ -149,6 +145,95 @@ async function mergeUnder(
     conflicts: conflicts.length,
   });
   return RefreshResult.Merged;
+}
+
+interface ConflictTurn {
+  checkout: WorkspaceCheckout;
+  base: string;
+  merge: ConflictMerge;
+  context: Context;
+}
+
+async function conflictTurn(
+  state: StepsState,
+  turn: ConflictTurn,
+): Promise<void> {
+  const { checkout, base, merge } = turn;
+  await noteConflictOwners(state, turn);
+  const instruction = conflictInstruction(
+    state.input.setup.templates,
+    {
+      binding: checkout.name,
+      directory: relative(state.root, merge.directory) || ".",
+      base_branch: base,
+    },
+    merge.files,
+  );
+  await measuredConflict(state, merge.files.length, () =>
+    gatedAgent(state, merge.message, merge).instruct(
+      nodeWork(state),
+      instruction,
+      PromptTemplate.Conflict,
+    ),
+  );
+}
+
+async function noteConflictOwners(
+  state: StepsState,
+  turn: ConflictTurn,
+): Promise<void> {
+  const bodies = await nodeSideBodies(
+    {
+      env: state.input.env,
+      directory: turn.merge.directory,
+      context: turn.context,
+      deadlineMs: state.input.claim.expired_at - Date.now(),
+    },
+    { merged: turn.merge.commit, files: turn.merge.files },
+  );
+  state.conflictOwners = [
+    ...new Set([...(state.conflictOwners ?? []), ...bodies]),
+  ];
+}
+
+async function measuredConflict(
+  state: StepsState,
+  fileCount: number,
+  turn: () => Promise<void>,
+): Promise<void> {
+  const spans = state.ports.telemetry;
+  const budget = state.agent.budget;
+  const spanId = spans.start({
+    key: spans.key(SpanOperation.Conflict),
+    operation: SpanOperation.Conflict,
+  });
+  const before = budget.endedTurnCount();
+  const record = (end: ConflictEnd) =>
+    spans.end(
+      spanId,
+      conflictEnd({
+        end,
+        fileCount,
+        modelTurns: budget.endedTurnCount() - before,
+      }),
+    );
+  try {
+    await turn();
+  } catch (error) {
+    record(failedConflictEnd(state, error));
+    throw error;
+  }
+  record(budget.exhausted() ? ConflictEnd.BudgetEnd : ConflictEnd.Resolved);
+}
+
+function failedConflictEnd(state: StepsState, error: unknown): ConflictEnd {
+  if (error instanceof ExecutionStop)
+    return error.code === MERGE_MARKERS_LEFT
+      ? ConflictEnd.MarkersLeft
+      : ConflictEnd.Stop;
+  return state.agent.budget.exhausted()
+    ? ConflictEnd.BudgetEnd
+    : ConflictEnd.Stop;
 }
 
 function markersLeft(
