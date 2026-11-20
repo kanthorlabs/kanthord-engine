@@ -146,6 +146,25 @@ const RELEASE_STOP = {
   reason: ExecutionStopReason.JudgementInvalid,
   code: null,
 };
+const EXECUTION_PROOF_FAILED = "gateway.invocation.execution_proof_failed";
+
+async function releaseUnlessLost(
+  claimant: {
+    release(executionId: string, stop: typeof RELEASE_STOP): unknown;
+  },
+  executionId: string,
+): Promise<void> {
+  try {
+    await claimant.release(executionId, RELEASE_STOP);
+  } catch (error) {
+    if (
+      !(error instanceof assert.AssertionError) ||
+      !error.message.includes(EXECUTION_PROOF_FAILED)
+    )
+      throw error;
+  }
+}
+
 const REVIEWER = {
   kind: "worker",
   config: { worker: "reviewer@1", worker_instances: [] },
@@ -908,7 +927,7 @@ test(
       async (u) => {
         await rotateSecret(fixture, ROTATED_SECRET);
         const third = await importNode(fixture, project, "implement-3.md");
-        await claimant!.release(claimedExecution, RELEASE_STOP);
+        await releaseUnlessLost(claimant!, claimedExecution);
         const pulled = await claimant!.claimed([...nodes, third]);
         const workerClient = httpClient(
           workerOperations,

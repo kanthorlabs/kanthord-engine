@@ -33,7 +33,7 @@ import type { SlotDriver, SlotEntry, SlotInstance } from "./slot-driver.ts";
 import { threadEnvironment } from "./thread-driver.ts";
 
 export const POOL_BACKOFF_INITIAL_MS = 1000;
-export const POOL_BACKOFF_MAX_MS = 30000;
+export const POOL_BACKOFF_MAX_MS = 300000;
 export const POOL_STOP_DEADLINE_MS = 5000;
 const BACKOFF_FACTOR = 2;
 const WORKERS_DIRECTORY = "workers";
@@ -50,6 +50,7 @@ export interface WorkerPoolOptions {
   logger: Logger;
   drivers: ReadonlyMap<PoolPlacement, SlotDriver>;
   environment?: NodeJS.ProcessEnv;
+  instanceFailed(instance: PoolInstance): void;
 }
 
 interface Hosted {
@@ -449,6 +450,14 @@ export class WorkerPool implements PoolHost {
       },
       "worker.pool.instance_failed",
     );
+    try {
+      this.options.instanceFailed(hosted.instance);
+    } catch (error) {
+      this.options.logger.error(
+        { err: error, instance: hosted.instance.name },
+        "worker.pool.instance_failed_release",
+      );
+    }
     if (Date.now() - hosted.startedAt >= POOL_BACKOFF_MAX_MS)
       hosted.delay = POOL_BACKOFF_INITIAL_MS;
     const delay = hosted.delay;

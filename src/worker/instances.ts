@@ -536,12 +536,20 @@ export class WorkerInstances implements WorkerInstanceLookups {
     }
   }
 
+  instanceFailed(instanceId: string): void {
+    this.releaseExecutions(instanceId, InstanceLoss.PoolFailed);
+  }
+
+  private releaseExecutions(instanceId: string, loss: InstanceLoss): void {
+    const ends = this.dependencies.store.transaction((tx) =>
+      this.revokeLostExecutions(tx, instanceId, loss),
+    );
+    this.reportExecutionEnds(ends);
+  }
+
   private releaseLostExecutions(instanceId: string): void {
     try {
-      const ends = this.dependencies.store.transaction((tx) =>
-        this.revokeLostExecutions(tx, instanceId),
-      );
-      this.reportExecutionEnds(ends);
+      this.releaseExecutions(instanceId, InstanceLoss.HeartbeatLost);
     } catch (error) {
       this.dependencies.logger.error(
         { err: asError(error), instance_id: instanceId },
@@ -553,6 +561,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
   private revokeLostExecutions(
     tx: Transaction,
     instanceId: string,
+    loss: InstanceLoss,
   ): ExecutionEnds[] {
     const instance = readInstanceById(tx, instanceId)?.name;
     if (instance === undefined) return [];
@@ -561,7 +570,7 @@ export class WorkerInstances implements WorkerInstanceLookups {
       .flatMap(({ execution_id }) => {
         const ends = this.dependencies.revokeForInstanceLoss(tx, execution_id, {
           instance,
-          loss: InstanceLoss.HeartbeatLost,
+          loss,
         });
         return ends ? [ends] : [];
       });

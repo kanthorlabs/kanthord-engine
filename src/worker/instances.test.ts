@@ -2317,3 +2317,38 @@ test("a failed loss revoke logs the error and the sweep continues with the next 
   assert.equal(failed[0].instance_id, first.record.id);
   assert.equal(records(DISCONNECTED_RECORD).length, TWO_CALLS);
 });
+
+test("instanceFailed ends the live execution of the instance with the loss pool_failed and reports the ends after the commit", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.worker().instances.instanceFailed(box.record.id);
+  assert.deepEqual(f.lost, [
+    {
+      executionId: box.executionId,
+      instance: INSTANCE,
+      loss: InstanceLoss.PoolFailed,
+    },
+  ]);
+  assert.equal(f.reports.length, SINGLE_CALL);
+  assert.equal(f.reports[0]!.inTransaction, false);
+});
+
+test("instanceFailed skips an execution that holds a stop order", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  sendPause(f, box);
+  f.worker().instances.instanceFailed(box.record.id);
+  assert.deepEqual(f.lost, []);
+  assert.equal(f.reports.length, NO_CALLS);
+});
+
+test("instanceFailed propagates the error of a failed revoke", async (t) => {
+  const f = instanceFixture(t);
+  const box = await connectedBusy(f);
+  f.revocation.lossFailure = new Error(REVOKE_FAILURE);
+  assert.throws(
+    () => f.worker().instances.instanceFailed(box.record.id),
+    new Error(REVOKE_FAILURE),
+  );
+  assert.equal(f.reports.length, NO_CALLS);
+});
