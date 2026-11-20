@@ -94,6 +94,19 @@ macOS needs `ripgrep` (`rg`) on `PATH`. Linux needs bubblewrap, `socat` and `rip
 A command in the Workbench bash cannot bind or reach a loopback port on macOS. On Linux the sandbox has its own loopback, and the host ports stay unreachable.
 `read`, `grep`, `find`, `ls`, `edit` and `write` refuse a path outside the working directory `<state>/workbench/<agent_name>`, after symlink resolution, and an absolute path. The tools normalize each path as pi does first: a leading `@` is stripped, `~` is expanded and a `file://` URL is converted, so `@/etc/passwd` and `file:///etc/passwd` are refused. `read` checks the file that pi opens. For a missing file, pi tries name variants of the full path: a narrow no-break space before `AM` or `PM`, the NFD form, and U+2019 for `'`. When the first variant that exists resolves outside the working directory, `read` is refused.
 
+## Run kinds
+
+Each run has one run kind: `owner` or `guest`. A run that a guest started is a `guest` run. Every other run is an `owner` run. No `fork` run kind exists. The first run of a fork session is an `owner` run.
+
+Each run kind holds a closed list of Workbench tools. The server sets the active tools of the run to the built-in tools, the operation tools of the agent, and the Workbench tools of the session that the list names. A Workbench tool that no list names is active in no run kind.
+
+| Run kind | Workbench tools                      |
+| -------- | ------------------------------------ |
+| `owner`  | `offer_action`, `evidence_read`      |
+| `guest`  | `request_owner_act`, `evidence_read` |
+
+A guest run holds no `offer_action`. An owner run holds no `request_owner_act`. A session holds a Workbench tool only when it exists for the session: a `plan@1` phase holds neither `offer_action` nor `request_owner_act`, and `evidence_read` needs a declaration that lists it. The guard and the project scope still decide each operation call of every run kind.
+
 ## Guests and project scope
 
 `workbench.invite.create` takes the body `{ invitee_name, project_ids, granted_operations }`. `project_ids` names 1 to 50 existing projects, each once. The set never changes. Revoke the invite and create a new one to change it. `granted_operations` lists the project-scoped operations that the guest-started runs of the invite run with no card. The list is fixed at create. A refused or repeated id answers 400 `workbench.invite.grant_invalid`.

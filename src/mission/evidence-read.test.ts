@@ -111,3 +111,45 @@ test("evidence reads refuse absent nodes or records", async (t) => {
       error.code === MissionErrorCode.RecordNotFound,
   );
 });
+
+test("(security) the evidence list answer holds no asset content and no command output", async (t) => {
+  const h = evidenceHarness(t, IDENTITY);
+  const output = "zq-command-output-marker";
+  const data = Buffer.from(output).toString("base64");
+  const submitted = await h.invoke("evidence.submit", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: {
+      ...h.context,
+      subject: "Log",
+      assets: [
+        {
+          kind: AssetKind.Produced,
+          content: { media_type: "text/plain", encoding: "base64", data },
+        },
+      ],
+      verification: {
+        tested_input: { kind: AssetKind.Produced, sha256: "a".repeat(64) },
+        results: [
+          {
+            command: "pnpm test",
+            exit_code: 1,
+            signal: null,
+            timed_out: false,
+          },
+        ],
+      },
+    },
+  });
+  const listed = await h.invoke("evidence.list", {
+    params: { node_id: h.node_id },
+    query: {},
+    body: null,
+  });
+  assert.equal(listed.items.length, SINGLE_RESULT);
+  assert.equal(listed.items[FIRST_ITEM_INDEX]!.id, submitted.evidence.id);
+  assert.ok(listed.items[FIRST_ITEM_INDEX]!.verification);
+  const serialized = JSON.stringify(listed);
+  assert.ok(!serialized.includes(output));
+  assert.ok(!serialized.includes(data));
+});

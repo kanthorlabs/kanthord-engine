@@ -30,6 +30,7 @@ import {
   WORKBENCH_FORK_FRAME,
   WORKBENCH_FORK_PREFIX,
   WORKBENCH_OPENING_TEXT,
+  WORKBENCH_REQUEST_OWNER_ACT_TOOL,
   WorkbenchErrorCode,
 } from "../../workbench/contract.ts";
 import {
@@ -214,6 +215,23 @@ function assertNoFork(state: string, fixture: Fixture): void {
   };
   assert.equal(service.sessions.size, SOURCE_FILES);
 }
+
+test(
+  "(happy path) the first run of a fork session is an owner run: it holds offer_action and no request_owner_act",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const { fixture, source } = await sourceFixture(t, [
+      fauxAssistantMessage(SUMMARY),
+      pass(),
+      fauxAssistantMessage(FORK_ANSWER),
+    ]);
+    const forked = completed(await forkOf(fixture, source.id, FORK_TEXT));
+    await untilIdle(fixture, forked.session_id, t.signal);
+    const tools = fixture.provider.tools.at(-SINGLE)!;
+    assert.ok(tools.includes(OFFER_ACTION));
+    assert.ok(!tools.includes(WORKBENCH_REQUEST_OWNER_ACT_TOOL));
+  },
+);
 
 test(
   "(security, guard input) Run.request of the first fork run equals the text, never the summary",
