@@ -13,7 +13,7 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { background } from "../../kernel/context.ts";
+import { background, DEADLINE_EXCEEDED_CODE } from "../../kernel/context.ts";
 import {
   hostEnvironment,
   stopAfter,
@@ -40,7 +40,11 @@ import {
   REVIEW_DIRECTORY,
 } from "./workspace-layout.ts";
 import type { RepositoryTransport } from "../contract.ts";
-import { DOWNLOADS_AT_ONCE, prepareEvaluation } from "./evaluation-input.ts";
+import {
+  DOWNLOADS_AT_ONCE,
+  placeReviewAssets,
+  prepareEvaluation,
+} from "./evaluation-input.ts";
 import { verificationCommands } from "./review-scope.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
@@ -232,6 +236,7 @@ const FIRST_CHUNK = "first chunk ";
 const LAST_CHUNK = "last chunk";
 const HOLD_MS = 50;
 const STREAM_POLL_MS = 10;
+const DOWNLOAD_DEADLINE_MS = 300;
 
 test("the reviewer assets download at most 4 at a time and stream each body to its file", async (t) => {
   const setup = anthropicSetup({ repositories: [] });
@@ -351,6 +356,99 @@ test("the reviewer assets download at most 4 at a time and stream each body to i
         `${FIRST_CHUNK}${LAST_CHUNK}`,
       );
     workspaces.release(result.key, result.kind);
+  } finally {
+    run.dispose();
+    server.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      server.close((error) => (error ? reject(error) : resolve())),
+    );
+  }
+});
+
+test("a deadline during a streamed download stops with operation_failed deadline_exceeded and leaves no file", async (t) => {
+  const setup = anthropicSetup({ repositories: [] });
+  const claim = {
+    execution_id: setup.execution_id,
+    node_id: createIdentity("node"),
+    attempt: 1,
+    pinned_revision: 1,
+    node_branch: "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    created_at: Date.now(),
+    expired_at: Date.now() + 60000,
+    trace_id: "trace",
+    root_span_id: "1".repeat(16),
+  };
+  const assetId = createIdentity("evidence_asset");
+  const evidence = [
+    {
+      id: "support",
+      assets: [
+        {
+          id: assetId,
+          kind: "object",
+          address: { kind: "object", location: `s3://test/${assetId}` },
+        },
+      ],
+    },
+  ] as Evidence[];
+  const server = createServer((_request, response) => {
+    response.writeHead(200);
+    response.write(FIRST_CHUNK);
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const run = new ExecutionRun({
+    claim,
+    clients: {
+      mission: {
+        "execution.evidence.asset.content.get": async () => ({
+          type: "completed",
+          status: 200,
+          data: {
+            asset_id: assetId,
+            address: { kind: "object", location: "s3://test/report" },
+            get_url: `${base}/${assetId}`,
+            size: FIRST_CHUNK.length + LAST_CHUNK.length,
+            media_type: "text/plain",
+            expires_at: Date.now() + 60000,
+          },
+        }),
+      },
+    } as unknown as MethodClients,
+    credentials: { release: async () => {} },
+    context: background,
+  });
+  const directory = temporary(t);
+  try {
+    const error = await placeReviewAssets(run, {
+      workspace: { key: directory, directory },
+      evidence,
+      round: FIRST_ROUND,
+      evidenceIds: [],
+      scope: {
+        addedFiles: [],
+        changedFiles: [],
+        patches: [],
+        emptyPatches: [],
+      },
+      deadline: Date.now() + DOWNLOAD_DEADLINE_MS,
+      context: background,
+    }).then(
+      () => assert.fail("The download must reach the deadline."),
+      (error: unknown) => error,
+    );
+    const stop = await run.stopOf(error);
+    assert.deepEqual(
+      { reason: stop.reason, code: stop.code },
+      { reason: EndReason.OperationFailed, code: DEADLINE_EXCEEDED_CODE },
+    );
+    assert.deepEqual(
+      readdirSync(directory, { recursive: true, encoding: "utf8" }).filter(
+        (path) => path.endsWith(assetId),
+      ),
+      [],
+    );
   } finally {
     run.dispose();
     server.closeAllConnections();

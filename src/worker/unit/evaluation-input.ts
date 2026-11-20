@@ -8,14 +8,18 @@ import {
   roundPatch,
 } from "./local-git.ts";
 import { createWriteStream, lstatSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { rm, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { join, relative } from "node:path";
 import { evidencePlacementOf } from "../../agent/review-roots.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
-import { CancellationContext, type Context } from "../../kernel/context.ts";
+import {
+  CancellationContext,
+  type Context,
+  reasonOf,
+} from "../../kernel/context.ts";
 import { identitySchema } from "../../kernel/identity.ts";
 import {
   AssetKind,
@@ -147,11 +151,16 @@ async function placeAsset(
       await response.body?.cancel();
       return run.stop(EndReason.OperationFailed);
     }
-    await pipeline(
-      Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
-      createWriteStream(file, { mode: ASSET_MODE, flags: CREATE_ONLY }),
-      { signal: context.signal },
-    );
+    try {
+      await pipeline(
+        Readable.fromWeb(response.body as WebReadableStream<Uint8Array>),
+        createWriteStream(file, { mode: ASSET_MODE, flags: CREATE_ONLY }),
+        { signal: context.signal },
+      );
+    } catch (error) {
+      await rm(file, { force: true });
+      throw reasonOf(context.signal) ?? error;
+    }
     return assetId;
   } finally {
     context.cancel();
