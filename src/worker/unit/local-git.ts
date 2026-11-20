@@ -27,6 +27,9 @@ const EXIT_SUCCESS = 0;
 const EXIT_NO_MATCH = 1;
 const NO_EXIT = -1;
 const NUL = "\0";
+const RECORD_SEPARATOR = "\x1e";
+const RECORD_SEPARATOR_FORMAT = "%x1e";
+const LITERAL_PATHSPECS = "--literal-pathspecs";
 const NO_VALUE = "";
 const NO_PATHS = 0;
 const PATH_BATCH_BYTES = 262144;
@@ -722,11 +725,11 @@ export async function unmergedFiles(
   const output = await run(
     env,
     directory,
-    ["diff", "--name-only", "--diff-filter=U"],
+    ["diff", "-z", "--name-only", "--diff-filter=U"],
     context,
     deadlineMs,
   );
-  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+  return output.split(NUL).filter((path) => path !== NO_VALUE);
 }
 
 export async function addedFiles(
@@ -1019,6 +1022,91 @@ export async function rangeCommits(
     .filter((line) => line !== NO_VALUE);
 }
 
+export interface FileRange {
+  from: string;
+  to: string;
+  file: string;
+}
+
+function rangeArgs(range: FileRange): string[] {
+  assert.match(range.from, COMMIT_PATTERN);
+  assert.match(range.to, COMMIT_PATTERN);
+  assert.ok(range.file);
+  return [range.from, range.to, "--", range.file];
+}
+
+export function rangeLog(call: GitCall, range: FileRange): Promise<string> {
+  const [from, to, ...path] = rangeArgs(range);
+  return run(
+    call.env,
+    call.directory,
+    [LITERAL_PATHSPECS, "log", "--format=%h %s", `${from}..${to}`, ...path],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export function rangeFileDiff(
+  call: GitCall,
+  range: FileRange,
+): Promise<string> {
+  return run(
+    call.env,
+    call.directory,
+    [
+      "-c",
+      "core.quotePath=false",
+      LITERAL_PATHSPECS,
+      "diff",
+      "--no-color",
+      "--no-ext-diff",
+      "--no-textconv",
+      ...rangeArgs(range),
+    ],
+    call.context,
+    call.deadlineMs,
+  );
+}
+
+export interface NodeSideTouch {
+  merged: string;
+  files: readonly string[];
+}
+
+export async function nodeSideBodies(
+  call: GitCall,
+  touch: NodeSideTouch,
+): Promise<string[]> {
+  assert.match(touch.merged, COMMIT_PATTERN);
+  assert.ok(touch.files.length > NO_PATHS);
+  const bodies: string[] = [];
+  for (const files of pathBatches(touch.files)) {
+    const output = await run(
+      call.env,
+      call.directory,
+      [
+        LITERAL_PATHSPECS,
+        "log",
+        "--no-merges",
+        `--format=${RECORD_SEPARATOR_FORMAT}%b`,
+        "HEAD",
+        `^${touch.merged}`,
+        "--",
+        ...files,
+      ],
+      call.context,
+      call.deadlineMs,
+    );
+    bodies.push(
+      ...output
+        .split(RECORD_SEPARATOR)
+        .map((body) => body.trim())
+        .filter((body) => body !== NO_VALUE),
+    );
+  }
+  return bodies;
+}
+
 export async function abortMerge(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -1123,11 +1211,21 @@ export async function conflictMarkerFiles(
   const { output } = await runMatch(
     env,
     directory,
-    ["grep", "--no-index", "-l", "-E", "^(<{7}|>{7})( |$)", "--", ...files],
+    [
+      LITERAL_PATHSPECS,
+      "grep",
+      "--no-index",
+      "-z",
+      "-l",
+      "-E",
+      "^(<{7}|>{7})( |$)",
+      "--",
+      ...files,
+    ],
     context,
     deadlineMs,
   );
-  return output.split("\n").filter((line) => line.trim() !== CLEAN_STATUS);
+  return output.split(NUL).filter((path) => path !== NO_VALUE);
 }
 
 export async function fileAtRevision(

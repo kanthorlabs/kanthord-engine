@@ -85,6 +85,40 @@ const COMMIT_IDENTITY = [
   "user.email=seed@example.com",
 ];
 const PI_DIRECTORY = join(PI_ROOT, PI_DIRECTORY_NAME);
+const UPSTREAM = "up";
+
+async function conflictSeed(
+  t: Parameters<typeof seedFixture>[0],
+  upstream: readonly string[],
+): Promise<SeedFixture> {
+  const fixture = await seedFixture(t);
+  const git = simpleGit(fixture.source);
+  await git.raw(["checkout", "-q", "-b", "node"]);
+  writeFileSync(join(fixture.source, "file"), "node");
+  await git.raw([...COMMIT_IDENTITY, "commit", "-q", "-am", "node"]);
+  const nodeHead = (await git.revparse(["HEAD"])).trim();
+  for (const branch of ["main", ...upstream]) {
+    await git.raw(["checkout", "-q", "-B", branch, "main"]);
+    writeFileSync(join(fixture.source, "file"), branch);
+    await git.raw([...COMMIT_IDENTITY, "commit", "-q", "-am", branch]);
+  }
+  await git.raw(["checkout", "-q", "main"]);
+  fixture.seed.heads = { [fixture.bindingId]: nodeHead };
+  const setup = fixture.seed.setup as {
+    repositories: { strategy: Record<string, string> }[];
+  };
+  for (const branch of upstream)
+    setup.repositories[0]!.strategy.upstream_branch = branch;
+  writeFileSync(
+    join(fixture.seedFolder, "seed.json"),
+    JSON.stringify(fixture.seed),
+  );
+  return fixture;
+}
+
+function conflictsOf(fixture: SeedFixture): unknown {
+  return readJson(join(fixture.root, "out"), "metrics.json").conflicts;
+}
 process.on("exit", () => rmSync(PI_ROOT, { recursive: true, force: true }));
 installPiTools({ directory: PI_DIRECTORY });
 usePiDirectory(PI_DIRECTORY);
@@ -621,6 +655,99 @@ suite("worker tasks run", () => {
         "unit.leave",
       ]);
       assert.ok(metrics.steps.every((entry) => entry.ms >= NO_CALLS));
+    },
+  );
+
+  test(
+    "metrics.json holds one conflicts entry for each conflict turn, with the release gate flag",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await conflictSeed(t, []);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([
+          writeGood(),
+          fauxAssistantMessage("done"),
+          writeGood(),
+          fauxAssistantMessage("resolved"),
+        ]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      assert.deepEqual(conflictsOf(fixture), [
+        {
+          file_count: 1,
+          model_turns: 2,
+          end: "resolved",
+          release_owner_failed: false,
+        },
+      ]);
+    },
+  );
+
+  test(
+    "metrics.json gives two conflicts before one release gate the flag of that gate",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await conflictSeed(t, [UPSTREAM]);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([
+          writeGood(),
+          fauxAssistantMessage("done"),
+          writeGood(),
+          fauxAssistantMessage("resolved"),
+          writeGood(),
+          fauxAssistantMessage("resolved"),
+        ]),
+      );
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const resolved = {
+        file_count: 1,
+        model_turns: 2,
+        end: "resolved",
+        release_owner_failed: false,
+      };
+      assert.deepEqual(conflictsOf(fixture), [resolved, resolved]);
+    },
+  );
+
+  test(
+    "metrics.json holds a null release gate flag when the conflict turn ends the budget",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const fixture = await conflictSeed(t, []);
+      const run = commandRun(
+        fixture,
+        scriptedProvider([
+          writeGood(),
+          fauxAssistantMessage("done"),
+          writeGood(),
+          fauxAssistantMessage("resolved"),
+        ]),
+      );
+      await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { budgetTurns: "3" }),
+        run.io,
+      );
+      assert.deepEqual(conflictsOf(fixture), [
+        {
+          file_count: 1,
+          model_turns: 1,
+          end: "budget_end",
+          release_owner_failed: null,
+        },
+      ]);
     },
   );
 

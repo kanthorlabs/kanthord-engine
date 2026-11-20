@@ -423,3 +423,44 @@ export function evaluationEnd(judgement: {
     texts: { rationale: judgement.rationale },
   };
 }
+
+export const ConflictEnd = {
+  Resolved: "resolved",
+  MarkersLeft: "markers_left",
+  BudgetEnd: "budget_end",
+  Stop: "stop",
+} as const;
+export type ConflictEnd = (typeof ConflictEnd)[keyof typeof ConflictEnd];
+
+export const ConflictAttribute = {
+  FileCount: "kanthord.conflict.file_count",
+  ModelTurns: "kanthord.conflict.model_turns",
+  End: "kanthord.conflict.end",
+  OwnerFailed: "kanthord.conflict.owner_failed",
+} as const;
+
+export interface ConflictFacts {
+  end: ConflictEnd;
+  fileCount: number;
+  modelTurns: number;
+}
+
+export function conflictEnd(facts: ConflictFacts): SpanEnd {
+  assert.ok(Number.isSafeInteger(facts.fileCount));
+  assert.ok(Number.isSafeInteger(facts.modelTurns));
+  return {
+    status:
+      facts.end === ConflictEnd.Resolved || facts.end === ConflictEnd.BudgetEnd
+        ? SpanStatus.Ok
+        : SpanStatus.Error,
+    attributes: {
+      [ConflictAttribute.FileCount]: facts.fileCount,
+      [ConflictAttribute.ModelTurns]: facts.modelTurns,
+      [ConflictAttribute.End]: facts.end,
+    },
+  };
+}
+
+export function conflictOwnerAttributes(failed: boolean | null): Attributes {
+  return failed === null ? {} : { [ConflictAttribute.OwnerFailed]: failed };
+}

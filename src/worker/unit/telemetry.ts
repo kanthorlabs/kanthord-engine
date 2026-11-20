@@ -28,6 +28,7 @@ export const SpanOperation = {
   Gate: "worker.gate",
   Setup: "worker.setup",
   ReleaseGate: "worker.release_gate",
+  Conflict: "worker.conflict",
   Turn: "agent.turn",
   Tool: "agent.tool",
   Session: "agent.session",

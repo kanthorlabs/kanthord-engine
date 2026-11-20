@@ -17,16 +17,21 @@ import type { MethodClaim } from "./execution-stop.ts";
 import type { CheckoutRef, Commit, ImplementPorts } from "./foundry-ports.ts";
 import type { GitPaths } from "./local-git.ts";
 import { type FoundryControl, type FoundryHost, runTasks } from "./foundry.ts";
-import { taskEnd, taskFailure, taskSpan } from "./method-telemetry.ts";
+import {
+  conflictOwnerAttributes,
+  taskEnd,
+  taskFailure,
+  taskSpan,
+} from "./method-telemetry.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
 import {
-  type AffectedNote,
   nodeUnitOf,
   RELEASE_GATE_AFFECTED,
   RELEASE_GATE_RESULT,
   RELEASE_GATE_UNIT_ID,
   type ReleaseGate,
   ReleaseGateKind,
+  type ReleaseNote,
 } from "./release-gate.ts";
 import { baseFetch } from "./step-base-fetch.ts";
 import { baseRefreshRelease } from "./step-base-refresh.ts";
@@ -80,6 +85,7 @@ export interface ImplementInput extends FoundryControl {
   setupInstruction: string | null;
   progress: ProgressCtx;
   agent: NativeAgent;
+  conflictOwners?: readonly string[] | null;
 }
 
 export interface ImplementResult {
@@ -148,14 +154,14 @@ function unitsFrame(runner: TaskRunner | null): LoopFrame<UnitScope> {
   };
 }
 
-export const releaseGateFrame: LoopFrame<AffectedNote> = {
+export const releaseGateFrame: LoopFrame<ReleaseNote> = {
   reads: ["state"],
   endReads: ["route"],
   note: "one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count",
   init: (ctx, outer) => {
     const round = outer as RoundScope | null;
     if (round?.planned) ctx.state.unchangedTurns = NO_UNCHANGED_TURNS;
-    return { verdict: null };
+    return { verdict: null, conflictOwnerFailed: null };
   },
   body: [
     stepNode(baseFetch),
@@ -183,6 +189,7 @@ export const releaseGateFrame: LoopFrame<AffectedNote> = {
           ? {}
           : { [RELEASE_GATE_AFFECTED]: scope.verdict }),
         ...("unit" in gate ? { [RELEASE_GATE_UNIT_ID]: gate.unit.id } : {}),
+        ...conflictOwnerAttributes(scope.conflictOwnerFailed),
       },
     };
   },
@@ -256,6 +263,12 @@ function stateOf(input: ImplementInput, ports: ImplementPorts): StartState {
     cleared: null,
     refreshed: null,
     ...input.progress,
+    ...(input.conflictOwners === undefined
+      ? {}
+      : {
+          conflictOwners:
+            input.conflictOwners === null ? null : [...input.conflictOwners],
+        }),
   };
 }
 

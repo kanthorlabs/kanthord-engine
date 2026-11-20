@@ -64,6 +64,9 @@ export class ExecutionBudget {
     this.endedTurns++;
     if (this.exhausted()) for (const context of this.agents) context.cancel();
   }
+  endedTurnCount(): number {
+    return this.endedTurns;
+  }
   exhausted(): boolean {
     return this.exhaustedAt(this.endedTurns);
   }

@@ -91,6 +91,10 @@ export interface AffectedNote {
   verdict: AffectedVerdict | null;
 }
 
+export interface ReleaseNote extends AffectedNote {
+  conflictOwnerFailed: boolean | null;
+}
+
 export interface VerifiedRelease {
   checked: ReleaseCheck;
   commands: readonly string[];
@@ -183,6 +187,22 @@ export function releaseOutcome(
   });
   if (passed) return { kind: ReleaseGateKind.Passed };
   return routedRelease(state, verified);
+}
+
+export function conflictOwnerFailed(
+  state: StepsState,
+  verified: VerifiedRelease,
+): boolean | null {
+  const touched = state.conflictOwners;
+  if (touched === undefined) return null;
+  delete state.conflictOwners;
+  if (touched === null) return null;
+  const { checked, owners } = verified;
+  if (checked.setup) return false;
+  return checked.run.verification.results.some(
+    (result, index) =>
+      result.exit_code !== EXIT_SUCCESS && touched.includes(owners[index]!.id),
+  );
 }
 
 function firstFailedIndex(run: VerificationRun): number {
