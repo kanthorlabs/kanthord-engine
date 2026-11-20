@@ -22,6 +22,16 @@ test("the child environment holds no instance configuration, token or endpoint",
   assert.deepEqual(env, { PATH: "/bin" });
 });
 
+test("(security) the child environment holds no EVAL_ variable and keeps PATH", () => {
+  const env = childEnvironment({
+    PATH: "/bin",
+    EVAL_ANTHROPIC_API_KEY: "present",
+    EVAL_ANTHROPIC_AUTH_FILE: "/home/host/.config/kanthord-eval/auth.json",
+    EVAL_OTHER: "present",
+  });
+  assert.deepEqual(env, { PATH: "/bin" });
+});
+
 test("the child environment holds no machine configuration", () => {
   const env = childEnvironment({
     PATH: "/bin",
