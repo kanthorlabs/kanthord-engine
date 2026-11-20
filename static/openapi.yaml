@@ -434,6 +434,8 @@ paths:
     $ref: ./openapi/worker/execution.seed.get.yaml#/pathItem
   /api/worker/execution/{execution_id}/setup:
     $ref: ./openapi/worker/execution.setup.get.yaml#/pathItem
+  /api/worker/execution/{execution_id}/unit_record:
+    $ref: ./openapi/worker/execution.unit_record.put.yaml#/pathItem
   /api/worker/footprint:
     $ref: ./openapi/worker/footprint.report.yaml#/pathItem
   /api/worker/handover:

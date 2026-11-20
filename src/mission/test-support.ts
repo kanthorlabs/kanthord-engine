@@ -470,6 +470,9 @@ export function missionHarness(
         return null;
       },
     },
+    unitRecords: {
+      deleteNode: (...args) => record("unitRecords.deleteNode", args),
+    },
     schedulerClaims: {
       revoke: (...args) => {
         record("schedulerClaims.revoke", args);

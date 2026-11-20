@@ -379,6 +379,7 @@ type Collaborators = Pick<Dependencies, "bindings" | "workQueue"> &
       | "environments"
       | "acts"
       | "logger"
+      | "unitRecords"
     >
   >;
 
@@ -421,6 +422,7 @@ function makeService(
       text_max_bytes,
     },
     health,
+    unitRecords: { deleteNode: () => {} },
     schedulerClaims: {
       revoke: () => null,
       executionRevoked: () => undefined,
@@ -3179,8 +3181,11 @@ test("criterion.set enforces check order, revisions and content validation", (t)
 const INVALID_RETIRE_DIGEST = "0".repeat(64);
 const RETIRE_QUEUE_FAILURE = "retirement queue failure";
 
-function retireFixture(t: TestContext) {
-  const f = dependencyFixture(t);
+function retireFixture(
+  t: TestContext,
+  collaborators: Partial<Collaborators> = {},
+) {
+  const f = dependencyFixture(t, undefined, undefined, collaborators);
   function preview(nodeId: string, query: object = {}): RetirePreview {
     const operation = missionOperations["node.retire.preview"];
     const input = operation.input.parse({
@@ -3274,8 +3279,11 @@ function retirementError(
   };
 }
 
-test("node.retire preview is read-only and hashes precisely the other five fields; apply increments once", (t) => {
-  const f = retireFixture(t);
+test("node.retire preview is read-only and hashes precisely the other five fields; apply increments once and deletes the unit records of the node", (t) => {
+  const deleted: string[] = [];
+  const f = retireFixture(t, {
+    unitRecords: { deleteNode: (_tx, nodeId) => void deleted.push(nodeId) },
+  });
   const id = f.implement();
   const before = { ...f.snapshot(), jobs: f.jobs() };
   const plan = f.preview(id);
@@ -3293,6 +3301,7 @@ test("node.retire preview is read-only and hashes precisely the other five field
   assert.equal(f.snapshot().nodes.length, before.nodes.length);
   assert.equal(f.node(id)?.state, NodeState.Available);
   assert.ok(f.node(id)?.retired_at);
+  assert.deepEqual(deleted, [id]);
   f.refuses(id, MissionErrorCode.Retired, { node_id: id });
 });
 
@@ -4910,8 +4919,11 @@ test("import.apply retains stored task order, appends creates in set order and c
   );
 });
 
-test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked", (t) => {
-  const f = importApplyFixture(t);
+test("import.apply same filename without identity retires and replaces the old node before uniqueness is checked, and deletes the unit records of the old node", (t) => {
+  const deleted: string[] = [];
+  const f = importApplyFixture(t, undefined, undefined, {
+    unitRecords: { deleteNode: (_tx, nodeId) => void deleted.push(nodeId) },
+  });
   const first = f.apply(f.request());
   const entries = f.identified(first);
   const old = entries.find((item) => item.filename === IMPLEMENT_FILENAME)!.id!;
@@ -4928,6 +4940,7 @@ test("import.apply same filename without identity retires and replaces the old n
     [replacement],
   );
   assert.deepEqual(result.changes.retired_node_ids, [old]);
+  assert.deepEqual(deleted, [old]);
   assert.deepEqual(
     f.store.database.prepare("PRAGMA foreign_key_check").all(),
     [],

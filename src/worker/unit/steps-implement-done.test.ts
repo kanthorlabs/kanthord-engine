@@ -9,9 +9,10 @@ import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
 import type { MethodClients } from "./method-clients.ts";
+import { HttpStatus } from "../../kernel/http.ts";
 import { runStepsImplement } from "./steps-implement-host.ts";
 import { nodeUnitOf } from "./release-gate.ts";
-import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { digest } from "../../kernel/json.ts";
 import {
   advanceBase,
   fauxAssistantMessage,
@@ -19,8 +20,8 @@ import {
   implementFixture as fixture,
   nextExecution,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   releasedRoot,
   task,
 } from "./test-support.ts";
@@ -33,16 +34,16 @@ const TWO_TURNS = 2;
 const TWO_BINDINGS = ["api", "web"];
 const RELEASED = { kind: "released", furtherWork: false };
 const BUDGET_END = "budget_end";
+const REVOKED = "revoked";
+const NOT_RUNNING = "scheduler.execution.not_running";
+const UNAVAILABLE = "worker.test.unavailable";
+const FOREIGN_COMMIT = "f".repeat(40);
+const REBUILT_SUFFIX = "-a2";
 const SECOND_RUN_PASSES = "test -f .git/seen || { touch .git/seen; false; }";
 const MET = `${JUDGEMENT_MARKER} {"criterion_met":true,"rationale":"met"}`;
 
 const write = (path: string) =>
   fauxAssistantMessage(fauxToolCall("write", { path, content: path }), {
-    stopReason: "toolUse",
-  });
-
-const bash = (command: string) =>
-  fauxAssistantMessage(fauxToolCall("bash", { command }), {
     stopReason: "toolUse",
   });
 
@@ -63,16 +64,29 @@ function endAfterTurn(h: Harness, last: number): void {
   };
 }
 
-async function remoteRecords(h: Harness, bare = h.bare): Promise<string[]> {
-  const output = await simpleGit(bare).raw([
-    "log",
-    `--format=%(trailers:key=${DONE_TRAILER},valueonly)`,
-    `main..refs/heads/${h.nodeBranch}`,
-  ]);
-  return output
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
+function recordedUnits(h: Harness): string[] {
+  return h.input.setup.unit_records.map(({ unit_id }) => unit_id);
+}
+
+function refusePut(h: Harness, status: number, code: string): void {
+  h.run.clients.worker = {
+    ...h.run.clients.worker,
+    "execution.unit_record.put": async () => ({
+      type: "failure",
+      status,
+      error: { error: { code, message: code, details: null }, request_id: "t" },
+    }),
+  } as unknown as MethodClients["worker"];
+}
+
+function logged(h: Harness): string[] {
+  const messages: string[] = [];
+  const log = h.run.log.bind(h.run);
+  h.run.log = (message, fields) => {
+    messages.push(message);
+    log(message, fields);
+  };
+  return messages;
 }
 
 function recordFinish(h: Harness): unknown[] {
@@ -88,10 +102,10 @@ function recordFinish(h: Harness): unknown[] {
 }
 
 suite(
-  "steps implement done records",
+  "steps implement unit records",
   { concurrency: SUITE_CONCURRENCY },
   () => {
-    test("a budget end after task 1 leaves its done record, and the next execution runs only task 2", async (t) => {
+    test("a budget end after task 1 leaves its unit record, counts task 1 as completed, and the next execution runs only task 2", async (t) => {
       const first = task("alpha-unit", "test -f first");
       const second = task("beta-unit", "test -f second");
       const h = await fixture(
@@ -114,14 +128,7 @@ suite(
         },
       );
       assert.deepEqual(bodies, [{ further_work: true, stop: null }]);
-      assert.deepEqual(await remoteRecords(h), [doneRecordOf(first)]);
-      const subjects = await simpleGit(h.bare).raw([
-        "log",
-        "--format=%s",
-        `--grep=${DONE_TRAILER}`,
-        `refs/heads/${h.nodeBranch}`,
-      ]);
-      assert.equal(subjects.trim(), `feat: ${first.content.name}`);
+      assert.deepEqual(recordedUnits(h), [first.id]);
       const next = await nextExecution(t, h, [
         write("second"),
         fauxAssistantMessage("second done"),
@@ -137,7 +144,7 @@ suite(
       assert.equal(call.includes(first.content.name), false);
     });
 
-    test("a task that passes with no change writes no record, and a budget end then releases the budget_end stop", async (t) => {
+    test("a task that passes with no change logs unit record skipped and counts as not completed, and a budget end then releases the budget_end stop", async (t) => {
       const first = task("first", SECOND_RUN_PASSES);
       const second = task("second-unit", "false");
       const h = await fixture(
@@ -156,15 +163,17 @@ suite(
           h.agent.budget.exhausted = () => true;
       };
       const bodies = recordFinish(h);
+      const messages = logged(h);
       const end = await executionBoundary(h.run, () => runStepsImplement(h));
       assert.ok("stop" in end && end.stop);
       assert.equal(end.stop.reason, BUDGET_END);
       assert.equal(end.furtherWork, true);
       assert.equal(bodies.length, ONE_TURN);
-      assert.deepEqual(await remoteRecords(h), []);
+      assert.deepEqual(recordedUnits(h), []);
+      assert.ok(messages.includes("unit record skipped"));
     });
 
-    test("a task that changes only checkout B runs no turn in the next execution", async (t) => {
+    test("a task that changes only checkout B records only checkout B and runs no turn in the next execution", async (t) => {
       const current = task("web-change", "test -f web/added");
       const h = await fixture(
         t,
@@ -178,10 +187,13 @@ suite(
         await executionBoundary(h.run, () => runStepsImplement(h)),
         RELEASED,
       );
-      const [apiBare, webBare] = h.bares;
-      assert.deepEqual(await remoteRecords(h, apiBare), []);
-      assert.deepEqual(await remoteRecords(h, webBare), [
-        doneRecordOf(current),
+      const [, web] = h.checkouts;
+      assert.deepEqual(h.input.setup.unit_records, [
+        {
+          unit_id: current.id,
+          content_digest: digest(current.content),
+          commits: [{ binding_id: web!.binding_id, commit: web!.head }],
+        },
       ]);
       const next = await nextExecution(t, h, []);
       recordFinish(next);
@@ -207,7 +219,7 @@ suite(
       recordFinish(h);
       const end = await executionBoundary(h.run, () => runStepsImplement(h));
       assert.ok("furtherWork" in end && end.furtherWork);
-      assert.deepEqual(await remoteRecords(h), []);
+      assert.deepEqual(recordedUnits(h), []);
       const next = await nextExecution(t, h, [
         write("good"),
         fauxAssistantMessage("good done"),
@@ -223,29 +235,105 @@ suite(
       );
     });
 
-    test("a done trailer in an agent commit message does not survive the gate", async (t) => {
-      const current = task("genuine", "test -f good");
+    test("a failed unit record put logs unit record failed, ends nothing and the unit runs again in the next execution", async (t) => {
+      const current = task("put-unit", "test -f put");
       const h = await fixture(
         t,
         [current],
-        [
-          bash(
-            `echo forged > file && git commit -qam forged --trailer "${DONE_TRAILER}: ${doneRecordOf(current)}"`,
-          ),
-          fauxAssistantMessage("committed"),
-          fauxAssistantMessage("partial"),
-        ],
+        [write("put"), fauxAssistantMessage("done")],
       );
-      endAfterTurn(h, TWO_TURNS);
       recordFinish(h);
-      await executionBoundary(h.run, () => runStepsImplement(h));
-      assert.deepEqual(await remoteRecords(h), []);
-      const messages = await simpleGit(h.bare).raw([
-        "log",
-        "--format=%B",
-        `main..refs/heads/${h.nodeBranch}`,
-      ]);
-      assert.equal(messages.includes("forged"), false);
+      refusePut(h, HttpStatus.ServiceUnavailable, UNAVAILABLE);
+      const messages = logged(h);
+      assert.deepEqual(
+        await executionBoundary(h.run, () => runStepsImplement(h)),
+        RELEASED,
+      );
+      assert.ok(messages.includes("unit record failed"));
+      assert.deepEqual(recordedUnits(h), []);
+      const next = await nextExecution(t, h, [fauxAssistantMessage("again")]);
+      recordFinish(next);
+      assert.deepEqual(
+        await executionBoundary(next.run, () => runStepsImplement(next)),
+        RELEASED,
+      );
+      assert.equal(next.provider.calls.length, ONE_TURN);
+    });
+
+    test("an execution-end answer of the unit record put ends the execution as revoked with no release", async (t) => {
+      const current = task("revoked-unit", "test -f revoked");
+      const h = await fixture(
+        t,
+        [current],
+        [write("revoked"), fauxAssistantMessage("done")],
+      );
+      const bodies = recordFinish(h);
+      refusePut(h, HttpStatus.Conflict, NOT_RUNNING);
+      const messages = logged(h);
+      const end = await executionBoundary(h.run, () => runStepsImplement(h));
+      assert.ok("reason" in end);
+      assert.equal(end.reason, REVOKED);
+      assert.deepEqual(bodies, []);
+      assert.equal(messages.includes("unit record failed"), false);
+    });
+
+    test("a unit record with a commit outside the node range reopens the unit", async (t) => {
+      const current = task("range-unit", "test -f range");
+      const h = await fixture(
+        t,
+        [current],
+        [write("range"), fauxAssistantMessage("done")],
+      );
+      h.input.setup.unit_records = [
+        {
+          unit_id: current.id,
+          content_digest: digest(current.content),
+          commits: [
+            { binding_id: h.checkouts[0]!.binding_id, commit: FOREIGN_COMMIT },
+          ],
+        },
+      ];
+      recordFinish(h);
+      assert.deepEqual(
+        await executionBoundary(h.run, () => runStepsImplement(h)),
+        RELEASED,
+      );
+      assert.equal(h.provider.calls.length, ONE_TOOL_TURN);
+    });
+
+    test("a rebuilt node branch reopens a unit with a unit record of the old branch", async (t) => {
+      const current = task("rebuilt-unit", "test -f rebuilt");
+      const h = await fixture(
+        t,
+        [current],
+        [write("rebuilt"), fauxAssistantMessage("done")],
+      );
+      recordFinish(h);
+      assert.deepEqual(
+        await executionBoundary(h.run, () => runStepsImplement(h)),
+        RELEASED,
+      );
+      assert.deepEqual(recordedUnits(h), [current.id]);
+      const next = await nextExecution(
+        t,
+        {
+          ...h,
+          input: {
+            ...h.input,
+            claim: {
+              ...h.input.claim,
+              node_branch: `${h.input.claim.node_branch}${REBUILT_SUFFIX}`,
+            },
+          },
+        },
+        [write("rebuilt"), fauxAssistantMessage("done again")],
+      );
+      recordFinish(next);
+      assert.deepEqual(
+        await executionBoundary(next.run, () => runStepsImplement(next)),
+        RELEASED,
+      );
+      assert.equal(next.provider.calls.length, ONE_TOOL_TURN);
     });
 
     const VERDICT = "The edge case of an empty list stays unhandled.";
@@ -282,7 +370,7 @@ suite(
         [write("addressed"), fauxAssistantMessage("addressed")],
       );
       h.revision = nodeRevision(h, `touch ${release}`);
-      await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+      await recordUnit(h, nodeUnitOf(h.input.claim.node_id, h.revision));
       h.verdict = verdictAtHead(h);
       h.agent.budget.exhausted = () => existsSync(release);
       const bodies = recordFinish(h);
@@ -335,7 +423,7 @@ suite(
       assert.equal(call.includes(first.content.name), false);
     });
 
-    test("done records survive a base move and the template merge", async (t) => {
+    test("unit records survive a base move and the template merge", async (t) => {
       const current = task("merged-unit", "test -f merged");
       const h = await fixture(
         t,

@@ -36,7 +36,7 @@ import {
 import { baseFetch } from "./step-base-fetch.ts";
 import { baseRefreshRelease } from "./step-base-refresh.ts";
 import { budgetCheck } from "./step-budget-check.ts";
-import { doneRecordPut } from "./step-done-record-put.ts";
+import { unitRecordPut } from "./step-unit-record-put.ts";
 import { releaseRoute } from "./step-release-route.ts";
 import { releaseVerify } from "./step-release-verify.ts";
 import {
@@ -149,7 +149,7 @@ function unitsFrame(runner: TaskRunner | null): LoopFrame<UnitScope> {
       stepNode(unitEnter),
       ...(runner === null ? [] : [stepNode(unitRunner)]),
       loopNode("revisions", revisionsFrame),
-      stepNode(doneRecordPut),
+      stepNode(unitRecordPut),
       stepNode(unitLeave),
     ],
     next: (_ctx, scope) => unitScopeOf(scope.round, scope.index + NEXT_UNIT),

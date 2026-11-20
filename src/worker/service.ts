@@ -68,6 +68,7 @@ import {
   SessionRemoval,
   type SshHostKeysOf,
   type StopOrderReason,
+  type UnitIdsOf,
   WORKER_SERVICE_NAME,
   type WorkerAgentView,
   type WorkerBindingOf,
@@ -96,6 +97,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import { ActionPerformer } from "./action-performer.ts";
 import { executionSeed } from "./execution-seed.ts";
 import { executionSetup } from "./execution-setup.ts";
+import { deleteNodeUnitRecords, putUnitRecord } from "./unit-records.ts";
 import { clearedChangeRequests } from "./change-request.ts";
 import { linkUpdatePage } from "./link-update.ts";
 import { failedChecks } from "./failed-check.ts";
@@ -258,6 +260,7 @@ export interface Dependencies {
   repositoryPolicyOf: RepositoryPolicyOf;
   repositoryBindingIdsOf: RepositoryBindingIdsOf;
   intentOf: IntentOf;
+  unitIdsOf: UnitIdsOf;
   pinnedCredentialMetadata: PinnedCredentialMetadataFn;
   credentialMetadata: CredentialMetadataOf;
   sshHostKeysOf: SshHostKeysOf;
@@ -467,6 +470,10 @@ export class WorkerService implements Service {
   archiving(tx: Transaction, runtimeIdentity: string): boolean {
     return this.instances.archiving(tx, runtimeIdentity);
   }
+  deleteNodeUnitRecords(tx: Transaction, nodeId: string): void {
+    deleteNodeUnitRecords(tx, nodeId);
+  }
+
   instanceNameOf(tx: Transaction, instanceId: string): string | null {
     const instance = readInstanceById(tx, instanceId);
     return instance?.ended_at === null ? instance.name : null;
@@ -1579,6 +1586,10 @@ export class WorkerService implements Service {
           executionId: params.execution_id,
           caller,
         }),
+    );
+    registry.register(
+      workerOperations["execution.unit_record.put"],
+      ({ body }, caller) => putUnitRecord(this.dependencies, caller, body),
     );
     registry.register(
       workerOperations["action.request"],

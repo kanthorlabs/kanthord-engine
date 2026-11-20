@@ -867,7 +867,8 @@ diagnostic names the `connection_name` of the other process.
 
 During an execution, the application logs one info record for each task start
 (`task started`), task commit (`task committed`), verification result (`task
-verified`), done record (`done recorded`) and node judgement (`node
+verified`), unit record (`unit recorded`, `unit record skipped`,
+`unit record failed`) and node judgement (`node
 judged`). When the checkpoint commit or the push of a stop
 fails, the application logs `checkpoint failed` with the `reason`, the thrown
 error text with secrets removed. The record has no `reason` when the worker

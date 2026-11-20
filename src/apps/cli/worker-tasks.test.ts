@@ -16,6 +16,7 @@ import { PI_DIRECTORY_NAME, usePiDirectory } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { CancellationContext } from "../../kernel/context.ts";
 import { HostTool } from "../../worker/contract.ts";
+import { digest } from "../../kernel/json.ts";
 import {
   hostEnvironment,
   temporary,
@@ -57,6 +58,12 @@ import { runInProcess } from "./test-support.ts";
 import { stopOnSignal, type TasksCommandIo, tasksRun } from "./worker-tasks.ts";
 
 const PI_ROOT = temporaryDirectory();
+const COMMIT_IDENTITY = [
+  "-c",
+  "user.name=Seed",
+  "-c",
+  "user.email=seed@example.com",
+];
 const PI_DIRECTORY = join(PI_ROOT, PI_DIRECTORY_NAME);
 process.on("exit", () => rmSync(PI_ROOT, { recursive: true, force: true }));
 installPiTools({ directory: PI_DIRECTORY });
@@ -474,11 +481,80 @@ suite("worker tasks run", () => {
           "unit.enter",
           "unit.turn",
           "verify.own",
-          "done_record.put",
+          "unit_record.put",
           "unit.leave",
         ],
       );
       assert.ok(metrics.steps.every((entry) => entry.ms >= NO_CALLS));
+    },
+  );
+
+  test(
+    "a seed with unit_records skips the unit with a valid record, and the outbox holds the put of the other unit",
+    { timeout: TEST_TIMEOUT_MS },
+    async (t) => {
+      const first = task("first", "true");
+      const second = task("second", "grep -q good file");
+      const fixture = await seedFixture(t, (seed) => {
+        (seed.revision as { tasks: unknown[] }).tasks = [first, second];
+      });
+      const git = simpleGit(fixture.source);
+      await git.raw(["checkout", "-q", "-b", "node"]);
+      await git.raw([
+        ...COMMIT_IDENTITY,
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "first",
+      ]);
+      const firstCommit = (await git.revparse(["HEAD"])).trim();
+      await git.raw(["checkout", "-q", "main"]);
+      const setup = fixture.seed.setup as Record<string, unknown>;
+      setup.unit_records = [
+        {
+          unit_id: first.id,
+          content_digest: digest(first.content),
+          commits: [{ binding_id: fixture.bindingId, commit: firstCommit }],
+        },
+      ];
+      fixture.seed.heads = { [fixture.bindingId]: firstCommit };
+      writeFileSync(
+        join(fixture.seedFolder, "seed.json"),
+        JSON.stringify(fixture.seed),
+      );
+      const provider = scriptedProvider([
+        writeGood(),
+        fauxAssistantMessage("done"),
+      ]);
+      const run = commandRun(fixture, provider);
+      const code = await tasksRun(
+        fixture.seedFolder,
+        runOptions(fixture, { skipReleaseGate: true }),
+        run.io,
+      );
+      assert.equal(code, TasksExit.Success, run.stderr.join(""));
+      const out = join(fixture.root, "out");
+      assert.deepEqual(readJson(out, "progress.json").completed_units, [
+        second.id,
+      ]);
+      const outbox = JSON.parse(
+        readFileSync(join(out, "outbox.json"), "utf8"),
+      ) as { operation: string; step: string; body: { unit_id: string } }[];
+      assert.deepEqual(
+        outbox.map(({ operation, step, body }) => ({
+          operation,
+          step,
+          unit_id: body.unit_id,
+        })),
+        [
+          {
+            operation: "worker.execution.unit_record.put",
+            step: "unit_record.put",
+            unit_id: second.id,
+          },
+        ],
+      );
     },
   );
 
@@ -509,7 +585,7 @@ suite("worker tasks run", () => {
       ) as { step: string | null }[];
       assert.deepEqual(
         outbox.map((entry) => entry.step),
-        ["unit.turn"],
+        ["unit.turn", "unit_record.put"],
       );
     },
   );

@@ -150,6 +150,7 @@ function machineFixture(t: TestContext) {
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,
     intentOf: unexpected,
+    unitIdsOf: unexpected,
     pinnedCredentialMetadata: unexpected,
     credentialMetadata: unexpected,
     sshHostKeysOf: unexpected,

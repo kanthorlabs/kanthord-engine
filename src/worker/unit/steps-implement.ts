@@ -30,7 +30,7 @@ import {
   type SetupEntry,
 } from "./environment-setup.ts";
 import { criterionRevisionInstruction } from "./judgement.ts";
-import { isDone, readDoneRecords } from "./done-record.ts";
+import { validUnitRecords } from "./unit-record.ts";
 import { type Verdict, VerdictSource } from "./node-verdict.ts";
 import {
   type JudgedCheckout,
@@ -88,7 +88,7 @@ export const TaskResultKind = {
   BudgetEnd: "budget_end",
 } as const;
 export type TaskResult =
-  | { kind: typeof TaskResultKind.Complete; recorded: boolean }
+  | { kind: typeof TaskResultKind.Complete; committed: boolean }
   | { kind: typeof TaskResultKind.BudgetEnd };
 
 export interface StepsInput {
@@ -316,9 +316,10 @@ async function nodeInstructionOf(
 export async function startCheck(state: StartState): Promise<StartCheck> {
   assert.ok(state.checkouts.length > NO_CHECKOUTS);
   const node = await nodeInstructionOf(state);
-  const done = await readDoneRecords(state);
-  const pending = unitsOf(state)
-    .filter((task) => !isDone(done, task))
+  const units = unitsOf(state);
+  const done = await validUnitRecords(state, units);
+  const pending = units
+    .filter((task) => !done.has(task.id))
     .map((task) => ({ task, instruction: null }));
   state.ports.log.log("units planned", {
     commit: headSetOf(state.checkouts),

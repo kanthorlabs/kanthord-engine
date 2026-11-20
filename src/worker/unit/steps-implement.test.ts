@@ -32,7 +32,7 @@ import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace-layout.ts";
-import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
+import { digest } from "../../kernel/json.ts";
 import { readPushRecord } from "./push-record.ts";
 import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
@@ -53,8 +53,8 @@ import {
   implementFixture as fixture,
   nextExecution,
   NO_PROVIDER_CALLS,
-  recordDone,
   recordReleases,
+  recordUnit,
   STEPS_KEY,
   task,
   TEST_SSH_ACCESS,
@@ -230,7 +230,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         bindings: [],
       },
     } as unknown as Revision;
-    await recordDone(h, done);
+    await recordUnit(h, done);
     h.verdict = {
       source: VerdictSource.Rework,
       text: "Rework the node.",
@@ -266,7 +266,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     const events = t.mock.method(h.run, "log");
     assert.deepEqual(await runTask(h, current), {
       kind: "complete",
-      recorded: true,
+      committed: true,
     });
     assert.deepEqual(
       events.mock.calls.map((call) => call.arguments[0]),
@@ -276,7 +276,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         "task verified",
         "task committed",
         "task verified",
-        "done recorded",
+        "unit recorded",
       ],
     );
     const verified = events.mock.calls
@@ -833,7 +833,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
 
   const TWO_BINDINGS = ["api", "web"];
 
-  test("two bindings commit only the checkout with a change", async (t) => {
+  test("two bindings commit only the checkout with a change, and the unit record names only that checkout at its gate commit", async (t) => {
     const current = task("api-change", "test -f api/added");
     const h = await fixture(
       t,
@@ -856,7 +856,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     const webBefore = web.head;
     assert.deepEqual(await runTask(h, current), {
       kind: "complete",
-      recorded: true,
+      committed: true,
     });
     assert.notEqual(api.head, apiBefore);
     assert.equal(await simpleGit(api.directory).revparse(["HEAD"]), api.head);
@@ -865,10 +865,16 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.equal(web.head, webBefore);
     assert.equal(await simpleGit(web.directory).revparse(["HEAD"]), webBefore);
-    assert.ok(
-      (
-        await simpleGit(api.directory).raw(["log", "-1", "--format=%B"])
-      ).includes(`${DONE_TRAILER}: ${doneRecordOf(current)}`),
+    assert.deepEqual(h.input.setup.unit_records, [
+      {
+        unit_id: current.id,
+        content_digest: digest(current.content),
+        commits: [{ binding_id: api.binding_id, commit: api.head }],
+      },
+    ]);
+    assert.equal(
+      (await simpleGit(api.directory).raw(["log", "-1", "--format=%B"])).trim(),
+      `feat: ${current.content.name}\n\n${current.id}`,
     );
     h.input.workspaces.release(key, WorkspaceKind.Node);
   });
@@ -909,7 +915,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         verifications: [baseMoved ? "test -f other" : "true"],
       },
     };
-    await recordDone(h, nodeUnitOf(h.input.claim.node_id, h.revision));
+    await recordUnit(h, nodeUnitOf(h.input.claim.node_id, h.revision));
     const judged = h.checkouts.map((checkout) => ({
       binding_id: checkout.binding_id,
       commit: checkout.head,

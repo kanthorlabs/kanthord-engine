@@ -150,6 +150,9 @@ const fakeCollaborations = {
   intentOf: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },
+  unitIdsOf: () => {
+    throw new Error("UNEXPECTED_COLLABORATION");
+  },
   pinnedCredentialMetadata: () => {
     throw new Error("UNEXPECTED_COLLABORATION");
   },

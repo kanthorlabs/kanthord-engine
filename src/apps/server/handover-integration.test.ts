@@ -361,7 +361,163 @@ for (const adapter of ["direct", "http"] as const) {
       "worker.execution.no_native_agent",
     );
   });
+
+  test(`${adapter} a unit record put of a live execution replaces the record of the unit, the setup answers it, and an unknown unit or binding and a foreign or closed execution are refused`, async (t) => {
+    const h = await setup(t, adapter, undefined, { instanceCount: 2 });
+    const executionId = h.execution.execution_id;
+    const record = (unitId: string, bindingId: string, commit: string) => ({
+      unit_id: unitId,
+      content_digest: digest({ unit: unitId, commit }),
+      commits: [{ binding_id: bindingId, commit }],
+    });
+    const put = (body: ReturnType<typeof record>, token = h.token) =>
+      h.call(
+        workerOperations["execution.unit_record.put"],
+        { params: { execution_id: executionId }, query: {}, body },
+        token,
+        { idempotencyKey: createIdempotencyKey() },
+      );
+    const setupRecords = async () =>
+      completed(
+        await h.call(
+          workerOperations["execution.setup.get"],
+          { params: { execution_id: executionId }, query: {}, body: null },
+          h.token,
+        ),
+      ).unit_records;
+    const nodeId = h.execution.node_id;
+    const bindingId = h.bindings.repo!.id;
+    completed(await h.handover());
+    assert.deepEqual(await setupRecords(), []);
+    const first = record(nodeId, bindingId, PINNED_HEAD);
+    assert.deepEqual(completed(await put(first)), first);
+    assert.deepEqual(await setupRecords(), [first]);
+    const replaced = record(nodeId, bindingId, MOVED_HEAD);
+    completed(await put(replaced));
+    assert.deepEqual(await setupRecords(), [replaced]);
+    refused(
+      await put(record(createIdentity("task"), bindingId, PINNED_HEAD)),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordUnitUnknown,
+    );
+    refused(
+      await put(record(nodeId, createIdentity("binding"), PINNED_HEAD)),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordBindingUnknown,
+    );
+    const other = (
+      await h.f.slotClient(h.execution.project_id, "general", SECOND_SLOT)
+    ).token;
+    completed(await h.call(workerOperations.register, NO_INPUT, other));
+    refused(await put(first, other), HttpStatus.Forbidden, PROOF_FAILED);
+    completed(await h.release());
+    refused(await put(first), HttpStatus.Forbidden, PROOF_FAILED);
+    assert.deepEqual(
+      h.f.store.database
+        .prepare(
+          "SELECT unit_id, commits FROM worker_unit_record WHERE node_id = ?",
+        )
+        .all(nodeId)
+        .map((row) => ({ ...row })),
+      [{ unit_id: nodeId, commits: canonicalJSON(replaced.commits) }],
+    );
+  });
 }
+
+for (const adapter of ["direct", "http"] as const) {
+  test(`${adapter} the setup answers only the unit records of its own node, an examine execution answers none, and a put of an examine execution is refused with intent_invalid`, async (t) => {
+    const h = await setup(t, adapter, undefined, { instanceCount: 2 });
+    const executionId = h.execution.execution_id;
+    const nodeId = h.execution.node_id;
+    const record = {
+      unit_id: nodeId,
+      content_digest: digest({ unit: nodeId }),
+      commits: [{ binding_id: h.bindings.repo!.id, commit: PINNED_HEAD }],
+    };
+    const put = () =>
+      h.call(
+        workerOperations["execution.unit_record.put"],
+        { params: { execution_id: executionId }, query: {}, body: record },
+        h.token,
+        { idempotencyKey: createIdempotencyKey() },
+      );
+    const setupRecords = async () =>
+      completed(
+        await h.call(
+          workerOperations["execution.setup.get"],
+          { params: { execution_id: executionId }, query: {}, body: null },
+          h.token,
+        ),
+      ).unit_records;
+    completed(await h.handover());
+    completed(await put());
+    h.f.store.database
+      .prepare(
+        "INSERT INTO worker_unit_record (node_id, unit_id, content_digest, commits) VALUES (?, ?, ?, ?)",
+      )
+      .run(
+        OTHER_NODE,
+        OTHER_NODE,
+        record.content_digest,
+        canonicalJSON(record.commits),
+      );
+    assert.deepEqual(await setupRecords(), [record]);
+    h.f.store.database
+      .prepare("UPDATE mission_node_revision SET intent = ? WHERE node_id = ?")
+      .run(Intent.Examine, nodeId);
+    assert.deepEqual(await setupRecords(), []);
+    refused(
+      await put(),
+      HttpStatus.Conflict,
+      WorkerErrorCode.UnitRecordIntentInvalid,
+    );
+  });
+}
+
+test("a discard of a node deletes its unit records and keeps the unit records of another node", async (t) => {
+  const h = await setup(t, "direct", undefined, { instanceCount: 2 });
+  const nodeId = h.execution.node_id;
+  const insert = h.f.store.database.prepare(
+    "INSERT INTO worker_unit_record (node_id, unit_id, content_digest, commits) VALUES (?, ?, ?, ?)",
+  );
+  for (const owner of [nodeId, OTHER_NODE])
+    insert.run(owner, owner, digest({ owner }), "[]");
+  completed(await h.release());
+  const mission = completed(
+    await h.call(missionOperations.get, {
+      params: { project_id: h.execution.project_id },
+      query: {},
+      body: null,
+    }),
+  );
+  const node = completed(
+    await h.call(missionOperations["node.get"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: null,
+    }),
+  );
+  const discarded = completed(
+    await h.call(missionOperations["node.discard"], {
+      params: { node_id: nodeId },
+      query: {},
+      body: {
+        reason: "discard",
+        expected_mission_version: mission.version,
+        expected_state: node.state,
+        expected_attempt: node.attempt,
+      },
+    }),
+  );
+  assert.equal(discarded.node.state, DISCARDED_STATE);
+  assert.deepEqual(
+    h.f.store.database
+      .prepare("SELECT node_id FROM worker_unit_record")
+      .all()
+      .map((row) => ({ ...row })),
+    [{ node_id: OTHER_NODE }],
+  );
+});
 
 function offlineProvider(credential: OAuthCredential) {
   return createProvider({
@@ -1647,6 +1803,8 @@ const ENV_CANARY = "seed-environment-canary-0123456789";
 const ENV_REMOTE_CANARY = "seed-remote-canary-0123456789";
 const BUILD_ARGS_CANARY = "seed-build-canary-0123456789";
 const CLOSED_STATE = "Completed";
+const DISCARDED_STATE = "Discarded";
+const OTHER_NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAZ";
 const SEED_ENVIRONMENT = {
   image: "mcr.microsoft.com/devcontainers/base:ubuntu",
   build: { dockerfile: "Dockerfile", args: { CANARY: BUILD_ARGS_CANARY } },

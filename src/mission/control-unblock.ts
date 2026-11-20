@@ -170,8 +170,8 @@ export function unblockNode(
           actor,
           now,
         );
-  if (node.attempt > NO_ATTEMPT)
-    openAttempt(
+  if (node.attempt > NO_ATTEMPT) {
+    const attempt = openAttempt(
       tx,
       nodeId,
       revision,
@@ -179,6 +179,9 @@ export function unblockNode(
       now,
       body.start_point ?? StartPoint.NodeBranch,
     );
+    if (attempt.start_point === StartPoint.BaseBranch)
+      dependencies.unitRecords.deleteNode(tx, nodeId);
+  }
   transition(tx, dependencies, mission, node, NodeState.Available, now);
   return actedOn(
     tx,

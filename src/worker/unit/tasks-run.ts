@@ -46,6 +46,7 @@ import {
   type EvidencePort,
   type ImplementHostPorts,
   PortResultKind,
+  type UnitRecordPort,
 } from "./foundry-ports.ts";
 import { foundryImplement, type ImplementResult } from "./foundry-implement.ts";
 import type { MethodClients } from "./method-clients.ts";
@@ -199,6 +200,18 @@ export function localEvidencePort(
         body: { ...redactedDraft(draft, output), ...run.context() },
       });
       return ok(ids.evidence_id);
+    },
+  };
+}
+
+export function localUnitRecordPort(output: TasksOutput): UnitRecordPort {
+  return {
+    async put(record) {
+      output.record({
+        operation: "worker.execution.unit_record.put",
+        body: record,
+      });
+      return ok(null);
     },
   };
 }
@@ -595,6 +608,7 @@ function composedOf(input: LocalTasksInput): {
     repository: localRepositoryPort(host),
     releaseTrees: localReleaseTreePort(host),
     claim: { check: async () => ok(null) },
+    unitRecords: localUnitRecordPort(output),
     agent: agentOpenPort({ run, budget, open }),
   };
   return {

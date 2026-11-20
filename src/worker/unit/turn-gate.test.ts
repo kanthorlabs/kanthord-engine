@@ -375,7 +375,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const before = h.checkouts[0]!.head;
     assert.deepEqual(await runTask(h, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const subjects = await simpleGit(h.root).raw([
       "log",
@@ -429,7 +429,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const before = h.checkouts[0]!.head;
     assert.deepEqual(await runTask(h, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const commits = await simpleGit(h.root).raw([
       "rev-list",
@@ -459,7 +459,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     assert.deepEqual(await runTask(h, first), {
       kind: TaskResultKind.Complete,
-      recorded: false,
+      committed: false,
     });
     await assert.rejects(runTask(h, second), {
       reason: EndReason.NoProgress,
@@ -518,7 +518,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     assert.equal(
       (await simpleGit(h.root).raw(["ls-files", WORK_FILE])).trim(),
@@ -679,7 +679,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {
       kind: TaskResultKind.Complete,
-      recorded: true,
+      committed: true,
     });
     const subjects = await git.raw(["log", "--format=%s", `${before}..HEAD`]);
     assert.deepEqual(subjects.trim().split("\n"), [

@@ -89,6 +89,7 @@ const seedAgentSchema = agentSetupSchema.extend({
 const seedSetupSchema = executionSetupSchema.extend({
   agents: z.array(seedAgentSchema).min(1),
   templates: promptTemplatesSchema.optional(),
+  unit_records: executionSetupSchema.shape.unit_records.optional(),
 });
 const seedPlanSchema = z.strictObject({
   pending: z.array(
@@ -346,6 +347,7 @@ async function setupOf(
   return {
     ...seed.setup,
     templates,
+    unit_records: seed.setup.unit_records ?? [],
     resource_budget: budgetOf(seed, options),
     agents: agents.map((agent, index) => {
       if (agent.prompt.final === undefined)

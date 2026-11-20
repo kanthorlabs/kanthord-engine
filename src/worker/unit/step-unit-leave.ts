@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { DeadlineKind, type FoundryStep } from "./chain.ts";
-import { isDone } from "./done-record.ts";
 import { next } from "./step-support.ts";
 import type { UnitScope } from "./step-unit-enter.ts";
 import { TaskResultKind } from "./steps-implement.ts";
@@ -29,7 +28,7 @@ export const unitLeave: FoundryStep<
     const completedUnits = new Set(ctx.completedUnits);
     if (
       scope.node !== null ||
-      (result.recorded && !isDone(ctx.plan.done, unit))
+      (result.committed && !ctx.plan.done.has(unit.id))
     )
       completedUnits.add(unit.id);
     return next(scope, { completedUnits, reports });

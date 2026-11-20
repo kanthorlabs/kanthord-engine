@@ -76,6 +76,7 @@ const API_ONLY_OPERATIONS = [
   "worker.execution.change_request.get",
   "worker.execution.failed_check.get",
   "worker.execution.link_update.get",
+  "worker.execution.unit_record.put",
   "mission.evidence.asset.complete",
   "mission.evidence.request",
   "mission.delivery.admit",
@@ -130,7 +131,7 @@ const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
 const IMPLEMENTED_COUNT = 233;
-const OPERATION_COUNT = 274;
+const OPERATION_COUNT = 275;
 const INTAKE_CREDENTIAL_LEAVES = [
   "intake credential archive",
   "intake credential check",

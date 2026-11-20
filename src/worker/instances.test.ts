@@ -382,6 +382,7 @@ function instanceFixture(
     repositoryPolicyOf: unexpected,
     repositoryBindingIdsOf: unexpected,
     intentOf: unexpected,
+    unitIdsOf: unexpected,
     pinnedCredentialMetadata: unexpected,
     credentialMetadata: unexpected,
     sshHostKeysOf: unexpected,

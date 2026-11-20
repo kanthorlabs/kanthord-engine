@@ -13,7 +13,7 @@ chain implement
   phase start
     loop start                              one frame; span worker.phase start
       step base.refresh(claim)              [LLM] port: secrets.redact; per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end; stop operation_failed/repository.connector.git_failed, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed, operation_failed/worker.merge.markers_left, provider_failed
-      step units.plan                       verdict rule, done records, pending units
+      step units.plan                       verdict rule, unit records, pending units
   phase tasks                               one call: foundryImplement(input, host)
     loop tasks                              one frame; span worker.phase tasks
       loop release_rounds                   until the release gate passes; a routed failure gives the next round
@@ -23,7 +23,7 @@ chain implement
           loop revisions                    until the unit passes; scope of the unit
             step unit.turn                  [LLM] port: claim.check, secrets.redact; claim check; Work | TaskRevision | CriterionRevision; gate G in write mode; budget end; stop provider_failed, revoked, operation_failed/worker.turn.*, operation_failed/worker.git.commit_failed
             step verify.own                 port: releaseTrees.takeBase; verdict rule, unchanged-turn count, pending setup, own commands; restore on exit; stop no_progress, operation_failed/worker.verification.infrastructure_failed, environment_failed/verification_timeout, environment_failed/command_absent, environment_failed/setup_failed
-          step done_record.put              on a pass; the done trailer on the commits of the unit; stop operation_failed/worker.git.commit_failed
+          step unit_record.put              port: unitRecords.put; on a pass; the unit record of the checkouts that hold a gate commit of the unit; a failed put ends nothing; stop revoked
           step unit.leave                   notes the final agent text for the coder report; counts the completed unit
         loop release_gate                   one frame per round; span worker.release_gate; a planned round resets the unchanged-turn count
           step base.fetch                   port: repository.fetchBase; base_branch and upstream_branch of each checkout; stop operation_failed/repository.connector.git_failed
@@ -103,5 +103,5 @@ chain tasks_prepare
       step agent.open                       port: agent.open; stop operation_failed
       step env.setup(live)                  node failure -> setup instruction of the first unit; budget end; stop environment_failed/setup_failed
       step state.open                       the live implement state of the later phases
-      step units.plan                       verdict rule, done records, pending units
+      step units.plan                       verdict rule, unit records, pending units
   dispose resources                         by the caller, on every end
