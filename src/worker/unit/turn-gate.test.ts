@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
@@ -607,6 +608,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
   });
 
   test("the gate finds a rebase in progress behind a gitdir file", async (t) => {
+    t.mock.method(bashSandbox, "wrap", async (command: string) => command);
     const h = await fixture(
       t,
       [task("gitdir", "false")],

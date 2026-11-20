@@ -767,7 +767,19 @@ No machine source fails with `worker.machine.config_absent`. An invalid machine
 configuration, or one whose `name` differs from the requested machine, fails with
 `worker.machine.config_invalid`. The agent processes of the instance do not
 receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` or
-`KANTHORD_ENDPOINT`.
+`KANTHORD_ENDPOINT`. They receive no variable whose name starts with `EVAL_`.
+
+The `swe@1` bash of a coder execution runs in the sandbox of
+`@anthropic-ai/sandbox-runtime` `0.0.26`, as the Workbench bash does. The
+[Built-in tools](./workbench.md#built-in-tools) section of the Workbench page
+states the configuration and the paths. `allowWrite` holds the workspace and the
+`TMPDIR` of the instance. `denyRead` holds the credential paths of the worker
+process, among them `~/.config/kanthord-eval` and `~/.pi/agent`, and names no
+workspace, no `TMPDIR` and no ancestor of them. A bash call fails with an error
+tool result when the sandbox cannot start. No command runs without the sandbox.
+A Linux host of a worker instance needs `bubblewrap`, `socat` and `ripgrep` on
+`PATH`. A macOS host needs `ripgrep` (`rg`). The node verifications run outside
+the sandbox.
 
 The data directory of the instance is `<XDG data directory>/kanthord/workers/<name>`.
 The log directory is `<XDG state directory>/kanthord/workers/<name>`.
