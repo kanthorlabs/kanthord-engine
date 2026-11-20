@@ -11,6 +11,7 @@ import {
   CancellationContext,
   cancelled,
   type Context,
+  ContextCancelled,
 } from "../../kernel/context.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { stopAfter } from "../../kernel/test-support.ts";
@@ -973,6 +974,76 @@ test("a budget end of one parallel branch merges the patch of each branch that e
   assert.equal(end.result.setupPending, true);
   assert.equal("setupInstruction" in end.result, false);
   assert.deepEqual(h.trace, ["writer", "ender", "waiter", "waiter aborted"]);
+});
+
+test("a step that a budget end cancels writes the outcome budget_end with no error status, and a stop in an exhausted budget stays stop", async (t) => {
+  const h = harness(t);
+  const throwing = (id: string, error: () => Error) =>
+    foundryOf(
+      contextStepOf(h, id, {
+        call: async ({ context }) => {
+          await cancelled(context.signal);
+          throw error();
+        },
+      }),
+    );
+  const end = await runTasks(
+    {
+      nodes: [
+        parallelNode(GROUP, [
+          soloBranch(
+            stepNode(
+              foundryOf(
+                contextStepOf(h, "ender", {
+                  kind: StepKind.BudgetEnd,
+                  call: async () => {
+                    await new Promise((resolve) => setImmediate(resolve));
+                    h.io.budget.wallDeadlineReached();
+                  },
+                }),
+              ),
+            ),
+          ),
+          soloBranch(
+            stepNode(throwing("cancelled", () => new ContextCancelled())),
+          ),
+          soloBranch(
+            stepNode(
+              throwing(
+                "stopped",
+                () => new ExecutionStop(EndReason.OperationFailed, STOP_CODE),
+              ),
+            ),
+          ),
+        ]),
+      ],
+      seed: {},
+      resultOf: (ctx) => ctx,
+    },
+    {
+      cancel: h.io.run.operationContext,
+      budget: h.io.budget,
+      until: null,
+      env: {},
+    },
+    { capabilities: [], ports: { telemetry: h.io.run.spans } as CommonPorts },
+  );
+  assert.equal(end.kind, FoundryEndKind.BudgetEnd);
+  assert.deepEqual(stepSpanOutcomes(h.records), [
+    ["ender", FrameOutcome.BudgetEnd],
+    ["cancelled", FrameOutcome.BudgetEnd],
+    ["stopped", FrameOutcome.Stop],
+  ]);
+  const statusOf = (id: string) => {
+    const start = spanRecords(h, SpanOperation.Step).find(
+      (record) => record.attributes?.[STEP_ID_ATTRIBUTE] === id,
+    );
+    return spanEnds(h.records, SpanOperation.Step).find(
+      (record) => record.span_id === start?.span_id,
+    )?.status;
+  };
+  assert.equal(statusOf("cancelled"), SpanStatus.Ok);
+  assert.equal(statusOf("stopped"), SpanStatus.Error);
 });
 
 test("a build rejects two parallel branches that write one key", (t) => {

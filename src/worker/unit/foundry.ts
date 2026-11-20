@@ -82,9 +82,12 @@ function walkStep(
   step: ChainStep,
   holder: ScopeHolder,
 ): Promise<Walked> {
-  return withinStep(run.ports.telemetry, step, () =>
-    runStep(run, step, holder),
-  );
+  const io = {
+    spans: run.ports.telemetry,
+    budget: run.control.budget,
+    cancel: run.control.cancel,
+  };
+  return withinStep(io, step, () => runStep(run, step, holder));
 }
 
 async function runStep(

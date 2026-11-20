@@ -155,7 +155,12 @@ function walkStep(
   holder: ScopeHolder,
 ): Promise<Walked> {
   if (step.final === true) return runStep(walk, step, holder);
-  return withinStep(walk.io.run.spans, step, () => runStep(walk, step, holder));
+  const io = {
+    spans: walk.io.run.spans,
+    budget: walk.io.budget,
+    cancel: walk.cancel,
+  };
+  return withinStep(io, step, () => runStep(walk, step, holder));
 }
 
 async function runStep(
