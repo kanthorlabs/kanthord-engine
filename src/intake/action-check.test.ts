@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import pino from "pino";
 import {
   GrantKind,
   type ReplyRequestFacts,
@@ -158,6 +159,7 @@ function harness(
     reviews?: unknown[];
     checks?: { pending: string[]; failed: string[] };
     sshFacts?: { binding_id: string; address: string };
+    trees?: { base: string; tested: string } | null;
   },
 ) {
   const { store, pin } = sshStore(t);
@@ -194,6 +196,8 @@ function harness(
     message: "refused",
   });
   const checkReads: (readonly string[])[] = [];
+  const treeReads: string[] = [];
+  const logger = pino({ enabled: false });
   const pullRequest = new GitHubPlatform();
   const github = {
     getSettledPullRequest: async () =>
@@ -215,6 +219,22 @@ function harness(
             value: { ...SETTLED_CHECKS, ...options.checks },
           };
     },
+    commitTreeOf: async (
+      ...input: Parameters<GitHubPlatform["commitTreeOf"]>
+    ) => {
+      const { ref } = input[2];
+      treeReads.push(ref);
+      if (options.trees === undefined || options.trees === null)
+        return refusal(ResultClass.RetryableRefusal);
+      const isBase = ref === BASE_BRANCH;
+      return {
+        ok: true as const,
+        value: {
+          sha: isBase ? BASE_HEAD : ref,
+          tree: isBase ? options.trees.base : options.trees.tested,
+        },
+      };
+    },
     foldPullRequest: (
       ...input: Parameters<GitHubPlatform["foldPullRequest"]>
     ) => pullRequest.foldPullRequest(...input),
@@ -227,7 +247,7 @@ function harness(
   };
   const check = () =>
     checkAction(
-      { store, custody: fake.custody, github, gitWriter },
+      { store, custody: fake.custody, github, gitWriter, logger },
       caller,
       EVIDENCE_ID,
     );
@@ -240,6 +260,7 @@ function harness(
     landings,
     landingInputs,
     checkReads,
+    treeReads,
     check,
     sshRequests,
   };
@@ -415,6 +436,62 @@ test("a node check of an open pull request with a failed run that the rules do n
   });
   assert.equal((await h.check()).end_state, CheckEndState.ChecksFailed);
   assert.deepEqual(h.checkReads, [["lint"]]);
+});
+
+const BASE_BRANCH = "main";
+const BASE_HEAD = "9999999999999999999999999999999999999999";
+const SAME_TREE = { base: "tree-a", tested: "tree-a" };
+const OTHER_TREE = { base: "tree-a", tested: "tree-b" };
+
+function testedPullRequestFacts(trusted: string[] = []): RequestFacts {
+  return {
+    ...requestFacts(pullRequestAddress, false, trusted),
+    assessed_commit: PUSHED,
+  };
+}
+
+test("regression: F124 an open pull request whose tree landed answers expected with the base head commit", async (t) => {
+  const h = harness(t, {
+    facts: testedPullRequestFacts(),
+    credential: "github",
+    reviews: [],
+    trees: SAME_TREE,
+  });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.Expected,
+    landed_commits: [BASE_HEAD],
+  });
+  assert.deepEqual(h.treeReads, [BASE_BRANCH, PUSHED]);
+});
+
+test("an open pull request with a different tree keeps the answer none", async (t) => {
+  const h = harness(t, {
+    facts: testedPullRequestFacts(),
+    credential: "github",
+    reviews: [],
+    trees: OTHER_TREE,
+  });
+  assert.equal((await h.check()).end_state, CheckEndState.None);
+});
+
+test("an open pull request with a failed tree read keeps the answer none", async (t) => {
+  const h = harness(t, {
+    facts: testedPullRequestFacts(),
+    credential: "github",
+    reviews: [],
+  });
+  assert.equal((await h.check()).end_state, CheckEndState.None);
+});
+
+test("a pull request whose fold answers another end state reads no tree", async (t) => {
+  const h = harness(t, {
+    facts: testedPullRequestFacts([String(TRUSTED_ID)]),
+    credential: "github",
+    reviews: [changeRequest(TRUSTED_ID)],
+    trees: SAME_TREE,
+  });
+  assert.equal((await h.check()).end_state, CheckEndState.Other);
+  assert.deepEqual(h.treeReads, []);
 });
 
 const NODE_ID = "node_01ARZ3NDEKTSV4RRFFQ69G5FAV";

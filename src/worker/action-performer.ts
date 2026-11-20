@@ -90,6 +90,8 @@ interface CheckBlock {
 }
 const IN_FLIGHT_CODE = "intake.outbound.request.in_flight";
 const MERGE_SKIPPED_MESSAGE = "merge skipped: gate files changed";
+const HUMAN_LANDING_MESSAGE =
+  "human landing: merge the node branch into the base branch with a merge commit";
 const NO_GATE_FILES = 0;
 const NO_CHECKS = 0;
 const HEAD_COMMIT_CHANGED_MESSAGE = "merge skipped: head commit changed";
@@ -406,9 +408,10 @@ export class ActionPerformer {
       landing.kind === ActionResultKind.Submitted &&
       pending.entry.gate_files.length > NO_GATE_FILES
     )
-      this.warnMergeSkipped(
+      this.warnHumanLanding(
         landing.evidence.id as string,
         pending.entry.gate_files,
+        address,
       );
     return landing;
   }
@@ -611,6 +614,25 @@ export class ActionPerformer {
           );
         });
     }
+  }
+
+  private warnHumanLanding(
+    evidenceId: string,
+    gateFiles: string[],
+    address: Extract<
+      PlatformAddress,
+      { kind: typeof PlatformAddressKind.BranchPush }
+    >,
+  ): void {
+    this.dependencies.logger?.warn(
+      {
+        evidence_id: evidenceId,
+        gate_files: gateFiles,
+        base_branch: address.branch,
+        tested_commit: address.commit,
+      },
+      HUMAN_LANDING_MESSAGE,
+    );
   }
 
   private warnMergeSkipped(evidenceId: string, gateFiles: string[]): void {

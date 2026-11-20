@@ -88,7 +88,18 @@ const MERGE_ROUTE = `PUT /repos/owner/pushed/pulls/${PULL_NUMBER}/merge`;
 const HTTP_OK = 200;
 const HTTP_CONFLICT = 409;
 const HTTP_METHOD_NOT_ALLOWED = 405;
+const HTTP_BAD_GATEWAY = 502;
+const HTTP_SERVER_ERROR = 500;
+const COMMIT_ROUTE = "GET /repos/owner/pushed/commits/";
+const BASE_HEAD_COMMIT = "1111111111111111111111111111111111111111";
+const HEAD_TREE = "2222222222222222222222222222222222222222";
+const EQUAL_TREES_LOG =
+  "merge answered 502: the base branch tree equals the pull request head tree";
+const EQUAL_TREES_RESULT = "equal";
+const BASE_TREE = "3333333333333333333333333333333333333333";
 const ONE_REQUEST = 1;
+const NO_TREE_READS = 0;
+const TWO_TREE_READS = 2;
 const REAL_GIT_DEADLINE_MS = 30_000;
 const REAL_NODE_BRANCH = "kanthord/node_01ARZ3NDEKTSV4RRFFQ69G5FAV";
 const EXECUTABLE_MODE = 0o755;
@@ -99,6 +110,9 @@ const Platform = {
   Merges: "merges",
   LosesMergeAnswer: "loses_merge_answer",
   NotMergeable: "not_mergeable",
+  BadGatewayLanded: "bad_gateway_landed",
+  BadGatewayDiffers: "bad_gateway_differs",
+  BadGatewayTreeReadFails: "bad_gateway_tree_read_fails",
 } as const;
 type Platform = (typeof Platform)[keyof typeof Platform];
 
@@ -128,6 +142,7 @@ const facts: ActionFacts = {
   reused_address: null,
   merge_address: mergeAddress,
   gate_files: [],
+  report: null,
 };
 
 const branchPushAddress = {
@@ -182,6 +197,16 @@ async function gitHubServer(
           merged: state.merged,
           head: { sha: options.head },
         });
+      if (route.startsWith(COMMIT_ROUTE)) {
+        if (options.platform === Platform.BadGatewayTreeReadFails)
+          return answer(HTTP_SERVER_ERROR, { message: "tree read failed" });
+        const isBase = route === `${COMMIT_ROUTE}main`;
+        const equal = options.platform === Platform.BadGatewayLanded;
+        return answer(HTTP_OK, {
+          sha: isBase ? BASE_HEAD_COMMIT : options.head,
+          commit: { tree: { sha: isBase && !equal ? BASE_TREE : HEAD_TREE } },
+        });
+      }
       if (route !== MERGE_ROUTE) return answer(404, { message: "not found" });
       const sha = (JSON.parse(requests.at(-1)!.body) as { sha: string }).sha;
       if (sha !== options.head)
@@ -190,6 +215,8 @@ async function gitHubServer(
         return answer(HTTP_METHOD_NOT_ALLOWED, {
           message: "Pull Request is not mergeable",
         });
+      if (options.platform.startsWith("bad_gateway"))
+        return answer(HTTP_BAD_GATEWAY, { message: "bad gateway" });
       state.merged = true;
       if (options.platform === Platform.LosesMergeAnswer)
         return request.socket.destroy();
@@ -246,7 +273,13 @@ async function harness(
     commit: (write) => store.transaction(write),
   };
   const inFlight = new Set<string>();
-  const logger = pino({ enabled: false });
+  const logLines: string[] = [];
+  const logger = pino(
+    { level: "info" },
+    { write: (line) => logLines.push(line) },
+  );
+  const logs = () =>
+    logLines.map((line) => JSON.parse(line) as Record<string, unknown>);
   const merge = (body: Partial<MergeBody> = {}) =>
     mergeAction(
       {
@@ -254,6 +287,7 @@ async function harness(
         custody: fake.custody,
         github: new GitHubPlatform({ baseUrl: gitHub.baseUrl }),
         gitWriter: options.gitWriter ?? gitWriter,
+        logger,
       },
       (request) => runOutbound({ store, logger, inFlight }, caller, request),
       caller,
@@ -292,7 +326,7 @@ async function harness(
         OutboundRequestState.Pending,
       ]);
     });
-  return { ...fake, gitHub, merge, rows, seed };
+  return { ...fake, gitHub, merge, rows, seed, logs };
 }
 
 function mergeRequests(requests: GrantRequest[]) {
@@ -404,6 +438,44 @@ test("regression: K118 a 405 merge answer answers retryable_refusal and merges n
   );
   assert.equal(h.gitHub.merges(), ONE_REQUEST);
   assert.equal(h.gitHub.state.merged, false);
+  assert.equal(treeReads(h.gitHub), NO_TREE_READS);
+});
+
+function treeReads(gitHub: { calls: () => string[] }) {
+  return gitHub.calls().filter((route) => route.startsWith(COMMIT_ROUTE))
+    .length;
+}
+
+test("regression: F124 a 502 merge answer with equal trees answers merged and retries nothing", async (t) => {
+  const h = await harness(t, { platform: Platform.BadGatewayLanded });
+  const answer = await h.merge();
+  assert.deepEqual(answer, mergeAddress);
+  assert.equal(h.gitHub.merges(), ONE_REQUEST);
+  assert.equal(treeReads(h.gitHub), TWO_TREE_READS);
+  assert.deepEqual(h.gitHub.calls().slice(-2), [
+    `${COMMIT_ROUTE}main`,
+    `${COMMIT_ROUTE}${TESTED_COMMIT}`,
+  ]);
+  const landed = h.logs().find((line) => line.msg === EQUAL_TREES_LOG);
+  assert.equal(landed?.base_head_commit, BASE_HEAD_COMMIT);
+  assert.equal(landed?.result, EQUAL_TREES_RESULT);
+});
+
+test("a 502 merge answer with different trees answers unknown_outcome and states the difference", async (t) => {
+  const h = await harness(t, { platform: Platform.BadGatewayDiffers });
+  const answer = await h.merge();
+  assert.ok("class" in answer);
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.match(answer.message, /trees differ/);
+  assert.equal(treeReads(h.gitHub), TWO_TREE_READS);
+});
+
+test("a 502 merge answer with a failed tree read answers unknown_outcome and states the failed compare", async (t) => {
+  const h = await harness(t, { platform: Platform.BadGatewayTreeReadFails });
+  const answer = await h.merge();
+  assert.ok("class" in answer);
+  assert.equal(answer.class, ResultClass.UnknownOutcome);
+  assert.match(answer.message, /tree compare failed/);
 });
 
 test("a branch push land squashes through the SSH release of the request evidence and uses no API credential", async (t) => {

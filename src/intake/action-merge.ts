@@ -51,6 +51,19 @@ import {
 
 const EXPIRED_DEADLINE_MS = 0;
 const RETRIED_MERGE_STATUSES: readonly number[] = [HttpStatus.MethodNotAllowed];
+const TreeCompare = {
+  Equal: "equal",
+  Different: "different",
+  Failed: "failed",
+} as const;
+const TREE_COMPARE_MESSAGES = {
+  [TreeCompare.Different]:
+    "The trees differ: the base branch tree is not the pull request head tree, so nothing landed.",
+  [TreeCompare.Failed]: "The tree compare failed.",
+} as const;
+const TREE_COMPARE_LOG_MESSAGE =
+  "merge answered 502: the base branch tree equals the pull request head tree";
+const MESSAGE_NOTE_SEPARATOR = " ";
 export const FOREIGN_MERGE_ANSWER_MESSAGE =
   "The request key holds the answer of another merge.";
 
@@ -305,11 +318,40 @@ export async function callMergePullRequest(
       merge_method: method.value,
     },
   );
-  if (!answer.ok) return mergeRefusal(answer);
-  return { ok: true, result: merge };
+  if (answer.ok) return { ok: true, result: merge };
+  if (answer.status !== HttpStatus.BadGateway) return mergeRefusal(answer);
+  const compare = await compareTrees(dependencies, call, facts);
+  if (compare.kind === TreeCompare.Equal) {
+    dependencies.logger.info(
+      { base_head_commit: compare.baseHead, result: compare.kind },
+      TREE_COMPARE_LOG_MESSAGE,
+    );
+    return { ok: true, result: merge };
+  }
+  return mergeRefusal(answer, TREE_COMPARE_MESSAGES[compare.kind]);
 }
 
-function mergeRefusal(answer: GitHubFailure): CallAnswer {
+async function compareTrees(
+  dependencies: ActionCheckDependencies,
+  call: GitHubCall,
+  facts: Readonly<ActionFacts>,
+): Promise<
+  | { kind: typeof TreeCompare.Equal; baseHead: string }
+  | { kind: typeof TreeCompare.Different | typeof TreeCompare.Failed }
+> {
+  const base = await dependencies.github.commitTreeOf(call, targetOf(facts), {
+    ref: facts.frozen_action.configuration.base_branch,
+  });
+  const head = await dependencies.github.commitTreeOf(call, targetOf(facts), {
+    ref: facts.snapshot_commit,
+  });
+  if (!base.ok || !head.ok) return { kind: TreeCompare.Failed };
+  if (base.value.tree !== head.value.tree)
+    return { kind: TreeCompare.Different };
+  return { kind: TreeCompare.Equal, baseHead: base.value.sha };
+}
+
+function mergeRefusal(answer: GitHubFailure, note?: string): CallAnswer {
   const resultClass =
     answer.status !== null && RETRIED_MERGE_STATUSES.includes(answer.status)
       ? ResultClass.RetryableRefusal
@@ -318,10 +360,14 @@ function mergeRefusal(answer: GitHubFailure): CallAnswer {
     ok: false,
     class: resultClass,
     code: GITHUB_RESULT_CODE_PREFIX + resultClass,
-    message:
+    message: [
       answer.status === null
         ? answer.message
         : `${answer.status} ${answer.message}`,
+      note,
+    ]
+      .filter((part) => part !== undefined)
+      .join(MESSAGE_NOTE_SEPARATOR),
   };
 }
 

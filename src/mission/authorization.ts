@@ -39,6 +39,7 @@ import {
   type StorageBinding,
   testedInputSchema,
 } from "./contract.ts";
+import { coderReportOf } from "./coder-report.ts";
 import { currentAssessmentOf } from "./currency.ts";
 import {
   keyOfLocation,
@@ -426,6 +427,10 @@ export function authorizeFrozenAction(
       reused_address: reused,
       merge_address: merge,
       gate_files: gateFiles,
+      report:
+        action.action === RepositoryAction.PullRequest
+          ? coderReportOf(tx, claim.nodeId, claim.attempt)
+          : null,
     },
   };
 }
@@ -592,6 +597,7 @@ export function authorizeServiceMerge(
       reused_address: null,
       merge_address: address,
       gate_files: [],
+      report: null,
     },
   };
 }
@@ -680,9 +686,8 @@ export function authorizeRequestEvidence(
     ),
   );
   const assessed =
-    address.kind === PlatformAddressKind.BranchPush &&
     currentAssessmentOf(tx, evidence.node_id, evidence.attempt)?.result ===
-      AssessmentResult.Success
+    AssessmentResult.Success
       ? assessedCommitOf(
           tx,
           evidence.node_id,

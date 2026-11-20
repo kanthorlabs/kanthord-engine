@@ -15,6 +15,9 @@ const EMOJI = "\u{1F600}";
 const HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
 const KEPT_HEADER = "fix: keep the session";
 const ADDED_HEADER = "feat: add the form";
+const RETYPED_HEADER = "fix: add the page";
+const DOUBLED_HEADER = "fix: fix: keep it";
+const NOT_A_TYPE_HEADER = "fix: fixes: keep it";
 
 test("the header lowers the first letter and removes a final full stop", () => {
   assert.equal(commitHeader(CommitType.Fix, "Keep the session."), KEPT_HEADER);
@@ -22,6 +25,37 @@ test("the header lowers the first letter and removes a final full stop", () => {
     commitHeader(CommitType.Feat, "  Add\n the   form "),
     ADDED_HEADER,
   );
+});
+
+test("the header drops one commit header prefix of the subject", () => {
+  assert.equal(
+    commitHeader(CommitType.Fix, "fix: keep the session"),
+    KEPT_HEADER,
+  );
+  assert.equal(
+    commitHeader(CommitType.Feat, "feat(worker): add the form"),
+    ADDED_HEADER,
+  );
+  assert.equal(
+    commitHeader(CommitType.Fix, "docs: add the page"),
+    RETYPED_HEADER,
+  );
+  assert.equal(
+    commitHeader(CommitType.Fix, "fix: fix: keep it"),
+    DOUBLED_HEADER,
+  );
+});
+
+test("a word that is not a commit type stays in the subject", () => {
+  assert.equal(
+    commitHeader(CommitType.Fix, "fixes: keep it"),
+    NOT_A_TYPE_HEADER,
+  );
+});
+
+test("a subject with only a prefix fails the header rule", () => {
+  assert.throws(() => commitHeader(CommitType.Fix, "fix: ."));
+  assert.throws(() => commitHeader(CommitType.Fix, "fix(worker):"));
 });
 
 test("the header removes every final full stop and space", () => {

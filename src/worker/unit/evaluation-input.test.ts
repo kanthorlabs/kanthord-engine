@@ -20,7 +20,7 @@ import {
   temporary,
 } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
-import type { Evidence } from "../../mission/contract.ts";
+import { CODER_REPORT_SUBJECT, type Evidence } from "../../mission/contract.ts";
 import type { MethodClients } from "./method-clients.ts";
 import {
   anthropicSetup,
@@ -40,7 +40,6 @@ import {
 } from "./workspace.ts";
 import type { RepositoryTransport } from "../contract.ts";
 import { prepareEvaluation, verificationCommands } from "./evaluation-input.ts";
-import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 const FIRST_ROUND = {
   round: 1,

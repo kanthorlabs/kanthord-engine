@@ -78,6 +78,10 @@ const GATE_FILE_BODY_INTRO =
 const GATE_FILE_BODY_OUTRO = "A human reviews and merges this pull request.";
 const GATE_FILE_BODY_PART_SEPARATOR = "\n\n";
 const GATE_FILE_LINE_SEPARATOR = "\n";
+const PULL_REQUEST_BODY_MAX = 65536;
+const NO_TEXT = "";
+const FIRST_CHARACTER = 0;
+const FINAL_HIGH_SURROGATE = /[\uD800-\uDBFF]$/;
 
 export type PerformBody = {
   key: string;
@@ -371,7 +375,7 @@ async function createPullRequest(
       head: performer.claim.nodeBranch,
       base: facts.frozen_action.configuration.base_branch,
       title: commitHeader(facts.node.commit_type, facts.node.name),
-      ...gateFileBodyOf(facts),
+      ...pullRequestBodyOf(facts),
     },
   );
   if (!answer.ok)
@@ -384,16 +388,36 @@ async function createPullRequest(
   return { ok: true, result: pullRequestAddress(facts, answer.value.number) };
 }
 
-function gateFileBodyOf(facts: Readonly<ActionFacts>): { body?: string } {
-  if (facts.gate_files.length === NO_GATE_FILES) return {};
+function pullRequestBodyOf(facts: Readonly<ActionFacts>): { body?: string } {
+  const gateText = gateFileTextOf(facts);
+  const report = facts.report ?? NO_TEXT;
+  if (report === NO_TEXT && gateText === NO_TEXT) return {};
+  if (gateText === NO_TEXT)
+    return { body: cutReport(report, PULL_REQUEST_BODY_MAX) };
+  const room =
+    PULL_REQUEST_BODY_MAX -
+    gateText.length -
+    GATE_FILE_BODY_PART_SEPARATOR.length;
+  const kept = cutReport(report, room);
+  if (kept === NO_TEXT) return { body: gateText };
+  return { body: `${kept}${GATE_FILE_BODY_PART_SEPARATOR}${gateText}` };
+}
+
+function cutReport(report: string, room: number): string {
+  if (room <= FIRST_CHARACTER) return NO_TEXT;
+  return report
+    .slice(FIRST_CHARACTER, room)
+    .replace(FINAL_HIGH_SURROGATE, NO_TEXT);
+}
+
+function gateFileTextOf(facts: Readonly<ActionFacts>): string {
+  if (facts.gate_files.length === NO_GATE_FILES) return NO_TEXT;
   const lines = facts.gate_files.map((path) => `- \`${path}\``);
-  return {
-    body: [
-      GATE_FILE_BODY_INTRO,
-      lines.join(GATE_FILE_LINE_SEPARATOR),
-      GATE_FILE_BODY_OUTRO,
-    ].join(GATE_FILE_BODY_PART_SEPARATOR),
-  };
+  return [
+    GATE_FILE_BODY_INTRO,
+    lines.join(GATE_FILE_LINE_SEPARATOR),
+    GATE_FILE_BODY_OUTRO,
+  ].join(GATE_FILE_BODY_PART_SEPARATOR);
 }
 
 async function pushSnapshot(

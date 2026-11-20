@@ -248,6 +248,15 @@ export const ExpectedEndState = {
 export type ExpectedEndState =
   (typeof ExpectedEndState)[keyof typeof ExpectedEndState];
 
+export interface CommitTreeQuery {
+  ref: string;
+}
+
+export interface CommitTree {
+  sha: string;
+  tree: string;
+}
+
 export interface CheckFold {
   end_state: CheckEndState;
   landed_commits: string[];
@@ -1109,6 +1118,33 @@ export class GitHubPlatform {
     return {
       ok: true,
       value: parsed.data.merged && parsed.data.head.sha === input.sha,
+    };
+  }
+
+  async commitTreeOf(
+    call: GitHubCall,
+    target: GitHubTarget,
+    commit: CommitTreeQuery,
+  ): Promise<GitHubAnswer<CommitTree>> {
+    assert.ok(commit.ref.length >= MIN_SEGMENT_LENGTH);
+    const answer = await this.send(call, target, {
+      kind: CallKind.Read,
+      route: "GET /repos/{owner}/{repo}/commits/{ref}",
+      parameters: { ref: commit.ref },
+    });
+    if (!answer.ok) return answer;
+    const parsed = z
+      .looseObject({
+        sha: z.string().min(MIN_SEGMENT_LENGTH),
+        commit: z.looseObject({
+          tree: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
+        }),
+      })
+      .safeParse(answer.value);
+    if (!parsed.success) return unreadableBody(CallKind.Read);
+    return {
+      ok: true,
+      value: { sha: parsed.data.sha, tree: parsed.data.commit.tree.sha },
     };
   }
 

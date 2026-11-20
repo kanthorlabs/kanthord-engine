@@ -34,7 +34,6 @@ import type { MethodClients } from "./method-clients.ts";
 import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import { readPushRecord } from "./push-record.ts";
-import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 import {
   HEAD_COMMIT_SUBJECT,
   runStepsImplement,
@@ -63,7 +62,11 @@ import {
 } from "./test-support.ts";
 import { background } from "../../kernel/context.ts";
 import { PromptTemplate } from "../../agent/contract.ts";
-import { AssetKind, type Revision } from "../../mission/contract.ts";
+import {
+  AssetKind,
+  CODER_REPORT_SUBJECT,
+  type Revision,
+} from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
 

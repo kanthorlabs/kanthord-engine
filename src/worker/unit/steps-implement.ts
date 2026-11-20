@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { PromptTemplate } from "../../agent/contract.ts";
 import {
   AssetKind,
+  CODER_REPORT_SUBJECT,
   type EarlierVerdict,
   type Revision,
   type TaskContent,
@@ -102,7 +103,6 @@ import {
 import { nodeUnitOf, releaseGate, ReleaseGateKind } from "./release-gate.ts";
 import { memoScopeOf, type VerificationMemo } from "./verification-memo.ts";
 import { REPORT_MEDIA_TYPE } from "./steps-examine.ts";
-import { CODER_REPORT_SUBJECT } from "./coder-report.ts";
 
 export const HEAD_COMMIT_SUBJECT = "Head commit of the node branch";
 const NO_TASKS = 0;

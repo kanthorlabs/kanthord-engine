@@ -98,6 +98,8 @@ const GATE_FILE_BODY = [
   "- `package.json`\n- `scripts/affected-tests.mjs`",
   "A human reviews and merges this pull request.",
 ].join("\n\n");
+const REPORT = "Done: the accounts page ships.";
+const BODY_LIMIT = 65536;
 const MERGE_PUSH_ACTION = "push";
 const PULL_REQUEST_ACTION = "pull_request";
 const ONE_RELEASE = 1;
@@ -163,6 +165,7 @@ function actionFacts(
     reused_address: null,
     merge_address: null,
     gate_files: [],
+    report: null,
     ...overrides,
   };
 }
@@ -252,7 +255,7 @@ function harness(t: TestContext, options: Options) {
   const logger = pino({ enabled: false });
   const perform = (body: Partial<PerformBody> = {}) =>
     performAction(
-      { store, custody: fake.custody, github, gitWriter },
+      { store, custody: fake.custody, github, gitWriter, logger },
       (request) => runOutbound({ store, logger, inFlight }, caller, request),
       caller,
       {
@@ -456,6 +459,83 @@ test("a pull request create names the gate files in its body", async (t) => {
   ]);
 });
 
+test("a pull request create sends the coder report as its body", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, { report: REPORT }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    {
+      head: claim.nodeBranch,
+      base: "main",
+      title: "feat: ship accounts",
+      body: REPORT,
+    },
+  ]);
+});
+
+test("a pull request body holds the coder report, a blank line, then the gate file text", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, {
+      report: REPORT,
+      gate_files: GATE_FILE_PATHS,
+    }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    {
+      head: claim.nodeBranch,
+      base: "main",
+      title: "feat: ship accounts",
+      body: `${REPORT}\n\n${GATE_FILE_BODY}`,
+    },
+  ]);
+});
+
+test("a long coder report is cut and the gate file text stays whole", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, {
+      report: "r".repeat(BODY_LIMIT * 2),
+      gate_files: GATE_FILE_PATHS,
+    }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  const body = (h.pullRequests[0] as { body: string }).body;
+  assert.equal(body.length, BODY_LIMIT);
+  assert.ok(body.endsWith(`\n\n${GATE_FILE_BODY}`));
+});
+
+test("a pull request create with no report and no gate file sends no body", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    { head: claim.nodeBranch, base: "main", title: "feat: ship accounts" },
+  ]);
+});
+
+test("a pull request title keeps one commit type of the node name", async (t) => {
+  const h = harness(t, {
+    facts: actionFacts(PULL_REQUEST_ACTION, {
+      node: { id: NODE_ID, name: "fix: ship accounts", commit_type: "fix" },
+    }),
+    credential: API_CREDENTIAL,
+  });
+  await h.perform();
+  assert.deepEqual(h.pullRequests, [
+    {
+      head: claim.nodeBranch,
+      base: "main",
+      title: "fix: ship accounts",
+    },
+  ]);
+});
+
 const REPLY_RESOURCE_IDENTITY = "conversation:github:owner/pushed";
 const REPLY_REPOSITORY = "owner/pushed";
 const REPLY_ACTION = "reply";
@@ -576,6 +656,7 @@ function replyHarness(t: TestContext) {
         store,
         custody: fake.custody,
         github,
+        logger,
         gitWriter: {
           squashPushFresh: () => assert.fail("A reply pushes nothing."),
           pushSnapshotFresh: () => assert.fail("A reply pushes nothing."),
@@ -806,6 +887,7 @@ function jiraReplyHarness(
           readTokenAccount: unexpected,
           postIssueComment: unexpected,
         } as unknown as GitHubPlatform,
+        logger,
         gitWriter: {
           squashPushFresh: unexpected,
           pushSnapshotFresh: unexpected,
@@ -1000,6 +1082,7 @@ function slackReplyHarness(t: TestContext) {
           readTokenAccount: unexpected,
           postIssueComment: unexpected,
         } as unknown as GitHubPlatform,
+        logger,
         gitWriter: {
           squashPushFresh: unexpected,
           pushSnapshotFresh: unexpected,

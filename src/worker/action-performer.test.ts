@@ -389,10 +389,16 @@ function humanLanding(t: TestContext) {
   return { ...h, address, pushes };
 }
 
+const HUMAN_LANDING_NOTICE =
+  "human landing: merge the node branch into the base branch with a merge commit";
+const MERGE_SKIPPED_NOTICE = "merge skipped: gate files changed";
+
 test("a push with a gate file records the branch push of the tested commit and pushes nothing", async (t) => {
   const h = humanLanding(t);
-  const warned: unknown[] = [];
-  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  };
   const request = t.mock.method(h.dependencies.evidenceRequests, "request");
   assert.deepEqual((await h.perform()).items, [
     { kind: ActionResultKind.Submitted, evidence: h.evidence },
@@ -401,8 +407,27 @@ test("a push with a gate file records the branch push of the tested commit and p
   assert.equal(request.mock.callCount(), SINGLE_CALL_COUNT);
   assert.deepEqual(request.mock.calls[0]?.arguments[0].body.address, h.address);
   assert.deepEqual(warned, [
-    { evidence_id: h.evidence.id, gate_files: GATE_FILE_PATHS },
+    [
+      {
+        evidence_id: h.evidence.id,
+        gate_files: GATE_FILE_PATHS,
+        base_branch: "main",
+        tested_commit: COMMIT,
+      },
+      HUMAN_LANDING_NOTICE,
+    ],
   ]);
+});
+
+test("a push with no gate file logs no human-landing notice", async (t) => {
+  const h = humanLanding(t);
+  h.entry.gate_files = [];
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  };
+  await h.perform();
+  assert.deepEqual(warned, []);
 });
 
 function reusable(t: TestContext) {
@@ -1011,8 +1036,10 @@ test("kanthord landing with a gate file requests no merge and warns once", async
   const h = actionable(t);
   h.entry.action.configuration.landing = "kanthord";
   h.entry.gate_files = GATE_FILE_PATHS;
-  const warned: unknown[] = [];
-  h.dependencies.logger = { warn: (obj: unknown) => warned.push(obj) };
+  const warned: unknown[][] = [];
+  h.dependencies.logger = {
+    warn: (...args: unknown[]) => warned.push(args),
+  };
   const perform = t.mock.method(
     h.dependencies.intakeActions,
     "perform",
@@ -1023,7 +1050,10 @@ test("kanthord landing with a gate file requests no merge and warns once", async
   ]);
   assert.equal(perform.mock.callCount(), SINGLE_CALL_COUNT);
   assert.deepEqual(warned, [
-    { evidence_id: h.evidence.id, gate_files: GATE_FILE_PATHS },
+    [
+      { evidence_id: h.evidence.id, gate_files: GATE_FILE_PATHS },
+      MERGE_SKIPPED_NOTICE,
+    ],
   ]);
 });
 
