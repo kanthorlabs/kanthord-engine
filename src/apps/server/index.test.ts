@@ -701,7 +701,7 @@ test("serve refuses another master_key against an existing database and writes n
 
 const SCHEMA_MISMATCH = /system\.database\.migration\.schema_mismatch/;
 const RESET_INSTRUCTION =
-  /delete kanthord\.db, tracking\.db and their -wal and -shm files in the data directory, and start again/;
+  /run kanthord upgrade --reset-changed; the command rebuilds only the changed services and keeps the credentials and the unchanged services/;
 
 function withExtraText(migrations: Migrations, service: string): Migrations {
   return migrations.map((entry) =>

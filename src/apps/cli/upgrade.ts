@@ -5,6 +5,7 @@ import {
   type PendingMigration,
   Store,
 } from "../../kernel/store.ts";
+import { CUSTODY_SERVICE_NAME } from "../../custody/contract.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { formatRows, type RowValue, rowWidth } from "../../kernel/rows.ts";
 import { ConfigChangeKind } from "../../config/steps.ts";
@@ -14,6 +15,7 @@ const STAMP_LENGTH = 15;
 const UpgradeRow = {
   UpToDate: "up_to_date",
   Backup: "backup",
+  Dropped: "dropped",
   Migrated: "migrated",
   Renamed: "renamed",
   Removed: "removed",
@@ -27,13 +29,35 @@ interface Target {
   path: string;
   migrations: Migrations;
   pending: readonly PendingMigration[];
+  changed: readonly string[];
 }
 
-function openTarget(path: string, migrations: Migrations): Target | null {
+function inspect(
+  store: Store,
+  migrations: Migrations,
+  resetChanged: boolean,
+): Pick<Target, "pending" | "changed"> {
+  const changed = resetChanged ? store.changedServices(migrations) : [];
+  if (!changed.length)
+    return { pending: store.plan(migrations).pending, changed };
+  store.assertResettable(migrations, changed, CUSTODY_SERVICE_NAME);
+  return { pending: [], changed };
+}
+
+function openTarget(
+  path: string,
+  migrations: Migrations,
+  resetChanged: boolean,
+): Target | null {
   if (!audit(path, "file", true)) return null;
   const store = new Store(path);
   try {
-    return { store, path, migrations, pending: store.plan(migrations).pending };
+    return {
+      store,
+      path,
+      migrations,
+      ...inspect(store, migrations, resetChanged),
+    };
   } catch (error) {
     store.close();
     throw error;
@@ -61,9 +85,17 @@ interface BackupContext {
   row: RowWriter;
 }
 
-function openTargets(targets: Target[], specs: readonly TargetSpec[]): void {
+function openTargets(
+  targets: Target[],
+  specs: readonly TargetSpec[],
+  resetChanged: boolean,
+): void {
   for (const { file, migrations } of specs) {
-    const target = openTarget(join(directories().data, file), migrations);
+    const target = openTarget(
+      join(directories().data, file),
+      migrations,
+      resetChanged,
+    );
     if (target) targets.push(target);
   }
 }
@@ -84,10 +116,17 @@ function migrateTargets(
   stamp: string,
   row: RowWriter,
 ): void {
-  for (const { store, path, migrations } of behind) {
+  for (const { store, path, migrations, changed } of behind) {
     const backup = `${path}.bak-${stamp}`;
     store.backup(backup);
     row(UpgradeRow.Backup, backup);
+    if (changed.length)
+      for (const table of store.resetServices(
+        migrations,
+        changed,
+        CUSTODY_SERVICE_NAME,
+      ))
+        row(UpgradeRow.Dropped, table);
     store.migrate(migrations, ({ service, from, to }) =>
       row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`),
     );
@@ -109,10 +148,15 @@ function writeConfig(
   row(UpgradeRow.ConfigVersion, `${config.from} -> ${config.to}`);
 }
 
+interface UpgradeSettings {
+  now?: Date;
+  resetChanged?: boolean;
+}
+
 export async function upgrade(
   path: string,
   write: (text: string) => void,
-  now: Date = new Date(),
+  { now = new Date(), resetChanged = false }: UpgradeSettings = {},
 ): Promise<void> {
   const row: RowWriter = (name, value) =>
     write(formatRows([[name, value]], [], UPGRADE_ROW_WIDTH));
@@ -130,10 +174,17 @@ export async function upgrade(
   const config = upgradeConfig(original);
   const targets: Target[] = [];
   try {
-    openTargets(targets, [
-      { file: DATABASE_FILE, migrations: serverMigrations },
-      { file: TRACKING_DATABASE_FILE, migrations: trackingDatabaseMigrations },
-    ]);
+    openTargets(
+      targets,
+      [
+        { file: DATABASE_FILE, migrations: serverMigrations },
+        {
+          file: TRACKING_DATABASE_FILE,
+          migrations: trackingDatabaseMigrations,
+        },
+      ],
+      resetChanged,
+    );
     const server = targets.find(
       ({ migrations }) => migrations === serverMigrations,
     );
@@ -144,7 +195,9 @@ export async function upgrade(
           .master_key,
         path,
       );
-    const behind = targets.filter(({ pending }) => pending.length);
+    const behind = targets.filter(
+      ({ pending, changed }) => pending.length || changed.length,
+    );
     if (config.content === null && !behind.length) {
       row(UpgradeRow.UpToDate, path);
       return;
