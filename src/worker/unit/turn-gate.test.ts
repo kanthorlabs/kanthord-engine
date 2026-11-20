@@ -31,10 +31,11 @@ import {
   EndReason,
   type ExecutionEnd,
   ExecutionEndKind,
+  ExecutionStop,
 } from "./execution-stop.ts";
 import { executionBoundary } from "./native-method.ts";
 import { refreshAtClaim, RefreshResult } from "./base-refresh.ts";
-import { TaskResultKind } from "./steps-implement.ts";
+import { type StepsState, TaskResultKind } from "./steps-implement.ts";
 import {
   prepareStepsWorkspace,
   runStepsImplement,
@@ -555,33 +556,115 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
-  test("a wall time end in a conflict turn aborts the merge and releases a budget end", async (t) => {
+  const BUDGET_END_STOP = {
+    reason: ExecutionStopReason.BudgetEnd,
+    code: BudgetLimit.WallTime,
+    cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
+  };
+
+  function endWallTimeAfterTurn(h: Fixture): void {
+    const instruct = h.agent.instruct.bind(h.agent);
+    h.agent.instruct = async (work, text, template) => {
+      await instruct(work, text, template);
+      h.agent.budget.wallDeadlineReached();
+    };
+  }
+
+  test("a wall time end in a conflict turn with no marker left concludes the merge in the checkpoint and pushes the merge commit", async (t) => {
     const h = await conflictFixture(t, [
       write("file", RESOLVED),
       fauxAssistantMessage(RESOLVED),
     ]);
     await fetchBase(h);
     const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
+    endWallTimeAfterTurn(h);
+    const records = recordSpans(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    const root = releasedRoot(h);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    const head = await headOf(root);
+    assert.equal(await remoteHead(h), head);
+    assert.deepEqual(
+      (await simpleGit(root).raw(["rev-list", "--parents", "-n", "1", head]))
+        .trim()
+        .split(" ")
+        .slice(1),
+      [before, base],
+    );
+    assert.equal(
+      (await simpleGit(root).raw(["log", "-1", "--format=%s", head])).trim(),
+      MERGE_HEADER,
+    );
+    assert.equal(readFileSync(join(root, "file"), "utf8").trim(), RESOLVED);
+    const { start, end } = gateSpan(records);
+    assert.equal(start.attributes?.["kanthord.gate.mode"], GateMode.Checkpoint);
+    assert.equal(end.attributes?.["kanthord.gate.changed"], true);
+  });
+
+  test("a wall time end in a conflict turn with markers left aborts the merge in the checkpoint and pushes the head before the merge", async (t) => {
+    const h = await conflictFixture(t, [fauxAssistantMessage("unresolved")]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    endWallTimeAfterTurn(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
+    await assertAtBefore(h, before);
+  });
+
+  test("a wall time end after the agent aborts the merge commits nothing in the checkpoint", async (t) => {
+    const h = await conflictFixture(t, [
+      bash("git merge --abort"),
+      fauxAssistantMessage("aborted"),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    endWallTimeAfterTurn(h);
+    const bodies = recordReleases(h);
+    assert.deepEqual(
+      await executionBoundary(h.run, () => runStepsImplement(h)),
+      { kind: "released", furtherWork: true, stop: BUDGET_END_STOP },
+    );
+    assert.deepEqual(bodies, [{ further_work: true, stop: BUDGET_END_STOP }]);
+    assert.equal((h as StepsState).openMerge?.resolved, true);
+    await assertAtBefore(h, before);
+  });
+
+  test("the checkpoint of a stop aborts the open merge and pushes the head before the merge", async (t) => {
+    const h = await conflictFixture(t, [
+      write("file", RESOLVED),
+      fauxAssistantMessage(RESOLVED),
+    ]);
+    await fetchBase(h);
+    const before = h.checkouts[0]!.head;
+    const base = await headOf(h.root, "origin/main");
     const instruct = h.agent.instruct.bind(h.agent);
     h.agent.instruct = async (work, text, template) => {
       await instruct(work, text, template);
-      h.agent.budget.wallDeadlineReached();
+      (h as StepsState).openMerge = {
+        directory: h.root,
+        commit: base,
+        files: ["file"],
+        message: MERGE_HEADER,
+        resolved: true,
+      };
+      throw new ExecutionStop(EndReason.OperationFailed, null);
     };
     const bodies = recordReleases(h);
-    const stop = {
-      reason: ExecutionStopReason.BudgetEnd,
-      code: BudgetLimit.WallTime,
-      cause: unattributed([CauseCategory.Plan, CauseCategory.Model]),
-    };
-    assert.deepEqual(
-      await executionBoundary(h.run, () => runStepsImplement(h)),
-      {
-        kind: "released",
-        furtherWork: true,
-        stop,
-      },
-    );
-    assert.deepEqual(bodies, [{ further_work: true, stop }]);
+    const end = await executionBoundary(h.run, () => runStepsImplement(h));
+    assert.ok("stop" in end && end.stop);
+    assert.equal(end.stop.reason, EndReason.OperationFailed);
+    assert.equal(bodies.length, ONE_RELEASE);
     assert.equal(existsSync(gitPath(h, "MERGE_HEAD")), false);
     await assertAtBefore(h, before);
   });

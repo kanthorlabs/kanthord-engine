@@ -12,7 +12,7 @@ const STOPS: readonly StopCode[] = [
   "provider_failed",
 ];
 const NOTE =
-  "per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end";
+  "per checkout and merged branch: merge, Conflict turn on a conflict, gate G; budget end after the turn: one more marker check records the open merge";
 
 export const baseRefreshClaim: FoundryStep<unknown, "state", never> = {
   foundry: true,

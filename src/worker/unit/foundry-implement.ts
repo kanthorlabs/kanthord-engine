@@ -60,7 +60,7 @@ import {
   workUnitsOf,
 } from "./steps-implement.ts";
 import { Phase, SpanOperation } from "./telemetry.ts";
-import { NO_UNCHANGED_TURNS } from "./turn-gate.ts";
+import { NO_UNCHANGED_TURNS, type OpenMerge } from "./turn-gate.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 
 const ONE_FRAME = true;
@@ -95,6 +95,7 @@ export interface ImplementResult {
   reports: ReadonlyMap<string, string>;
   route: ReleaseGate | null;
   progress: ProgressCtx;
+  openMerge?: OpenMerge;
 }
 
 export function phaseFrame(
@@ -300,6 +301,7 @@ function resultOf(ctx: ExecutionCtx): ImplementResult {
       lastVerification: state.lastVerification,
       revisionCount: state.revisionCount,
     },
+    ...(state.openMerge === undefined ? {} : { openMerge: state.openMerge }),
   };
 }
 

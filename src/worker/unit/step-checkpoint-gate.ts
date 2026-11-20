@@ -29,16 +29,16 @@ export const checkpointGateExit: Step<unknown, "state", never> = {
     "operation_failed/worker.turn.*",
     "operation_failed/worker.git.commit_failed",
   ],
-  note: "aborts the agent; commits the partial work of the current unit",
+  note: "aborts the agent; concludes a resolved open merge; aborts each other MERGE_HEAD; commits the partial work of the current unit",
   async run({ state }, scope, io) {
     assert.ok(state.checkouts.length > NO_CHECKOUTS);
     await state.agent.abort();
-    await checkpointGate(
-      state,
-      checkpointMessage(state),
-      io.context,
-      ViolationEnd.Stop,
-    );
+    await checkpointGate(state, {
+      message: checkpointMessage(state),
+      merge: state.openMerge?.resolved ? state.openMerge : null,
+      context: io.context,
+      violationEnd: ViolationEnd.Stop,
+    });
     return next(scope);
   },
 };
@@ -49,16 +49,16 @@ export const checkpointGateRestore: Step<unknown, "state" | "stop", never> = {
   reads: ["state", "stop"],
   writes: [],
   stops: [],
-  note: "aborts the agent; skipped after a turn violation; a violation restores",
+  note: "aborts the agent; aborts every MERGE_HEAD; skipped after a turn violation; a violation restores",
   async run({ state, stop }, scope, io) {
     await state.agent.abort();
     if (!isTurnViolation(stop.code))
-      await checkpointGate(
-        state,
-        checkpointMessage(state),
-        io.context,
-        ViolationEnd.Restore,
-      );
+      await checkpointGate(state, {
+        message: checkpointMessage(state),
+        merge: null,
+        context: io.context,
+        violationEnd: ViolationEnd.Restore,
+      });
     return next(scope);
   },
 };

@@ -160,6 +160,7 @@ function mergeImplement(ctx: ExecutionCtx, result: ImplementResult): void {
   ctx.completedUnits = result.completedUnits;
   ctx.reports = result.reports;
   if (result.route !== null) ctx.route = result.route;
+  if (result.openMerge !== undefined) state.openMerge = result.openMerge;
 }
 
 function implementPortsOf(ports: ImplementHostPorts): ImplementPorts {

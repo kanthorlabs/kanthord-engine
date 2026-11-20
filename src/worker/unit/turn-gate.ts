@@ -83,6 +83,16 @@ export interface ConflictMerge {
   directory: string;
   commit: string;
   files: readonly string[];
+  message: string;
+}
+export interface OpenMerge extends ConflictMerge {
+  resolved: boolean;
+}
+export interface CheckpointTurn {
+  message: string;
+  merge: ConflictMerge | null;
+  context: Context;
+  violationEnd: ViolationEnd;
 }
 interface GateTurn {
   mode: GateMode;
@@ -183,16 +193,33 @@ export function gatedAgent(
 
 export async function checkpointGate(
   state: StepsState,
-  message: string,
-  context: Context,
-  violationEnd: ViolationEnd,
+  turn: CheckpointTurn,
 ): Promise<boolean> {
-  assert.ok(isCommitMessage(message));
+  assert.ok(isCommitMessage(turn.message));
   return runGate(
     state,
-    { mode: GateMode.Checkpoint, message, merge: null, violationEnd },
+    {
+      mode: GateMode.Checkpoint,
+      message: turn.message,
+      merge: turn.merge,
+      violationEnd: turn.violationEnd,
+    },
     state.checkouts.map((checkout) => checkout.head),
-    context,
+    turn.context,
+  );
+}
+
+function gateMerges(
+  state: StepsState,
+  turn: GateTurn,
+  context: Context,
+): Promise<(ConflictMerge | null)[]> {
+  if (turn.mode !== GateMode.Checkpoint)
+    return Promise.resolve(
+      state.checkouts.map((checkout) => mergeOf(turn, checkout)),
+    );
+  return perCheckout(state.checkouts, (checkout) =>
+    keptMerge(state, checkout, { merge: mergeOf(turn, checkout), context }),
   );
 }
 
@@ -212,15 +239,12 @@ async function runGate(
       attributes: { [GATE_MODE_ATTRIBUTE]: turn.mode },
     },
     async () => {
-      if (turn.mode === GateMode.Checkpoint)
-        await perCheckout(state.checkouts, (checkout) =>
-          abortOpenMerge(state, checkout, context),
-        );
+      const merges = await gateMerges(state, turn, context);
       const inspections = await perCheckout(
         state.checkouts,
         (checkout, index) =>
           inspect(state, checkout, before[index]!, {
-            merge: mergeOf(turn, checkout),
+            merge: merges[index]!,
             context,
           }),
       );
@@ -240,6 +264,7 @@ async function runGate(
           before: before[index]!,
           status: inspections[index]!.status,
           turn,
+          merge: merges[index]!,
           context,
         }),
       );
@@ -417,22 +442,25 @@ function operationViolation(
   return null;
 }
 
-async function abortOpenMerge(
+async function keptMerge(
   state: StepsState,
   checkout: NodeCheckout,
-  context: Context,
-): Promise<void> {
+  options: InspectOptions,
+): Promise<ConflictMerge | null> {
+  const { merge, context } = options;
   const paths = await livePaths(
     callOf(state, checkout, context),
     checkout.gitPaths,
   );
-  if (operationsOf(paths).includes(MERGE_HEAD))
-    await abortMerge(
-      state.input.env,
-      checkout.directory,
-      context,
-      remainingOf(state)(),
-    );
+  if (!operationsOf(paths).includes(MERGE_HEAD)) return null;
+  if (merge !== null && mergeHeadAt(paths) === merge.commit) return merge;
+  await abortMerge(
+    state.input.env,
+    checkout.directory,
+    context,
+    remainingOf(state)(),
+  );
+  return null;
 }
 
 async function violate(
@@ -463,6 +491,7 @@ interface SettleInput {
   before: string;
   status: GitStatus;
   turn: GateTurn;
+  merge: ConflictMerge | null;
   context: Context;
 }
 
@@ -471,8 +500,7 @@ async function settleCheckout(
   checkout: NodeCheckout,
   input: SettleInput,
 ): Promise<Settled> {
-  const { before, status, context } = input;
-  const merge = mergeOf(input.turn, checkout);
+  const { before, status, merge, context } = input;
   if (
     merge === null &&
     status.head === before &&
@@ -530,12 +558,12 @@ async function concludeConflict(
   checkout: NodeCheckout,
   conflict: ConflictSettle,
 ): Promise<Settled> {
-  const { context, turn } = conflict.input;
+  const { context } = conflict.input;
   await refuseMarkers(state, checkout, conflict.merge, context);
   const paths = await concludeMerge(
     state.input.env,
     checkout.directory,
-    turn.message,
+    conflict.merge.message,
     context,
     remainingOf(state)(),
   );
