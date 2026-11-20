@@ -34,7 +34,7 @@ The agent reads precondition fields from the server. A precondition field is a f
 
 ## Reason
 
-The `reason` of a human act is an annotation that the agent writes. It is not a value of the run message, it is never an invented value, and it does not widen the scope.
+The `reason` of a human act is an annotation that the agent writes. It is not a value of the run message, and it does not widen the scope. A reason that states a statement, a decision or a confirmation of the human that the run message does not hold is an invented value. Any other reason is never an invented value.
 
 ## Data
 
