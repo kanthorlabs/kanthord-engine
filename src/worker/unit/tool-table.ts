@@ -19,18 +19,12 @@ import {
   type ShellConfig,
 } from "../../agent/bash-process.ts";
 import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
-import {
-  endProcessGroups,
-  liveGroups,
-  markedGroups,
-  removeMarkerFile,
-} from "../../kernel/process-group.ts";
+import { endMarkedGroups } from "../../kernel/process-group.ts";
 export { childEnvironment } from "../../agent/environment.ts";
 
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
-const NO_GROUPS = 0;
 const PNPM_STORE_DIRECTORY = "pnpm-store";
 const PNPM_CACHE_DIRECTORY = "pnpm-cache";
 const NPM_CACHE_DIRECTORY = "npm-cache";
@@ -51,7 +45,6 @@ export class ToolProcesses {
   private readonly shell: ShellConfig;
   private readonly ended = new Map<string, BashProcess>();
   private readonly timeouts = new Map<string, ToolTimeout>();
-  private readonly groups = new Set<number>();
   private readonly marker = randomUUID();
 
   constructor(shell: ShellConfig) {
@@ -61,7 +54,6 @@ export class ToolProcesses {
 
   operations(toolCallId: string): BashOperations {
     assert.ok(toolCallId);
-    this.pruneGroups();
     return processBashOperations(
       this.shell,
       (bashProcess) => {
@@ -71,26 +63,12 @@ export class ToolProcesses {
       {
         killGroupAtEnd: true,
         marker: this.marker,
-        track: (leader) => {
-          this.groups.add(leader);
-        },
       },
     );
   }
 
   endGroups(): Promise<void> {
-    const groups = new Set([...this.groups, ...markedGroups(this.marker)]);
-    this.groups.clear();
-    return endProcessGroups([...groups]).finally(() =>
-      removeMarkerFile(this.marker),
-    );
-  }
-
-  private pruneGroups(): void {
-    if (this.groups.size === NO_GROUPS) return;
-    const live = liveGroups([...this.groups]);
-    this.groups.clear();
-    for (const group of live) this.groups.add(group);
+    return endMarkedGroups(this.marker);
   }
 
   take(toolCallId: string): BashProcess | undefined {

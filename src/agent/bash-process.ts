@@ -35,7 +35,6 @@ type ExecOptions = Parameters<BashOperations["exec"]>[2];
 export interface BashGroupOptions {
   killGroupAtEnd: boolean;
   marker?: string;
-  track?: (leader: number) => void;
 }
 
 export function processBashOperations(
@@ -66,7 +65,6 @@ async function runBash(
   const child = spawnShell(shell, command, { cwd, env, marker: group.marker });
   const killer = childKiller(child);
   const timer = armKillTimer(killer.kill, timeoutMs);
-  trackLeader(child, group);
   signal?.addEventListener("abort", killer.kill, { once: true });
   if (signal?.aborted) killer.kill();
   child.stdout?.on("data", onData);
@@ -149,11 +147,6 @@ function childKiller(child: ChildProcess): ChildKiller {
     wasKilled: () => killed,
     failure: () => killFailure,
   };
-}
-
-function trackLeader(child: ChildProcess, group: BashGroupOptions): void {
-  if (child.pid === undefined) return;
-  group.track?.(child.pid);
 }
 
 function markedEnvironment(

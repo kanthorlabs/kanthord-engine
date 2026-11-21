@@ -37,6 +37,7 @@ import {
   HEARTBEAT_INTERVAL_MS,
   register,
   type Registration,
+  REGISTRATION_INDETERMINATE,
   startHeartbeat,
 } from "./registration.ts";
 import {
@@ -120,10 +121,11 @@ interface Execution {
   task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
 }
 
-function isSlotUnavailable(error: unknown): boolean {
+function isRetryable(error: unknown): boolean {
   return (
     error instanceof Diagnostic &&
-    error.code === WorkerErrorCode.SlotUnavailable
+    (error.code === WorkerErrorCode.SlotUnavailable ||
+      error.code === REGISTRATION_INDETERMINATE)
   );
 }
 
@@ -417,7 +419,7 @@ export class WorkerUnit {
       try {
         await this.registerEntry(entry);
       } catch (error) {
-        if (isSlotUnavailable(error)) this.armRetry(entry);
+        if (isRetryable(error)) this.armRetry(entry);
         throw error;
       }
       this.runRegistered(entry);
@@ -442,7 +444,7 @@ export class WorkerUnit {
     try {
       await this.registerEntry(entry);
     } catch (error) {
-      if (isSlotUnavailable(error)) this.armRetry(entry);
+      if (isRetryable(error)) this.armRetry(entry);
       else this.logRetryFailure(error);
       return;
     }
@@ -451,8 +453,15 @@ export class WorkerUnit {
   }
 
   private logRetryFailure(error: unknown): void {
-    if (!(error instanceof Diagnostic)) throw error;
-    this.logRecord({ msg: RETRY_FAILED, code: error.code }, "warn");
+    const record =
+      error instanceof Diagnostic
+        ? { msg: RETRY_FAILED, code: error.code }
+        : {
+            msg: RETRY_FAILED,
+            error_type:
+              error instanceof Error ? error.constructor.name : typeof error,
+          };
+    this.logRecord(record, "warn");
   }
 
   async remove(binding: UnitBinding): Promise<Error | null> {

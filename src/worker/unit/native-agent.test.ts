@@ -73,6 +73,10 @@ import { SessionReadOutcome } from "../contract.ts";
 
 after(() => bashSandbox.dispose());
 
+function unwrapped(t: TestContext) {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
+}
+
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PROVIDER_CALL_COUNT = 3;
@@ -756,6 +760,7 @@ test(
   "F79 path 4: NativeAgent.dispose() kills the tree of a running bash call, also a process in its own group",
   { timeout: DISPOSE_CASE_TIMEOUT_MS },
   async (t) => {
+    unwrapped(t);
     const h = await fixture(t, [
       tool("bash", { command: DISPOSE_TREE }),
       fauxAssistantMessage("unexpected"),
@@ -788,6 +793,7 @@ test(
   "dispose ends a descendant of a finished bash call that ignores SIGTERM with SIGKILL after the grace time",
   { timeout: IGNORER_CASE_TIMEOUT_MS },
   async (t) => {
+    unwrapped(t);
     const h = await fixture(t, [
       tool("bash", { command: IGNORER_COMMAND }),
       fauxAssistantMessage("done"),

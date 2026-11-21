@@ -4,8 +4,10 @@ import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  endMarkedGroups,
   endProcessGroups,
   FREEZE_PASSES_MAX,
+  GROUP_END_WARNING,
   GROUP_GRACE_MS,
   GROUP_MARKER_VARIABLE,
   killChildTree,
@@ -436,4 +438,67 @@ test("the system environment read answers the group of a descendant that holds t
     [leader.pid, descendant].sort(),
   );
   assert.deepEqual(markedGroups(`${marker}-other`), []);
+});
+
+test("(invariant guard) a signal failure at the marked group end emits one warning and resolves", async (t) => {
+  const timer = mockedGraceTimer(t);
+  const warnings: Error[] = [];
+  const listener = (warning: Error) => warnings.push(warning);
+  process.on("warning", listener);
+  t.after(() => process.off("warning", listener));
+  const ended = endMarkedGroups(MARKER, {
+    readTable: () => [ownRow, groupRow(MARKED_GROUP)],
+    readEnvironments: () => [
+      environmentRow(MARKED_GROUP, MARKED_GROUP, MARKER),
+    ],
+    readHolders: () => [],
+    signalGroup: () => {
+      throw errorWithCode("EPERM");
+    },
+  });
+  timer.graceEnds();
+  await ended;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    warnings.map((warning) => warning.name),
+    [GROUP_END_WARNING],
+  );
+});
+
+test("(invariant guard) a failed table read at the marked group end emits one warning and resolves", async (t) => {
+  const warnings: Error[] = [];
+  const listener = (warning: Error) => warnings.push(warning);
+  process.on("warning", listener);
+  t.after(() => process.off("warning", listener));
+  await endMarkedGroups(MARKER, {
+    readTable: () => {
+      throw errorWithCode("EIO");
+    },
+    readEnvironments: () => [],
+    readHolders: () => [],
+    signalGroup: () => {},
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(
+    warnings.map((warning) => warning.name),
+    [GROUP_END_WARNING],
+  );
+});
+
+test("a live group that holds no marked process gets no signal at the marked group end", async (t) => {
+  const timer = mockedGraceTimer(t);
+  const { system, signals } = recordingSystem(
+    [() => [ownRow, groupRow(MARKED_GROUP), groupRow(OTHER_GROUP)]],
+    [
+      environmentRow(MARKED_GROUP, MARKED_GROUP, MARKER),
+      environmentRow(OTHER_GROUP, OTHER_GROUP, OTHER_MARKER),
+    ],
+  );
+  const ended = endMarkedGroups(MARKER, system);
+  timer.graceEnds();
+  await ended;
+  assert.deepEqual(signals, [
+    `${TERM} ${MARKED_GROUP}`,
+    `${KILL} ${MARKED_GROUP}`,
+  ]);
 });

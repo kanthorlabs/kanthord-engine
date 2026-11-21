@@ -123,11 +123,9 @@ async function endedCall(
   let output = "";
   const marker = randomUUID();
   t.after(() => removeMarkerFile(marker));
-  const groups = new Set<number>();
   const ended = await processBashOperations(SHELL, () => {}, {
     killGroupAtEnd: true,
     marker,
-    track: (leader) => groups.add(leader),
   }).exec(command, temporary(t), {
     onData: (data) => {
       output += data.toString();
@@ -136,7 +134,7 @@ async function endedCall(
   return {
     exitCode: ended.exitCode,
     spawned: spawnedPids(t, [{ type: "text", text: output }]),
-    groups: [...new Set([...groups, ...markedGroups(marker)])],
+    groups: markedGroups(marker),
   };
 }
 

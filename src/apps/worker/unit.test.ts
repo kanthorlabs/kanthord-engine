@@ -14,7 +14,10 @@ import { WorkPullKind } from "../../scheduler/contract.ts";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
-import { HEARTBEAT_INTERVAL_MS } from "./registration.ts";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  REGISTRATION_INDETERMINATE,
+} from "./registration.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { existsSync, mkdirSync, readFileSync, utimesSync } from "node:fs";
@@ -939,7 +942,9 @@ async function addedUnit(t: TestContext, answers: unknown[]) {
   const second = scripted({
     register: async () => {
       registers++;
-      return answers.shift() ?? completed(REGISTRATION);
+      const answer = answers.shift();
+      if (answer instanceof Error) throw answer;
+      return answer ?? completed(REGISTRATION);
     },
     pull: (context) => {
       pulls++;
@@ -1074,6 +1079,44 @@ test(
       added.records.filter((record) => record.msg === RETRY_FAILED_MESSAGE),
       [{ msg: RETRY_FAILED_MESSAGE, code: WorkerErrorCode.RegistrationEnded }],
     );
+    await added.ended();
+  },
+);
+
+test(
+  "a registration with an indeterminate answer registers at the next retry and starts its pull loop",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      { type: OperationResultType.Indeterminate },
+    ]);
+    const error = await added.unit.add(added.binding);
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, REGISTRATION_INDETERMINATE);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    await added.pulled;
+    assert.equal(added.registers(), SECOND_REGISTER);
+    await added.ended();
+  },
+);
+
+test(
+  "a retry that throws an error that is not a diagnostic logs one record and keeps the unit running",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      SLOT_UNAVAILABLE,
+      new TypeError("transport broke"),
+    ]);
+    await added.unit.add(added.binding);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    while (!added.records.some((record) => record.msg === RETRY_FAILED_MESSAGE))
+      await delay(1, undefined, { signal: t.signal });
+    assert.deepEqual(
+      added.records.filter((record) => record.msg === RETRY_FAILED_MESSAGE),
+      [{ msg: RETRY_FAILED_MESSAGE, error_type: "TypeError" }],
+    );
+    assert.equal(added.registers(), SECOND_REGISTER);
     await added.ended();
   },
 );

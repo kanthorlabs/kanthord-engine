@@ -15,6 +15,7 @@ const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_STOP = "SIGSTOP";
 const SIGNAL_TERM = "SIGTERM";
 export const GROUP_GRACE_MS = 3000;
+export const GROUP_END_WARNING = "AgentProcessGroupEndWarning";
 export const GROUP_MARKER_VARIABLE = "KANTHORD_PROCESS_GROUP_MARKER";
 const NO_GROUPS = 0;
 const SINGLE_FAILURE = 1;
@@ -175,6 +176,29 @@ export function endProcessGroups(
       }
     }, GROUP_GRACE_MS);
   });
+}
+
+export async function endMarkedGroups(
+  marker: string,
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): Promise<void> {
+  try {
+    await endProcessGroups(markedGroups(marker, system), system);
+  } catch (error) {
+    warnGroupEnd(error);
+  }
+  try {
+    removeMarkerFile(marker);
+  } catch (error) {
+    warnGroupEnd(error);
+  }
+}
+
+function warnGroupEnd(error: unknown): void {
+  process.emitWarning(
+    error instanceof Error ? error.message : String(error),
+    GROUP_END_WARNING,
+  );
 }
 
 export function liveGroups(
