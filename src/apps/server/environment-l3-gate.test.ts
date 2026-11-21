@@ -16,6 +16,7 @@ import { stopAfter, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { MissionErrorCode, missionOperations } from "../../mission/contract.ts";
 import {
+  EnvironmentFailureClass,
   environmentSecretOperations,
   EnvironmentStatus,
   EnvironmentTarget,
@@ -103,6 +104,7 @@ const CHECK_NAME_PREFIX = "kanthord-env-check-";
 const Verb = {
   Build: "build",
   Image: "image",
+  Info: "info",
   Run: "run",
   Tag: "tag",
   Volume: "volume",
@@ -141,6 +143,8 @@ const ROTATED_PROOF_RUNS = 2;
 const MIXED_GROUPS = 2;
 const TRACE_SPANS = 4;
 const DEVCONTAINER_BUILD_COUNT = 1;
+const FAILED_CODE = 1;
+const RUNTIME_UNREACHABLE = "Cannot connect to Podman";
 const SETTLED_STATUSES: readonly EnvironmentStatus[] = [
   EnvironmentStatus.Ready,
   EnvironmentStatus.None,
@@ -160,6 +164,7 @@ interface RuntimeState {
   tags: Set<string>;
   caches: Map<string, CacheVolume>;
   gate: Promise<void> | null;
+  failure: string | null;
 }
 
 interface SecretRead {
@@ -333,7 +338,10 @@ async function answered(
   return fallback;
 }
 
-async function l3Fixture(t: TestContext, options: { memoryMb?: number } = {}) {
+async function l3Fixture(
+  t: TestContext,
+  options: { memoryMb?: number; runtimeFailure?: string } = {},
+) {
   const podman = fakeContainerHost(t);
   const devcontainer = fakeDevcontainerCli(t);
   const original = join(
@@ -345,6 +353,7 @@ async function l3Fixture(t: TestContext, options: { memoryMb?: number } = {}) {
     tags: new Set(),
     caches: new Map(),
     gate: null,
+    failure: options.runtimeFailure ?? null,
   };
   const host: RuntimeHost = {
     ...podman.host,
@@ -352,13 +361,16 @@ async function l3Fixture(t: TestContext, options: { memoryMb?: number } = {}) {
       ...podman.host.environment,
       PATH: `${secrets.bin}${delimiter}${podman.host.environment.PATH}`,
     },
-    run: async (runtime, args, timeoutMs) =>
-      answered(
+    run: async (runtime, args, timeoutMs) => {
+      if (state.failure !== null && args[0] === Verb.Info)
+        return { code: FAILED_CODE, stdout: "", stderr: state.failure };
+      return answered(
         state,
         devcontainer.invocations,
         args,
         await podman.host.run(runtime, args, timeoutMs),
-      ),
+      );
+    },
   };
   const starts: SlotStart[] = [];
   const stateDirectory = temporary(t);
@@ -1078,5 +1090,41 @@ test(
     const builds = l3.devcontainer.invocations();
     assert.equal(builds.length, DEVCONTAINER_BUILD_COUNT);
     assert.ok(!builds[0]!.args.includes(Option.Memory));
+  },
+);
+
+test(
+  "an image run with a container runtime that does not answer starts no devcontainer build and records the status detail",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const l3 = await l3Fixture(t, { runtimeFailure: RUNTIME_UNREACHABLE });
+    const { fixture } = l3;
+    const projectId = await createEmptyProject(fixture, "environment-l3-down");
+    await writeBindings(fixture, projectId, {
+      [REPOSITORY_BINDING]: repositoryBinding(
+        "git@github.com:owner/repo.git",
+        STORED_ENVIRONMENT,
+      ),
+      [WORKER_BINDING]: await containerWorker(
+        fixture,
+        WORKER_BINDING,
+        REPOSITORY_BINDING,
+      ),
+      [REVIEWER_BINDING]: REVIEWER,
+    });
+    const [item] = await awaitItems(
+      t,
+      fixture,
+      projectId,
+      (found) =>
+        found.length === SINGLE_ITEM &&
+        found[0]!.status === EnvironmentStatus.Failed,
+    );
+    assert.ok(item);
+    assert.equal(item.status, EnvironmentStatus.Failed);
+    assert.equal(item.failure?.class, EnvironmentFailureClass.BuildFailed);
+    assert.equal(item.failure?.tail, RUNTIME_UNREACHABLE);
+    assert.equal(l3.devcontainer.invocations().length, NO_ITEMS);
+    assert.equal(layerBuilds(l3).length, NO_ITEMS);
   },
 );

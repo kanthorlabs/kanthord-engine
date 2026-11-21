@@ -67,6 +67,9 @@ export function startHeartbeat(
   };
 }
 
+export const REGISTRATION_INDETERMINATE =
+  "worker.start.registration_indeterminate";
+
 export async function register(
   api: WorkerTransport,
   context: Context = background,
@@ -81,7 +84,7 @@ export async function register(
   if (result.type === OperationResultType.Failure)
     throw new Diagnostic(result.error.error.code, result.error.error.message);
   throw new Diagnostic(
-    "worker.start.registration_indeterminate",
+    REGISTRATION_INDETERMINATE,
     "worker: registration answer is indeterminate.",
   );
 }

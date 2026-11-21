@@ -1441,14 +1441,15 @@ export class Onboarding {
   }
 
   private releaseSecrets(record: GroupRecord, runId: string): SecretRelease {
-    if (record.secrets.length === NO_ITEMS)
-      return { outcome: SecretReleaseOutcome.Released, files: [], values: [] };
-    return this.dependencies.secrets.release({
-      projectId: record.project_id,
-      bindingId: record.binding_id,
-      runId,
-      entries: record.secrets,
-    });
+    if (!record.read_succeeded) return { outcome: SecretReleaseOutcome.Stale };
+    return record.secrets.length === NO_ITEMS
+      ? { outcome: SecretReleaseOutcome.Released, files: [], values: [] }
+      : this.dependencies.secrets.release({
+          projectId: record.project_id,
+          bindingId: record.binding_id,
+          runId,
+          entries: record.secrets,
+        });
   }
 
   private async tracedBuild(

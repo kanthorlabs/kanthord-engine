@@ -491,3 +491,52 @@ test("an aborted bash call leaves no process of its tree, also a process in its 
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
 });
+
+const F79_CASE_TIMEOUT_MS = 30_000;
+
+test(
+  "F79 path 4: the abort that NativeAgent.dispose() raises kills the tree of a running bash call at once",
+  { timeout: F79_CASE_TIMEOUT_MS },
+  async (t) => {
+    unwrapped(t);
+    const pi = await loadPi();
+    const now = Date.now();
+    const budget = new ExecutionBudget({
+      created_at: now,
+      expired_at: now + COMMAND_LIMIT_MS,
+      resource_budget: { wall_time_ms: COMMAND_LIMIT_MS },
+    });
+    const [bash] = sessionTools(
+      pi,
+      "swe@1",
+      temporary(t),
+      budget,
+      unusedHostTools,
+      hostEnvironment(),
+      new ToolProcesses(pi.getShellConfig()),
+      { denyRead: [] },
+    ).customTools;
+    const controller = new AbortController();
+    const ready = Promise.withResolvers<number[]>();
+    const running = bash!.execute(
+      TOOL_CALL,
+      { command: processTreeCommand() },
+      controller.signal,
+      (update) => {
+        const pids = pidsIn(update.content);
+        if (pids.length === PROCESS_TREE_PIDS) ready.resolve(pids);
+      },
+      undefined as never,
+    );
+    const settled = running.then(
+      () => undefined,
+      (error: Error) => error,
+    );
+    const spawned = spawnedPids(t, [
+      { type: "text", text: (await ready.promise).join("\n") },
+    ]);
+    controller.abort();
+    assert.deepEqual(await survivingProcesses(spawned), []);
+    assert.match((await settled)?.message ?? "", /Command aborted/);
+  },
+);

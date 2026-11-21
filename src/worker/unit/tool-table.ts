@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
   BashOperations,
@@ -18,6 +19,7 @@ import {
   type ShellConfig,
 } from "../../agent/bash-process.ts";
 import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
+import { endMarkedGroups } from "../../kernel/process-group.ts";
 export { childEnvironment } from "../../agent/environment.ts";
 
 const MINIMUM_SECONDS = 1;
@@ -43,6 +45,7 @@ export class ToolProcesses {
   private readonly shell: ShellConfig;
   private readonly ended = new Map<string, BashProcess>();
   private readonly timeouts = new Map<string, ToolTimeout>();
+  private readonly marker = randomUUID();
 
   constructor(shell: ShellConfig) {
     assert.ok(shell.shell);
@@ -57,8 +60,15 @@ export class ToolProcesses {
         if (this.ended.size >= PROCESSES_MAX) this.ended.clear();
         this.ended.set(toolCallId, bashProcess);
       },
-      { killGroupAtEnd: true },
+      {
+        killGroupAtEnd: true,
+        marker: this.marker,
+      },
     );
+  }
+
+  endGroups(): Promise<void> {
+    return endMarkedGroups(this.marker);
   }
 
   take(toolCallId: string): BashProcess | undefined {

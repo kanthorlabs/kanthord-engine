@@ -25,10 +25,14 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
+import { GROUP_GRACE_MS } from "../../kernel/process-group.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -70,6 +74,10 @@ import { readSessionFileEntry } from "./session-store.ts";
 import { SessionReadOutcome } from "../contract.ts";
 
 after(() => bashSandbox.dispose());
+
+function unwrapped(t: TestContext) {
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
+}
 
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
@@ -741,6 +749,121 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
     h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
   );
 });
+
+const DISPOSE_TREE = [
+  "sleep 60 >/dev/null 2>&1 & echo $! >pid-leader-group",
+  "bash -c 'set -m; sleep 60 >/dev/null 2>&1 & echo $! >pid-own-group; sleep 60' >/dev/null 2>&1 &",
+  "wait",
+].join("\n");
+const DISPOSE_TREE_FILES = ["pid-leader-group", "pid-own-group"];
+const DISPOSE_CASE_TIMEOUT_MS = 30_000;
+
+test(
+  "F79 path 4: NativeAgent.dispose() kills the tree of a running bash call, also a process in its own group",
+  { timeout: DISPOSE_CASE_TIMEOUT_MS },
+  async (t) => {
+    unwrapped(t);
+    const h = await fixture(t, [
+      tool("bash", { command: DISPOSE_TREE }),
+      fauxAssistantMessage("unexpected"),
+    ]);
+    const pending = h.agent.prompt(WORK).catch(() => undefined);
+    const files = DISPOSE_TREE_FILES.map((name) => join(h.workspace, name));
+    while (!files.every((file) => existsSync(file)))
+      await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+    const spawned = spawnedPids(t, [
+      {
+        type: "text",
+        text: files.map((file) => readFileSync(file, "utf8")).join(""),
+      },
+    ]);
+    assert.equal(spawned.length, files.length);
+    h.agent.dispose();
+    assert.deepEqual(await survivingProcesses(spawned), []);
+    await pending;
+  },
+);
+
+const IGNORER_COMMAND = [
+  "set -m",
+  `node -e "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! >pid-ignorer`,
+].join("\n");
+const SIGTERM_WAIT_MS = 300;
+const IGNORER_CASE_TIMEOUT_MS = 60_000;
+
+test(
+  "dispose ends a descendant of a finished bash call that ignores SIGTERM with SIGKILL after the grace time",
+  { timeout: IGNORER_CASE_TIMEOUT_MS },
+  async (t) => {
+    unwrapped(t);
+    const h = await fixture(t, [
+      tool("bash", { command: IGNORER_COMMAND }),
+      fauxAssistantMessage("done"),
+    ]);
+    await h.agent.prompt(WORK);
+    const spawned = spawnedPids(t, [
+      {
+        type: "text",
+        text: readFileSync(join(h.workspace, "pid-ignorer"), "utf8"),
+      },
+    ]);
+    assert.equal(spawned.length, SINGLE_CALL_COUNT);
+    assert.deepEqual(await survivingProcesses(spawned), spawned);
+    h.agent.dispose();
+    await setTimeout(SIGTERM_WAIT_MS);
+    assert.equal((await survivingProcesses(spawned)).length, SINGLE_CALL_COUNT);
+    await setTimeout(GROUP_GRACE_MS);
+    assert.deepEqual(await survivingProcesses(spawned), []);
+  },
+);
+
+const SANDBOX_PLATFORM = "linux";
+const PROC_DIRECTORY = "/proc";
+const SANDBOX_STARTED = "sandbox-started";
+
+function processesWith(token: string): string[] {
+  return readdirSync(PROC_DIRECTORY)
+    .filter((entry) => /^\d+$/.test(entry))
+    .filter((pid) => {
+      try {
+        return readFileSync(join(PROC_DIRECTORY, pid, "cmdline"), "utf8")
+          .split("\0")
+          .includes(token);
+      } catch {
+        return false;
+      }
+    });
+}
+
+test(
+  "(sandbox) dispose during a wrapped bash call leaves no process of its tree on the host, also one in its own group that ignores SIGTERM",
+  {
+    timeout: IGNORER_CASE_TIMEOUT_MS,
+    skip: platform() !== SANDBOX_PLATFORM && "the bwrap sandbox runs on Linux",
+  },
+  async (t) => {
+    const token = randomUUID();
+    const h = await fixture(t, [
+      tool("bash", {
+        command: [
+          "set -m",
+          `node -e "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)" ${token} >/dev/null 2>&1 &`,
+          `echo started >${SANDBOX_STARTED}`,
+          "sleep 30",
+        ].join("\n"),
+      }),
+      fauxAssistantMessage("unexpected"),
+    ]);
+    const pending = h.agent.prompt(WORK).catch(() => undefined);
+    const started = join(h.workspace, SANDBOX_STARTED);
+    while (!existsSync(started) || processesWith(token).length === NO_ENTRIES)
+      await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+    h.agent.dispose();
+    await setTimeout(GROUP_GRACE_MS + SIGTERM_WAIT_MS);
+    assert.deepEqual(processesWith(token), []);
+    await pending;
+  },
+);
 
 test("native instructions preserve pinned work and persist the session and last text", async (t) => {
   const h = await fixture(t, [

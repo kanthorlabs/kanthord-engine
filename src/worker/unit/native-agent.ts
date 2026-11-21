@@ -161,6 +161,7 @@ function nativeAgent(
   redaction: SensitiveTextRedaction,
   templates: PromptTemplates,
   record: (sent: TurnPrompt) => void,
+  processes: ToolProcesses,
 ): NativeAgent {
   const recordSend = (work: WorkPrompt, template: PromptTemplate) =>
     record({
@@ -235,6 +236,7 @@ function nativeAgent(
       context.cancel();
       session?.dispose();
       session = null;
+      void processes.endGroups();
     },
   };
 }
@@ -374,6 +376,7 @@ export async function openNativeAgent(
       (prompt) => {
         sent = prompt;
       },
+      processes,
     );
   } catch (error) {
     trace?.end(SpanStatus.Error);

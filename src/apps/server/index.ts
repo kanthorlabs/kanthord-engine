@@ -164,7 +164,11 @@ import { ContainerDriver } from "./container-driver.ts";
 import { EnvironmentImages } from "./environment-image.ts";
 import { EnvironmentProbe } from "./environment-probe.ts";
 import { HostProofs } from "./environment-host-proof.ts";
-import type { EnvironmentRuntime } from "../../project/environment-state.ts";
+import {
+  EnvironmentFailureClass,
+  type EnvironmentRuntime,
+  ImageBuildOutcome,
+} from "../../project/environment-state.ts";
 import { COMMAND_LIMIT_MS } from "../../worker/unit/budget.ts";
 import {
   containerOwner,
@@ -235,6 +239,7 @@ export { enforceMasterKey, verifyMasterKey } from "../../custody/index.ts";
 const TRACE_ID_BYTES = 16;
 const SPAN_ID_BYTES = 8;
 const STDERR_DESCRIPTOR = 2;
+const RUNTIME_UNAVAILABLE = "the container runtime is unavailable";
 const STOP_WATCHDOG_MS = 10000;
 
 function selectionsByHolder(
@@ -513,7 +518,16 @@ export function composeServices(options: ComposeServicesOptions) {
     pullImage: (reference, signal) =>
       environmentImages.pullImage(reference, signal),
     imageExists: (tag) => environmentImages.imageExists(tag),
-    build: (input, signal) => environmentImages.build(input, signal),
+    build: async (input, signal) => {
+      const status = await containerDriver.check();
+      if (!status.available)
+        return {
+          outcome: ImageBuildOutcome.Failed,
+          class: EnvironmentFailureClass.BuildFailed,
+          tail: status.detail ?? status.reason ?? RUNTIME_UNAVAILABLE,
+        };
+      return environmentImages.build(input, signal);
+    },
     prove: (input, signal) => environmentImages.prove(input, signal),
     proveOnHost: (input, signal) => hostProofs.proveOnHost(input, signal),
     tagProved: (tag) => environmentImages.tagProved(tag),

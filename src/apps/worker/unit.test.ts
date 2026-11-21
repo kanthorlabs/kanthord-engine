@@ -14,6 +14,10 @@ import { WorkPullKind } from "../../scheduler/contract.ts";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
+import {
+  HEARTBEAT_INTERVAL_MS,
+  REGISTRATION_INDETERMINATE,
+} from "./registration.ts";
 import type { WorkerTransport } from "./transport.ts";
 import { testClaim } from "./test-support.ts";
 import { existsSync, mkdirSync, readFileSync, utimesSync } from "node:fs";
@@ -88,6 +92,7 @@ function cancelled(context: Context | undefined) {
 
 function scripted(options: {
   pull: (context: Context | undefined) => Promise<unknown>;
+  register?: () => Promise<unknown>;
   handover?: () => Promise<unknown>;
   deregister?: () => unknown;
 }) {
@@ -98,7 +103,7 @@ function scripted(options: {
         completed(stringify({ info: { version: packageVersion() } })),
     },
     worker: {
-      register: async () => completed(REGISTRATION),
+      register: options.register ?? (async () => completed(REGISTRATION)),
       heartbeat: async () => completed(null),
       handover: options.handover,
       "registration.deregister": async (input: {
@@ -902,3 +907,216 @@ test("a stop whose release fails answers worker.stop.execution_live with the exe
   await live.running;
   assert.deepEqual(live.events, ["push", "release"]);
 });
+
+const RETRY_INTERVAL_MS = HEARTBEAT_INTERVAL_MS;
+const APPLICATION_READY = "Worker application ready";
+const RETRY_FAILED_MESSAGE = "Worker registration retry failed";
+const RETRY_CASE_TIMEOUT_MS = 30000;
+const SECOND_REGISTER = 2;
+const SINGLE_REGISTER = 1;
+const NO_RECORDS = 0;
+
+function refusal(code: string, status: number) {
+  return {
+    type: OperationResultType.Failure,
+    status,
+    error: {
+      error: { code, message: "The registration was refused." },
+      request_id: "request_01ARZ3NDEKTSV4RRFFQ69G5FAA",
+    },
+  };
+}
+
+const SLOT_UNAVAILABLE = refusal(
+  WorkerErrorCode.SlotUnavailable,
+  HttpStatus.Conflict,
+);
+
+async function addedUnit(t: TestContext, answers: unknown[]) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const records: Record<string, unknown>[] = [];
+  const first = scripted({ pull: (context) => cancelled(context) });
+  const pulled = Promise.withResolvers<void>();
+  let registers = 0;
+  let pulls = 0;
+  const second = scripted({
+    register: async () => {
+      registers++;
+      const answer = answers.shift();
+      if (answer instanceof Error) throw answer;
+      return answer ?? completed(REGISTRATION);
+    },
+    pull: (context) => {
+      pulls++;
+      pulled.resolve();
+      return cancelled(context);
+    },
+  });
+  const env = environmentOf(t);
+  const unit = new WorkerUnit({
+    bindings: [
+      {
+        transport: first.transport,
+        client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+      },
+    ],
+    directories: directoriesOf(env),
+    env,
+    deny_read: [],
+    log: (line) => records.push(JSON.parse(line) as Record<string, unknown>),
+  });
+  const running = unit.run();
+  while (!records.some((record) => record.msg === APPLICATION_READY))
+    await delay(1, undefined, { signal: t.signal });
+  const binding = {
+    transport: second.transport,
+    client_secret: randomBytes(CLIENT_SECRET_BYTES).toString("base64"),
+  };
+  const ended = async () => {
+    void unit.drain();
+    assert.equal(await running, null);
+  };
+  return {
+    unit,
+    binding,
+    records,
+    ended,
+    pulled: pulled.promise,
+    registers: () => registers,
+    pulls: () => pulls,
+  };
+}
+
+test(
+  "a registration that answers slot_unavailable registers at the next retry after the slot frees and starts its pull loop",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [SLOT_UNAVAILABLE]);
+    const error = await added.unit.add(added.binding);
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, WorkerErrorCode.SlotUnavailable);
+    assert.equal(added.registers(), SINGLE_REGISTER);
+    assert.equal(added.pulls(), NO_RECORDS);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    await added.pulled;
+    assert.equal(added.registers(), SECOND_REGISTER);
+    assert.equal(
+      added.records.filter((record) => record.msg === RETRY_FAILED_MESSAGE)
+        .length,
+      NO_RECORDS,
+    );
+    await added.ended();
+  },
+);
+
+test(
+  "a retry that meets slot_unavailable again arms the next retry",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [SLOT_UNAVAILABLE, SLOT_UNAVAILABLE]);
+    await added.unit.add(added.binding);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    while (added.registers() < SECOND_REGISTER)
+      await delay(1, undefined, { signal: t.signal });
+    await delay(SETTLE_WAIT_MS);
+    assert.equal(added.pulls(), NO_RECORDS);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    await added.pulled;
+    assert.equal(added.registers(), SECOND_REGISTER + SINGLE_REGISTER);
+    await added.ended();
+  },
+);
+
+test(
+  "a remove before the slot frees stops the retries and sends no later register call",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [SLOT_UNAVAILABLE]);
+    await added.unit.add(added.binding);
+    assert.equal(await added.unit.remove(added.binding), null);
+    t.mock.timers.tick(RETRY_INTERVAL_MS * SECOND_REGISTER);
+    await delay(SETTLE_WAIT_MS);
+    assert.equal(added.registers(), SINGLE_REGISTER);
+    assert.equal(added.pulls(), NO_RECORDS);
+    await added.ended();
+  },
+);
+
+test(
+  "a register failure with another code arms no retry",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      refusal(WorkerErrorCode.RegistrationEnded, HttpStatus.Conflict),
+    ]);
+    const error = await added.unit.add(added.binding);
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, WorkerErrorCode.RegistrationEnded);
+    t.mock.timers.tick(RETRY_INTERVAL_MS * SECOND_REGISTER);
+    await delay(SETTLE_WAIT_MS);
+    assert.equal(added.registers(), SINGLE_REGISTER);
+    await added.ended();
+  },
+);
+
+test(
+  "a retry that fails with another code logs one record and arms no further retry",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      SLOT_UNAVAILABLE,
+      refusal(WorkerErrorCode.RegistrationEnded, HttpStatus.Conflict),
+    ]);
+    await added.unit.add(added.binding);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    while (added.registers() < SECOND_REGISTER)
+      await delay(1, undefined, { signal: t.signal });
+    await delay(SETTLE_WAIT_MS);
+    t.mock.timers.tick(RETRY_INTERVAL_MS * SECOND_REGISTER);
+    await delay(SETTLE_WAIT_MS);
+    assert.equal(added.registers(), SECOND_REGISTER);
+    assert.deepEqual(
+      added.records.filter((record) => record.msg === RETRY_FAILED_MESSAGE),
+      [{ msg: RETRY_FAILED_MESSAGE, code: WorkerErrorCode.RegistrationEnded }],
+    );
+    await added.ended();
+  },
+);
+
+test(
+  "a registration with an indeterminate answer registers at the next retry and starts its pull loop",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      { type: OperationResultType.Indeterminate },
+    ]);
+    const error = await added.unit.add(added.binding);
+    assert.ok(error instanceof Diagnostic);
+    assert.equal(error.code, REGISTRATION_INDETERMINATE);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    await added.pulled;
+    assert.equal(added.registers(), SECOND_REGISTER);
+    await added.ended();
+  },
+);
+
+test(
+  "a retry that throws an error that is not a diagnostic logs one record and keeps the unit running",
+  { timeout: RETRY_CASE_TIMEOUT_MS },
+  async (t) => {
+    const added = await addedUnit(t, [
+      SLOT_UNAVAILABLE,
+      new TypeError("transport broke"),
+    ]);
+    await added.unit.add(added.binding);
+    t.mock.timers.tick(RETRY_INTERVAL_MS);
+    while (!added.records.some((record) => record.msg === RETRY_FAILED_MESSAGE))
+      await delay(1, undefined, { signal: t.signal });
+    assert.deepEqual(
+      added.records.filter((record) => record.msg === RETRY_FAILED_MESSAGE),
+      [{ msg: RETRY_FAILED_MESSAGE, error_type: "TypeError" }],
+    );
+    assert.equal(added.registers(), SECOND_REGISTER);
+    await added.ended();
+  },
+);

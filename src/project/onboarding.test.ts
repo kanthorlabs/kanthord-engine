@@ -126,6 +126,7 @@ const DOCS_NAME = "docs";
 const DOCS_REPAIRS = 2;
 const ONE_CALL = 1;
 const NO_CALLS = 0;
+const BUILD_EVENT = "build";
 const NO_REPAIRS = 0;
 const PASSED = "passed";
 const FAILED = "failed";
@@ -298,6 +299,7 @@ class Harness {
   cacheList: Array<{ project_id: string; resource_identity: string }> = [];
   clock = 0;
   beforeRelease: (() => void) | null = null;
+  beforeProbe: (() => void) | null = null;
   script: (tools: ToolDefinition[]) => Promise<void> = async () => {};
   sessionInputs: EnvironmentSessionInput[] = [];
   sessionEnds = 0;
@@ -432,6 +434,7 @@ class Harness {
       },
       probePush: async ({ bindingId, commit, runId }) => {
         this.order.push("probePush");
+        this.beforeProbe?.();
         this.probeCalls.push({ bindingId, commit, runId });
         if (this.probeError !== null) throw this.probeError;
       },
@@ -2806,6 +2809,39 @@ test(
     assert.ok(!file.tail.includes(SECRET_TEXT));
     assert.equal(h.buildInputs.length, NO_CALLS);
     assert.equal(existsSync(h.secretFile()), false);
+  },
+);
+
+test(
+  "F9: a binding set with no container instance gives target host and no build, also when it changes after the run started",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = secretHarness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    h.beforeProbe = () => {
+      h.beforeProbe = null;
+      h.bindings = facts([SECRET_APP], [server]);
+      h.onboarding.bindingsChanged(PROJECT);
+    };
+    await h.compute(SECRET_APP);
+    assert.equal(h.state(SECRET_APP).target, EnvironmentTarget.Image);
+    await h.ended();
+    assert.equal(h.buildInputs.length, NO_CALLS);
+    assert.deepEqual(
+      h.events.filter((event) => event === BUILD_EVENT),
+      [],
+    );
+    await h.until(
+      () =>
+        h.state(SECRET_APP).target === EnvironmentTarget.Host &&
+        h.state(SECRET_APP).status === EnvironmentStatus.Ready,
+    );
+    const [first, ...later] = h.resolveCalls.map((call) => call.target);
+    assert.equal(first, EnvironmentTarget.Image);
+    assert.ok(later.length > NO_CALLS);
+    assert.ok(later.every((target) => target === EnvironmentTarget.Host));
+    assert.equal(h.buildInputs.length, NO_CALLS);
   },
 );
 

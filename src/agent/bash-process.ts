@@ -3,7 +3,12 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { killChildTree } from "../kernel/process-group.ts";
+import {
+  closeMarkerFile,
+  GROUP_MARKER_VARIABLE,
+  killChildTree,
+  openMarkerFile,
+} from "../kernel/process-group.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
@@ -29,6 +34,7 @@ type ExecOptions = Parameters<BashOperations["exec"]>[2];
 
 export interface BashGroupOptions {
   killGroupAtEnd: boolean;
+  marker?: string;
 }
 
 export function processBashOperations(
@@ -56,12 +62,7 @@ async function runBash(
   const timeoutMs = timeoutMsOf(timeout);
   if (signal?.aborted) throw new Error(ABORTED);
   await assertWorkingDirectory(cwd);
-  const child = spawn(shell.shell, [...shell.args, command], {
-    cwd,
-    detached: true,
-    env,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawnShell(shell, command, { cwd, env, marker: group.marker });
   const killer = childKiller(child);
   const timer = armKillTimer(killer.kill, timeoutMs);
   signal?.addEventListener("abort", killer.kill, { once: true });
@@ -76,6 +77,36 @@ async function runBash(
     clearTimeout(timer);
     signal?.removeEventListener("abort", killer.kill);
     settleChild(child, killer.wasKilled(), { settled, group });
+  }
+}
+
+interface SpawnTarget {
+  cwd: string;
+  env: NodeJS.ProcessEnv | undefined;
+  marker: string | undefined;
+}
+
+function spawnShell(
+  shell: ShellConfig,
+  command: string,
+  target: SpawnTarget,
+): ChildProcess {
+  const descriptor =
+    target.marker === undefined ? undefined : openMarkerFile(target.marker);
+  try {
+    return spawn(shell.shell, [...shell.args, command], {
+      cwd: target.cwd,
+      detached: true,
+      env: markedEnvironment(target.env, target.marker),
+      stdio: [
+        "ignore",
+        "pipe",
+        "pipe",
+        ...(descriptor === undefined ? [] : [descriptor]),
+      ],
+    });
+  } finally {
+    closeMarkerFile(descriptor);
   }
 }
 
@@ -116,6 +147,14 @@ function childKiller(child: ChildProcess): ChildKiller {
     wasKilled: () => killed,
     failure: () => killFailure,
   };
+}
+
+function markedEnvironment(
+  env: NodeJS.ProcessEnv | undefined,
+  marker: string | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (marker === undefined) return env;
+  return { ...(env ?? process.env), [GROUP_MARKER_VARIABLE]: marker };
 }
 
 function armKillTimer(
