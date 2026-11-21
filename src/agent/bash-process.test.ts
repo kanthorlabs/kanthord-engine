@@ -4,6 +4,7 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { type BashProcess, processBashOperations } from "./bash-process.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { endProcessGroups } from "../kernel/process-group.ts";
 import { pidsIn, spawnedPids, survivingProcesses } from "./test-support.ts";
 
 const SHELL = { shell: "/bin/bash", args: ["-c"] };
@@ -59,7 +60,7 @@ const SIGNAL_WAIT_MS = 300;
 const GROUP_CHILDREN =
   "sleep 30 >/dev/null 2>&1 & echo $!; (sleep 30 >/dev/null 2>&1 & echo $!)";
 const GROUP_PIDS = 2;
-const ESCAPED_CHILD = "set -m; sleep 30 >/dev/null 2>&1 & echo $!";
+const ESCAPED_CHILD = "set -m; sleep 30 >/dev/null 2>&1 & echo $!; sleep 2";
 const TREE_COMMAND = `${GROUP_CHILDREN}; (set -m; sleep 30 >/dev/null 2>&1 & echo $!; wait) & sleep 30`;
 const TREE_PIDS = 3;
 const HANDLER_READY = "ready";
@@ -110,10 +111,12 @@ function printedPids(output: () => string, count: number): Promise<string> {
 async function endedCall(
   t: TestContext,
   command: string,
-): Promise<{ exitCode: number | null; spawned: number[] }> {
+): Promise<{ exitCode: number | null; spawned: number[]; groups: number[] }> {
   let output = "";
+  const groups = new Set<number>();
   const ended = await processBashOperations(SHELL, () => {}, {
     killGroupAtEnd: true,
+    track: (tracked) => tracked.forEach((group) => groups.add(group)),
   }).exec(command, temporary(t), {
     onData: (data) => {
       output += data.toString();
@@ -122,6 +125,7 @@ async function endedCall(
   return {
     exitCode: ended.exitCode,
     spawned: spawnedPids(t, [{ type: "text", text: output }]),
+    groups: [...groups],
   };
 }
 
@@ -173,14 +177,16 @@ test(
 );
 
 test(
-  "F79 path 2: a descendant outside the leader group is alive with a new parent when the call ends",
-  F79_OPEN,
+  "F79 path 2: a descendant outside the leader group is gone after the tracked groups end",
+  { timeout: CASE_TIMEOUT_MS },
   async (t) => {
-    const { exitCode, spawned } = await endedCall(t, ESCAPED_CHILD);
+    const { exitCode, spawned, groups } = await endedCall(t, ESCAPED_CHILD);
     assert.equal(exitCode, SUCCESS);
     assert.equal(spawned.length, ONE_CHILD);
     assert.deepEqual(await survivingProcesses(spawned), spawned);
     assert.notEqual(Number(processField("ppid", spawned[0]!)), process.pid);
+    await endProcessGroups(groups);
+    assert.deepEqual(await survivingProcesses(spawned), []);
   },
 );
 

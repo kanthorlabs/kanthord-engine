@@ -4,6 +4,8 @@ import { readdirSync, readFileSync } from "node:fs";
 
 const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_STOP = "SIGSTOP";
+const SIGNAL_TERM = "SIGTERM";
+export const GROUP_GRACE_MS = 3000;
 const NO_GROUPS = 0;
 const SINGLE_FAILURE = 1;
 export const FREEZE_PASSES_MAX = 8;
@@ -14,7 +16,10 @@ const LINUX = "linux";
 const PROC_DIRECTORY = "/proc";
 const STAT_PPID_FIELD = 1;
 const STAT_GROUP_FIELD = 2;
-const PS_COLUMNS = 3;
+const PS_COLUMNS = 4;
+const PS_STATE_COLUMN = 3;
+const ZOMBIE_STATE = "Z";
+const STAT_STATE_FIELD = 0;
 const PS_PATH = "/bin/ps";
 const STAT_NAME_GAP = 2;
 const STAT_NAME_START = 0;
@@ -74,6 +79,37 @@ export function killProcessTree(
   const groups = stopped.size === NO_GROUPS ? [leader] : [...stopped];
   failures.push(...signalGroups(groups, SIGNAL_KILL, system));
   throwFailures(failures);
+}
+
+export function treeGroups(
+  leader: number,
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): number[] {
+  assertLeader(leader);
+  return freshGroups(leader, system.readTable(), new Set());
+}
+
+export function endProcessGroups(
+  groups: readonly number[],
+  system: ProcessSystem = SYSTEM_PROCESSES,
+): Promise<void> {
+  for (const group of groups) assertLeader(group);
+  if (groups.length === NO_GROUPS) return Promise.resolve();
+  const live = [...liveGroups(groups, system)];
+  if (live.length === NO_GROUPS) return Promise.resolve();
+  const failures = signalGroups(live, SIGNAL_TERM, system);
+  return new Promise((resolve, reject) => {
+    setTimeout(() => {
+      try {
+        const remaining = [...liveGroups(live, system)];
+        failures.push(...signalGroups(remaining, SIGNAL_KILL, system));
+        throwFailures(failures);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    }, GROUP_GRACE_MS);
+  });
 }
 
 export function liveGroups(
@@ -186,8 +222,15 @@ function procTable(): ProcessRow[] {
     .filter((name) => /^\d+$/.test(name))
     .flatMap((name) => {
       const stat = procStat(name);
-      return stat === null ? [] : [procStatRow(stat)];
+      return stat === null || zombieStat(stat) ? [] : [procStatRow(stat)];
     });
+}
+
+function zombieStat(stat: string): boolean {
+  const name = stat.lastIndexOf(")");
+  assert.ok(name > STAT_NAME_START);
+  const fields = stat.slice(name + STAT_NAME_GAP).split(" ");
+  return fields[STAT_STATE_FIELD] === ZOMBIE_STATE;
 }
 
 export function procStatRow(stat: string): ProcessRow {
@@ -214,16 +257,20 @@ function procStat(pid: string): string | null {
 }
 
 function psTable(): ProcessRow[] {
-  const output = execFileSync(PS_PATH, ["-A", "-o", "pid=,ppid=,pgid="], {
+  const output = execFileSync(PS_PATH, ["-A", "-o", "pid=,ppid=,pgid=,stat="], {
     encoding: "utf8",
   });
   return output
     .split("\n")
-    .map((line) => line.trim().split(/\s+/).map(Number))
+    .map((line) => line.trim().split(/\s+/))
     .filter((columns) => columns.length === PS_COLUMNS)
+    .filter((columns) => !columns[PS_STATE_COLUMN]!.startsWith(ZOMBIE_STATE))
     .map(([pid, ppid, group]) => {
-      assert.ok(Number.isSafeInteger(pid) && Number.isSafeInteger(group));
-      return { pid: pid!, ppid: ppid!, group: group! };
+      assert.ok(
+        Number.isSafeInteger(Number(pid)) &&
+          Number.isSafeInteger(Number(group)),
+      );
+      return { pid: Number(pid), ppid: Number(ppid), group: Number(group) };
     });
 }
 

@@ -3,7 +3,9 @@ import { test, type TestContext } from "node:test";
 import { execFileSync, spawn } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import {
+  endProcessGroups,
   FREEZE_PASSES_MAX,
+  GROUP_GRACE_MS,
   killChildTree,
   killProcessTree,
   type ProcessRow,
@@ -20,6 +22,8 @@ const FORKED = 1003;
 const FOREIGN = 2000;
 const STOP = "SIGSTOP";
 const KILL = "SIGKILL";
+const TERM = "SIGTERM";
+const ONE_MS = 1;
 const ESCAPED_SECONDS = 60;
 const FORK_INTERVAL_MS = 5;
 const FORKS_BEFORE_KILL = 5;
@@ -271,4 +275,75 @@ test("a descendant whose parent exited before the kill is no longer a descendant
 
 test("a stat line with no name end is refused", () => {
   assert.throws(() => procStatRow("4242 node S 4200 4100"));
+});
+
+function groupRow(group: number): ProcessRow {
+  return { pid: group, ppid: 1, group };
+}
+
+function mockedGraceTimer(t: TestContext) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  return {
+    beforeGrace: () => t.mock.timers.tick(GROUP_GRACE_MS - ONE_MS),
+    atGrace: () => t.mock.timers.tick(ONE_MS),
+    graceEnds: () => t.mock.timers.tick(GROUP_GRACE_MS),
+  };
+}
+
+test("a live group gets SIGTERM and a group that ends before the grace time gets no SIGKILL", async (t) => {
+  const timer = mockedGraceTimer(t);
+  const { system, signals } = recordingSystem([
+    () => [ownRow, groupRow(LEADER), groupRow(FOREIGN)],
+    () => [ownRow, groupRow(FOREIGN)],
+  ]);
+  const ended = endProcessGroups([LEADER, CHILD], system);
+  assert.deepEqual(signals, [`${TERM} ${LEADER}`]);
+  timer.beforeGrace();
+  assert.deepEqual(signals, [`${TERM} ${LEADER}`]);
+  timer.atGrace();
+  await ended;
+  assert.deepEqual(signals, [`${TERM} ${LEADER}`]);
+});
+
+test("a group that is still live after the grace time gets SIGKILL", async (t) => {
+  const timer = mockedGraceTimer(t);
+  const { system, signals } = recordingSystem([
+    () => [ownRow, groupRow(LEADER), groupRow(CHILD)],
+    () => [ownRow, groupRow(CHILD)],
+  ]);
+  const ended = endProcessGroups([LEADER, CHILD], system);
+  timer.beforeGrace();
+  assert.deepEqual(signals, [`${TERM} ${LEADER}`, `${TERM} ${CHILD}`]);
+  timer.atGrace();
+  await ended;
+  assert.deepEqual(signals, [
+    `${TERM} ${LEADER}`,
+    `${TERM} ${CHILD}`,
+    `${KILL} ${CHILD}`,
+  ]);
+});
+
+test("ESRCH on a group is no failure and another error is a failure", async (t) => {
+  const timer = mockedGraceTimer(t);
+  const live = () => [ownRow, groupRow(LEADER)];
+  const refusing = (code: string): ProcessSystem => ({
+    readTable: live,
+    signalGroup: () => {
+      throw errorWithCode(code);
+    },
+  });
+  const gone = endProcessGroups([LEADER], refusing("ESRCH"));
+  timer.graceEnds();
+  await gone;
+  const refused = endProcessGroups([LEADER], refusing("EPERM"));
+  const rejection = assert.rejects(refused, AggregateError);
+  timer.graceEnds();
+  await rejection;
+});
+
+test("a group list with no live group arms no timer and signals nothing", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { system, signals } = recordingSystem([() => [ownRow]]);
+  await endProcessGroups([LEADER], system);
+  assert.deepEqual(signals, []);
 });

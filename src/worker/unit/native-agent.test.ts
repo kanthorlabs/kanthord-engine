@@ -30,6 +30,7 @@ import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
+import { GROUP_GRACE_MS } from "../../kernel/process-group.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -773,6 +774,39 @@ test(
     h.agent.dispose();
     assert.deepEqual(await survivingProcesses(spawned), []);
     await pending;
+  },
+);
+
+const IGNORER_COMMAND = [
+  "set -m",
+  `node -e "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! >pid-ignorer`,
+  "sleep 2",
+].join("\n");
+const SIGTERM_WAIT_MS = 300;
+const IGNORER_CASE_TIMEOUT_MS = 60_000;
+
+test(
+  "dispose ends a descendant of a finished bash call that ignores SIGTERM with SIGKILL after the grace time",
+  { timeout: IGNORER_CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = await fixture(t, [
+      tool("bash", { command: IGNORER_COMMAND }),
+      fauxAssistantMessage("done"),
+    ]);
+    await h.agent.prompt(WORK);
+    const spawned = spawnedPids(t, [
+      {
+        type: "text",
+        text: readFileSync(join(h.workspace, "pid-ignorer"), "utf8"),
+      },
+    ]);
+    assert.equal(spawned.length, SINGLE_CALL_COUNT);
+    assert.deepEqual(await survivingProcesses(spawned), spawned);
+    h.agent.dispose();
+    await setTimeout(SIGTERM_WAIT_MS);
+    assert.equal((await survivingProcesses(spawned)).length, SINGLE_CALL_COUNT);
+    await setTimeout(GROUP_GRACE_MS);
+    assert.deepEqual(await survivingProcesses(spawned), []);
   },
 );
 
