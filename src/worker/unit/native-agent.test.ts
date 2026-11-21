@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -741,6 +742,39 @@ test("native parent cancellation aborts an active tool and disposal refuses reus
     h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
   );
 });
+
+const DISPOSE_TREE = [
+  "sleep 60 >/dev/null 2>&1 & echo $! >pid-leader-group",
+  "bash -c 'set -m; sleep 60 >/dev/null 2>&1 & echo $! >pid-own-group; sleep 60' >/dev/null 2>&1 &",
+  "wait",
+].join("\n");
+const DISPOSE_TREE_FILES = ["pid-leader-group", "pid-own-group"];
+const DISPOSE_CASE_TIMEOUT_MS = 30_000;
+
+test(
+  "F79 path 4: NativeAgent.dispose() kills the tree of a running bash call, also a process in its own group",
+  { timeout: DISPOSE_CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = await fixture(t, [
+      tool("bash", { command: DISPOSE_TREE }),
+      fauxAssistantMessage("unexpected"),
+    ]);
+    const pending = h.agent.prompt(WORK).catch(() => undefined);
+    const files = DISPOSE_TREE_FILES.map((name) => join(h.workspace, name));
+    while (!files.every((file) => existsSync(file)))
+      await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+    const spawned = spawnedPids(t, [
+      {
+        type: "text",
+        text: files.map((file) => readFileSync(file, "utf8")).join(""),
+      },
+    ]);
+    assert.equal(spawned.length, files.length);
+    h.agent.dispose();
+    assert.deepEqual(await survivingProcesses(spawned), []);
+    await pending;
+  },
+);
 
 test("native instructions preserve pinned work and persist the session and last text", async (t) => {
   const h = await fixture(t, [
