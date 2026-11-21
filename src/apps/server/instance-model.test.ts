@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { MessagePort } from "node:worker_threads";
 import { simpleGit } from "simple-git";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
@@ -68,6 +69,8 @@ import {
   provisionRepositoryCredentials,
 } from "./test-support.ts";
 import { threadEnvironment } from "./thread-driver.ts";
+
+after(() => bashSandbox.dispose());
 
 const TEST_TIMEOUT_MS = 180000;
 const SETTLE_MS = 600;
