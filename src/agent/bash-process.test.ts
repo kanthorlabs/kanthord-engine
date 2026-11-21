@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { type BashProcess, processBashOperations } from "./bash-process.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { endProcessGroups } from "../kernel/process-group.ts";
+import { endProcessGroups, markedGroups } from "../kernel/process-group.ts";
 import { pidsIn, spawnedPids, survivingProcesses } from "./test-support.ts";
 
 const SHELL = { shell: "/bin/bash", args: ["-c"] };
@@ -60,13 +61,14 @@ const SIGNAL_WAIT_MS = 300;
 const GROUP_CHILDREN =
   "sleep 30 >/dev/null 2>&1 & echo $!; (sleep 30 >/dev/null 2>&1 & echo $!)";
 const GROUP_PIDS = 2;
-const ESCAPED_CHILD = "set -m; sleep 30 >/dev/null 2>&1 & echo $!; sleep 2";
+const ESCAPED_CHILD = "set -m; sleep 30 >/dev/null 2>&1 & echo $!";
 const TREE_COMMAND = `${GROUP_CHILDREN}; (set -m; sleep 30 >/dev/null 2>&1 & echo $!; wait) & sleep 30`;
 const TREE_PIDS = 3;
 const HANDLER_READY = "ready";
 const HANDLER_CHILD = `node -e "process.on('SIGTERM', () => process.exit(0)); console.log('${HANDLER_READY}'); setTimeout(() => {}, 30000)" & echo $!; wait`;
 const STOPPED_STATE = /^T/;
 const NOT_PERMITTED = "EPERM";
+const DARWIN = "darwin";
 const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_TERM = "SIGTERM";
 const ABORTED = "aborted";
@@ -113,10 +115,12 @@ async function endedCall(
   command: string,
 ): Promise<{ exitCode: number | null; spawned: number[]; groups: number[] }> {
   let output = "";
+  const marker = randomUUID();
   const groups = new Set<number>();
   const ended = await processBashOperations(SHELL, () => {}, {
     killGroupAtEnd: true,
-    track: (tracked) => tracked.forEach((group) => groups.add(group)),
+    marker,
+    track: (leader) => groups.add(leader),
   }).exec(command, temporary(t), {
     onData: (data) => {
       output += data.toString();
@@ -125,7 +129,7 @@ async function endedCall(
   return {
     exitCode: ended.exitCode,
     spawned: spawnedPids(t, [{ type: "text", text: output }]),
-    groups: [...groups],
+    groups: [...new Set([...groups, ...markedGroups(marker)])],
   };
 }
 
@@ -178,7 +182,12 @@ test(
 
 test(
   "F79 path 2: a descendant outside the leader group is gone after the tracked groups end",
-  { timeout: CASE_TIMEOUT_MS },
+  {
+    timeout: CASE_TIMEOUT_MS,
+    skip:
+      process.platform === DARWIN &&
+      "ps -E hides the environment of SIP platform binaries such as sleep",
+  },
   async (t) => {
     const { exitCode, spawned, groups } = await endedCall(t, ESCAPED_CHILD);
     assert.equal(exitCode, SUCCESS);

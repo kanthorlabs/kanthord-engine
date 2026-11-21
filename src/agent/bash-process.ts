@@ -3,12 +3,14 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
-import { killChildTree, treeGroups } from "../kernel/process-group.ts";
+import {
+  GROUP_MARKER_VARIABLE,
+  killChildTree,
+} from "../kernel/process-group.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
 const OUTPUT_IDLE_MS = 100;
-const GROUP_SAMPLE_MS = 1000;
 const NO_TIMEOUT_MS = 0;
 const SIGNAL_EXIT_BASE = 128;
 const FAILED_EXIT = 1;
@@ -30,7 +32,8 @@ type ExecOptions = Parameters<BashOperations["exec"]>[2];
 
 export interface BashGroupOptions {
   killGroupAtEnd: boolean;
-  track?: (groups: readonly number[]) => void;
+  marker?: string;
+  track?: (leader: number) => void;
 }
 
 export function processBashOperations(
@@ -61,23 +64,22 @@ async function runBash(
   const child = spawn(shell.shell, [...shell.args, command], {
     cwd,
     detached: true,
-    env,
+    env: markedEnvironment(env, group.marker),
     stdio: ["ignore", "pipe", "pipe"],
   });
   const killer = childKiller(child);
   const timer = armKillTimer(killer.kill, timeoutMs);
-  const sampler = groupSampler(child, group.track);
+  trackLeader(child, group);
   signal?.addEventListener("abort", killer.kill, { once: true });
   if (signal?.aborted) killer.kill();
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);
   try {
     const exitCode = await childExit(child);
-    assertBashOutcome(killer, sampler, { signal, timeout });
+    assertBashOutcome(killer, { signal, timeout });
     return { exitCode: exitCode ?? signalExit(child) };
   } finally {
     clearTimeout(timer);
-    sampler.stop();
     signal?.removeEventListener("abort", killer.kill);
     settleChild(child, killer.wasKilled(), { settled, group });
   }
@@ -122,32 +124,17 @@ function childKiller(child: ChildProcess): ChildKiller {
   };
 }
 
-interface GroupSampler {
-  stop: () => void;
-  failure: () => unknown;
+function trackLeader(child: ChildProcess, group: BashGroupOptions): void {
+  if (child.pid === undefined) return;
+  group.track?.(child.pid);
 }
 
-function groupSampler(
-  child: ChildProcess,
-  track: BashGroupOptions["track"],
-): GroupSampler {
-  if (track === undefined || child.pid === undefined)
-    return { stop: () => {}, failure: () => null };
-  const leader = child.pid;
-  let sampleFailure: unknown = null;
-  track([leader]);
-  const interval = setInterval(() => {
-    try {
-      track(treeGroups(leader));
-    } catch (error) {
-      sampleFailure = error;
-      clearInterval(interval);
-    }
-  }, GROUP_SAMPLE_MS);
-  return {
-    stop: () => clearInterval(interval),
-    failure: () => sampleFailure,
-  };
+function markedEnvironment(
+  env: NodeJS.ProcessEnv | undefined,
+  marker: string | undefined,
+): NodeJS.ProcessEnv | undefined {
+  if (marker === undefined) return env;
+  return { ...(env ?? process.env), [GROUP_MARKER_VARIABLE]: marker };
 }
 
 function armKillTimer(
@@ -162,13 +149,8 @@ interface BashOutcomeInput {
   timeout: number | undefined;
 }
 
-function assertBashOutcome(
-  killer: ChildKiller,
-  sampler: GroupSampler,
-  input: BashOutcomeInput,
-): void {
+function assertBashOutcome(killer: ChildKiller, input: BashOutcomeInput): void {
   if (killer.failure() !== null) throw killer.failure();
-  if (sampler.failure() !== null) throw sampler.failure();
   if (input.signal?.aborted) throw new Error(ABORTED);
   if (killer.wasKilled()) throw new Error(`timeout:${input.timeout}`);
 }

@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   endProcessGroups,
   FREEZE_PASSES_MAX,
   GROUP_GRACE_MS,
+  GROUP_MARKER_VARIABLE,
   killChildTree,
   killProcessTree,
+  markedGroups,
+  type ProcessEnvironment,
   type ProcessRow,
   type ProcessSystem,
   procStatRow,
@@ -44,7 +48,10 @@ const ownRow: ProcessRow = {
 };
 const leaderRow: ProcessRow = { pid: LEADER, ppid: 1, group: LEADER };
 
-function recordingSystem(tables: (() => ProcessRow[])[]) {
+function recordingSystem(
+  tables: (() => ProcessRow[])[],
+  environments: ProcessEnvironment[] = [],
+) {
   const signals: string[] = [];
   let reads = 0;
   const system: ProcessSystem = {
@@ -53,6 +60,7 @@ function recordingSystem(tables: (() => ProcessRow[])[]) {
       reads += 1;
       return table();
     },
+    readEnvironments: () => environments,
     signalGroup: (group, signal) => {
       signals.push(`${signal} ${group}`);
     },
@@ -137,6 +145,7 @@ test("a table read error after a stop still kills the stopped group and throws b
       if (reads > FIRST_READ) throw readFailure;
       return [ownRow, leaderRow, { pid: CHILD, ppid: LEADER, group: CHILD }];
     },
+    readEnvironments: () => [],
     signalGroup: (group, signal) => {
       signals.push(`${signal} ${group}`);
       if (signal === KILL && group === CHILD) throw errorWithCode("EPERM");
@@ -164,6 +173,7 @@ test("an absent group is no failure, one failure throws itself and two throw an 
   ];
   const failing = (codes: Record<number, string>): ProcessSystem => ({
     readTable: table,
+    readEnvironments: () => [],
     signalGroup: (group, signal) => {
       const code = codes[group];
       if (signal === KILL && code !== undefined) throw errorWithCode(code);
@@ -328,6 +338,7 @@ test("ESRCH on a group is no failure and another error is a failure", async (t) 
   const live = () => [ownRow, groupRow(LEADER)];
   const refusing = (code: string): ProcessSystem => ({
     readTable: live,
+    readEnvironments: () => [],
     signalGroup: () => {
       throw errorWithCode(code);
     },
@@ -346,4 +357,61 @@ test("a group list with no live group arms no timer and signals nothing", async 
   const { system, signals } = recordingSystem([() => [ownRow]]);
   await endProcessGroups([LEADER], system);
   assert.deepEqual(signals, []);
+});
+
+const MARKER = "marker-a";
+const OTHER_MARKER = "marker-b";
+const MARKED_GROUP = 3000;
+const OTHER_GROUP = 3001;
+
+function environmentRow(
+  pid: number,
+  group: number,
+  marker: string,
+): ProcessEnvironment {
+  return {
+    pid,
+    group,
+    variables: ["A=1", `${GROUP_MARKER_VARIABLE}=${marker}`],
+  };
+}
+
+test("a process of an unrecorded group that holds the marker value is answered by its group", () => {
+  const { system } = recordingSystem(
+    [() => [ownRow]],
+    [
+      environmentRow(MARKED_GROUP, MARKED_GROUP, MARKER),
+      environmentRow(OTHER_GROUP, OTHER_GROUP, OTHER_MARKER),
+      { pid: FOREIGN, group: FOREIGN, variables: ["A=1"] },
+    ],
+  );
+  assert.deepEqual(markedGroups(MARKER, system), [MARKED_GROUP]);
+});
+
+test("a marked process in the group of the caller is not answered", () => {
+  const { system } = recordingSystem(
+    [() => [ownRow]],
+    [environmentRow(MARKED_GROUP, OWN_GROUP, MARKER)],
+  );
+  assert.deepEqual(markedGroups(MARKER, system), []);
+});
+
+test("the system environment read answers the group of a descendant that holds the marker after its parent exits", async (t) => {
+  const marker = `live-${process.pid}-${Date.now()}`;
+  const parent = `const child = require("node:child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, ${ESCAPED_SECONDS}000)"], { detached: true, stdio: "ignore" }); console.log(child.pid); child.unref(); setTimeout(() => {}, ${ESCAPED_SECONDS}000)`;
+  const leader = spawn(process.execPath, ["-e", parent], {
+    detached: true,
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, [GROUP_MARKER_VARIABLE]: marker },
+  });
+  assert.ok(leader.pid);
+  stopAfter(t, () => killIfPresent(leader.pid!));
+  const [printed] = await once(leader.stdout, "data");
+  const descendant = Number.parseInt(String(printed), 10);
+  stopAfter(t, () => killIfPresent(descendant));
+  assert.deepEqual(
+    markedGroups(marker).sort(),
+    [leader.pid, descendant].sort(),
+  );
+  assert.deepEqual(markedGroups(`${marker}-other`), []);
 });

@@ -6,6 +6,7 @@ const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_STOP = "SIGSTOP";
 const SIGNAL_TERM = "SIGTERM";
 export const GROUP_GRACE_MS = 3000;
+export const GROUP_MARKER_VARIABLE = "KANTHORD_PROCESS_GROUP_MARKER";
 const NO_GROUPS = 0;
 const SINGLE_FAILURE = 1;
 export const FREEZE_PASSES_MAX = 8;
@@ -21,6 +22,12 @@ const PS_STATE_COLUMN = 3;
 const ZOMBIE_STATE = "Z";
 const STAT_STATE_FIELD = 0;
 const PS_PATH = "/bin/ps";
+const PS_ENVIRONMENT_LINE = /^\s*(\d+)\s+(\d+)\s+(.*)$/;
+const PS_ENVIRONMENT_PID = 1;
+const PS_ENVIRONMENT_GROUP = 2;
+const PS_ENVIRONMENT_COMMAND = 3;
+const ENVIRONMENT_SEPARATOR = "\0";
+const UNREADABLE_CODES = ["ENOENT", "ESRCH", "EACCES", "EPERM"];
 const STAT_NAME_GAP = 2;
 const STAT_NAME_START = 0;
 
@@ -36,13 +43,21 @@ export function killProcessGroup(leader: number): void {
   process.kill(-leader, SIGNAL_KILL);
 }
 
+export interface ProcessEnvironment {
+  pid: number;
+  group: number;
+  variables: readonly string[];
+}
+
 export interface ProcessSystem {
   readTable: () => ProcessRow[];
+  readEnvironments: () => ProcessEnvironment[];
   signalGroup: (group: number, signal: NodeJS.Signals) => void;
 }
 
 export const SYSTEM_PROCESSES: ProcessSystem = {
   readTable: () => processTable(),
+  readEnvironments: () => environmentTable(),
   signalGroup: (group, signal) => process.kill(-group, signal),
 };
 
@@ -81,12 +96,19 @@ export function killProcessTree(
   throwFailures(failures);
 }
 
-export function treeGroups(
-  leader: number,
+export function markedGroups(
+  marker: string,
   system: ProcessSystem = SYSTEM_PROCESSES,
 ): number[] {
-  assertLeader(leader);
-  return freshGroups(leader, system.readTable(), new Set());
+  assert.ok(marker);
+  const variable = `${GROUP_MARKER_VARIABLE}=${marker}`;
+  const own = ownGroups(system.readTable());
+  const groups = system
+    .readEnvironments()
+    .filter((row) => row.variables.includes(variable))
+    .map((row) => row.group)
+    .filter((group) => group > FIRST_USER_PID && !own.has(group));
+  return [...new Set(groups)];
 }
 
 export function endProcessGroups(
@@ -254,6 +276,50 @@ function procStat(pid: string): string | null {
       return null;
     throw error;
   }
+}
+
+function environmentTable(): ProcessEnvironment[] {
+  return process.platform === LINUX ? procEnvironments() : psEnvironments();
+}
+
+function procEnvironments(): ProcessEnvironment[] {
+  return readdirSync(PROC_DIRECTORY)
+    .filter((name) => /^\d+$/.test(name))
+    .flatMap((name) => {
+      const stat = procStat(name);
+      const environ = stat === null ? null : procEnviron(name);
+      if (stat === null || environ === null) return [];
+      const { pid, group } = procStatRow(stat);
+      return [{ pid, group, variables: environ.split(ENVIRONMENT_SEPARATOR) }];
+    });
+}
+
+function procEnviron(pid: string): string | null {
+  try {
+    return readFileSync(`${PROC_DIRECTORY}/${pid}/environ`, "utf8");
+  } catch (error) {
+    if (UNREADABLE_CODES.some((code) => isCode(error, code))) return null;
+    throw error;
+  }
+}
+
+function psEnvironments(): ProcessEnvironment[] {
+  const output = execFileSync(
+    PS_PATH,
+    ["-E", "-ww", "-A", "-o", "pid=,pgid=,command="],
+    { encoding: "utf8" },
+  );
+  return output.split("\n").flatMap((line) => {
+    const columns = PS_ENVIRONMENT_LINE.exec(line);
+    if (columns === null) return [];
+    return [
+      {
+        pid: Number(columns[PS_ENVIRONMENT_PID]),
+        group: Number(columns[PS_ENVIRONMENT_GROUP]),
+        variables: columns[PS_ENVIRONMENT_COMMAND]!.split(/\s+/),
+      },
+    ];
+  });
 }
 
 function psTable(): ProcessRow[] {

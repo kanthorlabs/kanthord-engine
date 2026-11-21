@@ -780,7 +780,6 @@ test(
 const IGNORER_COMMAND = [
   "set -m",
   `node -e "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! >pid-ignorer`,
-  "sleep 2",
 ].join("\n");
 const SIGTERM_WAIT_MS = 300;
 const IGNORER_CASE_TIMEOUT_MS = 60_000;
