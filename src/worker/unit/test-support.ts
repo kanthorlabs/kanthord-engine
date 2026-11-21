@@ -67,6 +67,7 @@ import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
+import { verificationCommands } from "./evaluation-input.ts";
 import { doneTrailerOf } from "./done-record.ts";
 import { VerificationKind } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
@@ -391,6 +392,17 @@ async function openExecution(
     type: "api_key",
     key: STEPS_KEY,
   }));
+  const revision = {
+    filename: "implement.md",
+    content: {
+      name: "implement",
+      requirement: "implement",
+      criterion: "implement",
+      verifications: ["true"],
+      bindings: [],
+    },
+    tasks,
+  } as unknown as Revision;
   const agent = await openNativeAgent({
     hostTools: unusedHostTools,
     setup,
@@ -414,23 +426,17 @@ async function openExecution(
     denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
+    verification: {
+      commands: verificationCommands(revision),
+      checkouts: workspace.checkouts.map(({ directory }) => directory),
+    },
   });
   stopAfter(t, () => agent.dispose());
   return {
     input,
     run,
     agent,
-    revision: {
-      filename: "implement.md",
-      content: {
-        name: "implement",
-        requirement: "implement",
-        criterion: "implement",
-        verifications: ["true"],
-        bindings: [],
-      },
-      tasks,
-    } as unknown as Revision,
+    revision,
     ...workspace,
     verdict: null as Verdict | null,
     cleared: null as string | null,

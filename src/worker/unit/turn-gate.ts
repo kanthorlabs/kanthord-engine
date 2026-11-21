@@ -154,6 +154,9 @@ export function gatedAgent(
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),
+    verificationWrites: (directory) => agent.verificationWrites(directory),
+    clearVerificationWrites: (directory) =>
+      agent.clearVerificationWrites(directory),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
     dispose: () => agent.dispose(),
@@ -400,12 +403,13 @@ async function settleCheckout(
         context,
         remaining(),
         await namedPointers(state, checkout, context),
-        [],
+        state.agent.verificationWrites(directory),
       )) !== null;
   else {
     await refuseMarkers(state, checkout, merge, context);
     await concludeMerge(env, directory, turn.message, context, remaining());
   }
+  state.agent.clearVerificationWrites(directory);
   checkout.head = await headCommit(env, directory, context, remaining());
   await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
   return changed;

@@ -1,6 +1,9 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type {
+  AgentSession,
+  InlineExtension,
+} from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { CancellationContext, Context } from "../../kernel/context.ts";
@@ -23,6 +26,10 @@ import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
 import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
 import { sessionTools, ToolProcesses } from "./tool-table.ts";
+import {
+  type VerificationScope,
+  VerificationWrites,
+} from "./verification-writes.ts";
 import type {
   ExecutionCredential,
   ModelRuntimeFactory,
@@ -67,6 +74,7 @@ export interface NativeAgentInput {
   turnCheck?: () => Promise<void>;
   spans?: SpanRecorder;
   sessionRoot?: string;
+  verification?: VerificationScope;
 }
 export interface TurnPrompt {
   template: PromptTemplate;
@@ -81,6 +89,8 @@ export interface NativeAgent {
     template: PromptTemplate,
   ): Promise<void>;
   lastText(): string | undefined;
+  verificationWrites(directory: string): string[];
+  clearVerificationWrites(directory: string): void;
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   closeTrace(status: SpanStatus): void;
@@ -162,6 +172,7 @@ function nativeAgent(
   templates: PromptTemplates,
   record: (sent: TurnPrompt) => void,
   processes: ToolProcesses,
+  writes: VerificationWrites | undefined,
 ): NativeAgent {
   const recordSend = (work: WorkPrompt, template: PromptTemplate) =>
     record({
@@ -224,6 +235,8 @@ function nativeAgent(
       assert.ok(session);
       return session.getLastAssistantText();
     },
+    verificationWrites: (directory) => writes?.pathsOf(directory) ?? [],
+    clearVerificationWrites: (directory) => writes?.clear(directory),
     closeTrace(status) {
       if (session) trace?.end(status);
     },
@@ -289,6 +302,28 @@ function startSessionTrace(
   return { sessionId, trace: sessionTrace(input.spans, sessionId) };
 }
 
+function verificationWritesOf(
+  input: NativeAgentInput,
+): VerificationWrites | undefined {
+  if (!input.verification) return undefined;
+  return new VerificationWrites({
+    ...input.verification,
+    env: input.env,
+    context: input.context,
+    workspace: input.workspace,
+  });
+}
+
+function sessionHooks(
+  workspace: string,
+  pinned: InlineExtension,
+  writes: VerificationWrites | undefined,
+): InlineExtension[] {
+  const hooks = [pinned, checkoutConfinement(workspace)];
+  if (writes) hooks.push(writes.ownership());
+  return hooks;
+}
+
 export async function openNativeAgent(
   input: NativeAgentInput,
 ): Promise<NativeAgent> {
@@ -327,6 +362,7 @@ export async function openNativeAgent(
         )
       : pi.SessionManager.inMemory(input.workspace, options);
     const processes = new ToolProcesses(pi.getShellConfig());
+    const writes = verificationWritesOf(input);
     const opened = await openSession({
       cwd: input.workspace,
       modelRuntime: runtime,
@@ -342,9 +378,10 @@ export async function openNativeAgent(
         input.env,
         processes,
         { denyRead: input.denyRead, root: input.sandboxRoot },
+        writes,
       ),
       hostHome: input.hostHome,
-      hooks: [pins.hook, checkoutConfinement(input.workspace)],
+      hooks: sessionHooks(input.workspace, pins.hook, writes),
       context,
       sessionManager,
       knownSecrets: secrets,
@@ -377,6 +414,7 @@ export async function openNativeAgent(
         sent = prompt;
       },
       processes,
+      writes,
     );
   } catch (error) {
     trace?.end(SpanStatus.Error);

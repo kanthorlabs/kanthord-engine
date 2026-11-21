@@ -21,6 +21,10 @@ import {
 import { childEnvironment, sessionTools, ToolProcesses } from "./tool-table.ts";
 import { HOST_TOOL_PARAMETERS } from "../../agent/catalog.ts";
 import { HostTool } from "../contract.ts";
+import { VerificationWrites } from "./verification-writes.ts";
+import { simpleGit } from "simple-git";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { background } from "../../kernel/context.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const MODEL_TIMEOUT_SECONDS = 30;
@@ -540,3 +544,128 @@ test(
     assert.match((await settled)?.message ?? "", /Command aborted/);
   },
 );
+
+const VERIFY = "sh check.sh";
+const PYC = "pkg/__pycache__/check.pyc";
+const WRITE_PYC =
+  "mkdir -p pkg/__pycache__ && echo cache > pkg/__pycache__/check.pyc";
+const FAILING_EXIT = 3;
+const FAILING_OUTPUT = "verification-output\n";
+const NOTE_CONTENT = "note";
+const UNTRACKED_CONTENT = "untracked";
+const TRACKED_CONTENT = "tracked content";
+
+async function verificationCheckout(
+  t: TestContext,
+  script: string,
+  extra: Record<string, string> = {},
+) {
+  unwrapped(t);
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, ".gitignore"), "/__pycache__\n");
+  writeFileSync(join(directory, "check.sh"), script);
+  writeFileSync(join(directory, "tracked"), TRACKED_CONTENT);
+  for (const [name, content] of Object.entries(extra))
+    writeFileSync(join(directory, name), content);
+  mkdirSync(join(directory, "pkg"));
+  await git.add("--all");
+  await git.commit("initial");
+  const pi = await loadPi();
+  const writes = new VerificationWrites({
+    commands: [VERIFY],
+    checkouts: [directory],
+    env: hostEnvironment(),
+    context: background,
+    workspace: directory,
+  });
+  const now = Date.now();
+  const tools = sessionTools(
+    pi,
+    "swe@1",
+    directory,
+    new ExecutionBudget({
+      created_at: now,
+      expired_at: now + COMMAND_LIMIT_MS,
+      resource_budget: { wall_time_ms: COMMAND_LIMIT_MS },
+    }),
+    unusedHostTools,
+    hostEnvironment(),
+    new ToolProcesses(pi.getShellConfig()),
+    { denyRead: [] },
+    writes,
+  );
+  return { directory, git, writes, tools };
+}
+
+test("(F90) a verification run records the new untracked path that the ignore rules do not match and keeps the file", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(t, WRITE_PYC);
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), [PYC]);
+  assert.equal(existsSync(join(directory, PYC)), true);
+});
+
+test("a command that holds a verification command as a part is no verification run", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(t, WRITE_PYC);
+  await runBash(tools, `cd pkg && ${VERIFY}`);
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
+test("a verification command with outer spaces is a verification run", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(t, WRITE_PYC);
+  await runBash(tools, `  ${VERIFY}  `);
+  assert.deepEqual(writes.pathsOf(directory), [PYC]);
+});
+
+test("a bash call that is no verification records no write", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    WRITE_PYC,
+    { "generate.sh": "echo generated > gen.ts" },
+  );
+  await runBash(tools, "sh generate.sh");
+  assert.equal(existsSync(join(directory, "gen.ts")), true);
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
+test("a failing verification run records its new untracked paths and keeps the exit output", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    `${WRITE_PYC}; echo ${FAILING_OUTPUT.trim()}; exit ${FAILING_EXIT}`,
+  );
+  const result = await runBash(tools, VERIFY);
+  const content = result.structuredContent as {
+    output: string;
+    exit_code: number;
+  };
+  assert.equal(content.output, FAILING_OUTPUT);
+  assert.equal(content.exit_code, FAILING_EXIT);
+  assert.deepEqual(writes.pathsOf(directory), [PYC]);
+});
+
+test("a verification run deletes no file and changes no tracked file", async (t) => {
+  const { directory, git, writes, tools } = await verificationCheckout(
+    t,
+    WRITE_PYC,
+    { "note.txt": NOTE_CONTENT },
+  );
+  writeFileSync(join(directory, "untracked.txt"), UNTRACKED_CONTENT);
+  await runBash(tools, VERIFY);
+  assert.equal(
+    readFileSync(join(directory, "tracked"), "utf8"),
+    TRACKED_CONTENT,
+  );
+  assert.equal(readFileSync(join(directory, "note.txt"), "utf8"), NOTE_CONTENT);
+  assert.equal(
+    readFileSync(join(directory, "untracked.txt"), "utf8"),
+    UNTRACKED_CONTENT,
+  );
+  assert.equal(
+    (await git.raw(["status", "--porcelain", "--untracked-files=all"])).trim(),
+    `?? ${PYC}\n?? untracked.txt`,
+  );
+  assert.deepEqual(writes.pathsOf(directory), [PYC]);
+});

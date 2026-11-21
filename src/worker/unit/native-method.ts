@@ -15,6 +15,7 @@ import { Phase, type SpanEnd, type TelemetrySink } from "./telemetry.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { verificationCommands } from "./evaluation-input.ts";
+import type { VerificationScope } from "./verification-writes.ts";
 import { VerificationMemo } from "./verification-memo.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";
@@ -106,7 +107,10 @@ export async function runNativeExecution(
       if (!method) return run.stop(EndReason.OperationFailed);
       const revision = await readPinnedRevision(run);
       const intent = input.setup.intent;
-      const open = async (workspace: string) => {
+      const open = async (
+        workspace: string,
+        verification?: VerificationScope,
+      ) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
         const credential = input.credentials.items.find(
@@ -132,6 +136,7 @@ export async function runNativeExecution(
           turnCheck: () => run.checkClaim(),
           spans: run.spans,
           sessionRoot: input.sessionRoot,
+          verification,
         });
         const stop = stopOnEnd(run, native);
         const trace = run.onTraceClose((status) => native.closeTrace(status));
@@ -159,7 +164,10 @@ export async function runNativeExecution(
       );
       let working: NativeAgent;
       try {
-        working = await open(workspace.root);
+        working = await open(workspace.root, {
+          commands: verificationCommands(revision),
+          checkouts: workspace.checkouts.map(({ directory }) => directory),
+        });
       } catch (error) {
         await workspace.base.giveBack();
         input.workspaces.release(

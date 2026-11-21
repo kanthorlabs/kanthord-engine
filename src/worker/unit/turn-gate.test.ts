@@ -84,6 +84,8 @@ const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
 const SUBMODULE = "sub";
+const CACHE_FILE = "pkg/__pycache__/check.pyc";
+const WRITE_CACHE = `mkdir -p pkg/__pycache__ && echo cache > ${CACHE_FILE}`;
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -313,6 +315,40 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       assert.equal(turn.changed, false);
       assert.equal(turn.gitlink, turn.first);
     }
+  });
+
+  async function verificationTurn(
+    t: TestContext,
+    coderWrites: [string, string][],
+  ) {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        bash(WRITE_CACHE),
+        ...coderWrites.map(([path, content]) => write(path, content)),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    const committed = (
+      await simpleGit(h.root).raw(["show", "--name-only", "--format=", "HEAD"])
+    )
+      .trim()
+      .split("\n");
+    return { h, committed };
+  }
+
+  test("a verification run that wrote a cache file leaves the file out of the turn commit and in the work tree", async (t) => {
+    const { h, committed } = await verificationTurn(t, [[WORK_FILE, "a"]]);
+    assert.deepEqual(committed, [WORK_FILE]);
+    assert.equal(existsSync(join(h.root, CACHE_FILE)), true);
+    assert.equal((await simpleGit(h.root).status()).isClean(), true);
+  });
+
+  test("a coder write on a path that a verification run recorded puts the path in the turn commit", async (t) => {
+    const { committed } = await verificationTurn(t, [[CACHE_FILE, "coder"]]);
+    assert.deepEqual(committed, [CACHE_FILE]);
   });
 
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {

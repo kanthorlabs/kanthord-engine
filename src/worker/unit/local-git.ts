@@ -33,6 +33,7 @@ const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
 const STATUS_PREFIX_LENGTH = 3;
+const UNTRACKED_PREFIX = "?? ";
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
 const RENAME_LETTER = "R";
@@ -243,6 +244,17 @@ async function trimTurnStaging(
       ["update-index", "--force-remove", "--", ...batch],
       scope.context,
       scope.remaining(),
+    );
+  const left = rules.verificationWrites.filter((path) => added.has(path));
+  if (left.length > NO_PATHS)
+    await excludePaths(
+      {
+        env: scope.env,
+        directory: scope.directory,
+        context: scope.context,
+        deadlineMs: scope.remaining(),
+      },
+      left,
     );
   await unstageGitlinkMoves(scope, rules.pointers);
 }
@@ -1313,15 +1325,26 @@ export async function excludeUntracked(
     .split(NUL)
     .filter(Boolean);
   if (!paths.length) return paths;
+  await excludePaths(
+    { env, directory, context, deadlineMs: end - performance.now() },
+    paths,
+  );
+  return paths;
+}
+
+async function excludePaths(
+  call: GitCall,
+  paths: readonly string[],
+): Promise<void> {
   const excludeFile = resolve(
-    directory,
+    call.directory,
     (
       await run(
-        env,
-        directory,
+        call.env,
+        call.directory,
         ["rev-parse", "--git-path", "info/exclude"],
-        context,
-        end - performance.now(),
+        call.context,
+        call.deadlineMs,
       )
     ).trim(),
   );
@@ -1333,7 +1356,6 @@ export async function excludeUntracked(
         .map((path) => `/${path.replace(EXCLUDE_SPECIAL, "\\$&")}\n`)
         .join(""),
   );
-  return paths;
 }
 
 export interface GitCall {
@@ -1426,6 +1448,21 @@ export async function trackedChanges(
   )
     .split(NUL)
     .filter((entry) => entry.length > STATUS_PREFIX_LENGTH)
+    .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
+}
+
+export async function untrackedPaths(call: GitCall): Promise<string[]> {
+  return (
+    await run(
+      call.env,
+      call.directory,
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      call.context,
+      call.deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter((entry) => entry.startsWith(UNTRACKED_PREFIX))
     .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
 }
 

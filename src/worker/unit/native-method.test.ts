@@ -452,6 +452,89 @@ test("an agent open that throws after the prepare gives the base head tree back 
   );
 });
 
+test("an implement execution opens its agent with the pinned verification commands, so a coder verification write stays out of the pushed commit", async (t) => {
+  const writeCache =
+    "mkdir -p pkg/__pycache__ && echo cache > pkg/__pycache__/check.pyc";
+  const h = await implementFixture(t, [], []);
+  const { claim } = h.input;
+  const setup = h.input.setup;
+  const complete = (data: unknown) => ({
+    type: "completed",
+    status: 200,
+    data,
+  });
+  const clients = {
+    mission: {
+      "execution.pinnedRevision.get": async () =>
+        complete({
+          content: {
+            ...h.revision.content,
+            verifications: [writeCache],
+            bindings: [setup.repositories[0]!.binding_id],
+          },
+          tasks: [],
+        }),
+      "execution.rework_assessment.get": async () => complete(null),
+      "execution.evidence.list": async () =>
+        complete({ items: [], next_cursor: null }),
+      "evidence.submit": async () => complete({ evidence: {} }),
+    },
+    scheduler: { executionRelease: async () => complete({}) },
+    worker: {
+      "execution.failed_check.get": async () => complete({ items: [] }),
+      "execution.link_update.get": async () =>
+        complete({ items: [], next_cursor: null, total: 0 }),
+    },
+  } as unknown as MethodClients;
+  const store = new InMemoryCredentialStore();
+  await store.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_verification_scope",
+  }));
+  const provider = scriptedProvider([
+    fauxAssistantMessage(fauxToolCall("bash", { command: writeCache }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(
+      fauxToolCall("write", { path: "a.txt", content: "a" }),
+      { stopReason: "toolUse" },
+    ),
+    fauxAssistantMessage("done"),
+  ]);
+  const workspaces = WorkspaceRoot.open(temporary(t));
+  await runNativeExecution({
+    claim,
+    setup,
+    clients,
+    credentials: {
+      items: [
+        {
+          credential_id: setup.agents[0]!.credential_id,
+          provider_id: "anthropic",
+          store,
+        },
+      ],
+      release: async () => {},
+    },
+    transport,
+    sshAccess: testSshAccess(setup.repositories),
+    workspaces,
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    denyRead: [],
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: () => unusedHostTools,
+    context: background,
+  });
+  const pushed = await simpleGit(h.bare).raw([
+    "ls-tree",
+    "-r",
+    "--name-only",
+    claim.node_branch,
+  ]);
+  assert.deepEqual(pushed.trim().split("\n"), ["a.txt", "file"]);
+});
+
 const OK_RELEASE = { kind: "released", furtherWork: false };
 const NODE_ONLY_SETUP_FAILURE = 'case "$PWD" in */checkouts/*) exit 1;; esac';
 const ONE_COMMAND_TREE = 1;
