@@ -773,13 +773,30 @@ The `swe@1` bash of a coder execution runs in the sandbox of
 `@anthropic-ai/sandbox-runtime` `0.0.26`, as the Workbench bash does. The
 [Built-in tools](./workbench.md#built-in-tools) section of the Workbench page
 states the configuration and the paths. `allowWrite` holds the workspace and the
-`TMPDIR` of the instance. `denyRead` holds the credential paths of the worker
-process, among them `~/.config/kanthord-eval` and `~/.pi/agent`, and names no
-workspace, no `TMPDIR` and no ancestor of them. A bash call fails with an error
-tool result when the sandbox cannot start. No command runs without the sandbox.
-A Linux host of a worker instance needs `bubblewrap`, `socat` and `ripgrep` on
-`PATH`. A macOS host needs `ripgrep` (`rg`). The node verifications run outside
-the sandbox.
+`TMPDIR` of the instance. Each command exports that `TMPDIR`. The bash sets
+`npm_config_store_dir` and `npm_config_cache` to directories under that
+`TMPDIR`. `denyRead` holds the credential paths of the worker process, among
+them `~/.config/kanthord-eval`, `~/.pi/agent` and the pi directory of the
+instance. Keep the eval credential under `~/.config/kanthord-eval/`. When
+`EVAL_ANTHROPIC_AUTH_FILE` names a custom absolute path, `denyRead` holds that
+file and its symlink target.
+
+`denyRead` names no workspace, no `TMPDIR` and no ancestor of them. For each
+entry that is an ancestor of the instance root, `denyRead` holds each child of
+the entry that is not on the path to the root. So the other instance roots,
+`tracking.db`, its `-wal` and `-shm` files and each `*.bak-*` file stay denied.
+The bash computes the list at each call, so a later instance root is also
+denied. A bash call fails with an error tool result when the sandbox cannot
+start. The bash has no unsandboxed fallback.
+
+The node verification commands and the local git of the worker run outside the
+sandbox (plan rule R1). The `read`, `grep`, `find`, `ls`, `edit` and `write`
+tools of a worker agent refuse a path outside the workspace and an absolute
+path, as the Workbench tools do. A Linux host of a worker instance needs
+`bubblewrap`, `socat` and `ripgrep` on `PATH`. A macOS host needs `ripgrep`
+(`rg`). A container placement does not support the coder bash. The sandbox
+needs bubblewrap, `socat`, `rg` and user namespaces, and the default seccomp
+profile of the slot container blocks user namespaces.
 
 The data directory of the instance is `<XDG data directory>/kanthord/workers/<name>`.
 The log directory is `<XDG state directory>/kanthord/workers/<name>`.
