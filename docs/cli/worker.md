@@ -251,8 +251,11 @@ any key, so a restarted program keeps its runtime identity. A recorded replay
 whose registration has ended is rejected with `409` `gateway.registration.stale`;
 it does not recreate or transfer the registration. A binding with no free slot, or
 an unavailable binding, answers `409` `worker.registration.slot_unavailable`.
-Cancellation does not deregister an accepted registration. There is no automatic
-CLI retry. Declared failures print the `status` and `idempotency_key` rows;
+Cancellation does not deregister an accepted registration. A worker instance, at
+the worker or the server placement, retries a registration that answers
+`worker.registration.slot_unavailable` each 60 s until the slot frees or the
+binding drops the instance. Another error code ends the retries. There is no
+automatic CLI retry. Declared failures print the `status` and `idempotency_key` rows;
 indeterminate results print the `idempotency_key` row and instruct explicit reuse of it.
 
 The [Gateway idempotency component](../../src/gateway/idempotency.ts) stores

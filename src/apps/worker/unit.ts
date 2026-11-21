@@ -34,6 +34,7 @@ import { Backoff } from "./api.ts";
 import type { WorkerTransport } from "./transport.ts";
 import {
   deregister,
+  HEARTBEAT_INTERVAL_MS,
   register,
   type Registration,
   startHeartbeat,
@@ -64,6 +65,7 @@ const ANSWER_INVALID = "gateway.client.answer_invalid";
 const RESUME_PULL_WAIT_MS = 5000;
 const FOOTPRINT_REPORT_FAILED = "Worker footprint report failed";
 const FOOTPRINT_MEASURE_FAILED = "Worker footprint measure failed";
+const RETRY_FAILED = "Worker registration retry failed";
 
 export interface UnitBinding {
   transport: WorkerTransport;
@@ -104,6 +106,7 @@ interface Entry {
   registration?: Registration;
   registering?: Promise<Registration>;
   heartbeat?: { stop(): void };
+  retry?: NodeJS.Timeout;
   pulling?: Promise<unknown>;
   loop?: Promise<Diagnostic | null>;
   kept: boolean;
@@ -115,6 +118,13 @@ interface Execution {
   context: CancellationContext;
   stopWith(stop: ExecutionStop): void;
   task: Promise<Diagnostic | null | typeof SETUP_UNAVAILABLE>;
+}
+
+function isSlotUnavailable(error: unknown): boolean {
+  return (
+    error instanceof Diagnostic &&
+    error.code === WorkerErrorCode.SlotUnavailable
+  );
 }
 
 export class WorkerUnit {
@@ -324,7 +334,10 @@ export class WorkerUnit {
   quiesce(): Promise<Error | null> {
     this.quiesceTask ??= lifecycle(async () => {
       this.shutdown.cancel();
-      for (const entry of this.entries) entry.heartbeat?.stop();
+      for (const entry of this.entries) {
+        entry.heartbeat?.stop();
+        clearTimeout(entry.retry);
+      }
     });
     return this.quiesceTask;
   }
@@ -401,16 +414,51 @@ export class WorkerUnit {
     return lifecycle(async () => {
       await this.startTask;
       if (this.shutdown.signal.aborted) return;
-      await this.registerEntry(entry);
-      if (this.running && !entry.loop && !this.pulls.signal.aborted)
-        this.runEntry(entry);
+      try {
+        await this.registerEntry(entry);
+      } catch (error) {
+        if (isSlotUnavailable(error)) this.armRetry(entry);
+        throw error;
+      }
+      this.runRegistered(entry);
     });
+  }
+
+  private runRegistered(entry: Entry): void {
+    if (this.running && !entry.loop && !this.pulls.signal.aborted)
+      this.runEntry(entry);
+  }
+
+  private armRetry(entry: Entry): void {
+    entry.retry = setTimeout(() => {
+      void this.retryEntry(entry);
+    }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  private async retryEntry(entry: Entry): Promise<void> {
+    entry.retry = undefined;
+    if (this.shutdown.signal.aborted || entry.pulls.signal.aborted) return;
+    try {
+      await this.registerEntry(entry);
+    } catch (error) {
+      if (isSlotUnavailable(error)) this.armRetry(entry);
+      else this.logRetryFailure(error);
+      return;
+    }
+    if (entry.pulls.signal.aborted) return;
+    this.runRegistered(entry);
+  }
+
+  private logRetryFailure(error: unknown): void {
+    if (!(error instanceof Diagnostic)) throw error;
+    this.logRecord({ msg: RETRY_FAILED, code: error.code }, "warn");
   }
 
   async remove(binding: UnitBinding): Promise<Error | null> {
     const entry = this.entries.find((item) => item.binding === binding);
     if (!entry) return null;
     entry.pulls.cancel();
+    clearTimeout(entry.retry);
     const failure = await entry.loop;
     await entry.pulling;
     await entry.registering;
