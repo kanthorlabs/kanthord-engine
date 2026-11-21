@@ -430,6 +430,7 @@ export class WorkerUnit {
   }
 
   private armRetry(entry: Entry): void {
+    if (this.shutdown.signal.aborted || entry.pulls.signal.aborted) return;
     entry.retry = setTimeout(() => {
       void this.retryEntry(entry);
     }, HEARTBEAT_INTERVAL_MS);

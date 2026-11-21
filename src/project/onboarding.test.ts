@@ -299,6 +299,7 @@ class Harness {
   cacheList: Array<{ project_id: string; resource_identity: string }> = [];
   clock = 0;
   beforeRelease: (() => void) | null = null;
+  beforeProbe: (() => void) | null = null;
   script: (tools: ToolDefinition[]) => Promise<void> = async () => {};
   sessionInputs: EnvironmentSessionInput[] = [];
   sessionEnds = 0;
@@ -433,6 +434,7 @@ class Harness {
       },
       probePush: async ({ bindingId, commit, runId }) => {
         this.order.push("probePush");
+        this.beforeProbe?.();
         this.probeCalls.push({ bindingId, commit, runId });
         if (this.probeError !== null) throw this.probeError;
       },
@@ -2817,8 +2819,8 @@ test(
     const h = secretHarness(t);
     h.open();
     h.proveResults = PASSING_RESULTS;
-    h.beforeRelease = () => {
-      h.beforeRelease = null;
+    h.beforeProbe = () => {
+      h.beforeProbe = null;
       h.bindings = facts([SECRET_APP], [server]);
       h.onboarding.bindingsChanged(PROJECT);
     };

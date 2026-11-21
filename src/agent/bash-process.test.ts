@@ -56,7 +56,10 @@ test("a background child of a worker bash call is dead when the call ends", asyn
 });
 
 const CASE_TIMEOUT_MS = 30_000;
-const F79_OPEN = { todo: "F79: fixed by task 02", timeout: CASE_TIMEOUT_MS };
+const F79_OPEN = {
+  todo: "F79 path 5: stays open, no task of this node fixes it",
+  timeout: CASE_TIMEOUT_MS,
+};
 const KILL_TIMEOUT_SECONDS = 1;
 const PRINT_POLLS = 100;
 const PRINT_POLL_MS = 50;
