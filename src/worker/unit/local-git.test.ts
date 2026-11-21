@@ -40,6 +40,7 @@ import {
   treeOf,
 } from "./local-git.ts";
 import { readSetupRecord, writeSetupRecord } from "./setup-record.ts";
+import { addSubmodule, submoduleSource } from "./test-support.ts";
 import { PoolClass, TreePool } from "./tree-pool.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
@@ -55,6 +56,14 @@ const EMPTY_OBJECT = "{}";
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
 const REAL_CONTENT = "real";
+const SUBMODULE = "sub";
+const CLEAN_STATUS = "";
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -132,6 +141,53 @@ test("verification cleanup discards tracked and untracked edits but keeps ignore
   assert.equal(readFileSync(join(directory, "tracked"), "utf8"), original);
   assert.equal(existsSync(join(directory, "untracked")), false);
   assert.equal(existsSync(join(directory, "ignored")), true);
+});
+
+async function repositoryWithSubmodule(t: Parameters<typeof temporary>[0]) {
+  const source = await submoduleSource(t);
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(directory, "tracked"), "original");
+  await git.add("tracked");
+  await git.raw([...IDENTITY, "commit", "-m", "initial"]);
+  await addSubmodule(directory, source, SUBMODULE, source.first);
+  return { source, directory, git, sub: simpleGit(join(directory, SUBMODULE)) };
+}
+
+test("verification cleanup puts a moved submodule back at its gitlink commit", async (t) => {
+  const { source, directory, git, sub } = await repositoryWithSubmodule(t);
+  await sub.raw(["checkout", "--detach", source.second]);
+  assert.notEqual(
+    (await git.raw(["status", "--porcelain"])).trim(),
+    CLEAN_STATUS,
+  );
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+  assert.equal((await git.raw(["status", "--porcelain"])).trim(), CLEAN_STATUS);
+});
+
+test("verification cleanup keeps the submodule head at its gitlink commit when the submodule holds an edit", async (t) => {
+  const { source, directory, sub } = await repositoryWithSubmodule(t);
+  writeFileSync(join(directory, SUBMODULE, "file"), "edited");
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+  await sub.raw(["checkout", "--force", "--detach", source.second]);
+  writeFileSync(join(directory, SUBMODULE, "file"), "edited");
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+});
+
+test("verification cleanup skips a gitlink whose submodule directory holds no checkout", async (t) => {
+  const { directory: origin } = await repositoryWithSubmodule(t);
+  const directory = temporary(t);
+  await simpleGit().clone(origin, directory);
+  const before = readdirSync(directory).sort();
+  assert.deepEqual(readdirSync(join(directory, SUBMODULE)), []);
+  await discardChanges(env, directory, background, 10000);
+  assert.deepEqual(readdirSync(directory).sort(), before);
+  assert.deepEqual(readdirSync(join(directory, SUBMODULE)), []);
+  assert.equal(existsSync(join(directory, SUBMODULE, ".git")), false);
 });
 
 test("a tree id stays the same when an amend changes only the commit and differs when a file changes", async (t) => {

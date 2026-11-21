@@ -45,6 +45,8 @@ const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
 const RAW_RECORD_WIDTH = 2;
 const GIT_DIRECTORY = ".git";
+const GITLINK_MODE = "160000 ";
+const GITLINK_COMMIT_FIELD = 1;
 const LOCK_SUFFIX = ".lock";
 const NO_ENTRIES = 0;
 const FORMAT_VERSION = "0";
@@ -330,6 +332,7 @@ export async function discardChanges(
   assert.ok(Number.isFinite(deadlineMs));
   const end = performance.now() + deadlineMs;
   await run(env, directory, ["reset", "--hard", "HEAD"], context, deadlineMs);
+  await restoreGitlinks({ env, directory, context, end });
   await run(
     env,
     directory,
@@ -338,6 +341,51 @@ export async function discardChanges(
     Math.max(1, end - performance.now()),
   );
 }
+
+interface GitlinkScope {
+  env: NodeJS.ProcessEnv;
+  directory: string;
+  context: Context;
+  end: number;
+}
+
+async function restoreGitlinks(scope: GitlinkScope): Promise<void> {
+  const { env, directory, context, end } = scope;
+  const records = (
+    await run(
+      env,
+      directory,
+      ["ls-files", "--stage", "-z"],
+      context,
+      Math.max(1, end - performance.now()),
+    )
+  )
+    .split(NUL)
+    .filter((record) => record.startsWith(GITLINK_MODE));
+  for (const record of records) {
+    const [fields, path] = record.split("\t");
+    assert.ok(fields !== undefined && path);
+    const commit = fields.split(" ")[GITLINK_COMMIT_FIELD];
+    assert.ok(commit);
+    const submodule = join(directory, path);
+    if (!existsSync(join(submodule, GIT_DIRECTORY))) continue;
+    const current = await headCommit(
+      env,
+      submodule,
+      context,
+      Math.max(1, end - performance.now()),
+    );
+    if (current === commit) continue;
+    await run(
+      env,
+      submodule,
+      ["checkout", "--detach", "--force", commit, "--"],
+      context,
+      Math.max(1, end - performance.now()),
+    );
+  }
+}
+
 export async function headCommit(
   env: NodeJS.ProcessEnv,
   directory: string,

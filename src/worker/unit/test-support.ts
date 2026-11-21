@@ -447,6 +447,53 @@ async function openExecution(
   };
 }
 
+export interface SubmoduleSource {
+  address: string;
+  first: string;
+  second: string;
+}
+
+export async function submoduleSource(
+  t: TestContext,
+): Promise<SubmoduleSource> {
+  const address = temporary(t);
+  const git = simpleGit(address);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(address, "file"), "first");
+  await git.add("file");
+  await git.raw([...IDENTITY, "commit", "-m", "first"]);
+  const first = (await git.raw(["rev-parse", "HEAD"])).trim();
+  writeFileSync(join(address, "file"), "second");
+  await git.add("file");
+  await git.raw([...IDENTITY, "commit", "-m", "second"]);
+  const second = (await git.raw(["rev-parse", "HEAD"])).trim();
+  return { address, first, second };
+}
+
+export async function addSubmodule(
+  directory: string,
+  source: SubmoduleSource,
+  path: string,
+  commit: string,
+): Promise<string> {
+  const git = simpleGit({
+    baseDir: directory,
+    unsafe: { allowUnsafeProtocolOverride: true },
+  });
+  await git.raw([
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    source.address,
+    path,
+  ]);
+  await simpleGit(join(directory, path)).raw(["checkout", "--detach", commit]);
+  await git.raw(["add", "--all"]);
+  await git.raw([...IDENTITY, "commit", "-m", "add the submodule"]);
+  return (await git.raw(["rev-parse", "HEAD"])).trim();
+}
+
 export async function advanceBase(
   h: { bare: string },
   t: TestContext,
