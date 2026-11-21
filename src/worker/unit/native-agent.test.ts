@@ -25,6 +25,8 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { platform } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
@@ -812,6 +814,54 @@ test(
     assert.equal((await survivingProcesses(spawned)).length, SINGLE_CALL_COUNT);
     await setTimeout(GROUP_GRACE_MS);
     assert.deepEqual(await survivingProcesses(spawned), []);
+  },
+);
+
+const SANDBOX_PLATFORM = "linux";
+const PROC_DIRECTORY = "/proc";
+const SANDBOX_STARTED = "sandbox-started";
+
+function processesWith(token: string): string[] {
+  return readdirSync(PROC_DIRECTORY)
+    .filter((entry) => /^\d+$/.test(entry))
+    .filter((pid) => {
+      try {
+        return readFileSync(join(PROC_DIRECTORY, pid, "cmdline"), "utf8")
+          .split("\0")
+          .includes(token);
+      } catch {
+        return false;
+      }
+    });
+}
+
+test(
+  "(sandbox) dispose during a wrapped bash call leaves no process of its tree on the host, also one in its own group that ignores SIGTERM",
+  {
+    timeout: IGNORER_CASE_TIMEOUT_MS,
+    skip: platform() !== SANDBOX_PLATFORM && "the bwrap sandbox runs on Linux",
+  },
+  async (t) => {
+    const token = randomUUID();
+    const h = await fixture(t, [
+      tool("bash", {
+        command: [
+          "set -m",
+          `node -e "process.on('SIGTERM', () => {}); setTimeout(() => {}, 60000)" ${token} >/dev/null 2>&1 &`,
+          `echo started >${SANDBOX_STARTED}`,
+          "sleep 30",
+        ].join("\n"),
+      }),
+      fauxAssistantMessage("unexpected"),
+    ]);
+    const pending = h.agent.prompt(WORK).catch(() => undefined);
+    const started = join(h.workspace, SANDBOX_STARTED);
+    while (!existsSync(started) || processesWith(token).length === NO_ENTRIES)
+      await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+    h.agent.dispose();
+    await setTimeout(GROUP_GRACE_MS + SIGTERM_WAIT_MS);
+    assert.deepEqual(processesWith(token), []);
+    await pending;
   },
 );
 

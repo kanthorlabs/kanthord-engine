@@ -463,6 +463,7 @@ test("(invariant guard) a signal failure at the marked group end emits one warni
     warnings.map((warning) => warning.name),
     [GROUP_END_WARNING],
   );
+  assert.match(warnings[0]!.message, /EPERM, EPERM$/);
 });
 
 test("(invariant guard) a failed table read at the marked group end emits one warning and resolves", async (t) => {

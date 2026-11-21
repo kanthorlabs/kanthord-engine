@@ -195,10 +195,18 @@ export async function endMarkedGroups(
 }
 
 function warnGroupEnd(error: unknown): void {
-  process.emitWarning(
-    error instanceof Error ? error.message : String(error),
-    GROUP_END_WARNING,
+  process.emitWarning(groupEndMessage(error), GROUP_END_WARNING);
+}
+
+function groupEndMessage(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  if (!(error instanceof AggregateError)) return error.message;
+  const codes = error.errors.map((inner: unknown) =>
+    inner instanceof Error && "code" in inner
+      ? String(inner.code)
+      : String(inner),
   );
+  return `${error.message}: ${codes.join(", ")}`;
 }
 
 export function liveGroups(
