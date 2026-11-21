@@ -27,6 +27,7 @@ import {
   containsCommit,
   discardChanges,
   forceBranch,
+  gitlinkPaths,
   headCommit,
   isCommitted,
   MERGE_HEAD,
@@ -57,6 +58,7 @@ export type ViolationEnd = (typeof ViolationEnd)[keyof typeof ViolationEnd];
 const NO_ENTRIES = 0;
 export const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;
+const CODE_SPAN = /`([^`\n]+)`/g;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";
 const MERGE_SUBJECT = "merge";
@@ -391,8 +393,15 @@ async function settleCheckout(
   let changed = true;
   if (merge === null)
     changed =
-      (await commitWork(env, directory, turn.message, context, remaining())) !==
-      null;
+      (await commitWork(
+        env,
+        directory,
+        turn.message,
+        context,
+        remaining(),
+        await namedPointers(state, checkout, context),
+        [],
+      )) !== null;
   else {
     await refuseMarkers(state, checkout, merge, context);
     await concludeMerge(env, directory, turn.message, context, remaining());
@@ -400,6 +409,26 @@ async function settleCheckout(
   checkout.head = await headCommit(env, directory, context, remaining());
   await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
   return changed;
+}
+
+async function namedPointers(
+  state: StepsState,
+  checkout: WorkspaceCheckout,
+  context: Context,
+): Promise<string[]> {
+  const spans = new Set(
+    Array.from(
+      state.revision.content.requirement.matchAll(CODE_SPAN),
+      ([, span]) => span,
+    ),
+  );
+  const gitlinks = await gitlinkPaths({
+    env: state.input.env,
+    directory: checkout.directory,
+    context,
+    remaining: remainingOf(state),
+  });
+  return gitlinks.filter((path) => spans.has(path));
 }
 
 async function refuseMarkers(

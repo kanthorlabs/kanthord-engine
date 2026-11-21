@@ -38,6 +38,7 @@ import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import {
+  addSubmodule,
   advanceBase,
   commitOnNode,
   fauxAssistantMessage,
@@ -46,6 +47,7 @@ import {
   passingBase,
   recordReleases,
   releasedRoot,
+  submoduleSource,
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
@@ -81,6 +83,7 @@ const ONE_CHANGED_FILE = 1;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
+const SUBMODULE = "sub";
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -261,6 +264,55 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     await assertAtBefore(h, before);
     assert.equal(existsSync(join(releasedRoot(h), STRAY_FILE)), false);
+  });
+
+  async function submoduleTurn(
+    t: TestContext,
+    requirement: string,
+  ): Promise<{
+    changed: boolean;
+    gitlink: string;
+    first: string;
+    second: string;
+  }> {
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, requirement },
+    };
+    const source = await submoduleSource(t);
+    await addSubmodule(h.root, source, SUBMODULE, source.first);
+    h.checkouts[0]!.head = await headOf(h.root);
+    const git = simpleGit(h.root);
+    const sub = simpleGit(join(h.root, SUBMODULE));
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      await sub.raw(["checkout", "--detach", source.second]);
+    });
+    await agent.prompt(EMPTY_PROMPT);
+    return {
+      changed: agent.changed(),
+      gitlink: (await git.raw(["ls-tree", "HEAD", SUBMODULE])).split(/\s/)[2]!,
+      first: source.first,
+      second: source.second,
+    };
+  }
+
+  test("a requirement with the code span of a gitlink lets the turn commit record the move", async (t) => {
+    const turn = await submoduleTurn(t, `Move \`${SUBMODULE}\` forward.`);
+    assert.equal(turn.changed, true);
+    assert.equal(turn.gitlink, turn.second);
+  });
+
+  test("a requirement with no code span of a gitlink keeps the gitlink and counts no change", async (t) => {
+    for (const requirement of [
+      "Move sub forward.",
+      `Edit \`${SUBMODULE}/file\` only.`,
+    ]) {
+      const turn = await submoduleTurn(t, requirement);
+      assert.equal(turn.changed, false);
+      assert.equal(turn.gitlink, turn.first);
+    }
   });
 
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {
