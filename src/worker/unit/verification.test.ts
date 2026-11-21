@@ -755,6 +755,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
           return table();
         },
         readEnvironments: () => [],
+        readHolders: () => [],
         signalGroup: (group, signal) => signals.push([group, signal]),
       },
       reads: () => reads,

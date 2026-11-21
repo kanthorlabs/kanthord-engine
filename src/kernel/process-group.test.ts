@@ -11,6 +11,7 @@ import {
   killChildTree,
   killProcessTree,
   markedGroups,
+  markerFile,
   type ProcessEnvironment,
   type ProcessRow,
   type ProcessSystem,
@@ -61,6 +62,7 @@ function recordingSystem(
       return table();
     },
     readEnvironments: () => environments,
+    readHolders: () => [],
     signalGroup: (group, signal) => {
       signals.push(`${signal} ${group}`);
     },
@@ -146,6 +148,7 @@ test("a table read error after a stop still kills the stopped group and throws b
       return [ownRow, leaderRow, { pid: CHILD, ppid: LEADER, group: CHILD }];
     },
     readEnvironments: () => [],
+    readHolders: () => [],
     signalGroup: (group, signal) => {
       signals.push(`${signal} ${group}`);
       if (signal === KILL && group === CHILD) throw errorWithCode("EPERM");
@@ -174,6 +177,7 @@ test("an absent group is no failure, one failure throws itself and two throw an 
   const failing = (codes: Record<number, string>): ProcessSystem => ({
     readTable: table,
     readEnvironments: () => [],
+    readHolders: () => [],
     signalGroup: (group, signal) => {
       const code = codes[group];
       if (signal === KILL && code !== undefined) throw errorWithCode(code);
@@ -339,6 +343,7 @@ test("ESRCH on a group is no failure and another error is a failure", async (t) 
   const refusing = (code: string): ProcessSystem => ({
     readTable: live,
     readEnvironments: () => [],
+    readHolders: () => [],
     signalGroup: () => {
       throw errorWithCode(code);
     },
@@ -386,6 +391,23 @@ test("a process of an unrecorded group that holds the marker value is answered b
     ],
   );
   assert.deepEqual(markedGroups(MARKER, system), [MARKED_GROUP]);
+});
+
+test("a holder of the marker file in an unrecorded group is answered by its group", () => {
+  const files: string[] = [];
+  const { system } = recordingSystem([() => [ownRow]]);
+  const answered = markedGroups(MARKER, {
+    ...system,
+    readHolders: (file) => {
+      files.push(file);
+      return [
+        { pid: MARKED_GROUP, group: MARKED_GROUP },
+        { pid: process.pid, group: OWN_GROUP },
+      ];
+    },
+  });
+  assert.deepEqual(files, [markerFile(MARKER)]);
+  assert.deepEqual(answered, [MARKED_GROUP]);
 });
 
 test("a marked process in the group of the caller is not answered", () => {

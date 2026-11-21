@@ -5,7 +5,11 @@ import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { type BashProcess, processBashOperations } from "./bash-process.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { endProcessGroups, markedGroups } from "../kernel/process-group.ts";
+import {
+  endProcessGroups,
+  markedGroups,
+  removeMarkerFile,
+} from "../kernel/process-group.ts";
 import { pidsIn, spawnedPids, survivingProcesses } from "./test-support.ts";
 
 const SHELL = { shell: "/bin/bash", args: ["-c"] };
@@ -68,7 +72,6 @@ const HANDLER_READY = "ready";
 const HANDLER_CHILD = `node -e "process.on('SIGTERM', () => process.exit(0)); console.log('${HANDLER_READY}'); setTimeout(() => {}, 30000)" & echo $!; wait`;
 const STOPPED_STATE = /^T/;
 const NOT_PERMITTED = "EPERM";
-const DARWIN = "darwin";
 const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_TERM = "SIGTERM";
 const ABORTED = "aborted";
@@ -116,6 +119,7 @@ async function endedCall(
 ): Promise<{ exitCode: number | null; spawned: number[]; groups: number[] }> {
   let output = "";
   const marker = randomUUID();
+  t.after(() => removeMarkerFile(marker));
   const groups = new Set<number>();
   const ended = await processBashOperations(SHELL, () => {}, {
     killGroupAtEnd: true,
@@ -182,12 +186,7 @@ test(
 
 test(
   "F79 path 2: a descendant outside the leader group is gone after the tracked groups end",
-  {
-    timeout: CASE_TIMEOUT_MS,
-    skip:
-      process.platform === DARWIN &&
-      "ps -E hides the environment of SIP platform binaries such as sleep",
-  },
+  { timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const { exitCode, spawned, groups } = await endedCall(t, ESCAPED_CHILD);
     assert.equal(exitCode, SUCCESS);

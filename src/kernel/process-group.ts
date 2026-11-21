@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_STOP = "SIGSTOP";
@@ -14,6 +23,14 @@ const FIRST_USER_PID = 1;
 const PROCESS_ABSENT = "ESRCH";
 const ENTRY_ABSENT = "ENOENT";
 const LINUX = "linux";
+const DARWIN = "darwin";
+const LSOF_PATH = "/usr/sbin/lsof";
+const LSOF_NO_MATCH_STATUS = 1;
+const LSOF_PID_PREFIX = "p";
+const LSOF_GROUP_PREFIX = "g";
+const MARKER_FILE_PREFIX = "kanthord-group-";
+const MARKER_FILE_MODE = 0o600;
+const APPEND_FLAG = "a";
 const PROC_DIRECTORY = "/proc";
 const STAT_PPID_FIELD = 1;
 const STAT_GROUP_FIELD = 2;
@@ -49,15 +66,22 @@ export interface ProcessEnvironment {
   variables: readonly string[];
 }
 
+export interface ProcessHolder {
+  pid: number;
+  group: number;
+}
+
 export interface ProcessSystem {
   readTable: () => ProcessRow[];
   readEnvironments: () => ProcessEnvironment[];
+  readHolders: (file: string) => ProcessHolder[];
   signalGroup: (group: number, signal: NodeJS.Signals) => void;
 }
 
 export const SYSTEM_PROCESSES: ProcessSystem = {
   readTable: () => processTable(),
   readEnvironments: () => environmentTable(),
+  readHolders: (file) => fileHolders(file),
   signalGroup: (group, signal) => process.kill(-group, signal),
 };
 
@@ -107,8 +131,27 @@ export function markedGroups(
     .readEnvironments()
     .filter((row) => row.variables.includes(variable))
     .map((row) => row.group)
+    .concat(system.readHolders(markerFile(marker)).map((row) => row.group))
     .filter((group) => group > FIRST_USER_PID && !own.has(group));
   return [...new Set(groups)];
+}
+
+export function markerFile(marker: string): string {
+  assert.ok(marker);
+  return join(tmpdir(), `${MARKER_FILE_PREFIX}${marker}`);
+}
+
+export function openMarkerFile(marker: string): number | undefined {
+  if (process.platform !== DARWIN) return undefined;
+  return openSync(markerFile(marker), APPEND_FLAG, MARKER_FILE_MODE);
+}
+
+export function closeMarkerFile(descriptor: number | undefined): void {
+  if (descriptor !== undefined) closeSync(descriptor);
+}
+
+export function removeMarkerFile(marker: string): void {
+  rmSync(markerFile(marker), { force: true });
 }
 
 export function endProcessGroups(
@@ -276,6 +319,34 @@ function procStat(pid: string): string | null {
       return null;
     throw error;
   }
+}
+
+function fileHolders(file: string): ProcessHolder[] {
+  if (process.platform !== DARWIN || !existsSync(file)) return [];
+  let output: string;
+  try {
+    output = execFileSync(LSOF_PATH, ["-F", "pg", "--", file], {
+      encoding: "utf8",
+    });
+  } catch (error) {
+    if ((error as { status?: number }).status === LSOF_NO_MATCH_STATUS)
+      return [];
+    throw error;
+  }
+  return lsofHolders(output);
+}
+
+function lsofHolders(output: string): ProcessHolder[] {
+  const holders: ProcessHolder[] = [];
+  let pid = NaN;
+  for (const line of output.split("\n")) {
+    const value = Number(line.slice(1));
+    if (line.startsWith(LSOF_PID_PREFIX)) pid = value;
+    if (!line.startsWith(LSOF_GROUP_PREFIX)) continue;
+    assert.ok(Number.isSafeInteger(pid) && Number.isSafeInteger(value));
+    holders.push({ pid, group: value });
+  }
+  return holders;
 }
 
 function environmentTable(): ProcessEnvironment[] {

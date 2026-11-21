@@ -23,6 +23,7 @@ import {
   endProcessGroups,
   liveGroups,
   markedGroups,
+  removeMarkerFile,
 } from "../../kernel/process-group.ts";
 export { childEnvironment } from "../../agent/environment.ts";
 
@@ -80,7 +81,9 @@ export class ToolProcesses {
   endGroups(): Promise<void> {
     const groups = new Set([...this.groups, ...markedGroups(this.marker)]);
     this.groups.clear();
-    return endProcessGroups([...groups]);
+    return endProcessGroups([...groups]).finally(() =>
+      removeMarkerFile(this.marker),
+    );
   }
 
   private pruneGroups(): void {

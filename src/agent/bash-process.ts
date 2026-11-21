@@ -4,8 +4,10 @@ import { access } from "node:fs/promises";
 import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import {
+  closeMarkerFile,
   GROUP_MARKER_VARIABLE,
   killChildTree,
+  openMarkerFile,
 } from "../kernel/process-group.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
@@ -61,12 +63,7 @@ async function runBash(
   const timeoutMs = timeoutMsOf(timeout);
   if (signal?.aborted) throw new Error(ABORTED);
   await assertWorkingDirectory(cwd);
-  const child = spawn(shell.shell, [...shell.args, command], {
-    cwd,
-    detached: true,
-    env: markedEnvironment(env, group.marker),
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  const child = spawnShell(shell, command, { cwd, env, marker: group.marker });
   const killer = childKiller(child);
   const timer = armKillTimer(killer.kill, timeoutMs);
   trackLeader(child, group);
@@ -82,6 +79,36 @@ async function runBash(
     clearTimeout(timer);
     signal?.removeEventListener("abort", killer.kill);
     settleChild(child, killer.wasKilled(), { settled, group });
+  }
+}
+
+interface SpawnTarget {
+  cwd: string;
+  env: NodeJS.ProcessEnv | undefined;
+  marker: string | undefined;
+}
+
+function spawnShell(
+  shell: ShellConfig,
+  command: string,
+  target: SpawnTarget,
+): ChildProcess {
+  const descriptor =
+    target.marker === undefined ? undefined : openMarkerFile(target.marker);
+  try {
+    return spawn(shell.shell, [...shell.args, command], {
+      cwd: target.cwd,
+      detached: true,
+      env: markedEnvironment(target.env, target.marker),
+      stdio: [
+        "ignore",
+        "pipe",
+        "pipe",
+        ...(descriptor === undefined ? [] : [descriptor]),
+      ],
+    });
+  } finally {
+    closeMarkerFile(descriptor);
   }
 }
 
