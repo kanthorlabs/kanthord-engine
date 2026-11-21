@@ -90,7 +90,6 @@ export interface NativeAgent {
   ): Promise<void>;
   lastText(): string | undefined;
   verificationWrites(directory: string): string[];
-  clearVerificationWrites(directory: string): void;
   abort(): Promise<void>;
   readonly budget: ExecutionBudget;
   closeTrace(status: SpanStatus): void;
@@ -236,7 +235,6 @@ function nativeAgent(
       return session.getLastAssistantText();
     },
     verificationWrites: (directory) => writes?.pathsOf(directory) ?? [],
-    clearVerificationWrites: (directory) => writes?.clear(directory),
     closeTrace(status) {
       if (session) trace?.end(status);
     },

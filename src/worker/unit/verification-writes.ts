@@ -2,7 +2,7 @@ import { relative, resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Context } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
-import { untrackedPaths } from "./local-git.ts";
+import { includePaths, untrackedPaths } from "./local-git.ts";
 
 const OWNING_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
 const READ_LIMIT_MS = 30000;
@@ -45,8 +45,7 @@ export class VerificationWrites {
     } finally {
       const after = await this.untracked();
       for (const [directory, paths] of after)
-        for (const path of paths)
-          if (!before.get(directory)?.has(path)) this.record(directory, path);
+        this.record(directory, this.newPaths(before.get(directory), paths));
     }
   }
 
@@ -54,30 +53,44 @@ export class VerificationWrites {
     return [...(this.written.get(directory) ?? [])];
   }
 
-  clear(directory: string): void {
-    this.written.delete(directory);
-  }
-
   ownership(): InlineExtension {
     return (pi) => {
-      pi.on("tool_call", (event) => {
+      pi.on("tool_call", async (event) => {
         if (!OWNING_TOOLS.has(event.toolName)) return undefined;
         const { path } = event.input as { path?: unknown };
-        if (isString(path)) this.release(resolve(this.workspace, path));
+        if (isString(path)) await this.release(resolve(this.workspace, path));
         return undefined;
       });
     };
   }
 
-  private record(directory: string, path: string): void {
+  private newPaths(
+    before: ReadonlySet<string> | undefined,
+    after: ReadonlySet<string>,
+  ): string[] {
+    return [...after].filter((path) => !before?.has(path));
+  }
+
+  private record(directory: string, added: readonly string[]): void {
     const paths = this.written.get(directory) ?? new Set<string>();
-    paths.add(path);
+    for (const path of added) paths.add(path);
     this.written.set(directory, paths);
   }
 
-  private release(absolute: string): void {
-    for (const [directory, paths] of this.written)
-      paths.delete(relative(directory, absolute));
+  private async release(absolute: string): Promise<void> {
+    for (const [directory, paths] of this.written) {
+      const path = relative(directory, absolute);
+      if (!paths.delete(path)) continue;
+      await includePaths(
+        {
+          env: this.env,
+          directory,
+          context: this.context,
+          deadlineMs: READ_LIMIT_MS,
+        },
+        [path],
+      );
+    }
   }
 
   private async untracked(): Promise<Map<string, Set<string>>> {

@@ -1332,10 +1332,7 @@ export async function excludeUntracked(
   return paths;
 }
 
-async function excludePaths(
-  call: GitCall,
-  paths: readonly string[],
-): Promise<void> {
+async function excludeFileOf(call: GitCall): Promise<string> {
   const excludeFile = resolve(
     call.directory,
     (
@@ -1349,12 +1346,35 @@ async function excludePaths(
     ).trim(),
   );
   ensureDirectory(dirname(excludeFile));
+  return excludeFile;
+}
+
+async function excludePaths(
+  call: GitCall,
+  paths: readonly string[],
+): Promise<void> {
   appendFileSync(
-    excludeFile,
+    await excludeFileOf(call),
     NEWLINE +
       paths
         .map((path) => `/${path.replace(EXCLUDE_SPECIAL, "\\$&")}\n`)
         .join(""),
+  );
+}
+
+export async function includePaths(
+  call: GitCall,
+  paths: readonly string[],
+): Promise<void> {
+  const excludeFile = await excludeFileOf(call);
+  if (!existsSync(excludeFile)) return;
+  const patterns = new Set(paths.map(excludePattern));
+  writeFileSync(
+    excludeFile,
+    readFileSync(excludeFile, "utf8")
+      .split(NEWLINE)
+      .filter((line) => !patterns.has(line))
+      .join(NEWLINE),
   );
 }
 

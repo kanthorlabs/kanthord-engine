@@ -351,6 +351,31 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.deepEqual(committed, [CACHE_FILE]);
   });
 
+  test("a coder write on a path that an earlier turn left out puts the path in a later turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        bash(WRITE_CACHE),
+        fauxAssistantMessage("first"),
+        write(CACHE_FILE, "coder"),
+        fauxAssistantMessage("second"),
+      ],
+    );
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    await agent.prompt(EMPTY_PROMPT);
+    const first = await headOf(h.root);
+    await agent.prompt(EMPTY_PROMPT);
+    const committed = (
+      await simpleGit(h.root).raw(["show", "--name-only", "--format=", "HEAD"])
+    )
+      .trim()
+      .split("\n");
+    assert.notEqual(await headOf(h.root), first);
+    assert.deepEqual(committed, [CACHE_FILE]);
+    assert.equal((await simpleGit(h.root).status()).isClean(), true);
+  });
+
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {
     const current = task("commits", `test -f ${WORK_FILE}`);
     const h = await fixture(
