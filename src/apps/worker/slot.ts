@@ -3,6 +3,7 @@ import { isAbsolute } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { Readable, Writable } from "node:stream";
 import { MessageChannel, type Worker } from "node:worker_threads";
+import { bashSandbox, hostDenyRead } from "../../agent/bash-sandbox.ts";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import { BindingEntryState } from "../../worker/contract.ts";
@@ -160,6 +161,7 @@ export class SlotSession {
       {
         entries: frameEntries.map((entry) => this.open(entry)),
         log: LogDestination.StandardError,
+        deny_read: hostDenyRead(this.options.env),
       },
       this.options.env,
     );
@@ -238,5 +240,11 @@ export async function runSlot(
   for (const signal of STOP_SIGNALS) process.on(signal, () => session.stop());
   const code = await session.start();
   await flush(frames);
-  process.exit(code);
+  try {
+    await bashSandbox.dispose();
+  } catch (error) {
+    process.stderr.write(`${diagnostic(error)}\n${diagnosticRows(error)}`);
+  } finally {
+    process.exit(code);
+  }
 }

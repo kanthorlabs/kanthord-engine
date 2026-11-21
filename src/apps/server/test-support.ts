@@ -457,6 +457,7 @@ export async function inProcessWorker(
         ],
         directories: { data: state, log: state },
         env,
+        deny_read: [],
         model_runtime_factory: input.modelRuntimeFactory,
         repository_transport: input.repositoryTransport,
         log: (line) => {

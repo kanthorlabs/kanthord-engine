@@ -411,6 +411,7 @@ async function openExecution(
     workspace: workspace.root,
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
   });

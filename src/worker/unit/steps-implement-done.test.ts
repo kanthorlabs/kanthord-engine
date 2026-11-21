@@ -1,6 +1,7 @@
 import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
-import { suite, test } from "node:test";
+import { after, suite, test } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
@@ -24,6 +25,8 @@ import {
   releasedRoot,
   task,
 } from "./test-support.ts";
+
+after(() => bashSandbox.dispose());
 
 type Harness = Awaited<ReturnType<typeof fixture>>;
 

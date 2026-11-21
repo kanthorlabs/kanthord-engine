@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { simpleGit } from "simple-git";
 import {
   hostEnvironment,
@@ -18,6 +19,8 @@ import {
 import { until } from "./cli-test-support.ts";
 import { inProcessWorker } from "./test-support.ts";
 import { fixture } from "./worker-host-test-support.ts";
+
+after(() => bashSandbox.dispose());
 
 type Setup = Awaited<ReturnType<typeof fixture>>;
 type Registration = typeof registrationRecordSchema._output;

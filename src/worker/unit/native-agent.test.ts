@@ -27,7 +27,8 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
@@ -68,6 +69,8 @@ import { PINNED_CONTEXT_TYPE } from "./session-entries.ts";
 import { readSessionFileEntry } from "./session-store.ts";
 import { SessionReadOutcome } from "../contract.ts";
 
+after(() => bashSandbox.dispose());
+
 const SECRET = "test_native-scripted-key";
 const NODE = "node_01ARZ3NDEKTSV4RRFFQ69G5FAA";
 const PROVIDER_CALL_COUNT = 3;
@@ -88,6 +91,8 @@ const MESSAGE_ENTRY = "message";
 const CUSTOM_ENTRY = "custom";
 const TOOL_CALL_PART = "toolCall";
 const NO_ENTRIES = 0;
+const OUTSIDE_READS = 2;
+const SECRET_FILE_TEXT = "outside credential text";
 const WORK = renderWorkPrompt(SHIPPED_TEMPLATES, {
   node_id: NODE,
   revision: 1,
@@ -168,6 +173,7 @@ async function fixture(
     workspace,
     hostHome,
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context,
     turnCheck: options.turnCheck && (() => options.turnCheck!(context)),
@@ -222,6 +228,16 @@ function sessionEnds(h: Harness) {
   return sessionSpans(h).filter((record) => record.end_time);
 }
 
+function toolResults(h: Harness, toolName: string) {
+  return (h.provider.calls.at(-1)?.messages ?? []).filter(
+    (message) => message.role === TOOL_RESULT && message.toolName === toolName,
+  ) as { isError: boolean; content: { text: string }[] }[];
+}
+
+function bashResults(h: Harness): string {
+  return JSON.stringify(toolResults(h, "bash"));
+}
+
 test("native software agent writes and runs bounded bash with execution credentials", async (t) => {
   const h = await fixture(t, [
     tool("write", { path: "written.txt", content: CONTENT }),
@@ -230,7 +246,7 @@ test("native software agent writes and runs bounded bash with execution credenti
   ]);
   await h.agent.prompt(WORK);
   assert.equal(readFileSync(join(h.workspace, "written.txt"), "utf8"), CONTENT);
-  assert.ok(existsSync(join(h.workspace, "shell.txt")));
+  assert.ok(existsSync(join(h.workspace, "shell.txt")), bashResults(h));
   assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
   assert.ok(h.provider.calls.every(({ apiKey }) => apiKey === SECRET));
   assert.ok(
@@ -238,6 +254,21 @@ test("native software agent writes and runs bounded bash with execution credenti
       systemPrompt?.includes(SETUP_PROMPT),
     ),
   );
+});
+
+test("(security) a worker read of an absolute path outside the workspace is blocked", async (t) => {
+  const outside = join(temporary(t), "credential.json");
+  writeFileSync(outside, SECRET_FILE_TEXT);
+  const h = await fixture(t, [
+    tool("read", { path: outside }),
+    tool("read", { path: "/proc/self/environ" }),
+    fauxAssistantMessage("done"),
+  ]);
+  await h.agent.prompt(WORK);
+  const results = toolResults(h, "read");
+  assert.equal(results.length, OUTSIDE_READS);
+  for (const result of results) assert.equal(result.isError, true);
+  assert.ok(!callText(h).includes(SECRET_FILE_TEXT));
 });
 
 test("dispose ends the agent.session span once with the entry count", async (t) => {

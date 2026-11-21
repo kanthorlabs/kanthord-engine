@@ -4,6 +4,11 @@ import type { Provider } from "@earendil-works/pi-ai";
 import type { LlmProvider } from "../../llm/provider.ts";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import {
+  bashSandbox,
+  hostDenyRead,
+  type SandboxScope,
+} from "../../agent/bash-sandbox.ts";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import {
@@ -41,7 +46,7 @@ import {
   INSTANCE_SUPERSEDED_CODE,
   WorkerErrorCode,
 } from "../../worker/contract.ts";
-import { type UnitBinding, WorkerUnit } from "./unit.ts";
+import { type UnitBinding, type UnitDirectories, WorkerUnit } from "./unit.ts";
 import { httpTransport, observedTransport } from "./transport.ts";
 import {
   instanceDirectories,
@@ -138,6 +143,18 @@ function superseded(connectionName: unknown): Diagnostic {
 function connectionNameOf(error: Diagnostic): unknown {
   if (!(error instanceof ExchangeFailure)) return null;
   return (error.details as Record<string, unknown> | null)?.connection_name;
+}
+
+export function instanceDenyRead(
+  env: NodeJS.ProcessEnv,
+  directories: UnitDirectories,
+): SandboxScope {
+  return {
+    denyRead: hostDenyRead(env, {
+      pi: join(directories.data, PI_DIRECTORY_NAME),
+    }),
+    root: directories.data,
+  };
 }
 
 export class Worker implements Service {
@@ -247,10 +264,13 @@ export class Worker implements Service {
       const bindings = this.connection.bindings.map((entry) =>
         this.host(entry),
       );
+      const sandbox = instanceDenyRead(env, directories);
       this.unit = new WorkerUnit({
         bindings,
         directories,
         env: { ...env, TMPDIR: temporary },
+        deny_read: sandbox.denyRead,
+        sandbox_root: sandbox.root,
         log: this.options.log ?? LogDestination.StandardError,
         model_runtime_factory: this.options.modelRuntimeFactory,
         repository_transport: this.options.repositoryTransport,
@@ -283,6 +303,7 @@ export class Worker implements Service {
       const error = await this.quiesce();
       await this.startTask;
       const stopped = await this.unit?.stop();
+      const disposed = await lifecycle(() => bashSandbox.dispose());
       try {
         await this.operationalLog?.close();
       } finally {
@@ -290,6 +311,7 @@ export class Worker implements Service {
       }
       if (error) throw error;
       if (stopped) throw stopped;
+      if (disposed) throw disposed;
     });
     return this.stopTask;
   }

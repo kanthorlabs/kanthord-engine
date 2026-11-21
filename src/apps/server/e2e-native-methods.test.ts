@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { unusedHostTools } from "../../worker/test-support.ts";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { suite, test, type TestContext } from "node:test";
+import { after, suite, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -63,6 +64,8 @@ import {
   gatewayFixture,
   instanceNames,
 } from "./test-support.ts";
+
+after(() => bashSandbox.dispose());
 
 const SUCCESSFUL_EXIT = 0;
 const ZERO_BYTE = 0;
@@ -429,6 +432,7 @@ async function methodsFixture(t: TestContext) {
         workspaces,
         hostHome: temporary(t),
         env: hostEnvironment(),
+        denyRead: [],
         modelRuntimeFactory: scriptedModelRuntime(provider),
         hostTools: () => unusedHostTools,
         context: background,

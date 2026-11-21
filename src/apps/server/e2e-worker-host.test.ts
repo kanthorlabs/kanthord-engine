@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import {
@@ -55,6 +56,8 @@ import {
 } from "./worker-acceptance-test-support.ts";
 import { fixture as hostFixture } from "./worker-host-test-support.ts";
 
+after(() => bashSandbox.dispose());
+
 const RACE_TIMEOUT = 300000;
 const LAND_GATE_TIMEOUT_MS = 90000;
 const SECOND_LAND = 2;
@@ -73,6 +76,7 @@ const SIZE = 5;
 const MEDIA_TYPE = "application/octet-stream";
 const TOOL_RESULT = "toolResult";
 const UPLOAD = "evidence-upload";
+const BASH = "bash";
 const READY = "Worker application ready";
 const CLAIMED = "credential handover received";
 const WORKER_STOPPED = "worker_stopped";
@@ -232,7 +236,13 @@ test(
         const uploaded = page.items.filter(
           (item) => item.subject === FILE_NAME,
         );
-        assert.equal(uploaded.length, SINGLE_ITEM);
+        const bashResults = provider.calls
+          .at(-1)!
+          .messages.filter(
+            (message) =>
+              message.role === TOOL_RESULT && message.toolName === BASH,
+          );
+        assert.equal(uploaded.length, SINGLE_ITEM, JSON.stringify(bashResults));
         const assets = uploaded[0]!.assets;
         assert.equal(assets.length, SINGLE_ITEM);
         const asset = assets[0]!;

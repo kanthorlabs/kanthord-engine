@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -76,6 +77,8 @@ import {
   instanceNames,
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+
+after(() => bashSandbox.dispose());
 
 const SUCCESSFUL_EXIT = 0;
 const ZERO_BYTE = 0;
@@ -477,6 +480,7 @@ test(
       workspace: prepared.directory,
       hostHome,
       env: hostEnvironment(),
+      denyRead: [],
       modelRuntimeFactory: scriptedModelRuntime(provider),
       context: background,
     });
@@ -655,6 +659,7 @@ test(
         workspace: lab.directory,
         hostHome,
         env: hostEnvironment(),
+        denyRead: [],
         modelRuntimeFactory: scriptedModelRuntime(fake),
         context: background,
       });

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import type {
   BashOperations,
   BashToolOptions,
@@ -16,11 +17,15 @@ import {
   processBashOperations,
   type ShellConfig,
 } from "../../agent/bash-process.ts";
+import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
 export { childEnvironment } from "../../agent/environment.ts";
 
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
+const PNPM_STORE_DIRECTORY = "pnpm-store";
+const PNPM_CACHE_DIRECTORY = "pnpm-cache";
+const NPM_CACHE_DIRECTORY = "npm-cache";
 
 const HOST_TOOLS: Readonly<
   Record<HostTool, (hostTools: HostTools) => ToolDefinition>
@@ -75,6 +80,17 @@ export class ToolProcesses {
   }
 }
 
+function packageCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const temporary = env.TMPDIR;
+  if (temporary === undefined) return env;
+  return {
+    ...env,
+    pnpm_config_store_dir: join(temporary, PNPM_STORE_DIRECTORY),
+    pnpm_config_cache_dir: join(temporary, PNPM_CACHE_DIRECTORY),
+    npm_config_cache: join(temporary, NPM_CACHE_DIRECTORY),
+  };
+}
+
 export function sessionTools(
   pi: PiCodingAgent,
   agentName: string,
@@ -83,6 +99,7 @@ export function sessionTools(
   hostTools: HostTools,
   env: NodeJS.ProcessEnv,
   processes: ToolProcesses,
+  sandbox: SandboxScope,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
@@ -103,14 +120,20 @@ export function sessionTools(
       env: childEnvironment(context.env),
     }),
     operations: {
-      exec: (command, directory, execOptions) => {
+      exec: async (command, directory, execOptions) => {
         const limit = Math.floor(
           (Math.min(budget.remainingMs(), COMMAND_LIMIT_MS) - 1) /
             MILLISECONDS_PER_SECOND,
         );
-        if (limit < MINIMUM_SECONDS)
-          return Promise.reject(new Error("resource budget ended"));
+        if (limit < MINIMUM_SECONDS) throw new Error("resource budget ended");
         const applied = Math.min(execOptions.timeout ?? limit, limit);
+        const childEnv = packageCacheEnvironment(
+          childEnvironment(execOptions.env ?? env),
+        );
+        const wrapped = await bashSandbox.wrap(command, directory, {
+          ...sandbox,
+          env: childEnv,
+        });
         processes.recordTimeout(toolCallId, {
           requestedMs:
             execOptions.timeout === undefined
@@ -118,10 +141,10 @@ export function sessionTools(
               : execOptions.timeout * MILLISECONDS_PER_SECOND,
           appliedMs: applied * MILLISECONDS_PER_SECOND,
         });
-        return operations.exec(command, directory, {
+        return operations.exec(wrapped, directory, {
           ...execOptions,
           timeout: applied,
-          env: childEnvironment(execOptions.env ?? env),
+          env: childEnv,
         });
       },
     },

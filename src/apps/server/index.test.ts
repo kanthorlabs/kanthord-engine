@@ -1232,6 +1232,43 @@ test("server startup failure releases Mission in reverse construction order and 
   assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
 });
 
+test("server release disposes the bash sandbox after a startup failure and at each stop", async (t) => {
+  requirePiTools();
+  const paths = layout(temporary(t));
+  const result = await nodeChild(
+    [
+      "--input-type=module",
+      "-e",
+      `
+    import assert from 'node:assert/strict';
+    import { Server } from ${JSON.stringify(new URL("./index.ts", import.meta.url).href)};
+    import { bashSandbox } from ${JSON.stringify(new URL("../../agent/bash-sandbox.ts", import.meta.url).href)};
+    import { GatewayService } from ${JSON.stringify(new URL("../../gateway/index.ts", import.meta.url).href)};
+    let disposals = 0;
+    bashSandbox.dispose = async () => { disposals++; };
+    const served = new Server();
+    assert.equal(await served.start(), null);
+    assert.equal(disposals, 0);
+    assert.equal(await served.stop(), null);
+    assert.equal(disposals, 1);
+    const failure = new Error('gateway startup failed');
+    const start = GatewayService.prototype.start;
+    GatewayService.prototype.start = () => Promise.resolve(failure);
+    const failed = new Server();
+    assert.equal(await failed.start(), failure);
+    assert.equal(disposals, 2);
+    GatewayService.prototype.start = start;
+    assert.equal(await failed.stop(), null);
+    assert.equal(disposals, 3);
+    process.stdout.write('verified\\n');
+  `,
+    ],
+    { env: paths.env, signal: t.signal },
+  );
+  assert.equal(result.status, ExitCode.Success, result.stderr);
+  assert.equal(result.stdout, LIFECYCLE_VERIFIED_OUTPUT);
+});
+
 test("the shutdown watchdog holds the event loop and exits the process when cleanup never settles", async (t) => {
   const started = Date.now();
   const result = await nodeChild(

@@ -6,7 +6,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { setTimeout } from "node:timers/promises";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { background } from "../../kernel/context.ts";
 import {
   EndReason,
@@ -58,6 +59,8 @@ import type { MethodClients } from "./method-clients.ts";
 import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+
+after(() => bashSandbox.dispose());
 
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;
@@ -134,6 +137,7 @@ async function startedSession(t: TestContext, clients: MethodClients) {
     workspace,
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
     spans: run.spans,
@@ -337,6 +341,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     hostTools: () => unusedHostTools,
     context: background,
@@ -427,6 +432,7 @@ test("an agent open that throws after the prepare gives the base head tree back 
     workspaces,
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: async () => {
       throw new Error("open failed");
     },
@@ -527,6 +533,7 @@ async function examineRun(
     workspaces: WorkspaceRoot.open(temporary(t)),
     hostHome: temporary(t),
     env: hostEnvironment(),
+    denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     hostTools: () => unusedHostTools,
     context: background,

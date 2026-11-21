@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 
+const EVAL_PREFIX = "EVAL_";
+
 export function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   assert.ok(env);
   const output = { ...env };
@@ -25,6 +27,8 @@ export function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     "KANTHORD_ENDPOINT",
   ])
     delete output[name];
+  for (const name of Object.keys(output))
+    if (name.startsWith(EVAL_PREFIX)) delete output[name];
   assert.notEqual(output, env);
   return output;
 }

@@ -156,7 +156,7 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
   assert.ok(call);
   assert.equal(call.arguments[0], command);
   assert.equal(call.arguments[1], directory);
-  assert.equal(call.arguments[2]?.[name], undefined);
+  assert.equal(call.arguments[2]?.env[name], undefined);
   const text = result.content
     .map((item) => ("text" in item ? item.text : ""))
     .join("");
@@ -190,6 +190,7 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
   const emulated = createBashSandbox(
     {
       initialize: async () => undefined,
+      reset: async () => undefined,
       wrapWithSandbox: async (command, _shell, customConfig) => {
         const denied = customConfig?.filesystem?.denyRead ?? [];
         return denied.some((path) => command.includes(path))

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { suite, test, type TestContext } from "node:test";
+import { after, suite, test, type TestContext } from "node:test";
 import {
   appendFileSync,
   existsSync,
@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
@@ -48,6 +49,8 @@ import {
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
+
+after(() => bashSandbox.dispose());
 
 const FIXED = "fixed";
 const MERGE_HEADER = "feat: merge main";
@@ -609,6 +612,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
   });
 
   test("the gate finds a rebase in progress behind a gitdir file", async (t) => {
+    t.mock.method(bashSandbox, "wrap", async (command: string) => command);
     const h = await fixture(
       t,
       [task("gitdir", "false")],
