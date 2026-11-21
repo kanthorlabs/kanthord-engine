@@ -976,6 +976,93 @@ The [Worker sibling](https://github.com/kanthorlabs/kanthord/blob/main/docs/brai
 Shutdown during a live execution or a registration with no answer, and a stop
 deadline in those cases remain **blocked** under [HANDOFF B9](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/HANDOFF.md#b9-failure-and-recovery).
 
+#### Start at boot
+
+KanthorD supplies no service unit. After a host reboot, no `serve worker`
+process runs until a human starts it. Run one service of the host service
+manager for each instance. The service runs `kanthord serve worker --instance <name>`
+and needs no new option. Use the absolute path of the `kanthord` binary, which
+`command -v kanthord` prints.
+
+A service holds no secret. [`worker join`](./worker.md#join) writes the instance
+configuration to `<XDG configuration directory>/kanthord/workers/<name>.yaml` with
+mode `0600`. Set `XDG_CONFIG_HOME` in the service only when the instance file is
+outside the default configuration directory.
+
+A stop with `SIGTERM` exits `0` after a successful deregistration, so neither
+service manager restarts it. A process that another process supersedes exits `3`
+with `worker.instance.superseded`.
+
+**Linux.** Write the systemd user unit
+`~/.config/systemd/user/kanthord-worker-<name>.service`:
+
+```ini
+[Unit]
+Description=KanthorD worker instance <name>
+
+[Service]
+ExecStart=/usr/local/bin/kanthord serve worker --instance <name>
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=3
+
+[Install]
+WantedBy=default.target
+```
+
+`Restart=on-failure` restarts the process after a nonzero exit. With
+`RestartPreventExitStatus=3`, a superseded instance stays stopped. Add
+`Environment=XDG_CONFIG_HOME=<directory>` to the `[Service]` section only for an
+instance file outside the default directory. Then run these commands:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user enable --now kanthord-worker-<name>.service
+loginctl enable-linger <user>
+```
+
+`loginctl enable-linger <user>` makes the user manager start at boot with no
+login, so the user units start at boot.
+
+**macOS.** Write the launchd agent
+`~/Library/LaunchAgents/com.kanthorlabs.kanthord.worker.<name>.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.kanthorlabs.kanthord.worker.<name></string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/local/bin/kanthord</string>
+      <string>serve</string>
+      <string>worker</string>
+      <string>--instance</string>
+      <string><name></string>
+    </array>
+    <key>RunAtLoad</key>
+    <true />
+    <key>KeepAlive</key>
+    <dict>
+      <key>SuccessfulExit</key>
+      <false />
+    </dict>
+  </dict>
+</plist>
+```
+
+`SuccessfulExit` set to false makes launchd restart the process after a nonzero
+exit only. Launchd restarts the process after exit `3` too, and the restarted
+process takes the connection back from the second process. The operator stops
+the second process of the instance first, or stops the agent with
+`launchctl bootout gui/$(id -u)/com.kanthorlabs.kanthord.worker.<name>`. To add
+`XDG_CONFIG_HOME`, add an `EnvironmentVariables` dictionary. Load the agent with
+`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kanthorlabs.kanthord.worker.<name>.plist`.
+A launchd agent starts when its user logs in, so the host needs an automatic
+login for a start after a reboot.
+
 ### `serve slot`
 
 ```text
