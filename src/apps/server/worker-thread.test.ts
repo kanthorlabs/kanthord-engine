@@ -42,6 +42,7 @@ import {
 
 const CLIENT_SECRET_BYTES = 32;
 const DATA_KEYS = ["deny_read", "entries", "log"];
+const DISPOSE_MARKER = "bash sandbox dispose";
 const ENTRY_KEYS = ["client_id", "client_secret", "port", "state"];
 const TWO_INSTANCES = 2;
 const SINGLE_INSTANCE = 1;
@@ -277,6 +278,41 @@ test("a worker thread refuses to start without an absolute directory variable", 
       assert.deepEqual(error.fields, [["variables", name]], name);
       port1.close();
     }
+});
+
+test("a worker thread disposes the bash sandbox and keeps its start error when the dispose rejects", async (t) => {
+  const { port1, port2 } = new MessageChannel();
+  const env = threadEnvironment(temporary(t));
+  delete env.XDG_CACHE_HOME;
+  const data = threadData(entryOf(port2));
+  const source = `
+const { bashSandbox } = await import(${JSON.stringify(new URL("../../agent/bash-sandbox.ts", import.meta.url).href)});
+bashSandbox.dispose = async () => {
+  process.stderr.write(${JSON.stringify(DISPOSE_MARKER)});
+  throw new Error("the bash sandbox reset failed");
+};
+await import(${JSON.stringify(new URL("../worker/thread.ts", import.meta.url).href)});
+`;
+  const thread = new Worker(
+    new URL(`data:text/javascript,${encodeURIComponent(source)}`),
+    {
+      workerData: data,
+      transferList: entryPorts(data.entries),
+      env,
+      stderr: true,
+    },
+  );
+  stopAfter(t, () => thread.terminate());
+  let stderr = "";
+  thread.stderr.on("data", (chunk: Buffer) => {
+    stderr += chunk.toString();
+  });
+  const exited = new Promise((resolve) => thread.once("exit", resolve));
+  const [error] = await once(thread, "error");
+  await exited;
+  assert.deepEqual(error.fields, [["variables", "XDG_CACHE_HOME"]]);
+  assert.ok(stderr.includes(DISPOSE_MARKER), stderr);
+  port1.close();
 });
 
 test("a worker thread exits by itself after its run ends", async (t) => {

@@ -23,6 +23,10 @@ const NO_OUTPUT = "";
 const FRAME_DESCRIPTOR_REDIRECT = 'exec 3>&1 1>&2; exec "$0" "$@"';
 const SLOT_URL = new URL("./slot.ts", import.meta.url).href;
 const MAIN_URL = new URL("../../main.ts", import.meta.url).href;
+const BASH_SANDBOX_URL = new URL("../../agent/bash-sandbox.ts", import.meta.url)
+  .href;
+const ERRORS_URL = new URL("../../kernel/errors.ts", import.meta.url).href;
+const DISPOSE_FAILURE = "worker.sandbox.reset_failed";
 const SHORT_DEADLINE_MS = 300;
 const POLL_MS = 20;
 const LONG_DEADLINE_MS = 60000;
@@ -122,6 +126,7 @@ function slot(
   t: TestContext,
   deadlines: Deadlines,
   env?: NodeJS.ProcessEnv,
+  prelude = "",
 ): SlotProcess {
   const options = {
     initDeadlineMs: LONG_DEADLINE_MS,
@@ -129,7 +134,7 @@ function slot(
     stopDeadlineMs: LONG_DEADLINE_MS,
     ...deadlines,
   };
-  const script = `
+  const script = `${prelude}
 const { Worker } = await import("node:worker_threads");
 const { runSlot } = await import(${JSON.stringify(SLOT_URL)});
 await runSlot({
@@ -245,6 +250,21 @@ test("SIGTERM and SIGINT stop the thread through the stop control", async (t) =>
     assert.equal(exit.code, THREAD_STOPPED, signal);
     assert.equal(exit.stderr.includes("worker.slot."), false, signal);
   }
+});
+
+test("serve slot disposes the bash sandbox and exits with the thread code when the dispose rejects", async (t) => {
+  const prelude = `
+const { bashSandbox } = await import(${JSON.stringify(BASH_SANDBOX_URL)});
+const { Diagnostic } = await import(${JSON.stringify(ERRORS_URL)});
+bashSandbox.dispose = async () => { throw new Diagnostic(${JSON.stringify(DISPOSE_FAILURE)}, "worker: the bash sandbox reset failed."); };
+`;
+  const instance = slot(t, {}, undefined, prelude);
+  instance.send(init());
+  await instance.firstFrame();
+  instance.send({ kind: FrameKind.Control, control: SlotControl.Stop });
+  const exit = await instance.exited;
+  assert.equal(exit.code, THREAD_STOPPED);
+  assert.ok(exit.stderr.includes(DISPOSE_FAILURE), exit.stderr);
 });
 
 test("a thread that ignores the stop control ends at the stop deadline", async (t) => {

@@ -24,6 +24,7 @@ const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
 const PNPM_STORE_DIRECTORY = "pnpm-store";
+const PNPM_CACHE_DIRECTORY = "pnpm-cache";
 const NPM_CACHE_DIRECTORY = "npm-cache";
 
 const HOST_TOOLS: Readonly<
@@ -84,7 +85,8 @@ function packageCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   if (temporary === undefined) return env;
   return {
     ...env,
-    npm_config_store_dir: join(temporary, PNPM_STORE_DIRECTORY),
+    pnpm_config_store_dir: join(temporary, PNPM_STORE_DIRECTORY),
+    pnpm_config_cache_dir: join(temporary, PNPM_CACHE_DIRECTORY),
     npm_config_cache: join(temporary, NPM_CACHE_DIRECTORY),
   };
 }

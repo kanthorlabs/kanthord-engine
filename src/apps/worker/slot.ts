@@ -240,6 +240,11 @@ export async function runSlot(
   for (const signal of STOP_SIGNALS) process.on(signal, () => session.stop());
   const code = await session.start();
   await flush(frames);
-  await bashSandbox.dispose();
-  process.exit(code);
+  try {
+    await bashSandbox.dispose();
+  } catch (error) {
+    process.stderr.write(`${diagnostic(error)}\n${diagnosticRows(error)}`);
+  } finally {
+    process.exit(code);
+  }
 }

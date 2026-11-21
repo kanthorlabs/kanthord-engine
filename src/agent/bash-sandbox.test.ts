@@ -377,15 +377,16 @@ test("(security) denyWrite holds the config and the hooks of each .git directory
   const cwd = temporary(t);
   const own = join(cwd, ".git");
   const checkout = join(cwd, "checkouts", "engine", ".git");
+  const third = join(cwd, "a", "b", "c", ".git");
   const deep = join(cwd, "a", "b", "c", "d", ".git");
-  for (const directory of [own, checkout, deep])
+  for (const directory of [own, checkout, third, deep])
     mkdirSync(directory, { recursive: true });
   mkdirSync(join(cwd, "linked"));
   writeFileSync(join(cwd, "linked", ".git"), "gitdir: /elsewhere\n");
   const fake = fakeRuntime();
   await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, cwd, hostOf());
   const denyWrite = fake.calls[0]?.customConfig.filesystem?.denyWrite ?? [];
-  for (const git of [own, checkout]) {
+  for (const git of [own, checkout, third]) {
     assert.ok(denyWrite.includes(join(git, "config")));
     assert.ok(denyWrite.includes(join(git, "hooks")));
   }

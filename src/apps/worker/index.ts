@@ -303,7 +303,7 @@ export class Worker implements Service {
       const error = await this.quiesce();
       await this.startTask;
       const stopped = await this.unit?.stop();
-      await bashSandbox.dispose();
+      const disposed = await lifecycle(() => bashSandbox.dispose());
       try {
         await this.operationalLog?.close();
       } finally {
@@ -311,6 +311,7 @@ export class Worker implements Service {
       }
       if (error) throw error;
       if (stopped) throw stopped;
+      if (disposed) throw disposed;
     });
     return this.stopTask;
   }

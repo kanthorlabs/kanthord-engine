@@ -2,6 +2,7 @@ import { dirname, isAbsolute } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { lifecycle } from "../../kernel/service.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { SlotBindings } from "./slot-bindings.ts";
 import {
@@ -22,6 +23,7 @@ const DIRECTORY_VARIABLES = [
 async function main(): Promise<void> {
   const data = threadDataSchema.parse(workerData);
   const bindings = new SlotBindings((line) => process.stderr.write(line));
+  let disposed: Error | null;
   try {
     const refused = DIRECTORY_VARIABLES.filter(
       (name) => !isAbsolute(process.env[name] ?? ""),
@@ -63,8 +65,9 @@ async function main(): Promise<void> {
     for (const port of entryPorts(data.entries)) port.close();
     bindings.close();
     parentPort?.close();
-    await bashSandbox.dispose();
+    disposed = await lifecycle(() => bashSandbox.dispose());
   }
+  if (disposed) throw disposed;
 }
 
 void main();

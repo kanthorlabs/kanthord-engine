@@ -23,7 +23,8 @@ import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { machineConfigurationValue } from "../../worker/contract.ts";
-import { scopedDenyRead } from "../../agent/bash-sandbox.ts";
+import { bashSandbox, scopedDenyRead } from "../../agent/bash-sandbox.ts";
+import { OperationalLog } from "../../kernel/log.ts";
 import { directories as xdgDirectories } from "../../kernel/xdg.ts";
 import { instanceDirectories } from "./instance-config.ts";
 import {
@@ -82,6 +83,7 @@ const WORK_UNAVAILABLE = {
   },
 };
 const SINGLE = 1;
+const UNIT_AND_WORKER_LOGS = 2;
 const NO_PULLS = 0;
 const OTHER_MACHINE = "build-box";
 const MACHINE_CONFIG_ABSENT = "worker.machine.config_absent";
@@ -883,4 +885,26 @@ test("(security) the instance deny list holds the instance pi directory, the sib
       denied.filter((entry) => path === entry || path.startsWith(`${entry}/`)),
       [],
     );
+});
+
+test("a worker stop disposes the bash sandbox once", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const dispose = t.mock.method(bashSandbox, "dispose", async () => {});
+  const worker = new Worker(f.options());
+  assert.equal(await worker.start(), null);
+  assert.equal(await worker.stop(), null);
+  assert.equal(dispose.mock.callCount(), SINGLE);
+});
+
+test("a rejected bash sandbox dispose still closes the operational log, and the stop returns the dispose error", async (t) => {
+  const f = await fixture(t, SINGLE);
+  const failure = new Error("the bash sandbox reset failed");
+  t.mock.method(bashSandbox, "dispose", async () => {
+    throw failure;
+  });
+  const close = t.mock.method(OperationalLog.prototype, "close");
+  const worker = new Worker(f.options({ log: undefined }));
+  assert.equal(await worker.start(), null);
+  assert.equal(await worker.stop(), failure);
+  assert.equal(close.mock.callCount(), UNIT_AND_WORKER_LOGS);
 });

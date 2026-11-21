@@ -394,7 +394,8 @@ test("the swe@1 bash puts the package store and the package cache under the TMPD
     onData: () => {},
   });
   const env = processes.calls.at(-1)?.env;
-  assert.equal(env?.npm_config_store_dir, join(tmp, "pnpm-store"));
+  assert.equal(env?.pnpm_config_store_dir, join(tmp, "pnpm-store"));
+  assert.equal(env?.pnpm_config_cache_dir, join(tmp, "pnpm-cache"));
   assert.equal(env?.npm_config_cache, join(tmp, "npm-cache"));
 });
 
