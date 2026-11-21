@@ -21,6 +21,7 @@ import {
 } from "../../agent/hooks/sensitive-text-redaction.ts";
 import { countTurns, pinnedLayers } from "../../agent/pinned-layers.ts";
 import { loadPi } from "../../agent/pi.ts";
+import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
 import { sessionTools, ToolProcesses } from "./tool-table.ts";
 import type {
   ExecutionCredential,
@@ -59,6 +60,7 @@ export interface NativeAgentInput {
   hostHome: string;
   env: NodeJS.ProcessEnv;
   denyRead: readonly string[];
+  sandboxRoot?: string;
   modelRuntimeFactory: ModelRuntimeFactory;
   hostTools: HostTools;
   context: Context;
@@ -337,10 +339,10 @@ export async function openNativeAgent(
         input.hostTools,
         input.env,
         processes,
-        input.denyRead,
+        { denyRead: input.denyRead, root: input.sandboxRoot },
       ),
       hostHome: input.hostHome,
-      hooks: [pins.hook],
+      hooks: [pins.hook, checkoutConfinement(input.workspace)],
       context,
       sessionManager,
       knownSecrets: secrets,

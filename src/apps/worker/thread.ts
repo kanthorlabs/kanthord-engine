@@ -1,5 +1,6 @@
 import { dirname, isAbsolute } from "node:path";
 import { parentPort, workerData } from "node:worker_threads";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { SlotBindings } from "./slot-bindings.ts";
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
       directories: { data: state, log: state },
       env: process.env,
       deny_read: data.deny_read,
+      sandbox_root: dirname(process.env.XDG_STATE_HOME!),
       log: data.log,
       footprint: {
         residue_root: dirname(process.env.XDG_STATE_HOME!),
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
     for (const port of entryPorts(data.entries)) port.close();
     bindings.close();
     parentPort?.close();
+    await bashSandbox.dispose();
   }
 }
 

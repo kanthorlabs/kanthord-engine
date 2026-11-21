@@ -1,7 +1,7 @@
 import { addAbortListener } from "node:events";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { stringify } from "yaml";
 import type { Context } from "../../kernel/context.ts";
@@ -11,7 +11,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
 import { HttpStatus } from "../../kernel/http.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
-import { bashSandbox } from "../../agent/bash-process.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
 import { WorkerUnit } from "./unit.ts";
 import type { WorkerTransport } from "./transport.ts";
@@ -42,6 +42,8 @@ import {
   STEPS_KEY,
   task,
 } from "../../worker/unit/test-support.ts";
+
+after(() => bashSandbox.dispose());
 
 const CLIENT_SECRET_BYTES = 32;
 const SETTLE_WAIT_MS = 50;

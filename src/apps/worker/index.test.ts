@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { statSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
@@ -23,7 +23,15 @@ import { piProviderId, Platform } from "../../llm/platforms.ts";
 import { LoginSessionMode } from "../../llm/sessions.ts";
 import { generateX25519KeyPair } from "../../kernel/hpke.ts";
 import { machineConfigurationValue } from "../../worker/contract.ts";
-import { runWorker, Worker, type WorkerOptions } from "./index.ts";
+import { scopedDenyRead } from "../../agent/bash-sandbox.ts";
+import { directories as xdgDirectories } from "../../kernel/xdg.ts";
+import { instanceDirectories } from "./instance-config.ts";
+import {
+  instanceDenyRead,
+  runWorker,
+  Worker,
+  type WorkerOptions,
+} from "./index.ts";
 import { MACHINE_CONFIG_VARIABLE, writeMachineFile } from "./machine-config.ts";
 import {
   FAKE_INSTANCE_NAME,
@@ -842,4 +850,37 @@ test("an invalid machine configuration sends no claim and logs its code once", a
   assert.equal(f.pulls(), NO_PULLS);
   assert.equal(f.closes(MACHINE_CONFIG_INVALID), SINGLE);
   await f.stop();
+});
+
+test("(security) the instance deny list holds the instance pi directory, the sibling roots, tracking.db and the backups and no ancestor of the workspace or TMPDIR", (t) => {
+  const home = temporary(t);
+  const env: NodeJS.ProcessEnv = {
+    XDG_CONFIG_HOME: join(home, "config"),
+    XDG_STATE_HOME: join(home, "state"),
+    XDG_DATA_HOME: join(home, "data"),
+  };
+  const data = xdgDirectories(env).data;
+  const directories = instanceDirectories(env, "coder-1");
+  const sibling = instanceDirectories(env, "coder-2").data;
+  const workspace = join(directories.data, "workspaces", "node");
+  const tmp = join(directories.data, "tmp");
+  for (const directory of [workspace, tmp, sibling])
+    mkdirSync(directory, { recursive: true });
+  const files = ["tracking.db", "tracking.db-wal", "kanthord.db.bak-1"];
+  for (const file of files) writeFileSync(join(data, file), "");
+  const denied = scopedDenyRead(
+    { ...instanceDenyRead(env, directories), env: { TMPDIR: tmp } },
+    workspace,
+  );
+  for (const path of [
+    join(directories.data, "pi"),
+    sibling,
+    ...files.map((file) => join(data, file)),
+  ])
+    assert.ok(denied.includes(path), path);
+  for (const path of [workspace, tmp])
+    assert.deepEqual(
+      denied.filter((entry) => path === entry || path.startsWith(`${entry}/`)),
+      [],
+    );
 });

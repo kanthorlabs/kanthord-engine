@@ -6,7 +6,8 @@ import { existsSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { setTimeout } from "node:timers/promises";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { background } from "../../kernel/context.ts";
 import {
   EndReason,
@@ -58,6 +59,8 @@ import type { MethodClients } from "./method-clients.ts";
 import { type NativeAgent, openNativeAgent } from "./native-agent.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
+
+after(() => bashSandbox.dispose());
 
 const EXPECTED_CALL_COUNT = 1;
 const NO_RELEASES = 0;

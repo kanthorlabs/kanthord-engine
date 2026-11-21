@@ -190,6 +190,7 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
   const emulated = createBashSandbox(
     {
       initialize: async () => undefined,
+      reset: async () => undefined,
       wrapWithSandbox: async (command, _shell, customConfig) => {
         const denied = customConfig?.filesystem?.denyRead ?? [];
         return denied.some((path) => command.includes(path))

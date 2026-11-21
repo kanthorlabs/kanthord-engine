@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test, type TestContext } from "node:test";
+import { after, test, type TestContext } from "node:test";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   createJourneyNode,
@@ -41,6 +42,8 @@ import {
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
+
+after(() => bashSandbox.dispose());
 
 const MAIN_REF = "refs/heads/main";
 const SINGLE_INSTANCE = 1;

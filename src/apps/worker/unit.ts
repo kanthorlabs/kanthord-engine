@@ -85,6 +85,7 @@ export interface WorkerUnitOptions {
   directories: UnitDirectories;
   env: NodeJS.ProcessEnv;
   deny_read: readonly string[];
+  sandbox_root?: string;
   log: LogConfig["destination"] | ((message: string) => void);
   model_runtime_factory?: ModelRuntimeFactory;
   repository_transport?: RepositoryTransport;
@@ -700,6 +701,7 @@ export class WorkerUnit {
       hostHome: this.options.env.HOME ?? homedir(),
       env: this.options.env,
       denyRead: this.options.deny_read,
+      sandboxRoot: this.options.sandbox_root,
       context,
       stop,
       sessionRoot: executionSessionRoot(this.options.directories.data),

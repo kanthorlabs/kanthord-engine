@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
 import { hostDenyRead } from "../../agent/bash-sandbox.ts";
+import { piDirectory } from "../../agent/pi.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
 import { startThread } from "../worker/thread-start.ts";
@@ -79,7 +80,9 @@ export function slotThreadData(launch: SlotLaunch): ThreadData {
   return {
     entries: threadEntries(launch.entries),
     log: LogDestination.File,
-    deny_read: hostDenyRead(launch.environment, { root: launch.root }),
+    deny_read: hostDenyRead(launch.environment, {
+      pi: piDirectory(threadEnvironment(launch.environment, launch.root)),
+    }),
   };
 }
 

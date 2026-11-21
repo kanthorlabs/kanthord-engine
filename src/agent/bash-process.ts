@@ -5,12 +5,6 @@ import { constants as osConstants } from "node:os";
 import type { BashOperations } from "@earendil-works/pi-coding-agent";
 import { killChildTree } from "../kernel/process-group.ts";
 
-export {
-  bashSandbox,
-  createBashSandbox,
-  hostDenyRead,
-} from "./bash-sandbox.ts";
-
 const MILLISECONDS_PER_SECOND = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
 const OUTPUT_IDLE_MS = 100;

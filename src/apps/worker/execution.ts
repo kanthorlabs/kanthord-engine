@@ -40,6 +40,7 @@ export interface HostExecutionInput {
   hostHome: string;
   env: NodeJS.ProcessEnv;
   denyRead: readonly string[];
+  sandboxRoot?: string;
   context: Context;
   stop?: Context;
   sessionRoot?: string;

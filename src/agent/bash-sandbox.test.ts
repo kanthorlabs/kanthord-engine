@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
 import { createBashSandbox, hostDenyRead } from "./bash-sandbox.ts";
@@ -33,13 +33,18 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
     };
   }[] = [];
   const initialized: unknown[] = [];
+  const resets: boolean[] = [];
   return {
     calls,
     initialized,
+    resets,
     runtime: {
       initialize: async (config: unknown) => {
         initialized.push(config);
         await options.initialize?.();
+      },
+      reset: async () => {
+        resets.push(true);
       },
       wrapWithSandbox: async (
         command: string,
@@ -62,10 +67,11 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     cwd,
     hostOf({ TMPDIR: "/var/probe" }),
   );
-  assert.equal(wrapped, `sandboxed ${COMMAND}`);
+  const exported = `export TMPDIR='/var/probe'; ${COMMAND}`;
+  assert.equal(wrapped, `sandboxed ${exported}`);
   const [call] = fake.calls;
   assert.ok(call);
-  assert.equal(call.command, COMMAND);
+  assert.equal(call.command, exported);
   assert.equal(call.binShell, undefined);
   assert.deepEqual(call.customConfig.filesystem?.allowWrite, [
     cwd,
@@ -254,6 +260,8 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
   assert.deepEqual(call.customConfig.network, {
     allowedDomains: [
       "registry.npmjs.org",
+      "objects.githubusercontent.com",
+      "release-assets.githubusercontent.com",
       "github.com",
       "ssh.github.com",
       "api.github.com",
@@ -267,7 +275,7 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
   });
 });
 
-test("(security) with a worker environment denyRead holds the credential paths and names no ancestor of a workspace or of TMPDIR", async (t) => {
+function instanceLayout(t: TestContext) {
   const home = temporary(t);
   const env: NodeJS.ProcessEnv = {
     XDG_CONFIG_HOME: join(home, ".config"),
@@ -278,29 +286,133 @@ test("(security) with a worker environment denyRead holds the credential paths a
   const instance = join(place.data, "workers", "coder-1");
   const workspace = join(instance, "workspaces", "node", "checkouts", "engine");
   const tmp = join(instance, "tmp");
-  const denyRead = hostDenyRead(env, {
-    pi: join(instance, "pi"),
-    root: instance,
-  });
+  for (const directory of [
+    workspace,
+    tmp,
+    join(place.data, "workers", "coder-2"),
+  ])
+    mkdirSync(directory, { recursive: true });
+  for (const file of [
+    "tracking.db",
+    "tracking.db-wal",
+    "tracking.db-shm",
+    "kanthord.db.bak-1",
+    "tracking.db.bak-1",
+  ])
+    writeFileSync(join(place.data, file), "");
+  return { env, place, instance, workspace, tmp };
+}
+
+function ancestorsOf(list: readonly string[], path: string): string[] {
+  return list.filter(
+    (denied) => path === denied || path.startsWith(`${denied}/`),
+  );
+}
+
+test("(security) with a worker environment denyRead holds the credential paths, the siblings of the instance root and names no ancestor of a workspace or of TMPDIR", async (t) => {
+  const { env, place, instance, workspace, tmp } = instanceLayout(t);
   const fake = fakeRuntime();
   await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, workspace, {
     env: { TMPDIR: tmp },
     denyRead: hostDenyRead(env, { pi: join(instance, "pi") }),
+    root: instance,
   });
-  const wrapped = fake.calls[0]?.customConfig.filesystem?.denyRead ?? [];
-  for (const list of [denyRead, wrapped]) {
-    assert.ok(list.includes("~/.config/kanthord-eval"));
-    assert.ok(list.includes("~/.pi/agent"));
-    assert.ok(list.includes(place.config));
-    assert.ok(list.includes(join(instance, "pi")));
-    assert.ok(list.includes(join(place.data, "kanthord.db")));
-    assert.ok(!list.includes(place.data));
-    for (const path of [workspace, tmp])
-      assert.deepEqual(
-        list.filter(
-          (denied) => path === denied || path.startsWith(`${denied}/`),
-        ),
-        [],
-      );
+  const denied = fake.calls[0]?.customConfig.filesystem?.denyRead ?? [];
+  for (const path of [
+    "~/.config/kanthord-eval",
+    "~/.pi/agent",
+    place.config,
+    join(instance, "pi"),
+    join(place.data, "kanthord.db"),
+    join(place.data, "tracking.db"),
+    join(place.data, "tracking.db-wal"),
+    join(place.data, "tracking.db-shm"),
+    join(place.data, "kanthord.db.bak-1"),
+    join(place.data, "tracking.db.bak-1"),
+    join(place.data, "workers", "coder-2"),
+  ])
+    assert.ok(denied.includes(path), path);
+  assert.ok(!denied.includes(place.data));
+  assert.ok(!denied.includes(instance));
+  for (const path of [workspace, tmp])
+    assert.deepEqual(ancestorsOf(denied, path), []);
+});
+
+test("(security) an instance root created after the first wrap is denied on the next wrap", async (t) => {
+  const { env, place, instance, workspace, tmp } = instanceLayout(t);
+  const fake = fakeRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  const host = {
+    env: { TMPDIR: tmp },
+    denyRead: hostDenyRead(env, { pi: join(instance, "pi") }),
+    root: instance,
+  };
+  await sandbox.wrap(COMMAND, workspace, host);
+  const later = join(place.data, "workers", "coder-3");
+  assert.ok(!fake.calls[0]?.customConfig.filesystem?.denyRead.includes(later));
+  mkdirSync(later);
+  await sandbox.wrap(COMMAND, workspace, host);
+  assert.ok(fake.calls[1]?.customConfig.filesystem?.denyRead.includes(later));
+});
+
+test("(security) denyRead holds an absolute EVAL_ANTHROPIC_AUTH_FILE and its link target", async (t) => {
+  const directory = temporary(t);
+  const target = join(directory, "auth.json");
+  const link = join(directory, "linked.json");
+  writeFileSync(target, "");
+  symlinkSync(target, link);
+  const denied = hostDenyRead({ EVAL_ANTHROPIC_AUTH_FILE: link });
+  assert.ok(denied.includes(link));
+  assert.ok(denied.includes(realpathSync(target)));
+});
+
+test("a relative EVAL_ANTHROPIC_AUTH_FILE adds no denyRead entry", () => {
+  assert.deepEqual(
+    hostDenyRead({ EVAL_ANTHROPIC_AUTH_FILE: "auth.json" }),
+    hostDenyRead({}),
+  );
+});
+
+test("(security) denyWrite holds the config and the hooks of each .git directory under the cwd", async (t) => {
+  const cwd = temporary(t);
+  const own = join(cwd, ".git");
+  const checkout = join(cwd, "checkouts", "engine", ".git");
+  const deep = join(cwd, "a", "b", "c", "d", ".git");
+  for (const directory of [own, checkout, deep])
+    mkdirSync(directory, { recursive: true });
+  mkdirSync(join(cwd, "linked"));
+  writeFileSync(join(cwd, "linked", ".git"), "gitdir: /elsewhere\n");
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, cwd, hostOf());
+  const denyWrite = fake.calls[0]?.customConfig.filesystem?.denyWrite ?? [];
+  for (const git of [own, checkout]) {
+    assert.ok(denyWrite.includes(join(git, "config")));
+    assert.ok(denyWrite.includes(join(git, "hooks")));
   }
+  assert.ok(!denyWrite.includes(join(deep, "config")));
+  assert.ok(!denyWrite.includes(join(cwd, "linked", ".git", "config")));
+});
+
+test("a wrap exports the TMPDIR of the host before the command", async (t) => {
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(
+    COMMAND,
+    temporary(t),
+    hostOf({ TMPDIR: "/var/it's here" }),
+  );
+  assert.equal(
+    fake.calls[0]?.command,
+    `export TMPDIR='/var/it'\\''s here'; ${COMMAND}`,
+  );
+});
+
+test("dispose resets the runtime and the next wrap initializes it again", async (t) => {
+  const cwd = temporary(t);
+  const fake = fakeRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  await sandbox.wrap(COMMAND, cwd, hostOf());
+  await sandbox.dispose();
+  assert.equal(fake.resets.length, ONCE);
+  await sandbox.wrap(COMMAND, cwd, hostOf());
+  assert.equal(fake.initialized.length, TWICE);
 });

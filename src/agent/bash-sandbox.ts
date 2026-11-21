@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { type Dirent, readdirSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   SandboxManager,
@@ -20,9 +20,24 @@ const ENVIRONMENTS_DIRECTORY = "environments";
 const MISSING_ENTRY = "ENOENT";
 const PARENT_SEGMENT = "..";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
+const EVAL_AUTH_FILE_VARIABLE = "EVAL_ANTHROPIC_AUTH_FILE";
+const GITHUB_ASSET_HOSTS = [
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+];
+const GIT_DIRECTORY = ".git";
+const GIT_SEARCH_DEPTH = 3;
+const GIT_SEARCH_END = 0;
+const GIT_PROTECTED_ENTRIES = ["config", "hooks"];
+const SINGLE_QUOTE = /'/g;
+const QUOTED_SINGLE_QUOTE = "'\\''";
 
 const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
-  allowedDomains: [NPM_REGISTRY_HOST, ...platformNetworkHosts()],
+  allowedDomains: [
+    NPM_REGISTRY_HOST,
+    ...GITHUB_ASSET_HOSTS,
+    ...platformNetworkHosts(),
+  ],
   deniedDomains: [],
 };
 
@@ -35,21 +50,42 @@ const DEFAULT_CONFIG: SandboxRuntimeConfig = {
   },
 };
 
-type Runtime = Pick<typeof SandboxManager, "initialize" | "wrapWithSandbox">;
+type Runtime = Pick<
+  typeof SandboxManager,
+  "initialize" | "wrapWithSandbox" | "reset"
+>;
 
 function overriddenConfigFile(env: NodeJS.ProcessEnv): string[] {
   const override = env.KANTHORD_CONFIG;
   return override ? [resolve(override)] : [];
 }
 
-export interface SandboxHost {
-  env: NodeJS.ProcessEnv;
+function realTarget(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === MISSING_ENTRY) return path;
+    throw error;
+  }
+}
+
+function evalAuthFile(env: NodeJS.ProcessEnv): string[] {
+  const file = env[EVAL_AUTH_FILE_VARIABLE];
+  if (!file || !isAbsolute(file)) return [];
+  return [...new Set([file, realTarget(file)])];
+}
+
+export interface SandboxScope {
   denyRead: readonly string[];
+  root?: string;
+}
+
+export interface SandboxHost extends SandboxScope {
+  env: NodeJS.ProcessEnv;
 }
 
 export interface DenyReadScope {
   pi?: string;
-  root?: string;
 }
 
 function isWithin(ancestor: string, path: string): boolean {
@@ -71,17 +107,60 @@ function withoutAncestors(
   );
 }
 
-function siblingRoots(workers: string, root: string): string[] {
-  if (!isWithin(workers, root)) return [];
-  const own = relative(workers, root).split(sep)[0];
+function entriesOf(directory: string): Dirent[] {
   try {
-    return readdirSync(workers)
-      .filter((name) => name !== own)
-      .map((name) => join(workers, name));
+    return readdirSync(directory, { withFileTypes: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === MISSING_ENTRY) return [];
     throw error;
   }
+}
+
+function besideRoot(ancestor: string, root: string): string[] {
+  return entriesOf(ancestor).flatMap((entry) => {
+    const child = join(ancestor, entry.name);
+    if (!isWithin(child, root)) return [child];
+    return isWithin(root, child) ? [] : besideRoot(child, root);
+  });
+}
+
+function rootDenyRead(host: SandboxHost): string[] {
+  const { root } = host;
+  if (root === undefined) return [];
+  return host.denyRead
+    .filter((denied) => isWithin(denied, root))
+    .flatMap((ancestor) => besideRoot(ancestor, root));
+}
+
+export function scopedDenyRead(host: SandboxHost, cwd: string): string[] {
+  const allowed = [cwd, host.env.TMPDIR ?? TEMPORARY_FALLBACK];
+  const roots = host.root === undefined ? [] : [host.root];
+  return [
+    ...new Set([
+      ...withoutAncestors(host.denyRead, [...allowed, ...roots]),
+      ...withoutAncestors(rootDenyRead(host), allowed),
+    ]),
+  ];
+}
+
+function gitDirectories(directory: string, depth: number): string[] {
+  return entriesOf(directory).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.name === GIT_DIRECTORY)
+      return entry.isDirectory() || entry.isSymbolicLink() ? [path] : [];
+    if (!entry.isDirectory() || depth === GIT_SEARCH_END) return [];
+    return gitDirectories(path, depth - 1);
+  });
+}
+
+function gitDenyWrite(cwd: string): string[] {
+  return gitDirectories(cwd, GIT_SEARCH_DEPTH).flatMap((git) =>
+    GIT_PROTECTED_ENTRIES.map((entry) => join(git, entry)),
+  );
+}
+
+function shellQuoted(word: string): string {
+  return `'${word.replace(SINGLE_QUOTE, QUOTED_SINGLE_QUOTE)}'`;
 }
 
 export function hostDenyRead(
@@ -89,7 +168,7 @@ export function hostDenyRead(
   scope: DenyReadScope = {},
 ): string[] {
   const place = directories(env);
-  const denyRead = [
+  return [
     ...DEFAULT_CONFIG.filesystem.denyRead,
     piDirectory(env),
     ...(scope.pi === undefined ? [] : [scope.pi]),
@@ -97,6 +176,7 @@ export function hostDenyRead(
     join(place.state, LOG_FILE),
     place.config,
     ...overriddenConfigFile(env),
+    ...evalAuthFile(env),
     place.data,
     ...DATABASE_FILES.map((file) => join(place.data, file)),
     join(place.state, PROJECTS_DIRECTORY),
@@ -104,18 +184,19 @@ export function hostDenyRead(
     "~/.config/kanthord-eval",
     "~/.pi/agent",
   ];
-  if (scope.root === undefined) return denyRead;
-  return [
-    ...withoutAncestors(denyRead, [scope.root]),
-    ...siblingRoots(join(place.state, WORKERS_DIRECTORY), scope.root),
-  ];
 }
 
 function filesystemOf(
   denyRead: string[],
   allowWrite: string[],
+  denyWrite: string[],
 ): SandboxRuntimeConfig["filesystem"] {
-  return { ...DEFAULT_CONFIG.filesystem, denyRead, allowWrite };
+  return {
+    ...DEFAULT_CONFIG.filesystem,
+    denyRead,
+    allowWrite,
+    denyWrite: [...DEFAULT_CONFIG.filesystem.denyWrite, ...denyWrite],
+  };
 }
 
 export function createBashSandbox(
@@ -150,13 +231,22 @@ export function createBashSandbox(
     ): Promise<string> {
       assert.ok(cwd);
       const temporary = host.env.TMPDIR ?? TEMPORARY_FALLBACK;
-      const denied = withoutAncestors(host.denyRead, [cwd, temporary]);
-      started ??= start(filesystemOf(denied, []));
+      const denied = scopedDenyRead(host, cwd);
+      const gitDenied = gitDenyWrite(cwd);
+      started ??= start(filesystemOf(denied, [], gitDenied));
       await started;
-      return runtime.wrapWithSandbox(command, undefined, {
-        filesystem: filesystemOf(denied, [cwd, temporary]),
-        network: BASH_NETWORK,
-      });
+      return runtime.wrapWithSandbox(
+        `export TMPDIR=${shellQuoted(temporary)}; ${command}`,
+        undefined,
+        {
+          filesystem: filesystemOf(denied, [cwd, temporary], gitDenied),
+          network: BASH_NETWORK,
+        },
+      );
+    },
+    async dispose(): Promise<void> {
+      await runtime.reset();
+      started = undefined;
     },
   };
 }

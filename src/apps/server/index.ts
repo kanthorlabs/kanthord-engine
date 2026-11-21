@@ -195,6 +195,7 @@ import {
 import { WORKBENCH_SERVICE_NAME } from "../../workbench/contract.ts";
 import { AGENT_COMPONENT_NAME } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { PromptConsumer } from "../../agent/prompt-render.ts";
 import {
   checkServerRepositoryTools,
@@ -1814,6 +1815,11 @@ export class Server implements Service {
       } catch (error) {
         failures.push(asError(error));
       }
+    }
+    try {
+      await bashSandbox.dispose();
+    } catch (error) {
+      failures.push(asError(error));
     }
     return failures.length
       ? new AggregateError(failures, "Server resource cleanup failed.")

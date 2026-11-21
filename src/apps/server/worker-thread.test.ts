@@ -26,6 +26,7 @@ import {
   ThreadMessageKind,
 } from "../worker/thread-data.ts";
 import { until } from "./cli-test-support.ts";
+import { scopedDenyRead } from "../../agent/bash-sandbox.ts";
 import {
   launchEnvironment,
   slotThreadData,
@@ -181,17 +182,23 @@ test("(security) a slot thread gets a deny_read list of the server environment t
   const data = slotThreadData(launch);
   assert.ok(threadDataSchema.safeParse(data).success);
   const slot = directories(slotThreadEnvironment(serverEnv, slotRoot));
-  assert.ok(data.deny_read.includes(server.config));
-  assert.ok(data.deny_read.includes(join(server.data, "kanthord.db")));
-  assert.ok(data.deny_read.includes(join(server.state, "pi")));
-  assert.ok(data.deny_read.includes("~/.config/kanthord-eval"));
-  assert.ok(data.deny_read.includes(siblingRoot));
-  assert.ok(!data.deny_read.includes(slotRoot));
-  for (const path of [join(slot.state, "workspaces"), join(slotRoot, "tmp")])
+  const workspace = join(slot.state, "workspaces");
+  const tmp = join(slotRoot, "tmp");
+  assert.ok(data.deny_read.includes(join(slot.state, "pi")));
+  const denied = scopedDenyRead(
+    { env: { TMPDIR: tmp }, denyRead: data.deny_read, root: slotRoot },
+    workspace,
+  );
+  assert.ok(denied.includes(server.config));
+  assert.ok(denied.includes(join(server.data, "kanthord.db")));
+  assert.ok(denied.includes(join(server.state, "pi")));
+  assert.ok(denied.includes(join(slot.state, "pi")));
+  assert.ok(denied.includes("~/.config/kanthord-eval"));
+  assert.ok(denied.includes(siblingRoot));
+  assert.ok(!denied.includes(slotRoot));
+  for (const path of [workspace, tmp])
     assert.deepEqual(
-      data.deny_read.filter(
-        (denied) => path === denied || path.startsWith(`${denied}/`),
-      ),
+      denied.filter((entry) => path === entry || path.startsWith(`${entry}/`)),
       [],
     );
 });

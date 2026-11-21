@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import type {
   BashOperations,
   BashToolOptions,
@@ -13,15 +14,17 @@ export { ToolSource } from "../../agent/contract.ts";
 import { childEnvironment } from "../../agent/environment.ts";
 import {
   type BashProcess,
-  bashSandbox,
   processBashOperations,
   type ShellConfig,
 } from "../../agent/bash-process.ts";
+import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
 export { childEnvironment } from "../../agent/environment.ts";
 
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
+const PNPM_STORE_DIRECTORY = "pnpm-store";
+const NPM_CACHE_DIRECTORY = "npm-cache";
 
 const HOST_TOOLS: Readonly<
   Record<HostTool, (hostTools: HostTools) => ToolDefinition>
@@ -76,6 +79,16 @@ export class ToolProcesses {
   }
 }
 
+function packageCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const temporary = env.TMPDIR;
+  if (temporary === undefined) return env;
+  return {
+    ...env,
+    npm_config_store_dir: join(temporary, PNPM_STORE_DIRECTORY),
+    npm_config_cache: join(temporary, NPM_CACHE_DIRECTORY),
+  };
+}
+
 export function sessionTools(
   pi: PiCodingAgent,
   agentName: string,
@@ -84,7 +97,7 @@ export function sessionTools(
   hostTools: HostTools,
   env: NodeJS.ProcessEnv,
   processes: ToolProcesses,
-  denyRead: readonly string[],
+  sandbox: SandboxScope,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
@@ -112,10 +125,12 @@ export function sessionTools(
         );
         if (limit < MINIMUM_SECONDS) throw new Error("resource budget ended");
         const applied = Math.min(execOptions.timeout ?? limit, limit);
-        const childEnv = childEnvironment(execOptions.env ?? env);
+        const childEnv = packageCacheEnvironment(
+          childEnvironment(execOptions.env ?? env),
+        );
         const wrapped = await bashSandbox.wrap(command, directory, {
+          ...sandbox,
           env: childEnv,
-          denyRead,
         });
         processes.recordTimeout(toolCallId, {
           requestedMs:

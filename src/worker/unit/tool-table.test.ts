@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
 import type {
@@ -8,7 +9,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
-import { bashSandbox, createBashSandbox } from "../../agent/bash-process.ts";
+import { bashSandbox, createBashSandbox } from "../../agent/bash-sandbox.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
   pidsIn,
@@ -118,7 +119,7 @@ test("child environment removes provider keys and bash timeout stays below the b
       unusedHostTools,
       hostEnvironment(),
       recording,
-      [],
+      { denyRead: [] },
     );
   await runBash(tools(budget), "true", 3600);
   const maximumSeconds = 4;
@@ -151,7 +152,7 @@ test("child environment removes provider keys and bash timeout stays below the b
       unusedHostTools,
       hostEnvironment(),
       recording,
-      [],
+      { denyRead: [] },
     ).customTools,
     [],
   );
@@ -164,7 +165,7 @@ test("child environment removes provider keys and bash timeout stays below the b
     unusedHostTools,
     hostEnvironment(),
     processes,
-    [],
+    { denyRead: [] },
   );
   await runBash(real, "true");
   const output = await captured!.operations!.exec(
@@ -195,7 +196,7 @@ test("sessionTools of swe@1 holds both host tools under their own names and re@1
       unusedHostTools,
       hostEnvironment(),
       processes,
-      [],
+      { denyRead: [] },
     );
   const names = Object.values(HostTool);
   const swe = tools("swe@1");
@@ -236,7 +237,7 @@ test("bash records the requested and the applied timeout once and records nothin
       unusedHostTools,
       hostEnvironment(),
       processes,
-      [],
+      { denyRead: [] },
     );
   const long = budget(COMMAND_LIMIT_MS * 2, now);
   const limitSeconds = COMMAND_LIMIT_MS / MILLISECONDS_PER_SECOND - 1;
@@ -281,7 +282,7 @@ test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.
     unusedHostTools,
     source,
     processes,
-    [],
+    { denyRead: [] },
   );
   await runBash(tools, COMMAND);
   assert.deepEqual(processes.operationIds, [TOOL_CALL]);
@@ -302,6 +303,7 @@ function fakeSandboxRuntime() {
     customConfigs,
     runtime: {
       initialize: async () => {},
+      reset: async () => {},
       wrapWithSandbox: async (
         command: string,
         _binShell?: string,
@@ -336,7 +338,7 @@ function sandboxedTools(
     unusedHostTools,
     options.env,
     options.processes,
-    options.denyRead,
+    { denyRead: options.denyRead },
   );
 }
 
@@ -357,10 +359,43 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
   });
   await runBash(tools, COMMAND);
   assert.equal(processes.calls.length, SINGLE_CALL);
-  assert.equal(processes.calls[0]?.command, `sandboxed ${COMMAND}`);
+  assert.equal(
+    processes.calls[0]?.command,
+    `sandboxed export TMPDIR='${tmp}'; ${COMMAND}`,
+  );
   assert.equal(processes.calls[0]?.cwd, cwd);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.allowWrite, [cwd, tmp]);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.denyRead, denyRead);
+});
+
+test("the swe@1 bash puts the package store and the package cache under the TMPDIR of the environment", async (t) => {
+  unwrapped(t);
+  const pi = await loadPi();
+  let captured: BashToolOptions | undefined;
+  const mockPi = {
+    ...pi,
+    createBashToolDefinition: (cwd: string, options?: BashToolOptions) => {
+      captured = options;
+      return pi.createBashToolDefinition(cwd, options);
+    },
+  };
+  const processes = new CallRecordingProcesses(pi.getShellConfig());
+  const cwd = temporary(t);
+  const tmp = temporary(t);
+  const tools = sandboxedTools(mockPi, {
+    processes,
+    cwd,
+    env: hostEnvironment(),
+    denyRead: [],
+  });
+  await runBash(tools, COMMAND);
+  await captured!.operations!.exec(COMMAND, cwd, {
+    env: { ...hostEnvironment(), TMPDIR: tmp },
+    onData: () => {},
+  });
+  const env = processes.calls.at(-1)?.env;
+  assert.equal(env?.npm_config_store_dir, join(tmp, "pnpm-store"));
+  assert.equal(env?.npm_config_cache, join(tmp, "npm-cache"));
 });
 
 test("(security) a rejected wrap rejects the bash call, spawns no process and records no timeout", async (t) => {
@@ -408,7 +443,7 @@ async function killedBashCall(
     unusedHostTools,
     hostEnvironment(),
     new ToolProcesses(pi.getShellConfig()),
-    [],
+    { denyRead: [] },
   ).customTools;
   const failure: Error = await bash!
     .execute(
