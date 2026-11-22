@@ -458,7 +458,7 @@ test(
           "/repos/owner/gated/rules/branches/main?per_page=100&page=1",
         );
         const checkRuns = read(
-          `/repos/owner/gated/commits/${head}/check-runs?per_page=100`,
+          `/repos/owner/gated/commits/${head}/check-runs?per_page=100&page=1`,
         );
         const statuses = read(
           `/repos/owner/gated/commits/${head}/statuses?per_page=100&page=1`,

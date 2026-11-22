@@ -1034,6 +1034,10 @@ const GITHUB_MERGE_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/pulls\/([1-9][0-9]*)\/merge$/;
 const GITHUB_REPOSITORY_ROUTE = /^\/repos\/([^/]+)\/([^/]+)$/;
 const GITHUB_RULES_ROUTE = /^\/repos\/([^/]+)\/([^/]+)\/rules\/branches\/.+$/;
+const GITHUB_SETTLED_UPDATED_AT = "2000-01-01T00:00:00Z";
+const GITHUB_CHECK_RUN_PAGE_SIZE = 100;
+const GITHUB_FIRST_CHECK_RUN_PAGE = 1;
+const GITHUB_MIN_CHECK_RUN_PAGE_SIZE = 1;
 const GITHUB_CHECK_RUNS_ROUTE =
   /^\/repos\/([^/]+)\/([^/]+)\/commits\/([^/]+)\/check-runs$/;
 const GITHUB_STATUSES_ROUTE =
@@ -1078,6 +1082,7 @@ export interface FakePullRequest {
   merge_commit_sha: string | null;
   closed_at: string | null;
   head_sha: string;
+  updated_at: string;
   reviews: FakeReview[];
   mergeability: FakeMergeability[];
 }
@@ -1155,6 +1160,7 @@ interface FakeGitHubAnswer {
   status: number;
   body: unknown;
   etag?: string;
+  link?: string;
 }
 
 const createPullSchema = z.looseObject({
@@ -1197,6 +1203,7 @@ function pullBody(pull: FakePullRequest) {
     merge_commit_sha: pull.merge_commit_sha,
     closed_at: pull.closed_at,
     merged_at: pull.merged ? pull.closed_at : null,
+    updated_at: pull.updated_at,
     ...pull.mergeability[GITHUB_FIRST_MERGEABILITY],
     head: {
       ref: pull.head,
@@ -1243,6 +1250,7 @@ function insertPull(
     head_sha:
       state.branchHeads.get(input.head) ??
       createHash("sha1").update(`${owner}/${repo}#${input.head}`).digest("hex"),
+    updated_at: GITHUB_SETTLED_UPDATED_AT,
     reviews: [],
     mergeability: [],
   };
@@ -1358,19 +1366,37 @@ function branchRules(state: FakeGitHubState): FakeGitHubAnswer {
 
 function routeCommitChecks(
   state: FakeGitHubState,
-  pathname: string,
+  url: URL,
 ): FakeGitHubAnswer | null {
-  const runs = GITHUB_CHECK_RUNS_ROUTE.exec(pathname);
+  const runs = GITHUB_CHECK_RUNS_ROUTE.exec(url.pathname);
   if (runs) {
-    const [, , , ref] = runs;
-    assert.ok(ref);
+    const [, owner, repo, ref] = runs;
+    assert.ok(owner && repo && ref);
     const checkRuns = state.checkRuns.get(ref) ?? [];
+    const perPage = Number(
+      url.searchParams.get("per_page") ?? GITHUB_CHECK_RUN_PAGE_SIZE,
+    );
+    const page = Number(
+      url.searchParams.get("page") ?? GITHUB_FIRST_CHECK_RUN_PAGE,
+    );
+    assert.ok(
+      perPage >= GITHUB_MIN_CHECK_RUN_PAGE_SIZE &&
+        page >= GITHUB_FIRST_CHECK_RUN_PAGE,
+    );
+    const first = (page - GITHUB_FIRST_CHECK_RUN_PAGE) * perPage;
+    const more = first + perPage < checkRuns.length;
+    const next = new URL(url);
+    next.searchParams.set("page", String(page + 1));
     return {
       status: HttpStatus.OK,
-      body: { total_count: checkRuns.length, check_runs: checkRuns },
+      body: {
+        total_count: checkRuns.length,
+        check_runs: checkRuns.slice(first, first + perPage),
+      },
+      ...(more ? { link: `<${next.href}>; rel="next"` } : {}),
     };
   }
-  const statuses = GITHUB_STATUSES_ROUTE.exec(pathname);
+  const statuses = GITHUB_STATUSES_ROUTE.exec(url.pathname);
   if (!statuses) return null;
   const [, , , ref] = statuses;
   assert.ok(ref);
@@ -1475,7 +1501,11 @@ function replyGitHub(
 ) {
   assert.ok(Number.isInteger(answer.status));
   assert.ok(!response.headersSent);
-  const head = writeHead(response, answer.status, headers);
+  const head = writeHead(
+    response,
+    answer.status,
+    answer.link === undefined ? headers : { ...headers, link: answer.link },
+  );
   if (answer.status === GITHUB_NOT_MODIFIED_STATUS) head.end();
   else head.end(JSON.stringify(answer.body));
 }
@@ -1566,7 +1596,7 @@ async function gitHubRequest(
       ? branchRules(state)
       : GITHUB_MERGE_ROUTE.test(url.pathname)
         ? mergePull(state, url, body)
-        : (routeCommitChecks(state, url.pathname) ??
+        : (routeCommitChecks(state, url) ??
           routePull(state, method, url, body, call.if_none_match));
   if (method !== HttpMethod.Get && state.dropNext) {
     state.dropNext = false;

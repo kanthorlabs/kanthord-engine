@@ -592,7 +592,7 @@ test(
           },
           {
             method: "GET",
-            path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100`,
+            path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100&page=1`,
             body: null,
             token: GITHUB_KEY,
             if_none_match: null,
@@ -654,7 +654,7 @@ test(
             },
             {
               method: "GET",
-              path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100`,
+              path: `/repos/owner/gated/commits/${prHead}/check-runs?per_page=100&page=1`,
               token: GITHUB_KEY,
             },
             {

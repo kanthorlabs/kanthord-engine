@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
+import { once } from "node:events";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import pino from "pino";
 import {
   GrantKind,
@@ -158,6 +161,7 @@ function harness(
     checksFailure?: ResultClassValue;
     reviews?: unknown[];
     checks?: { pending: string[]; failed: string[] };
+    checksBaseUrl?: string;
     sshFacts?: { binding_id: string; address: string };
     trees?: { base: string; tested: string } | null;
   },
@@ -212,6 +216,10 @@ function harness(
       ...input: Parameters<GitHubPlatform["getRequiredChecks"]>
     ) => {
       checkReads.push(input[2].ignoredChecks);
+      if (options.checksBaseUrl !== undefined)
+        return new GitHubPlatform({
+          baseUrl: options.checksBaseUrl,
+        }).getRequiredChecks(...input);
       return options.reviews === undefined
         ? refusal(options.checksFailure ?? ResultClass.FinalRefusal)
         : {
@@ -436,6 +444,53 @@ test("a node check of an open pull request with a failed run that the rules do n
   });
   assert.equal((await h.check()).end_state, CheckEndState.ChecksFailed);
   assert.deepEqual(h.checkReads, [["lint"]]);
+});
+
+const FRESH_PULL_REQUEST_AGE_MS = 10000;
+
+async function emptyHeadServer(t: TestContext, updatedAt: string) {
+  const server = createServer((request, response) => {
+    const path = new URL(String(request.url), "http://localhost").pathname;
+    const body = path.endsWith("/check-runs")
+      ? { total_count: 0, check_runs: [] }
+      : path.includes("/pulls/")
+        ? {
+            number: 7,
+            state: "open",
+            head: { sha: PUSHED },
+            base: { ref: "main" },
+            updated_at: updatedAt,
+          }
+        : [];
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(body));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  t.after(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+
+test("regression: e10 gate S1 a node check of an open pull request with no check run on a fresh head answers no merged end", async (t) => {
+  const checksBaseUrl = await emptyHeadServer(
+    t,
+    new Date(Date.now() - FRESH_PULL_REQUEST_AGE_MS).toISOString(),
+  );
+  const h = harness(t, {
+    facts: testedPullRequestFacts(),
+    credential: "github",
+    reviews: [],
+    checksBaseUrl,
+    trees: { base: "tree-a", tested: "tree-a" },
+  });
+  assert.deepEqual(await h.check(), {
+    end_state: CheckEndState.ChecksPending,
+    landed_commits: [],
+  });
+  assert.deepEqual(h.treeReads, []);
 });
 
 const BASE_BRANCH = "main";

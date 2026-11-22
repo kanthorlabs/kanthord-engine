@@ -1665,10 +1665,18 @@ test("getChangeRequests answers the current change requests with their review co
 const RULES_PATH = "/repos/octo/widgets/rules/branches/main";
 const CHECK_RUNS_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/check-runs`;
 const STATUSES_PATH = `/repos/octo/widgets/commits/${HEAD_SHA}/statuses`;
+const SETTLED_UPDATED_AT = "2000-01-01T00:00:00Z";
+const CHECK_SETTLE_MS = 300000;
+const NO_CHECK_YET = "kanthord/no-check-yet";
 const CHECK_PULL_REQUEST = {
   ...PULL_REQUEST_BODY,
   base: { ref: BASE_BRANCH },
+  updated_at: SETTLED_UPDATED_AT,
 };
+const pullRequestAged = (ageMs: number) => ({
+  ...CHECK_PULL_REQUEST,
+  updated_at: new Date(Date.now() - ageMs).toISOString(),
+});
 const requiredRule = (...contexts: string[]) => ({
   type: "required_status_checks",
   parameters: {
@@ -2015,6 +2023,141 @@ test("getRequiredChecks answers a failed read unchanged", async (t) => {
   });
   assert.equal(!result.ok && result.class, ResultClass.FinalRefusal);
   assert.equal(!result.ok && result.status, HttpStatus.NotFound);
+});
+
+async function requiredChecksOf(
+  t: Parameters<typeof platform>[0],
+  handler: Handler,
+) {
+  const server = await platform(t, handler);
+  const result = await new GitHubPlatform({
+    baseUrl: server.baseUrl,
+  }).getRequiredChecks(call(), TARGET, { number: 7, ignoredChecks: [] });
+  return { server, result };
+}
+
+const pageOf = (request: IncomingMessage) =>
+  new URL(String(request.url), "http://localhost").searchParams.get("page");
+
+test("getRequiredChecks reads every page of the check runs", async (t) => {
+  const firstPage = Array.from({ length: 100 }, (_, index) =>
+    run(index + 1, `job-${index + 1}`, "completed", "success"),
+  );
+  const secondPage = Array.from({ length: 50 }, (_, index) =>
+    run(index + 101, `job-${index + 101}`, "completed", "success"),
+  );
+  secondPage[49] = run(150, "job-150", "completed", "failure");
+  const { server, result } = await requiredChecksOf(
+    t,
+    (request, response, count) => {
+      const path = pathOf(request);
+      if (path !== CHECK_RUNS_PATH)
+        return checkServer({
+          [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+          [RULES_PATH]: [200, []],
+          [STATUSES_PATH]: [200, []],
+        })(request, response, count);
+      return pageOf(request) === String(SECOND_PAGE)
+        ? answer(200, { total_count: 150, check_runs: secondPage })(
+            request,
+            response,
+            count,
+          )
+        : answer(
+            200,
+            { total_count: 150, check_runs: firstPage },
+            { link: NEXT_LINK },
+          )(request, response, count);
+    },
+  );
+  assert.deepEqual(result, {
+    ok: true,
+    value: {
+      head_commit: HEAD_SHA,
+      base_branch: BASE_BRANCH,
+      pending: [],
+      failed: ["job-150"],
+    },
+  });
+  const checkRunRequests = server.requests.filter(
+    (request) => pathOf(request) === CHECK_RUNS_PATH,
+  );
+  assert.deepEqual(checkRunRequests.map(pageOf), ["1", "2"]);
+});
+
+test("getRequiredChecks stops at the page bound and answers an unreadable body", async (t) => {
+  const { server, result } = await requiredChecksOf(
+    t,
+    (request, response, count) =>
+      pathOf(request) === CHECK_RUNS_PATH
+        ? answer(
+            200,
+            { total_count: 1, check_runs: [run(1, "a", "queued", null)] },
+            { link: NEXT_LINK },
+          )(request, response, count)
+        : checkServer({
+            [PULL_REQUEST_PATH]: [200, CHECK_PULL_REQUEST],
+            [RULES_PATH]: [200, []],
+            [STATUSES_PATH]: [200, []],
+          })(request, response, count),
+  );
+  assert.ok(!result.ok);
+  assert.equal(result.message, UNREADABLE_BODY_MESSAGE);
+  assert.equal(
+    server.requests.filter((request) => pathOf(request) === CHECK_RUNS_PATH)
+      .length,
+    REVIEW_PAGE_LIMIT,
+  );
+});
+
+const headWith = (
+  pullRequest: unknown,
+  checkRuns: unknown[],
+  rules: unknown[] = [],
+) =>
+  checkServer({
+    [PULL_REQUEST_PATH]: [200, pullRequest],
+    [RULES_PATH]: [200, rules],
+    [CHECK_RUNS_PATH]: [
+      200,
+      { total_count: checkRuns.length, check_runs: checkRuns },
+    ],
+    [STATUSES_PATH]: [200, []],
+  });
+
+test("getRequiredChecks holds a head with no check run pending until the pull request settles", async (t) => {
+  const fresh = await requiredChecksOf(t, headWith(pullRequestAged(10000), []));
+  assert.ok(fresh.result.ok);
+  assert.deepEqual(fresh.result.value.pending, [NO_CHECK_YET]);
+  assert.deepEqual(fresh.result.value.failed, []);
+});
+
+test("getRequiredChecks lets a head with no check run land after the settle time", async (t) => {
+  const settled = await requiredChecksOf(
+    t,
+    headWith(pullRequestAged(CHECK_SETTLE_MS + 1000), []),
+  );
+  assert.ok(settled.result.ok);
+  assert.deepEqual(settled.result.value.pending, []);
+  assert.deepEqual(settled.result.value.failed, []);
+});
+
+test("getRequiredChecks names only the queued run of a fresh head", async (t) => {
+  const queued = await requiredChecksOf(
+    t,
+    headWith(pullRequestAged(10000), [run(1, "build", "queued", null)]),
+  );
+  assert.ok(queued.result.ok);
+  assert.deepEqual(queued.result.value.pending, ["build"]);
+});
+
+test("getRequiredChecks keeps a required context with no run pending after the settle time", async (t) => {
+  const required = await requiredChecksOf(
+    t,
+    headWith(pullRequestAged(CHECK_SETTLE_MS + 1000), [], [requiredRule("ci")]),
+  );
+  assert.ok(required.result.ok);
+  assert.deepEqual(required.result.value.pending, ["ci"]);
 });
 
 interface LinkInput {
