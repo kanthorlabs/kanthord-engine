@@ -33,6 +33,7 @@ const MODIFIED = "M";
 const REGULAR_MODES = new Set(["100644", "100755"]);
 const NEWLINE = "\n";
 const STATUS_PREFIX_LENGTH = 3;
+const UNTRACKED_PREFIX = "?? ";
 const EXCLUDE_SPECIAL = /[\\*?[\]!#]/g;
 const COMMIT_PATTERN = /^[a-f0-9]{40,64}$/;
 const RENAME_LETTER = "R";
@@ -45,6 +46,9 @@ const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
 const RAW_RECORD_WIDTH = 2;
 const GIT_DIRECTORY = ".git";
+const GITLINK_TYPE = "160000";
+const GITLINK_MODE = `${GITLINK_TYPE} `;
+const GITLINK_COMMIT_FIELD = 1;
 const LOCK_SUFFIX = ".lock";
 const NO_ENTRIES = 0;
 const FORMAT_VERSION = "0";
@@ -123,6 +127,8 @@ export async function commitWork(
   message: string,
   context: Context,
   deadlineMs: number,
+  pointers: readonly string[] = [],
+  verificationWrites: readonly string[] = [],
 ): Promise<string | null> {
   assert.ok(directory);
   assert.ok(message);
@@ -132,7 +138,9 @@ export async function commitWork(
     assert.ok(duration > EXPIRED, "Commit deadline reached");
     return duration;
   };
-  if (!(await stageChanges(env, directory, context, remaining))) return null;
+  const rules = { pointers, verificationWrites };
+  if (!(await stageChanges(env, directory, context, remaining, rules)))
+    return null;
   await runCommit(env, directory, message, context, remaining());
   return headCommit(env, directory, context, remaining());
 }
@@ -166,13 +174,28 @@ interface IndexEntry {
   path: string;
 }
 
+interface TurnRules {
+  pointers: readonly string[];
+  verificationWrites: readonly string[];
+}
+
+export interface GitScope {
+  env: NodeJS.ProcessEnv;
+  directory: string;
+  context: Context;
+  remaining: () => number;
+}
+
 async function stageChanges(
   env: NodeJS.ProcessEnv,
   directory: string,
   context: Context,
   remaining: () => number,
+  rules: TurnRules | null,
 ): Promise<boolean> {
   await run(env, directory, ["add", "--all"], context, remaining());
+  if (rules !== null)
+    await trimTurnStaging({ env, directory, context, remaining }, rules);
   const converted = await conversionOnlyPaths(
     env,
     directory,
@@ -190,6 +213,83 @@ async function stageChanges(
       remaining(),
     );
   return !(await indexMatchesHead(env, directory, context, remaining()));
+}
+
+async function trimTurnStaging(
+  scope: GitScope,
+  rules: TurnRules,
+): Promise<void> {
+  const added = new Set(
+    await nulPaths(scope, [
+      "diff",
+      "--cached",
+      "--name-only",
+      "--no-renames",
+      "--diff-filter=A",
+    ]),
+  );
+  const ignored = await nulPaths(scope, [
+    "ls-files",
+    "--cached",
+    "--ignored",
+    "--exclude-standard",
+  ]);
+  const dropped = new Set(
+    [...ignored, ...rules.verificationWrites].filter((path) => added.has(path)),
+  );
+  for (const batch of pathBatches([...dropped]))
+    await run(
+      scope.env,
+      scope.directory,
+      ["update-index", "--force-remove", "--", ...batch],
+      scope.context,
+      scope.remaining(),
+    );
+  await unstageGitlinkMoves(scope, rules.pointers);
+}
+
+async function nulPaths(
+  scope: GitScope,
+  args: readonly string[],
+): Promise<string[]> {
+  const output = await run(
+    scope.env,
+    scope.directory,
+    [...args, "-z"],
+    scope.context,
+    scope.remaining(),
+  );
+  return output.split(NUL).filter((path) => path !== NO_VALUE);
+}
+
+async function unstageGitlinkMoves(
+  scope: GitScope,
+  pointers: readonly string[],
+): Promise<void> {
+  const fields = (
+    await run(
+      scope.env,
+      scope.directory,
+      ["diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames"],
+      scope.context,
+      scope.remaining(),
+    )
+  ).split(NUL);
+  for (let index = 0; index + 1 < fields.length; index += RAW_RECORD_WIDTH) {
+    const [oldMode, newMode, previous] = fields[index]!.slice(1).split(" ");
+    const path = fields[index + 1]!;
+    if (oldMode !== GITLINK_TYPE || newMode !== GITLINK_TYPE) continue;
+    if (pointers.includes(path)) continue;
+    assert.ok(previous);
+    await run(
+      scope.env,
+      scope.directory,
+      ["update-index", "--cacheinfo", `${GITLINK_TYPE},${previous},${path}`],
+      scope.context,
+      scope.remaining(),
+    );
+    await restoreGitlink(scope, { path, commit: previous }, false);
+  }
 }
 
 async function conversionOnlyPaths(
@@ -330,6 +430,12 @@ export async function discardChanges(
   assert.ok(Number.isFinite(deadlineMs));
   const end = performance.now() + deadlineMs;
   await run(env, directory, ["reset", "--hard", "HEAD"], context, deadlineMs);
+  await restoreGitlinks({
+    env,
+    directory,
+    context,
+    remaining: () => Math.max(1, end - performance.now()),
+  });
   await run(
     env,
     directory,
@@ -338,6 +444,65 @@ export async function discardChanges(
     Math.max(1, end - performance.now()),
   );
 }
+
+interface Gitlink {
+  path: string;
+  commit: string;
+}
+
+async function gitlinksOf(scope: GitScope): Promise<Gitlink[]> {
+  const records = (
+    await run(
+      scope.env,
+      scope.directory,
+      ["ls-files", "--stage", "-z"],
+      scope.context,
+      scope.remaining(),
+    )
+  )
+    .split(NUL)
+    .filter((record) => record.startsWith(GITLINK_MODE));
+  return records.map((record) => {
+    const [fields, path] = record.split("\t");
+    assert.ok(fields !== undefined && path);
+    const commit = fields.split(" ")[GITLINK_COMMIT_FIELD];
+    assert.ok(commit);
+    return { path, commit };
+  });
+}
+
+export async function gitlinkPaths(scope: GitScope): Promise<string[]> {
+  return (await gitlinksOf(scope)).map(({ path }) => path);
+}
+
+async function restoreGitlinks(scope: GitScope): Promise<void> {
+  for (const gitlink of await gitlinksOf(scope))
+    await restoreGitlink(scope, gitlink, true);
+}
+
+async function restoreGitlink(
+  scope: GitScope,
+  { path, commit }: Gitlink,
+  force: boolean,
+): Promise<void> {
+  const submodule = join(scope.directory, path);
+  if (!existsSync(join(submodule, GIT_DIRECTORY))) return;
+  const current = await headCommit(
+    scope.env,
+    submodule,
+    scope.context,
+    scope.remaining(),
+  );
+  if (current === commit) return;
+  await run(
+    scope.env,
+    submodule,
+    ["checkout", "--detach", ...(force ? ["--force"] : []), commit, "--"],
+    scope.context,
+    scope.remaining(),
+  );
+}
+
 export async function headCommit(
   env: NodeJS.ProcessEnv,
   directory: string,
@@ -537,6 +702,7 @@ export async function isCommitted(
   directory: string,
   context: Context,
   deadlineMs: number,
+  excluded: readonly string[] = [],
 ): Promise<boolean> {
   const end = performance.now() + deadlineMs;
   if (!(await indexMatchesHead(env, directory, context, deadlineMs)))
@@ -544,7 +710,13 @@ export async function isCommitted(
   const untracked = await run(
     env,
     directory,
-    ["ls-files", "--others", "--exclude-standard", "-z"],
+    [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...excluded.map((path) => `--exclude=${excludePattern(path)}`),
+      "-z",
+    ],
     context,
     end - performance.now(),
   );
@@ -941,7 +1113,7 @@ export async function concludeMerge(
   assert.ok(message);
   const end = performance.now() + deadlineMs;
   const remaining = () => end - performance.now();
-  await stageChanges(env, directory, context, remaining);
+  await stageChanges(env, directory, context, remaining, null);
   await runCommit(env, directory, message, context, remaining());
 }
 
@@ -1263,6 +1435,21 @@ export async function trackedChanges(
     .split(NUL)
     .filter((entry) => entry.length > STATUS_PREFIX_LENGTH)
     .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
+}
+
+export async function untrackedPaths(call: GitCall): Promise<string[]> {
+  return (
+    await run(
+      call.env,
+      call.directory,
+      ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+      call.context,
+      call.deadlineMs,
+    )
+  )
+    .split(NUL)
+    .filter((entry) => entry.startsWith(UNTRACKED_PREFIX))
+    .map((entry) => entry.slice(STATUS_PREFIX_LENGTH).replace(/\/$/, ""));
 }
 
 function remover(path: string): void {

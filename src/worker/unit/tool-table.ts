@@ -10,6 +10,7 @@ import { COMMAND_LIMIT_MS, type ExecutionBudget } from "./budget.ts";
 import { BuiltinTool, getAgentDeclaration } from "../../agent/catalog.ts";
 import type { PiCodingAgent } from "../../agent/pi.ts";
 import { HostTool, type HostTools } from "../contract.ts";
+import type { VerificationWrites } from "./verification-writes.ts";
 import { evidenceUploadTool, linkUpdateListTool } from "./host-tools.ts";
 export { ToolSource } from "../../agent/contract.ts";
 import { childEnvironment } from "../../agent/environment.ts";
@@ -110,6 +111,7 @@ export function sessionTools(
   env: NodeJS.ProcessEnv,
   processes: ToolProcesses,
   sandbox: SandboxScope,
+  verificationWrites?: VerificationWrites,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
@@ -164,13 +166,17 @@ export function sessionTools(
   });
   const bash: typeof declared = {
     ...declared,
-    execute: (toolCallId, params, signal, onUpdate, context) =>
-      pi
-        .createBashToolDefinition(
-          cwd,
-          options(toolCallId, processes.operations(toolCallId)),
-        )
-        .execute(toolCallId, params, signal, onUpdate, context),
+    execute: (toolCallId, params, signal, onUpdate, context) => {
+      const run = () =>
+        pi
+          .createBashToolDefinition(
+            cwd,
+            options(toolCallId, processes.operations(toolCallId)),
+          )
+          .execute(toolCallId, params, signal, onUpdate, context);
+      return verificationWrites?.track(params.command, run) ?? run();
+    },
+    ...(verificationWrites ? { executionMode: "sequential" as const } : {}),
   };
   return {
     allowlist,

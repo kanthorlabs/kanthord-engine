@@ -67,6 +67,7 @@ import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { RefreshResult } from "./base-refresh.ts";
 import type { Verdict } from "./node-reads.ts";
 import type { VerificationFacts } from "./progress-rule.ts";
+import { verificationCommands } from "./evaluation-input.ts";
 import { doneTrailerOf } from "./done-record.ts";
 import { VerificationKind } from "./method-telemetry.ts";
 import { VerificationMemo } from "./verification-memo.ts";
@@ -391,6 +392,17 @@ async function openExecution(
     type: "api_key",
     key: STEPS_KEY,
   }));
+  const revision = {
+    filename: "implement.md",
+    content: {
+      name: "implement",
+      requirement: "implement",
+      criterion: "implement",
+      verifications: ["true"],
+      bindings: [],
+    },
+    tasks,
+  } as unknown as Revision;
   const agent = await openNativeAgent({
     hostTools: unusedHostTools,
     setup,
@@ -414,23 +426,17 @@ async function openExecution(
     denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
+    verification: {
+      commands: verificationCommands(revision),
+      checkouts: workspace.checkouts.map(({ directory }) => directory),
+    },
   });
   stopAfter(t, () => agent.dispose());
   return {
     input,
     run,
     agent,
-    revision: {
-      filename: "implement.md",
-      content: {
-        name: "implement",
-        requirement: "implement",
-        criterion: "implement",
-        verifications: ["true"],
-        bindings: [],
-      },
-      tasks,
-    } as unknown as Revision,
+    revision,
     ...workspace,
     verdict: null as Verdict | null,
     cleared: null as string | null,
@@ -445,6 +451,53 @@ async function openExecution(
     bare: bares[0]!,
     bares,
   };
+}
+
+export interface SubmoduleSource {
+  address: string;
+  first: string;
+  second: string;
+}
+
+export async function submoduleSource(
+  t: TestContext,
+): Promise<SubmoduleSource> {
+  const address = temporary(t);
+  const git = simpleGit(address);
+  await git.raw(["init", "-b", "main"]);
+  writeFileSync(join(address, "file"), "first");
+  await git.add("file");
+  await git.raw([...IDENTITY, "commit", "-m", "first"]);
+  const first = (await git.raw(["rev-parse", "HEAD"])).trim();
+  writeFileSync(join(address, "file"), "second");
+  await git.add("file");
+  await git.raw([...IDENTITY, "commit", "-m", "second"]);
+  const second = (await git.raw(["rev-parse", "HEAD"])).trim();
+  return { address, first, second };
+}
+
+export async function addSubmodule(
+  directory: string,
+  source: SubmoduleSource,
+  path: string,
+  commit: string,
+): Promise<string> {
+  const git = simpleGit({
+    baseDir: directory,
+    unsafe: { allowUnsafeProtocolOverride: true },
+  });
+  await git.raw([
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    source.address,
+    path,
+  ]);
+  await simpleGit(join(directory, path)).raw(["checkout", "--detach", commit]);
+  await git.raw(["add", "--all"]);
+  await git.raw([...IDENTITY, "commit", "-m", "add the submodule"]);
+  return (await git.raw(["rev-parse", "HEAD"])).trim();
 }
 
 export async function advanceBase(

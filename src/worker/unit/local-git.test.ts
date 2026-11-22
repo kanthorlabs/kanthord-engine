@@ -40,6 +40,7 @@ import {
   treeOf,
 } from "./local-git.ts";
 import { readSetupRecord, writeSetupRecord } from "./setup-record.ts";
+import { addSubmodule, submoduleSource } from "./test-support.ts";
 import { PoolClass, TreePool } from "./tree-pool.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 
@@ -55,6 +56,14 @@ const EMPTY_OBJECT = "{}";
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
 const REAL_CONTENT = "real";
+const SUBMODULE = "sub";
+const CLEAN_STATUS = "";
+const IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
 
 function writeRefusingHook(hooks: string, marker: string): void {
   mkdirSync(hooks, { recursive: true });
@@ -132,6 +141,175 @@ test("verification cleanup discards tracked and untracked edits but keeps ignore
   assert.equal(readFileSync(join(directory, "tracked"), "utf8"), original);
   assert.equal(existsSync(join(directory, "untracked")), false);
   assert.equal(existsSync(join(directory, "ignored")), true);
+});
+
+async function repositoryWithSubmodule(t: Parameters<typeof temporary>[0]) {
+  const source = await submoduleSource(t);
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.raw(["init", "-b", "main"]);
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "tracked"), "original");
+  await git.add("tracked");
+  await git.raw([...IDENTITY, "commit", "-m", "initial"]);
+  await addSubmodule(directory, source, SUBMODULE, source.first);
+  return { source, directory, git, sub: simpleGit(join(directory, SUBMODULE)) };
+}
+
+test("verification cleanup puts a moved submodule back at its gitlink commit", async (t) => {
+  const { source, directory, git, sub } = await repositoryWithSubmodule(t);
+  await sub.raw(["checkout", "--detach", source.second]);
+  assert.notEqual(
+    (await git.raw(["status", "--porcelain"])).trim(),
+    CLEAN_STATUS,
+  );
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+  assert.equal((await git.raw(["status", "--porcelain"])).trim(), CLEAN_STATUS);
+});
+
+test("verification cleanup keeps the submodule head at its gitlink commit when the submodule holds an edit", async (t) => {
+  const { source, directory, sub } = await repositoryWithSubmodule(t);
+  writeFileSync(join(directory, SUBMODULE, "file"), "edited");
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+  await sub.raw(["checkout", "--force", "--detach", source.second]);
+  writeFileSync(join(directory, SUBMODULE, "file"), "edited");
+  await discardChanges(env, directory, background, 10000);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+});
+
+test("verification cleanup skips a gitlink whose submodule directory holds no checkout", async (t) => {
+  const { directory: origin } = await repositoryWithSubmodule(t);
+  const directory = temporary(t);
+  await simpleGit().clone(origin, directory);
+  const before = readdirSync(directory).sort();
+  assert.deepEqual(readdirSync(join(directory, SUBMODULE)), []);
+  await discardChanges(env, directory, background, 10000);
+  assert.deepEqual(readdirSync(directory).sort(), before);
+  assert.deepEqual(readdirSync(join(directory, SUBMODULE)), []);
+  assert.equal(existsSync(join(directory, SUBMODULE, ".git")), false);
+});
+
+const PYCACHE_FILE = "scripts/docs/__pycache__/check.pyc";
+const TRACKED_FILE = "tracked";
+const FORCED_CONTENT = "forced";
+const CHANGED_CONTENT = "changed";
+const CACHE_CONTENT = "cache";
+
+async function gitlinkOf(git: ReturnType<typeof simpleGit>): Promise<string> {
+  return (await git.raw(["ls-tree", "HEAD", SUBMODULE])).split(/\s/)[2]!;
+}
+
+async function repositoryWithTree(
+  t: Parameters<typeof temporary>[0],
+  ignore: string,
+) {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, ".gitignore"), ignore);
+  writeFileSync(join(directory, "tracked"), "original");
+  await commitWork(env, directory, "initial", background, 10000);
+  return { directory, git };
+}
+
+test("a work commit records a submodule move that the pointers name", async (t) => {
+  const { source, directory, git, sub } = await repositoryWithSubmodule(t);
+  await sub.raw(["checkout", "--detach", source.second]);
+  assert.ok(
+    await commitWork(env, directory, "move", background, 10000, [SUBMODULE]),
+  );
+  assert.equal(await gitlinkOf(git), source.second);
+});
+
+test("a work commit with no pointers drops a submodule move and puts the submodule back", async (t) => {
+  const { source, directory, git, sub } = await repositoryWithSubmodule(t);
+  const head = await headCommit(env, directory, background, 10000);
+  await sub.raw(["checkout", "--detach", source.second]);
+  assert.equal(
+    await commitWork(env, directory, "move", background, 10000, []),
+    null,
+  );
+  assert.equal(await headCommit(env, directory, background, 10000), head);
+  assert.equal(await gitlinkOf(git), source.first);
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.first);
+  assert.equal((await git.raw(["status", "--porcelain"])).trim(), CLEAN_STATUS);
+});
+
+test("a work commit with no pointers commits the file change and keeps the gitlink", async (t) => {
+  const { source, directory, git, sub } = await repositoryWithSubmodule(t);
+  await sub.raw(["checkout", "--detach", source.second]);
+  writeFileSync(join(directory, "tracked"), "changed");
+  assert.ok(await commitWork(env, directory, "file", background, 10000, []));
+  assert.equal(
+    (await git.raw(["show", "--name-only", "--format=", "HEAD"])).trim(),
+    TRACKED_FILE,
+  );
+  assert.equal(await gitlinkOf(git), source.first);
+});
+
+test("a work commit never adds a new ignored file that the coder force-adds", async (t) => {
+  const { directory, git } = await repositoryWithTree(t, "ignored\n");
+  writeFileSync(join(directory, "ignored"), FORCED_CONTENT);
+  await git.raw(["add", "-f", "ignored"]);
+  assert.equal(
+    await commitWork(env, directory, "forced", background, 10000),
+    null,
+  );
+  assert.equal(
+    readFileSync(join(directory, "ignored"), "utf8"),
+    FORCED_CONTENT,
+  );
+  assert.equal((await git.raw(["ls-files", "ignored"])).trim(), CLEAN_STATUS);
+});
+
+test("a work commit keeps a tracked file that a later ignore rule matches", async (t) => {
+  const { directory, git } = await repositoryWithTree(t, CLEAN_STATUS);
+  writeFileSync(join(directory, ".gitignore"), "tracked\n");
+  writeFileSync(join(directory, "tracked"), "changed");
+  assert.ok(await commitWork(env, directory, "tracked", background, 10000));
+  assert.equal(await git.raw(["show", "HEAD:tracked"]), CHANGED_CONTENT);
+});
+
+test("a work commit keeps a new file that an anchored ignore rule does not match", async (t) => {
+  const { directory, git } = await repositoryWithTree(t, "/__pycache__\n");
+  mkdirSync(join(directory, "scripts/docs/__pycache__"), { recursive: true });
+  writeFileSync(join(directory, PYCACHE_FILE), CACHE_CONTENT);
+  assert.ok(await commitWork(env, directory, "cache", background, 10000));
+  assert.equal(
+    (await git.raw(["ls-files", PYCACHE_FILE])).trim(),
+    PYCACHE_FILE,
+  );
+});
+
+test("a work commit leaves out a verification write and keeps the file", async (t) => {
+  const { directory, git } = await repositoryWithTree(t, "/__pycache__\n");
+  mkdirSync(join(directory, "scripts/docs/__pycache__"), { recursive: true });
+  writeFileSync(join(directory, PYCACHE_FILE), CACHE_CONTENT);
+  assert.equal(
+    await commitWork(
+      env,
+      directory,
+      "cache",
+      background,
+      10000,
+      [],
+      [PYCACHE_FILE],
+    ),
+    null,
+  );
+  assert.equal(
+    readFileSync(join(directory, PYCACHE_FILE), "utf8"),
+    CACHE_CONTENT,
+  );
+  assert.equal(
+    (await git.raw(["ls-files", PYCACHE_FILE])).trim(),
+    CLEAN_STATUS,
+  );
 });
 
 test("a tree id stays the same when an amend changes only the commit and differs when a file changes", async (t) => {

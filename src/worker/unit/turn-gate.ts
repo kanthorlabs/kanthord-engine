@@ -27,6 +27,7 @@ import {
   containsCommit,
   discardChanges,
   forceBranch,
+  gitlinkPaths,
   headCommit,
   isCommitted,
   MERGE_HEAD,
@@ -57,6 +58,7 @@ export type ViolationEnd = (typeof ViolationEnd)[keyof typeof ViolationEnd];
 const NO_ENTRIES = 0;
 export const NO_UNCHANGED_TURNS = 0;
 const SINGLE_CHECKOUT = 1;
+const CODE_SPAN = /`([^`\n]+)`/g;
 const SCRATCH_ENTRY = basename(SCRATCH_DIRECTORY);
 const DETACHED = "a detached HEAD";
 const MERGE_SUBJECT = "merge";
@@ -152,6 +154,7 @@ export function gatedAgent(
     changed: () => changed,
     commits: () => commits,
     lastText: () => agent.lastText(),
+    verificationWrites: (directory) => agent.verificationWrites(directory),
     abort: () => agent.abort(),
     closeTrace: (status) => agent.closeTrace(status),
     dispose: () => agent.dispose(),
@@ -391,15 +394,49 @@ async function settleCheckout(
   let changed = true;
   if (merge === null)
     changed =
-      (await commitWork(env, directory, turn.message, context, remaining())) !==
-      null;
+      (await commitWork(
+        env,
+        directory,
+        turn.message,
+        context,
+        remaining(),
+        await namedPointers(state, checkout, context),
+        state.agent.verificationWrites(directory),
+      )) !== null;
   else {
     await refuseMarkers(state, checkout, merge, context);
     await concludeMerge(env, directory, turn.message, context, remaining());
   }
   checkout.head = await headCommit(env, directory, context, remaining());
-  await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
+  await assertInvariant(
+    env,
+    checkout,
+    state.nodeBranch,
+    context,
+    remaining,
+    state.agent.verificationWrites(directory),
+  );
   return changed;
+}
+
+async function namedPointers(
+  state: StepsState,
+  checkout: WorkspaceCheckout,
+  context: Context,
+): Promise<string[]> {
+  const spans = new Set(
+    Array.from(
+      state.revision.content.requirement.matchAll(CODE_SPAN),
+      ([, span]) => span,
+    ),
+  );
+  const gitlinks = await gitlinkPaths({
+    env: state.input.env,
+    directory: checkout.directory,
+    context,
+    remaining: remainingOf(state),
+  });
+  return gitlinks.filter((path) => spans.has(path));
 }
 
 async function refuseMarkers(
@@ -443,6 +480,7 @@ async function assertInvariant(
   branch: string,
   context: Context,
   remaining: () => number,
+  excluded: readonly string[] = [],
 ): Promise<void> {
   const directory = checkout.directory;
   assert.equal(
@@ -453,7 +491,7 @@ async function assertInvariant(
     await headCommit(env, directory, context, remaining()),
     checkout.head,
   );
-  assert.ok(await isCommitted(env, directory, context, remaining()));
+  assert.ok(await isCommitted(env, directory, context, remaining(), excluded));
   assert.deepEqual(
     await operationsInProgress(env, directory, context, remaining()),
     [],

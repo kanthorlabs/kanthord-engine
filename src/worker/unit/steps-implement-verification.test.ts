@@ -9,7 +9,7 @@ import {
 import { suite, test } from "node:test";
 import { basename, dirname, join } from "node:path";
 import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { RecordKind, type TelemetryRecord } from "../../tracking/contract.ts";
@@ -28,7 +28,10 @@ import {
   runTask,
   TaskResultKind,
 } from "./steps-implement.ts";
+import { commitWork } from "./local-git.ts";
+import { background } from "../../kernel/context.ts";
 import {
+  addSubmodule,
   commandLimitClock,
   fauxAssistantMessage,
   fauxToolCall,
@@ -37,6 +40,7 @@ import {
   recordDone,
   recordReleases,
   recordSpans,
+  submoduleSource,
   task,
   useRealBase,
 } from "./test-support.ts";
@@ -52,6 +56,9 @@ const SETUP_INSTRUCTION = "Fix the setup: test -e fixed failed.";
 const WALL_DEADLINE_MS = 2000;
 const ONE_RUN = 1;
 const TWO_RUNS = 2;
+const SUBMODULE = "sub";
+const NEXT_FILE = "next";
+const MOVE_SUBMODULE = `git -C ${SUBMODULE} checkout --detach HEAD~1`;
 
 function countCommand(path: string): string {
   return `echo x >> ${path}`;
@@ -519,6 +526,45 @@ suite(
     });
   },
 );
+
+test("a task verification that moves a submodule leaves it at the gitlink commit and the next task commit records no gitlink move", async (t) => {
+  const current = task("moves", MOVE_SUBMODULE);
+  const h = await fixture(
+    t,
+    [current],
+    [writeTurn("work"), fauxAssistantMessage("work")],
+  );
+  const checkout = h.checkouts[0]!;
+  assert.equal(checkout.directory, h.root);
+  const source = await submoduleSource(t);
+  await addSubmodule(checkout.directory, source, SUBMODULE, source.second);
+  const git = simpleGit(checkout.directory);
+  checkout.head = (await git.raw(["rev-parse", "HEAD"])).trim();
+  const sub = simpleGit(join(checkout.directory, SUBMODULE));
+  assert.deepEqual(await runTask(h, current), {
+    kind: TaskResultKind.Complete,
+    recorded: true,
+  });
+  assert.equal((await sub.raw(["rev-parse", "HEAD"])).trim(), source.second);
+  writeFileSync(join(checkout.directory, NEXT_FILE), "next");
+  assert.ok(
+    await commitWork(
+      h.input.env,
+      checkout.directory,
+      "next",
+      background,
+      10000,
+    ),
+  );
+  const changed = await git.raw([
+    "diff-tree",
+    "--no-commit-id",
+    "--name-only",
+    "-r",
+    "HEAD",
+  ]);
+  assert.equal(changed.trim(), NEXT_FILE);
+});
 
 test("a task verification at the command limit stops with verification_timeout and runs no further agent turn", async (t) => {
   const marker = join(temporary(t), "started");

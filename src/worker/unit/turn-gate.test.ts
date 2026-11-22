@@ -38,6 +38,7 @@ import { gatedAgent, GateMode, TurnViolation } from "./turn-gate.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { WorkspaceKind } from "./workspace.ts";
 import {
+  addSubmodule,
   advanceBase,
   commitOnNode,
   fauxAssistantMessage,
@@ -46,6 +47,7 @@ import {
   passingBase,
   recordReleases,
   releasedRoot,
+  submoduleSource,
   task,
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
@@ -81,6 +83,21 @@ const ONE_CHANGED_FILE = 1;
 const EMPTY_PROMPT = { text: "prompt", digest: "digest" };
 const FAILING_SIGNER = "false";
 const SIGNER_FAILURE = "failed to sign the data";
+const SUBMODULE = "sub";
+const CACHE_FILE = "pkg/__pycache__/check.pyc";
+const GEN_FILE = "gen/out.txt";
+const WRITE_GEN = `mkdir -p gen && echo out > ${GEN_FILE}`;
+const VENDOR_DIRECTORY = "vendor/lib";
+const KEPT_FILE = "keep";
+const EDITED_CONTENT = "edited";
+const NO_TREE_ENTRY = "";
+const COMMIT_IDENTITY = [
+  "-c",
+  "user.name=test",
+  "-c",
+  "user.email=test@example.com",
+];
+const WRITE_CACHE = `mkdir -p pkg/__pycache__ && echo cache > ${CACHE_FILE}`;
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 
@@ -261,6 +278,251 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
     await assertAtBefore(h, before);
     assert.equal(existsSync(join(releasedRoot(h), STRAY_FILE)), false);
+  });
+
+  async function submoduleTurn(
+    t: TestContext,
+    requirement: string,
+  ): Promise<{
+    changed: boolean;
+    gitlink: string;
+    first: string;
+    second: string;
+  }> {
+    const h = await fixture(t, [], []);
+    h.revision = {
+      ...h.revision,
+      content: { ...h.revision.content, requirement },
+    };
+    const source = await submoduleSource(t);
+    await addSubmodule(h.root, source, SUBMODULE, source.first);
+    h.checkouts[0]!.head = await headOf(h.root);
+    const git = simpleGit(h.root);
+    const sub = simpleGit(join(h.root, SUBMODULE));
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      await sub.raw(["checkout", "--detach", source.second]);
+    });
+    await agent.prompt(EMPTY_PROMPT);
+    return {
+      changed: agent.changed(),
+      gitlink: (await git.raw(["ls-tree", "HEAD", SUBMODULE])).split(/\s/)[2]!,
+      first: source.first,
+      second: source.second,
+    };
+  }
+
+  test("a requirement with the code span of a gitlink lets the turn commit record the move", async (t) => {
+    const turn = await submoduleTurn(t, `Move \`${SUBMODULE}\` forward.`);
+    assert.equal(turn.changed, true);
+    assert.equal(turn.gitlink, turn.second);
+  });
+
+  test("a requirement with no code span of a gitlink keeps the gitlink and counts no change", async (t) => {
+    for (const requirement of [
+      "Move sub forward.",
+      `Edit \`${SUBMODULE}/file\` only.`,
+    ]) {
+      const turn = await submoduleTurn(t, requirement);
+      assert.equal(turn.changed, false);
+      assert.equal(turn.gitlink, turn.first);
+    }
+  });
+
+  async function verificationTurn(
+    t: TestContext,
+    coderWrites: [string, string][],
+  ) {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        bash(WRITE_CACHE),
+        ...coderWrites.map(([path, content]) => write(path, content)),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    const committed = (
+      await simpleGit(h.root).raw(["show", "--name-only", "--format=", "HEAD"])
+    )
+      .trim()
+      .split("\n");
+    return { h, committed };
+  }
+
+  test("a verification run that wrote a cache file leaves the file out of the turn commit and in the work tree", async (t) => {
+    const { h, committed } = await verificationTurn(t, [[WORK_FILE, "a"]]);
+    assert.deepEqual(committed, [WORK_FILE]);
+    assert.equal(existsSync(join(h.root, CACHE_FILE)), true);
+    assert.deepEqual((await simpleGit(h.root).status()).not_added, [
+      CACHE_FILE,
+    ]);
+  });
+
+  test("a coder write on a path that a verification run recorded puts the path in the turn commit", async (t) => {
+    const { committed } = await verificationTurn(t, [[CACHE_FILE, "coder"]]);
+    assert.deepEqual(committed, [CACHE_FILE]);
+  });
+
+  test("a coder write on a path that an earlier turn left out puts the path in a later turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        bash(WRITE_CACHE),
+        fauxAssistantMessage("first"),
+        write(CACHE_FILE, "coder"),
+        fauxAssistantMessage("second"),
+      ],
+    );
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    await agent.prompt(EMPTY_PROMPT);
+    const first = await headOf(h.root);
+    await agent.prompt(EMPTY_PROMPT);
+    const committed = (
+      await simpleGit(h.root).raw(["show", "--name-only", "--format=", "HEAD"])
+    )
+      .trim()
+      .split("\n");
+    assert.notEqual(await headOf(h.root), first);
+    assert.deepEqual(committed, [CACHE_FILE]);
+    assert.equal((await simpleGit(h.root).status()).isClean(), true);
+  });
+
+  const committedFiles = async (directory: string) =>
+    (
+      await simpleGit(directory).raw([
+        "show",
+        "--name-only",
+        "--format=",
+        "HEAD",
+      ])
+    )
+      .trim()
+      .split("\n");
+
+  test("a bash call that is no verification and changes a recorded path puts the path in the turn commit without an exclude line", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_GEN)],
+      [
+        bash(WRITE_GEN),
+        fauxAssistantMessage("first"),
+        bash(`echo changed > ${GEN_FILE}`),
+        fauxAssistantMessage("second"),
+      ],
+    );
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    await agent.prompt(EMPTY_PROMPT);
+    await agent.prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [GEN_FILE]);
+    const exclude = join(h.root, ".git", "info", "exclude");
+    assert.equal(
+      existsSync(exclude) && readFileSync(exclude, "utf8").includes("gen"),
+      false,
+    );
+  });
+
+  test("a write in the same assistant message as a verification run is in the turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        fauxAssistantMessage(
+          [
+            fauxToolCall("bash", { command: WRITE_CACHE }),
+            fauxToolCall("write", { path: WORK_FILE, content: "a" }),
+          ],
+          { stopReason: "toolUse" },
+        ),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [WORK_FILE]);
+    assert.equal(existsSync(join(h.root, CACHE_FILE)), true);
+  });
+
+  test("a verification run that clones a repository leaves no gitlink for it in the turn commit", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [bash(clone), write(WORK_FILE, "a"), fauxAssistantMessage("done")],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [WORK_FILE]);
+    assert.equal(existsSync(join(h.root, VENDOR_DIRECTORY, ".git")), true);
+    assert.equal(
+      await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
+      NO_TREE_ENTRY,
+    );
+  });
+
+  test("the turn gate restores a moved gitlink and keeps an uncommitted edit inside the submodule", async (t) => {
+    const h = await fixture(t, [], []);
+    const source = await submoduleSource(t);
+    const upstream = simpleGit(source.address);
+    writeFileSync(join(source.address, KEPT_FILE), "kept");
+    await upstream.add(KEPT_FILE);
+    await upstream.raw([...COMMIT_IDENTITY, "commit", "-m", "third"]);
+    const third = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    writeFileSync(join(source.address, "file"), "fourth");
+    await upstream.add("file");
+    await upstream.raw([...COMMIT_IDENTITY, "commit", "-m", "fourth"]);
+    const fourth = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    await addSubmodule(h.root, source, SUBMODULE, third);
+    h.checkouts[0]!.head = await headOf(h.root);
+    const sub = simpleGit(join(h.root, SUBMODULE));
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      await sub.raw(["checkout", "--detach", fourth]);
+      writeFileSync(join(h.root, SUBMODULE, KEPT_FILE), EDITED_CONTENT);
+    });
+    await agent.prompt(EMPTY_PROMPT);
+    assert.equal(await headOf(join(h.root, SUBMODULE)), third);
+    assert.equal(
+      readFileSync(join(h.root, SUBMODULE, KEPT_FILE), "utf8"),
+      EDITED_CONTENT,
+    );
+    assert.equal(
+      (await simpleGit(h.root).raw(["ls-tree", "HEAD", SUBMODULE])).split(
+        /\s/,
+      )[2],
+      third,
+    );
+  });
+
+  test("a submodule edit that conflicts with the gitlink restore stops the turn and the edit stays", async (t) => {
+    const h = await fixture(t, [], []);
+    const source = await submoduleSource(t);
+    const upstream = simpleGit(source.address);
+    const third = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    writeFileSync(join(source.address, "file"), "fourth");
+    await upstream.add("file");
+    await upstream.raw([...COMMIT_IDENTITY, "commit", "-m", "fourth"]);
+    const fourth = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    await addSubmodule(h.root, source, SUBMODULE, third);
+    h.checkouts[0]!.head = await headOf(h.root);
+    const sub = simpleGit(join(h.root, SUBMODULE));
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      await sub.raw(["checkout", "--detach", fourth]);
+      writeFileSync(join(h.root, SUBMODULE, "file"), EDITED_CONTENT);
+    });
+    const failure = await agent.prompt(EMPTY_PROMPT).then(
+      () => assert.fail("the turn ended without a stop"),
+      (error: unknown) => error,
+    );
+    assert.ok(failure instanceof Error);
+    assert.match(failure.message, /would be overwritten by checkout/);
+    assert.equal(await headOf(join(h.root, SUBMODULE)), fourth);
+    assert.equal(
+      readFileSync(join(h.root, SUBMODULE, "file"), "utf8"),
+      EDITED_CONTENT,
+    );
   });
 
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {
