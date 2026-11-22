@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import {
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  type Stats,
+} from "node:fs";
 import { join, relative, resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Context } from "../../kernel/context.ts";
@@ -40,13 +46,21 @@ function readFingerprint(path: string): string {
   if (stat === undefined) return MISSING;
   const header = `${stat.size}:${stat.mtimeMs}`;
   if (stat.isSymbolicLink()) return `${header}:${digestOf(readlinkSync(path))}`;
-  if (stat.isFile()) return `${header}:${digestOf(readFileSync(path))}`;
+  if (stat.isFile()) return `${header}:${fileDigest(path, stat)}`;
   if (!stat.isDirectory()) return header;
   const entries = readdirSync(path)
     .filter((name) => name !== GIT_DIRECTORY)
     .sort()
     .map((name) => `${name}=${readFingerprint(join(path, name))}`);
   return `${header}:${digestOf(entries.join("\n"))}`;
+}
+
+function fileDigest(path: string, stat: Stats): string {
+  try {
+    return digestOf(readFileSync(path));
+  } catch {
+    return `${stat.ctimeMs}:${stat.ino}:${stat.mode}`;
+  }
 }
 
 function unchanged(before: string | undefined, now: string | undefined) {

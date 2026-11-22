@@ -554,6 +554,7 @@ const FAILING_OUTPUT = "verification-output\n";
 const NOTE_CONTENT = "note";
 const UNTRACKED_CONTENT = "untracked";
 const TRACKED_CONTENT = "tracked content";
+const ROOT_USER = 0;
 
 async function verificationCheckout(
   t: TestContext,
@@ -646,16 +647,39 @@ test("a bash call that is no verification and changes a recorded path removes th
   assert.deepEqual(writes.pathsOf(directory), []);
 });
 
-test("(invariant guard) a recorded path that a later bash call makes unreadable leaves the record and the call keeps its result", async (t) => {
-  const { directory, writes, tools } = await verificationCheckout(
-    t,
-    "mkdir -p gen && echo out > gen/out.txt",
-  );
-  await runBash(tools, VERIFY);
-  assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt"]);
-  await runBash(tools, "chmod 000 gen/out.txt && echo locked");
-  assert.deepEqual(writes.pathsOf(directory), []);
-});
+test(
+  "(invariant guard) a recorded path that a later bash call makes unreadable leaves the record and the call keeps its result",
+  {
+    skip: process.getuid?.() === ROOT_USER && "root reads a mode 000 file",
+  },
+  async (t) => {
+    const { directory, writes, tools } = await verificationCheckout(
+      t,
+      "mkdir -p gen && echo out > gen/out.txt",
+    );
+    await runBash(tools, VERIFY);
+    assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt"]);
+    await runBash(tools, "chmod 000 gen/out.txt && echo locked");
+    assert.deepEqual(writes.pathsOf(directory), []);
+  },
+);
+
+test(
+  "a recorded path that a verification run left unreadable stays recorded after an unrelated bash call",
+  {
+    skip: process.getuid?.() === ROOT_USER && "root reads a mode 000 file",
+  },
+  async (t) => {
+    const { directory, writes, tools } = await verificationCheckout(
+      t,
+      "mkdir -p gen && echo out > gen/out.txt && chmod 000 gen/out.txt",
+    );
+    await runBash(tools, VERIFY);
+    assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt"]);
+    await runBash(tools, "echo same > unrelated.txt");
+    assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt"]);
+  },
+);
 
 test("a change inside the .git directory of a recorded nested repository keeps the record", async (t) => {
   const { directory, writes, tools } = await verificationCheckout(
