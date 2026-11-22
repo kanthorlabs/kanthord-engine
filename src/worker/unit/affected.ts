@@ -16,9 +16,11 @@ import type { BaseHead } from "./environment-setup.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
   changedEntries,
+  changedLineRanges,
   type ChangeEntry,
   ChangeStatus,
   fileAtRevision,
+  type LineRange,
   mergeBase,
 } from "./local-git.ts";
 import {
@@ -48,6 +50,8 @@ const STRING_TYPE = "string";
 const DECLARATION_VERSION = 1;
 const REPORT_VERSION_ONE = 1;
 const REPORT_VERSION_TWO = 2;
+const REPORT_VERSION_THREE = 3;
+const FIRST_LINE = 1;
 const DEFAULT_TIME_LIMIT_S = COMMAND_LIMIT_MS / MS_PER_SECOND;
 const MIN_TIME_LIMIT_S = 60;
 const MAX_TIME_LIMIT_S = 3600;
@@ -131,6 +135,19 @@ const testIdSchema = z.strictObject({
 });
 export type AffectedTestId = z.infer<typeof testIdSchema>;
 
+const lineRangeSchema = z.strictObject({
+  start: z.number().int().min(FIRST_LINE),
+  end: z.number().int().min(FIRST_LINE),
+});
+
+const flakyIdSchema = testIdSchema.extend({
+  lines: lineRangeSchema.optional(),
+  imports: z
+    .array(boundedString(STRING_MAX_BYTES))
+    .max(LIST_MAX_ENTRIES)
+    .optional(),
+});
+
 const floorSchema = z.strictObject({
   tests: z.number().int().nonnegative(),
   seconds: z.number().finite().nonnegative(),
@@ -141,6 +158,7 @@ const affectedReportBase = z.strictObject({
   version: z.union([
     z.literal(REPORT_VERSION_ONE),
     z.literal(REPORT_VERSION_TWO),
+    z.literal(REPORT_VERSION_THREE),
   ]),
   selection: z.enum(AffectedSelection),
   reason: boundedString(REASON_MAX_BYTES)
@@ -148,7 +166,7 @@ const affectedReportBase = z.strictObject({
     .nullable(),
   tests: z.array(boundedString(STRING_MAX_BYTES)).max(LIST_MAX_ENTRIES),
   failed: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
-  flaky: z.array(testIdSchema).max(LIST_MAX_ENTRIES),
+  flaky: z.array(flakyIdSchema).max(LIST_MAX_ENTRIES),
   excluded_e2e: z.array(boundedString(STRING_MAX_BYTES)).max(LIST_MAX_ENTRIES),
   floor: floorSchema.optional(),
 });
@@ -186,6 +204,17 @@ function checkResultLists(report: ReportFields, issue: IssueRaiser): void {
     issue("flaky", "holds an id of failed");
 }
 
+function checkFlaky(report: ReportFields, issue: IssueRaiser): void {
+  for (const id of report.flaky) {
+    if ((id.lines === undefined) !== (id.imports === undefined))
+      issue("flaky", "holds lines and imports together or neither");
+    if (id.lines !== undefined && report.version !== REPORT_VERSION_THREE)
+      issue("flaky", "holds lines and imports only in a version 3 report");
+    if (id.lines !== undefined && id.lines.end < id.lines.start)
+      issue("flaky", "holds lines that end before they start");
+  }
+}
+
 export const affectedReportSchema = affectedReportBase.superRefine(
   (report, context) => {
     const issue: IssueRaiser = (path, message) =>
@@ -193,6 +222,7 @@ export const affectedReportSchema = affectedReportBase.superRefine(
     checkFloor(report, issue);
     checkSelection(report, issue);
     checkResultLists(report, issue);
+    checkFlaky(report, issue);
   },
 );
 export type AffectedReport = z.infer<typeof affectedReportSchema>;
@@ -321,19 +351,43 @@ export function parseReport(
   return { report: parsed.data };
 }
 
+export type ChangedLines = ReadonlyMap<string, readonly LineRange[]>;
+
+type FlakyId = AffectedReport["flaky"][number];
+
+function flakyTouched(
+  id: FlakyId,
+  changed: ReadonlySet<string>,
+  lines: ChangedLines,
+): boolean {
+  if (id.lines === undefined || id.imports === undefined)
+    return changed.has(id.file);
+  const { start, end } = id.lines;
+  return (
+    id.imports.some((path) => changed.has(path)) ||
+    (lines.get(id.file) ?? []).some(
+      (range) => range.start <= end && range.end >= start,
+    )
+  );
+}
+
 export function promotedFlaky(
   report: AffectedReport,
   files: readonly ChangeEntry[],
+  lines: ChangedLines,
 ): AffectedTestId[] {
   const changed = new Set(files.map((entry) => entry.path));
-  return report.flaky.filter((id) => changed.has(id.file));
+  return report.flaky
+    .filter((id) => flakyTouched(id, changed, lines))
+    .map(({ file, name }) => ({ file, name }));
 }
 
 export function headFailed(
   report: AffectedReport,
   files: readonly ChangeEntry[],
+  lines: ChangedLines,
 ): AffectedTestId[] {
-  return [...report.failed, ...promotedFlaky(report, files)];
+  return [...report.failed, ...promotedFlaky(report, files, lines)];
 }
 
 export function isBaseRed(
@@ -699,7 +753,37 @@ function failureTextOf(
 interface HeadCheck {
   executed: Executed;
   outcome: Outcome;
+  lines: ChangedLines;
   durationMs: number;
+}
+
+async function changedLinesOf(
+  input: AffectedInput,
+  prepared: Prepared,
+  outcome: Outcome,
+): Promise<ChangedLines> {
+  const lines = new Map<string, readonly LineRange[]>();
+  if (!("report" in outcome)) return lines;
+  const changed = new Set(prepared.files.map((entry) => entry.path));
+  const paths = new Set(
+    outcome.report.flaky
+      .filter((id) => id.lines !== undefined && changed.has(id.file))
+      .map((id) => id.file),
+  );
+  for (const path of paths)
+    lines.set(
+      path,
+      await changedLineRanges({
+        env: input.env,
+        directory: input.checkout.directory,
+        from: prepared.mergeBase,
+        to: input.checkout.head,
+        path,
+        context: input.context,
+        deadlineMs: remaining(input),
+      }),
+    );
+  return lines;
 }
 
 async function checkHead(
@@ -714,7 +798,14 @@ async function checkHead(
     join(prepared.directory, REPORT_FILE),
     prepared,
   );
-  return outcome === null ? null : { executed, outcome, durationMs };
+  return outcome === null
+    ? null
+    : {
+        executed,
+        outcome,
+        lines: await changedLinesOf(input, prepared, outcome),
+        durationMs,
+      };
 }
 
 function headResultOf(
@@ -734,8 +825,8 @@ function headResultOf(
     declaration,
     changed: files.length,
     report,
-    failed: report ? headFailed(report, files) : [],
-    promoted_flaky: report ? promotedFlaky(report, files) : [],
+    failed: report ? headFailed(report, files, head.lines) : [],
+    promoted_flaky: report ? promotedFlaky(report, files, head.lines) : [],
     head: resultOf(head.executed.run, declaration.command),
     output: head.executed.run.outputs.at(-1) ?? "",
     duration_ms: head.durationMs,

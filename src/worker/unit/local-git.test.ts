@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import {
   appendFileSync,
   chmodSync,
@@ -25,6 +25,7 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   changedEntries,
+  changedLineRanges,
   ChangeStatus,
   checkoutDetached,
   commitWork,
@@ -34,6 +35,7 @@ import {
   fileAtRevision,
   headCommit,
   isAncestor,
+  type LineRange,
   mergeBase,
   normaliseGitState,
   scrubTree,
@@ -465,6 +467,56 @@ test("changed entries list the status of each path of a commit range in git orde
       { path: "with space.txt", status: ChangeStatus.Added },
     ],
   );
+});
+
+const NUMBERED_LINES = Array.from(
+  { length: 20 },
+  (_, index) => `line ${index + 1}`,
+);
+
+async function lineChange(
+  t: TestContext,
+  edit: (lines: string[]) => string[],
+): Promise<LineRange[]> {
+  const directory = temporary(t);
+  const git = simpleGit(directory);
+  await git.init();
+  await git.addConfig("user.name", "Test");
+  await git.addConfig("user.email", "test@example.invalid");
+  writeFileSync(join(directory, "numbered"), `${NUMBERED_LINES.join("\n")}\n`);
+  const from = await commitWork(env, directory, "base", background, 10000);
+  assert.ok(from);
+  writeFileSync(
+    join(directory, "numbered"),
+    `${edit([...NUMBERED_LINES]).join("\n")}\n`,
+  );
+  const to = await commitWork(env, directory, "work", background, 10000);
+  assert.ok(to);
+  return changedLineRanges({
+    env,
+    directory,
+    from,
+    to,
+    path: "numbered",
+    context: background,
+    deadlineMs: 10000,
+  });
+}
+
+test("changed line ranges answer the head lines of a change of lines 10 to 12", async (t) => {
+  const ranges = await lineChange(t, (lines) => {
+    lines.splice(9, 3, "ten", "eleven", "twelve");
+    return lines;
+  });
+  assert.deepEqual(ranges, [{ start: 10, end: 12 }]);
+});
+
+test("changed line ranges answer the head line next to a deletion", async (t) => {
+  const ranges = await lineChange(t, (lines) => {
+    lines.splice(9, 3);
+    return lines;
+  });
+  assert.deepEqual(ranges, [{ start: 9, end: 9 }]);
 });
 
 test("work commits ignore the global git configuration of the host", async (t) => {

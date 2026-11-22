@@ -45,6 +45,12 @@ const RENAMED_PATH_OFFSET = 2;
 const PLAIN_RECORD_WIDTH = 2;
 const RENAME_RECORD_WIDTH = 3;
 const RAW_RECORD_WIDTH = 2;
+const HUNK_HEADER = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/gm;
+const HUNK_START_GROUP = 1;
+const HUNK_COUNT_GROUP = 2;
+const FIRST_LINE = 1;
+const NO_LINES = 0;
+const DECIMAL_RADIX = 10;
 const GIT_DIRECTORY = ".git";
 const GITLINK_TYPE = "160000";
 const GITLINK_MODE = `${GITLINK_TYPE} `;
@@ -1029,6 +1035,53 @@ export async function changedEntries(
     index += PLAIN_RECORD_WIDTH;
   }
   return entries;
+}
+
+export interface LineRange {
+  start: number;
+  end: number;
+}
+
+export interface LineRangeRequest {
+  env: NodeJS.ProcessEnv;
+  directory: string;
+  from: string;
+  to: string;
+  path: string;
+  context: Context;
+  deadlineMs: number;
+}
+
+export async function changedLineRanges({
+  env,
+  directory,
+  from,
+  to,
+  path,
+  context,
+  deadlineMs,
+}: LineRangeRequest): Promise<LineRange[]> {
+  assert.ok(from && !from.startsWith("-"));
+  assert.ok(to && !to.startsWith("-"));
+  const output = await run(
+    env,
+    directory,
+    ["diff", "--unified=0", from, to, "--", path],
+    context,
+    deadlineMs,
+  );
+  return [...output.matchAll(HUNK_HEADER)].map((match) => {
+    const first = Number.parseInt(match[HUNK_START_GROUP]!, DECIMAL_RADIX);
+    const count =
+      match[HUNK_COUNT_GROUP] === undefined
+        ? FIRST_LINE
+        : Number.parseInt(match[HUNK_COUNT_GROUP], DECIMAL_RADIX);
+    if (count === NO_LINES) {
+      const line = Math.max(first, FIRST_LINE);
+      return { start: line, end: line };
+    }
+    return { start: first, end: first + count - FIRST_LINE };
+  });
 }
 
 export async function mergeBase(

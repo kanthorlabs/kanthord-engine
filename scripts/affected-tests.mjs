@@ -91,7 +91,7 @@ const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
-const REPORT_VERSION = 2;
+const REPORT_VERSION = 3;
 const SECONDS_ROUNDING = 10;
 const NO_SECONDS = 0;
 const TEXT_MAX_BYTES = 1024;
@@ -133,6 +133,9 @@ const STATUS_OFFSET = 0;
 const PATH_OFFSET = 1;
 const RENAMED_PATH_OFFSET = 2;
 const HALVING_DIVISOR = 2;
+const NAME_SEPARATOR = " > ";
+const FIRST_NAME_PART = 0;
+const LINE_NUMBER_OFFSET = 1;
 const FAILED_RUN_MESSAGE = "the test run failed without a failed test";
 const UNKNOWN_STATUS_MESSAGE = "unknown git status: ";
 const PNPM_ARGUMENTS = ["--silent", "run", "test:files"];
@@ -618,7 +621,46 @@ function buildFloor(selected, seconds) {
   };
 }
 
-function buildReport(selected, failed, flaky, floor) {
+function isTestCallNamed(statement, part) {
+  if (!ts.isExpressionStatement(statement)) return false;
+  if (!ts.isCallExpression(statement.expression)) return false;
+  const [first] = statement.expression.arguments;
+  return (
+    first !== undefined && ts.isStringLiteralLike(first) && first.text === part
+  );
+}
+
+function lineOf(tree, position) {
+  return tree.getLineAndCharacterOfPosition(position).line + LINE_NUMBER_OFFSET;
+}
+
+function testLines(root, { file, name }) {
+  const source = readFileSync(join(root, file), "utf8");
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
+  const part = name.split(NAME_SEPARATOR)[FIRST_NAME_PART];
+  const call = tree.statements.find((statement) =>
+    isTestCallNamed(statement, part),
+  );
+  if (call === undefined) return null;
+  return {
+    start: lineOf(tree, call.getStart(tree)),
+    end: lineOf(tree, call.getEnd()),
+  };
+}
+
+function flakyEntry(root, graph, id) {
+  const lines = testLines(root, id);
+  if (lines === null) return id;
+  return {
+    ...id,
+    lines,
+    imports: cutPaths(
+      closureOf(graph, id.file).filter((path) => path !== id.file),
+    ),
+  };
+}
+
+function buildReport(root, selected, failed, flaky, floor) {
   const cutFailed = cutIds(failed);
   const failedKeys = new Set(cutFailed.map(idKey));
   return fitSize({
@@ -627,7 +669,9 @@ function buildReport(selected, failed, flaky, floor) {
     reason: selected.reason,
     tests: cutPaths(selected.tests),
     failed: cutFailed,
-    flaky: cutIds(flaky).filter((id) => !failedKeys.has(idKey(id))),
+    flaky: cutIds(flaky)
+      .filter((id) => !failedKeys.has(idKey(id)))
+      .map((id) => flakyEntry(root, selected.graph, id)),
     excluded_e2e: cutPaths(selected.excluded_e2e),
     floor,
   });
@@ -642,7 +686,7 @@ function rerunFailures(root, file) {
 export function affectedReport(root, changes) {
   const selected = selectTests(root, changes);
   if (selected.selection === SELECTION.none) {
-    return buildReport(selected, [], [], buildFloor(selected, new Map()));
+    return buildReport(root, selected, [], [], buildFloor(selected, new Map()));
   }
   const first = runTests(root, selected.tests, FIRST_RUN_CONCURRENCY);
   const tests = new Set(selected.tests);
@@ -653,7 +697,7 @@ export function affectedReport(root, changes) {
   const floor = buildFloor(selected, first.seconds);
   const failedFiles = [...new Set(failed.map(({ file }) => file))];
   if (failedFiles.length > RERUN_FILE_LIMIT) {
-    return buildReport(selected, failed, [], floor);
+    return buildReport(root, selected, failed, [], floor);
   }
   const reruns = new Map(
     failedFiles.map((file) => [file, rerunFailures(root, file)]),
@@ -663,6 +707,7 @@ export function affectedReport(root, changes) {
     return rerun.crashed || rerun.keys.has(idKey(id));
   };
   return buildReport(
+    root,
     selected,
     failed.filter(stays),
     failed.filter((id) => !stays(id)),

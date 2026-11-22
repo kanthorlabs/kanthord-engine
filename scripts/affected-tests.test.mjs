@@ -74,6 +74,10 @@ test("fails once", () => {
   throw new Error("first run");
 });
 `;
+const COMPUTED_FLAKY_TEST = FLAKY_TEST.replace(
+  '"fails once"',
+  '["fails", "once"].join(" ")',
+);
 const FLAKY_MARKER = "marker";
 const RERUN_FILE_LIMIT = 8;
 
@@ -643,7 +647,7 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
   });
   assert.equal(result.status, FAILED);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 2,
+    version: 3,
     selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
@@ -667,6 +671,26 @@ test("a test that fails once and passes on the rerun is flaky", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(result.report.failed, []);
+  assert.equal(result.report.version, 3);
+  assert.deepEqual(result.report.flaky, [
+    {
+      file: "src/a.test.ts",
+      name: "fails once",
+      lines: { start: 4, end: 8 },
+      imports: ["src/a.ts"],
+    },
+  ]);
+});
+
+test("a flaky id whose first name part matches no top-level call is a plain entry", async (t) => {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": `import "./a.ts";\n${COMPUTED_FLAKY_TEST}`,
+  });
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+  });
+  assert.equal(result.status, SUCCESS);
   assert.deepEqual(result.report.flaky, [
     { file: "src/a.test.ts", name: "fails once" },
   ]);
@@ -701,7 +725,10 @@ test("8 files with failed ids run the reruns", async (t) => {
   const { result, ids } = await flakyFilesFixture(t, RERUN_FILE_LIMIT);
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(result.report.failed, []);
-  assert.deepEqual(result.report.flaky, ids);
+  assert.deepEqual(
+    result.report.flaky.map(({ file, name }) => ({ file, name })),
+    ids,
+  );
 });
 
 test("a file that fails to load is a failed id with the file path as name", async (t) => {
@@ -780,7 +807,7 @@ test("the none selection gives empty lists and the exit code 0", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 2,
+    version: 3,
     selection: "none",
     reason: null,
     tests: [],
@@ -803,7 +830,7 @@ test("a global input gives the all selection with a reason", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 2,
+    version: 3,
     selection: "all",
     reason: "global input: package.json",
     tests: ["src/a.test.ts"],
@@ -868,12 +895,12 @@ test("a template head that is not a directory counts in the closure", async (t) 
   assert.ok(closureOf(buildGraph(root), "src/main.ts").includes("src/w.ts"));
 });
 
-test("a selection all writes version 2 with the floor and the total test time", async (t) => {
+test("a selection all writes version 3 with the floor and the total test time", async (t) => {
   const root = await fixture(t, FLOOR_FILES);
   const report = outsideTestContext(() =>
     affectedReport(root, [change("package.json")]),
   );
-  assert.equal(report.version, 2);
+  assert.equal(report.version, 3);
   assert.equal(report.floor.tests, 1);
   assert.ok(report.floor.seconds > 0);
   assert.ok(report.floor.total_seconds >= report.floor.seconds);
