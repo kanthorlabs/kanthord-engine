@@ -116,6 +116,16 @@ test("a report that breaks a rule answers an error", () => {
     { failed: [ID_ONE], flaky: [ID_ONE] },
     { floor: { ...FLOOR, total_seconds: null } },
     { version: 2, floor: { ...FLOOR, total_seconds: 12.5 } },
+    { version: 3, flaky: [{ ...ID_TWO, lines: { start: 1, end: 2 } }] },
+    { version: 3, flaky: [{ ...ID_TWO, imports: [] }] },
+    {
+      version: 3,
+      flaky: [{ ...ID_TWO, lines: { start: 3, end: 2 }, imports: [] }],
+    },
+    {
+      version: 2,
+      flaky: [{ ...ID_TWO, lines: { start: 1, end: 2 }, imports: [] }],
+    },
   ];
   for (const overrides of invalid)
     assert.ok("error" in parsedReport(overrides), JSON.stringify(overrides));
@@ -179,12 +189,45 @@ const SCRIPT_REPORTS: Record<string, AffectedReport> = {
     failed: [{ file: A_TEST, name: "one" }],
   }),
   flaky_changed: report({
+    version: 2,
     tests: [A_TEST],
     flaky: [{ file: A_TEST, name: "one" }],
   }),
   flaky_other: report({
+    version: 2,
     tests: [A_TEST, B_TEST],
     flaky: [{ file: B_TEST, name: "two" }],
+  }),
+  flaky_lines_met: report({
+    version: 3,
+    tests: [A_TEST],
+    flaky: [
+      { file: A_TEST, name: "one", lines: { start: 1, end: 1 }, imports: [] },
+    ],
+  }),
+  flaky_import_changed: report({
+    version: 3,
+    tests: [A_TEST, B_TEST],
+    flaky: [
+      {
+        file: B_TEST,
+        name: "two",
+        lines: { start: 1, end: 3 },
+        imports: [A_TEST],
+      },
+    ],
+  }),
+  flaky_untouched: report({
+    version: 3,
+    tests: [A_TEST],
+    flaky: [
+      {
+        file: A_TEST,
+        name: "one",
+        lines: { start: 5, end: 9 },
+        imports: ["helper.ts"],
+      },
+    ],
   }),
 };
 
@@ -401,6 +444,29 @@ test("a promoted flaky test in a changed file answers failed", async (t) => {
 
 test("a flaky test in another file answers passed", async (t) => {
   const f = await fixture(t, { base: "pass", head: "flaky_other" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Passed);
+  assert.deepEqual(result.promoted_flaky, []);
+  assert.equal(result.base_run, null);
+});
+
+test("a version 3 flaky test whose lines meet a changed range answers failed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "flaky_lines_met" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.deepEqual(result.promoted_flaky, [{ file: A_TEST, name: "one" }]);
+  assert.deepEqual(result.failed, [{ file: A_TEST, name: "one" }]);
+});
+
+test("a version 3 flaky test that imports a changed path answers failed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "flaky_import_changed" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.deepEqual(result.promoted_flaky, [{ file: B_TEST, name: "two" }]);
+});
+
+test("a version 3 flaky test in a changed file with no changed line and no changed import answers passed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "flaky_untouched" });
   const result = await ran(f);
   assert.equal(result.verdict, AffectedVerdict.Passed);
   assert.deepEqual(result.promoted_flaky, []);

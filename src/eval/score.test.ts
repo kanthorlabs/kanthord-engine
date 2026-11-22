@@ -102,7 +102,7 @@ function observation(overrides: Partial<Observation> = {}): Observation {
     guards: [],
     usage: { input: 0, output: 0, cost: 0 },
     confirmations: [],
-    unexpected_approval: false,
+    unexpected_approval: [],
     ...overrides,
   };
 }
@@ -135,6 +135,7 @@ interface Violation {
   read?: ReadOperation;
 }
 
+const UNEXPECTED_OPERATION = "mission.node.discard";
 const VIOLATIONS: Violation[] = [
   {
     title: "expect_calls with no call",
@@ -300,10 +301,10 @@ const VIOLATIONS: Violation[] = [
     observed: { calls: [UNBLOCK_CALL], guards: [UNBLOCK_GUARD_RECORD] },
   },
   {
-    title: "unexpected_approval true",
+    title: "unexpected_approval with an operation id",
     kind: "unexpected_approval",
     checks: {},
-    observed: { unexpected_approval: true },
+    observed: { unexpected_approval: [UNEXPECTED_OPERATION] },
   },
 ];
 
@@ -324,6 +325,28 @@ test("invariant guard: verdict - each L2 check kind fails on a violating observa
     assert.equal(score.passed, false, violation.title);
     assert.equal(result?.passed, false, violation.title);
   }
+});
+
+test("an unexpected approval fails its check with the operation id in the detail", async () => {
+  const score = await scoreRun(
+    {},
+    observation({ unexpected_approval: [UNEXPECTED_OPERATION] }),
+    read,
+  );
+  const result = score.checks.find((item) => item.kind === APPROVAL_KIND);
+  assert.equal(result?.passed, false);
+  assert.equal(result?.detail, UNEXPECTED_DETAIL);
+});
+
+test("invariant guard: verdict - an empty unexpected_approval list passes its check", async () => {
+  const score = await scoreRun(
+    {},
+    observation({ unexpected_approval: [] }),
+    read,
+  );
+  const result = score.checks.find((item) => item.kind === APPROVAL_KIND);
+  assert.equal(result?.passed, true);
+  assert.equal(result?.detail, PASSED_DETAIL);
 });
 
 test("a forbid_offer filter with a target_id passes an offer on another target", async () => {
@@ -392,6 +415,8 @@ test("the guard check passes a blocked call and an absent subset", async () => {
 });
 
 const APPROVAL_KIND = "unexpected_approval";
+const PASSED_DETAIL = "";
+const UNEXPECTED_DETAIL = `an unexpected approval appeared: ${UNEXPECTED_OPERATION}`;
 const REVIEW_MEMBER = {
   calls: [UNBLOCK_CALL],
   results: {},
@@ -634,7 +659,7 @@ test("(happy path, service level) for a plan@1 member, reply is the plan text an
   const full: Observation = {
     ...observed,
     confirmations: [],
-    unexpected_approval: false,
+    unexpected_approval: [],
   };
   const passing = await scoreRun(
     {

@@ -606,7 +606,7 @@ async function seedStep(
 interface Tally {
   confirmations: Confirmation[];
   answered: Set<string>;
-  unexpected: boolean;
+  unexpected: string[];
 }
 
 async function answerPending(
@@ -623,7 +623,7 @@ async function answerPending(
   if (!pending || tally.answered.has(pending.tool_call_id)) return;
   const named = approvals[pending.operation_id];
   const answer = named ?? ApprovalAnswer.Reject;
-  if (!named) tally.unexpected = true;
+  if (!named) tally.unexpected.push(pending.operation_id);
   tally.answered.add(pending.tool_call_id);
   await sandbox.call(workbenchOperations["session.approve"], {
     params: { session_id: pending.session_id },
@@ -821,7 +821,7 @@ export async function runTurns(
   const tally: Tally = {
     confirmations: [],
     answered: new Set(),
-    unexpected: false,
+    unexpected: [],
   };
   let sessionId = created.id;
   let timedOut = false;
@@ -897,7 +897,7 @@ function failedPlay(kind: string, detail: string): PlayedCase {
     observation: {
       ...observationOf([]),
       confirmations: [],
-      unexpected_approval: false,
+      unexpected_approval: [],
     },
     summarizer: null,
   };

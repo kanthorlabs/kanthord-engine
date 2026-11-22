@@ -551,6 +551,9 @@ test("a missing, duplicate, malformed, wrong-length or wrong Jira signature answ
 });
 
 const STALE_SECONDS = 301;
+const SLACK_WINDOW_SECONDS = 300;
+const FILE_RUNNER_TIMEOUT_SECONDS = 60;
+const FUTURE_SECONDS = SLACK_WINDOW_SECONDS + FILE_RUNNER_TIMEOUT_SECONDS + 1;
 const WRONG_SECRET = "test_private-wrong-signing-secret";
 const SLACK_ATTEMPT_COUNT_ONE = 1;
 const OTHER_TEAM_DELIVERY_TEXT = JSON.stringify(
@@ -578,7 +581,7 @@ test("a stale or future timestamp, a missing or duplicate header, a malformed an
   );
   const refusals = [
     h.slack(body, { timestamp: slackTimestamp(-STALE_SECONDS) }),
-    h.slack(body, { timestamp: slackTimestamp(STALE_SECONDS) }),
+    h.slack(body, { timestamp: slackTimestamp(FUTURE_SECONDS) }),
     withoutSignature,
     withoutTimestamp,
     duplicateSignature,
