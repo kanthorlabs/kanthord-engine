@@ -47,11 +47,11 @@ function newPaths(
   before: ReadonlyMap<string, ReadonlySet<string>>,
   after: ReadonlyMap<string, ReadonlySet<string>>,
 ): [string, string][] {
-  const found: [string, string][] = [];
-  for (const [directory, paths] of after)
-    for (const path of paths)
-      if (!before.get(directory)?.has(path)) found.push([directory, path]);
-  return found;
+  return [...after].flatMap(([directory, paths]) =>
+    [...paths]
+      .filter((path) => !before.get(directory)?.has(path))
+      .map((path): [string, string] => [directory, path]),
+  );
 }
 
 function recordedUnder(paths: ReadonlySet<string>, changed: string): string[] {
