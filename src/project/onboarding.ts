@@ -13,7 +13,9 @@ import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { DiskSpace } from "../kernel/disk.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { pushTailOf } from "../repository/git-failure.ts";
+import { GitStage, GitWriteError } from "../repository/connector.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
+import { gitFailureReason, pushTailOf } from "../repository/git-failure.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type CheckResult,
@@ -129,6 +131,7 @@ export type AttemptAnswer =
 const UNREPAIRABLE_CLASSES: ReadonlySet<EnvironmentFailureClass | null> =
   new Set([
     EnvironmentFailureClass.PushRefused,
+    EnvironmentFailureClass.ProbeFailed,
     EnvironmentFailureClass.DiskLow,
   ]);
 
@@ -492,6 +495,22 @@ function detailFacts(detail: string): {
     command: parsed.data.command ?? NO_COMMAND,
     exit_code: parsed.data.exit_code ?? NO_EXIT_CODE,
   };
+}
+
+function probeFailureVerdict(error: unknown): ProofVerdict {
+  if (
+    error instanceof GitWriteError &&
+    error.stage === GitStage.Push &&
+    error.code === RepositoryErrorCode.GitFailed
+  )
+    return failedVerdict(
+      EnvironmentFailureClass.PushRefused,
+      pushTailOf(error),
+    );
+  return failedVerdict(
+    EnvironmentFailureClass.ProbeFailed,
+    `${gitFailureReason(error)}: ${pushTailOf(error)}`,
+  );
 }
 
 function failedVerdict(
@@ -1422,10 +1441,7 @@ export class Onboarding {
       );
     } catch (error) {
       if (signal.aborted) throw error;
-      return failedVerdict(
-        EnvironmentFailureClass.PushRefused,
-        pushTailOf(error),
-      );
+      return probeFailureVerdict(error);
     }
     return null;
   }

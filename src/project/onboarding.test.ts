@@ -20,11 +20,14 @@ import {
   type Environment,
   EnvironmentSource,
 } from "../kernel/devcontainer.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { DeadlineExceeded } from "../kernel/context.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
+import { GitStage, GitWriteError } from "../repository/connector.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type RepositoryFile,
@@ -135,6 +138,15 @@ const EXECUTION = "execution";
 const BUILD_FAILED = "build_failed";
 const NO_SPACE = "no space";
 const BOOM = "boom";
+
+function gitWriteFailure(stage: GitStage, text: string): GitWriteError {
+  return new GitWriteError(
+    stage,
+    new Diagnostic(RepositoryErrorCode.GitFailed, "git failed.", {
+      cause: new Error(text),
+    }),
+  );
+}
 const MAKE_SETUP = "make setup";
 const MAKE_TEST = "make test";
 const PROVE = "prove";
@@ -144,6 +156,7 @@ const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
 const SETUP_FAILED = "setup_failed";
 const PUSH_REFUSED = "push_refused";
+const PROBE_FAILED = "probe_failed";
 const DISK_LOW = "disk_low";
 const DISK_FREE_RATIO = 0.1;
 const DISK_LOW_TAIL = "free_bytes=9 total_bytes=100 ratio=0.1";
@@ -2467,7 +2480,10 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = hostHarness(t);
-    h.probeError = new Error("remote: pre-receive hook declined");
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "remote: pre-receive hook declined",
+    );
     await h.compute();
     await h.ended();
     assert.deepEqual(h.order, ["freeDisk", "probePush"]);
@@ -2486,7 +2502,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = hostHarness(t);
-    h.probeError = new Error(
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
       "refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
     );
     await h.compute();
@@ -2498,6 +2515,62 @@ test(
       file.tail,
       /^The binding credential has no `workflow` scope: /,
     );
+  },
+);
+
+test(
+  "a probe that fails before the push with a deadline error fails the record with probe_failed and the reason",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = new GitWriteError(
+      GitStage.BeforePush,
+      new DeadlineExceeded(),
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^deadline_exceeded: /);
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+  },
+);
+
+test(
+  "a probe that cannot resolve the host fails the record with probe_failed and host_unreachable",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.BeforePush,
+      "ssh: Could not resolve hostname git.example",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^host_unreachable: /);
+    assert.match(file.tail, /Could not resolve hostname/);
+  },
+);
+
+test(
+  "a failed proof of the class probe_failed starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.BeforePush,
+      "ssh: Could not resolve hostname git.example",
+    );
+    await failRun(h);
+    await turn();
+    await turn();
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    assert.equal(h.state().repairs, NO_REPAIRS);
   },
 );
 
@@ -2553,7 +2626,7 @@ test(
     const h = new Harness(t);
     h.bindings = facts([APP], [remoteWorker]);
     h.resolution = STORED;
-    h.probeError = new Error(BOOM);
+    h.probeError = gitWriteFailure(GitStage.Push, BOOM);
     await h.compute();
     await h.ended();
     assert.deepEqual(h.order, ["probePush"]);
