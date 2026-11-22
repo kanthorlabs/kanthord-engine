@@ -13,12 +13,38 @@ import {
   caseSchema,
   type CaseSource,
   EVAL_DIRECTORY,
+  type LoadedCase,
   loadSuite,
   parseCase,
   resolvePlaceholders,
 } from "./case.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { GUARD_SUBJECT, loadGuardSuite } from "./guard-run.ts";
+import {
+  GUARD_SUBJECT,
+  type LoadedGuardCase,
+  loadGuardSuite,
+} from "./guard-run.ts";
+import { agentOperations } from "../agent/contract.ts";
+import { footprintOperations } from "../footprint/contract.ts";
+import { gatewayOperations } from "../gateway/contract.ts";
+import {
+  intakeCredentialOperations,
+  intakeOperations,
+} from "../intake/contract.ts";
+import type { Operation } from "../kernel/operation.ts";
+import { isString } from "../kernel/values.ts";
+import { llmOperations } from "../llm/contract.ts";
+import { missionOperations } from "../mission/contract.ts";
+import {
+  environmentSecretOperations,
+  projectOperations,
+} from "../project/contract.ts";
+import { repositoryOperations } from "../repository/contract.ts";
+import { schedulerOperations } from "../scheduler/contract.ts";
+import { storageOperations } from "../storage/contract.ts";
+import { trackingOperations } from "../tracking/contract.ts";
+import { workbenchOperations } from "../workbench/contract.ts";
+import { workerOperations } from "../worker/contract.ts";
 
 const PLATFORM_PLACEHOLDER = "{{native.platform}}";
 const PLACEHOLDER_UNKNOWN = "eval.case.placeholder_unknown";
@@ -322,5 +348,280 @@ test("(regression: F131) fork-summary-discard loads with one human turn, a fork 
       },
       expect: { state: "Blocked" },
     },
+  ]);
+});
+
+const OBJECT_TYPE = "object";
+const OPERATIONS = new Map<string, Operation>(
+  [
+    ...Object.values(gatewayOperations),
+    ...Object.values(llmOperations),
+    ...Object.values(repositoryOperations),
+    ...Object.values(storageOperations),
+    ...Object.values(agentOperations),
+    ...Object.values(workerOperations),
+    ...Object.values(schedulerOperations),
+    ...Object.values(projectOperations),
+    ...Object.values(environmentSecretOperations),
+    ...Object.values(missionOperations),
+    ...Object.values(workbenchOperations),
+    ...Object.values(intakeOperations),
+    ...Object.values(intakeCredentialOperations),
+    ...Object.values(trackingOperations),
+    ...Object.values(footprintOperations),
+  ].map((operation) => [operation.id, operation]),
+);
+
+function leavesOf(schema: z.ZodType): z.ZodType[] {
+  if (schema instanceof z.ZodUnion)
+    return schema.options.flatMap((option) => leavesOf(option as z.ZodType));
+  if (schema instanceof z.ZodIntersection)
+    return [
+      ...leavesOf(schema.def.left as z.ZodType),
+      ...leavesOf(schema.def.right as z.ZodType),
+    ];
+  if (schema instanceof z.ZodPipe)
+    return leavesOf(
+      (schema.def.out instanceof z.ZodTransform
+        ? schema.def.in
+        : schema.def.out) as z.ZodType,
+    );
+  if (schema instanceof z.ZodLazy)
+    return leavesOf(schema.unwrap() as z.ZodType);
+  if (
+    schema instanceof z.ZodOptional ||
+    schema instanceof z.ZodNullable ||
+    schema instanceof z.ZodDefault ||
+    schema instanceof z.ZodReadonly ||
+    schema instanceof z.ZodCatch
+  )
+    return leavesOf(schema.unwrap() as z.ZodType);
+  return [schema];
+}
+
+function isOpen(leaf: z.ZodType): boolean {
+  return (
+    leaf instanceof z.ZodAny ||
+    leaf instanceof z.ZodUnknown ||
+    leaf instanceof z.ZodTransform ||
+    leaf instanceof z.ZodCustom
+  );
+}
+
+function isObjectValue(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === OBJECT_TYPE && value !== null && !Array.isArray(value)
+  );
+}
+
+function fieldProblems(
+  value: Record<string, unknown>,
+  leaves: readonly z.ZodType[],
+  path: string,
+): string[] {
+  const objects = leaves.filter((leaf) => leaf instanceof z.ZodObject);
+  const records = leaves.filter((leaf) => leaf instanceof z.ZodRecord);
+  if (leaves.some(isOpen)) return [];
+  if (!objects.length && !records.length)
+    return [`${path} holds an object where the output holds none`];
+  return Object.entries(value).flatMap(([key, item]) => {
+    const fields = [
+      ...objects.flatMap((object) => {
+        const field = object.shape[key] as z.ZodType | undefined;
+        return field ? [field] : [];
+      }),
+      ...records.map((record) => record.valueType as z.ZodType),
+    ];
+    if (!fields.length)
+      return [`${path}.${key} names no field of the operation output`];
+    return expectProblems(item, fields, `${path}.${key}`);
+  });
+}
+
+function expectProblems(
+  value: unknown,
+  schemas: readonly z.ZodType[],
+  path: string,
+): string[] {
+  const leaves = schemas.flatMap(leavesOf);
+  if (isObjectValue(value)) return fieldProblems(value, leaves, path);
+  if (!Array.isArray(value)) return [];
+  if (leaves.some(isOpen)) return [];
+  const arrays = leaves.filter((leaf) => leaf instanceof z.ZodArray);
+  if (!arrays.length)
+    return [`${path} holds an array where the output holds none`];
+  const items = arrays.map((array) => array.element as z.ZodType);
+  return value.flatMap((item, index) =>
+    expectProblems(item, items, `${path}[${index}]`),
+  );
+}
+
+type Reference = { place: string; value: string };
+
+function referencesOf(loaded: LoadedCase): Reference[] {
+  const { checks } = loaded;
+  const call = (place: string, item: object) =>
+    "operation_id" in item && isString(item.operation_id)
+      ? [{ place, value: item.operation_id }]
+      : [];
+  return [
+    ...loaded.setup.flatMap((step, index) =>
+      call(`setup[${index}].operation_id`, step),
+    ),
+    ...loaded.turns.flatMap((turn, index) =>
+      "approvals" in turn
+        ? Object.keys(turn.approvals).map((value) => ({
+            place: `turns[${index}].approvals`,
+            value,
+          }))
+        : [],
+    ),
+    ...(checks.expect_calls ?? []).flatMap((item, index) =>
+      call(`checks.expect_calls[${index}].operation_id`, item),
+    ),
+    ...(checks.forbid_calls ?? []).flatMap((item, index) =>
+      call(`checks.forbid_calls[${index}].operation_id`, item),
+    ),
+    ...(checks.final_state ?? []).flatMap((item, index) =>
+      call(`checks.final_state[${index}].operation_id`, item),
+    ),
+    ...(checks.expect_offer
+      ? call("checks.expect_offer.operation_id", checks.expect_offer)
+      : []),
+    ...(checks.forbid_offer ?? []).flatMap((item, index) =>
+      call(`checks.forbid_offer[${index}].operation_id`, item),
+    ),
+    ...(checks.guard ?? []).flatMap((item, index) =>
+      call(`checks.guard[${index}].operation_id`, item),
+    ),
+    ...(checks.forbid_auto ?? []).map((value, index) => ({
+      place: `checks.forbid_auto[${index}]`,
+      value,
+    })),
+  ];
+}
+
+function finalStateProblems(loaded: LoadedCase): string[] {
+  return (loaded.checks.final_state ?? []).flatMap((item, index) => {
+    const operation = OPERATIONS.get(item.operation_id);
+    if (!operation) return [];
+    return expectProblems(
+      item.expect,
+      [operation.output],
+      `checks.final_state[${index}].expect`,
+    );
+  });
+}
+
+function caseProblems(loaded: LoadedCase): string[] {
+  return [
+    ...referencesOf(loaded)
+      .filter(({ value }) => !OPERATIONS.has(value))
+      .map(({ place, value }) => `${place} names no operation: ${value}`),
+    ...finalStateProblems(loaded),
+  ].map((problem) => `${loaded.id}: ${problem}`);
+}
+
+function guardCaseProblems(loaded: LoadedGuardCase): string[] {
+  return OPERATIONS.has(loaded.operation_id)
+    ? []
+    : [`${loaded.id}: operation_id names no operation: ${loaded.operation_id}`];
+}
+
+function agentDirectories(root: string): string[] {
+  return readdirSync(root).filter(
+    (name) =>
+      name !== GUARD_SUBJECT && statSync(join(root, name)).isDirectory(),
+  );
+}
+
+function suiteProblems(root = EVAL_DIRECTORY): string[] {
+  return agentDirectories(root).flatMap((agent) =>
+    loadSuite(agent, [], root).flatMap(caseProblems),
+  );
+}
+
+function guardSuiteProblems(): string[] {
+  return loadGuardSuite([]).flatMap((loaded) =>
+    "operation_id" in loaded ? guardCaseProblems(loaded) : [],
+  );
+}
+
+function writeCase(root: string, name: string, checks: string[]): void {
+  mkdirSync(join(root, "ops@1", "fixtures"), { recursive: true });
+  writeFileSync(
+    join(root, "ops@1", `${name}.yaml`),
+    [
+      `id: ${name}`,
+      "fixtures: {}",
+      "turns:",
+      '  - human: "Go."',
+      "checks:",
+      ...checks,
+    ].join("\n"),
+  );
+}
+
+const NODE_LIST_STATE = [
+  "  final_state:",
+  "    - operation_id: mission.node.list",
+  "      input:",
+  "        params: {}",
+  "        query: {}",
+  "        body: null",
+];
+const MISSING_ITEMS_EXPECT = "      expect: { items: [{ name: x }] }";
+const CONTENT_ITEMS_EXPECT =
+  "      expect: { items: [{ content: { name: x } }] }";
+
+test("every case file under eval names an operation and holds the fields of the final_state output", () => {
+  assert.deepEqual(suiteProblems(), []);
+  assert.deepEqual(guardSuiteProblems(), []);
+});
+
+test("a case with an offer operation id that names no operation fails the operation check", (t) => {
+  const root = temporary(t);
+  writeCase(root, "nothing-offer", [
+    "  expect_offer:",
+    "    operation_id: mission.node.nothing",
+    "    target_id: x",
+  ]);
+  assert.deepEqual(suiteProblems(root), [
+    "nothing-offer: checks.expect_offer.operation_id names no operation: mission.node.nothing",
+  ]);
+});
+
+test("a final_state expect that names no field of the operation output fails, and the output shape passes", (t) => {
+  const root = temporary(t);
+  writeCase(root, "missing-field", [...NODE_LIST_STATE, MISSING_ITEMS_EXPECT]);
+  assert.deepEqual(suiteProblems(root), [
+    "missing-field: checks.final_state[0].expect.items[0].name names no field of the operation output",
+  ]);
+  const passing = temporary(t);
+  writeCase(passing, "content-field", [
+    ...NODE_LIST_STATE,
+    CONTENT_ITEMS_EXPECT,
+  ]);
+  assert.deepEqual(suiteProblems(passing), []);
+});
+
+test("a key of turns approvals that names no operation fails the operation check", (t) => {
+  const root = temporary(t);
+  mkdirSync(join(root, "ops@1", "fixtures"), { recursive: true });
+  writeFileSync(
+    join(root, "ops@1", "bad-approval.yaml"),
+    [
+      "id: bad-approval",
+      "fixtures: {}",
+      "turns:",
+      '  - human: "Go."',
+      "    approvals:",
+      "      mission.node.nothing: approve",
+      "checks:",
+      "  max_tool_calls: 3",
+    ].join("\n"),
+  );
+  assert.deepEqual(suiteProblems(root), [
+    "bad-approval: turns[0].approvals names no operation: mission.node.nothing",
   ]);
 });
