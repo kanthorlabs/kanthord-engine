@@ -1321,26 +1321,15 @@ export async function excludeUntracked(
     .split(NUL)
     .filter(Boolean);
   if (!paths.length) return paths;
-  await excludePaths(
-    { env, directory, context, deadlineMs: end - performance.now() },
-    paths,
-  );
-  return paths;
-}
-
-async function excludePaths(
-  call: GitCall,
-  paths: readonly string[],
-): Promise<void> {
   const excludeFile = resolve(
-    call.directory,
+    directory,
     (
       await run(
-        call.env,
-        call.directory,
+        env,
+        directory,
         ["rev-parse", "--git-path", "info/exclude"],
-        call.context,
-        call.deadlineMs,
+        context,
+        end - performance.now(),
       )
     ).trim(),
   );
@@ -1352,6 +1341,7 @@ async function excludePaths(
         .map((path) => `/${path.replace(EXCLUDE_SPECIAL, "\\$&")}\n`)
         .join(""),
   );
+  return paths;
 }
 
 export interface GitCall {

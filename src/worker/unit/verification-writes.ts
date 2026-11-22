@@ -43,6 +43,21 @@ function contains(recorded: string, changed: string): boolean {
   return changed === recorded || changed.startsWith(`${recorded}/`);
 }
 
+function newPaths(
+  before: ReadonlyMap<string, ReadonlySet<string>>,
+  after: ReadonlyMap<string, ReadonlySet<string>>,
+): [string, string][] {
+  const found: [string, string][] = [];
+  for (const [directory, paths] of after)
+    for (const path of paths)
+      if (!before.get(directory)?.has(path)) found.push([directory, path]);
+  return found;
+}
+
+function recordedUnder(paths: ReadonlySet<string>, changed: string): string[] {
+  return [...paths].filter((path) => contains(path, changed));
+}
+
 export class VerificationWrites {
   private readonly commands: ReadonlySet<string>;
   private readonly checkouts: readonly string[];
@@ -86,9 +101,8 @@ export class VerificationWrites {
       return await run();
     } finally {
       const after = await this.untracked();
-      for (const [directory, paths] of after)
-        for (const path of paths)
-          if (!before.get(directory)?.has(path)) this.record(directory, path);
+      for (const [directory, path] of newPaths(before, after))
+        this.record(directory, path);
     }
   }
 
@@ -98,9 +112,13 @@ export class VerificationWrites {
     try {
       return await run();
     } finally {
-      for (const [absolute, fingerprint] of before)
-        if (fingerprintOf(absolute) !== fingerprint) this.release(absolute);
+      this.releaseChanged(before);
     }
+  }
+
+  private releaseChanged(before: ReadonlyMap<string, string>): void {
+    for (const [absolute, fingerprint] of before)
+      if (fingerprintOf(absolute) !== fingerprint) this.release(absolute);
   }
 
   private fingerprints(): Map<string, string> {
@@ -119,8 +137,8 @@ export class VerificationWrites {
 
   private release(absolute: string): void {
     for (const [directory, paths] of this.written)
-      for (const path of paths)
-        if (contains(path, relative(directory, absolute))) paths.delete(path);
+      for (const path of recordedUnder(paths, relative(directory, absolute)))
+        paths.delete(path);
   }
 
   private async untracked(): Promise<Map<string, Set<string>>> {
