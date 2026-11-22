@@ -434,6 +434,8 @@ test("security: redaction - no file, printed line or error text holds the key, t
   }
 });
 
+const UNEXPECTED_KIND = "unexpected_approval";
+
 test("invariant guard: verdict - an unnamed approval is rejected, fails the run with unexpected_approval and shows the cause auto_mode_off", async (t) => {
   const { options: suite } = options(t, { unnamed: UNNAMED_CASE });
   const sandbox = await openSandbox(t, {
@@ -455,6 +457,12 @@ test("invariant guard: verdict - an unnamed approval is rejected, fails the run 
   assert.equal(
     played.observation.confirmations[0]?.guard?.cause,
     GuardCause.AutoModeOff,
+  );
+  const unnamed = played.observation.confirmations[0]!.operation_id;
+  assert.deepEqual(played.observation.unexpected_approval, [unnamed]);
+  assert.equal(
+    played.score.checks.find((check) => check.kind === UNEXPECTED_KIND)?.detail,
+    `an unexpected approval appeared: ${unnamed}`,
   );
 });
 

@@ -66,7 +66,7 @@ export interface Confirmation {
 
 export interface Observation extends SessionObservation {
   confirmations: Confirmation[];
-  unexpected_approval: boolean;
+  unexpected_approval: string[];
   members?: Record<string, SessionObservation>;
   summary?: string | null;
   scope_requests?: number;
@@ -721,9 +721,9 @@ export async function scoreRun(
   results.push(
     resultOf(
       "unexpected_approval",
-      observation.unexpected_approval
-        ? ["an unexpected approval appeared"]
-        : [],
+      observation.unexpected_approval.map(
+        (operationId) => `an unexpected approval appeared: ${operationId}`,
+      ),
     ),
   );
   return { passed: results.every((result) => result.passed), checks: results };
