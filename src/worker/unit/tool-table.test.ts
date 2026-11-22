@@ -631,6 +631,30 @@ test("a bash call that is no verification records no write", async (t) => {
   assert.deepEqual(writes.pathsOf(directory), []);
 });
 
+test("a bash call that is no verification and changes a recorded path removes the path from the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    `${WRITE_PYC}; mkdir -p gen && echo out > gen/out.txt`,
+  );
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt", PYC]);
+  await runBash(tools, "echo same > unrelated.txt");
+  assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt", PYC]);
+  await runBash(tools, "echo changed > gen/out.txt");
+  assert.deepEqual(writes.pathsOf(directory), [PYC]);
+  await runBash(tools, `rm ${PYC}`);
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
+test("a verification run that creates a nested repository records it without a trailing slash", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "git init -q vendor/lib",
+  );
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
+});
+
 test("a failing verification run records its new untracked paths and keeps the exit output", async (t) => {
   const { directory, writes, tools } = await verificationCheckout(
     t,

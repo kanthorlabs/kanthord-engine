@@ -1,11 +1,15 @@
-import { relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Context } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
-import { includePaths, untrackedPaths } from "./local-git.ts";
+import { untrackedPaths } from "./local-git.ts";
 
 const OWNING_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
 const READ_LIMIT_MS = 30000;
+const MISSING = "missing";
+const NO_PATHS = 0;
 
 export interface VerificationScope {
   commands: readonly string[];
@@ -16,6 +20,27 @@ export interface VerificationInput extends VerificationScope {
   env: NodeJS.ProcessEnv;
   context: Context;
   workspace: string;
+}
+
+function digestOf(content: string | Buffer): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function fingerprintOf(path: string): string {
+  const stat = lstatSync(path, { throwIfNoEntry: false });
+  if (stat === undefined) return MISSING;
+  const header = `${stat.size}:${stat.mtimeMs}`;
+  if (stat.isSymbolicLink()) return `${header}:${digestOf(readlinkSync(path))}`;
+  if (stat.isFile()) return `${header}:${digestOf(readFileSync(path))}`;
+  if (!stat.isDirectory()) return header;
+  const entries = readdirSync(path)
+    .sort()
+    .map((name) => `${name}=${fingerprintOf(join(path, name))}`);
+  return `${header}:${digestOf(entries.join("\n"))}`;
+}
+
+function contains(recorded: string, changed: string): boolean {
+  return changed === recorded || changed.startsWith(`${recorded}/`);
 }
 
 export class VerificationWrites {
@@ -34,19 +59,10 @@ export class VerificationWrites {
     this.workspace = input.workspace;
   }
 
-  isVerification(command: string): boolean {
-    return this.commands.has(command.trim());
-  }
-
-  async observe<T>(run: () => Promise<T>): Promise<T> {
-    const before = await this.untracked();
-    try {
-      return await run();
-    } finally {
-      const after = await this.untracked();
-      for (const [directory, paths] of after)
-        this.record(directory, this.newPaths(before.get(directory), paths));
-    }
+  track<T>(command: string, run: () => Promise<T>): Promise<T> {
+    return this.commands.has(command.trim())
+      ? this.observe(run)
+      : this.guard(run);
   }
 
   pathsOf(directory: string): string[] {
@@ -55,42 +71,56 @@ export class VerificationWrites {
 
   ownership(): InlineExtension {
     return (pi) => {
-      pi.on("tool_call", async (event) => {
+      pi.on("tool_call", (event) => {
         if (!OWNING_TOOLS.has(event.toolName)) return undefined;
         const { path } = event.input as { path?: unknown };
-        if (isString(path)) await this.release(resolve(this.workspace, path));
+        if (isString(path)) this.release(resolve(this.workspace, path));
         return undefined;
       });
     };
   }
 
-  private newPaths(
-    before: ReadonlySet<string> | undefined,
-    after: ReadonlySet<string>,
-  ): string[] {
-    return [...after].filter((path) => !before?.has(path));
+  private async observe<T>(run: () => Promise<T>): Promise<T> {
+    const before = await this.untracked();
+    try {
+      return await run();
+    } finally {
+      const after = await this.untracked();
+      for (const [directory, paths] of after)
+        for (const path of paths)
+          if (!before.get(directory)?.has(path)) this.record(directory, path);
+    }
   }
 
-  private record(directory: string, added: readonly string[]): void {
+  private async guard<T>(run: () => Promise<T>): Promise<T> {
+    const before = this.fingerprints();
+    if (before.size === NO_PATHS) return run();
+    try {
+      return await run();
+    } finally {
+      for (const [absolute, fingerprint] of before)
+        if (fingerprintOf(absolute) !== fingerprint) this.release(absolute);
+    }
+  }
+
+  private fingerprints(): Map<string, string> {
+    const read = new Map<string, string>();
+    for (const [directory, paths] of this.written)
+      for (const path of paths)
+        read.set(join(directory, path), fingerprintOf(join(directory, path)));
+    return read;
+  }
+
+  private record(directory: string, path: string): void {
     const paths = this.written.get(directory) ?? new Set<string>();
-    for (const path of added) paths.add(path);
+    paths.add(path);
     this.written.set(directory, paths);
   }
 
-  private async release(absolute: string): Promise<void> {
-    for (const [directory, paths] of this.written) {
-      const path = relative(directory, absolute);
-      if (!paths.delete(path)) continue;
-      await includePaths(
-        {
-          env: this.env,
-          directory,
-          context: this.context,
-          deadlineMs: READ_LIMIT_MS,
-        },
-        [path],
-      );
-    }
+  private release(absolute: string): void {
+    for (const [directory, paths] of this.written)
+      for (const path of paths)
+        if (contains(path, relative(directory, absolute))) paths.delete(path);
   }
 
   private async untracked(): Promise<Map<string, Set<string>>> {

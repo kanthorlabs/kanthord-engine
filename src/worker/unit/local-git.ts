@@ -245,17 +245,6 @@ async function trimTurnStaging(
       scope.context,
       scope.remaining(),
     );
-  const left = rules.verificationWrites.filter((path) => added.has(path));
-  if (left.length > NO_PATHS)
-    await excludePaths(
-      {
-        env: scope.env,
-        directory: scope.directory,
-        context: scope.context,
-        deadlineMs: scope.remaining(),
-      },
-      left,
-    );
   await unstageGitlinkMoves(scope, rules.pointers);
 }
 
@@ -299,7 +288,7 @@ async function unstageGitlinkMoves(
       scope.context,
       scope.remaining(),
     );
-    await restoreGitlink(scope, path, previous);
+    await restoreGitlink(scope, { path, commit: previous }, false);
   }
 }
 
@@ -487,14 +476,14 @@ export async function gitlinkPaths(scope: GitScope): Promise<string[]> {
 }
 
 async function restoreGitlinks(scope: GitScope): Promise<void> {
-  for (const { path, commit } of await gitlinksOf(scope))
-    await restoreGitlink(scope, path, commit);
+  for (const gitlink of await gitlinksOf(scope))
+    await restoreGitlink(scope, gitlink, true);
 }
 
 async function restoreGitlink(
   scope: GitScope,
-  path: string,
-  commit: string,
+  { path, commit }: Gitlink,
+  force: boolean,
 ): Promise<void> {
   const submodule = join(scope.directory, path);
   if (!existsSync(join(submodule, GIT_DIRECTORY))) return;
@@ -508,7 +497,7 @@ async function restoreGitlink(
   await run(
     scope.env,
     submodule,
-    ["checkout", "--detach", "--force", commit, "--"],
+    ["checkout", "--detach", ...(force ? ["--force"] : []), commit, "--"],
     scope.context,
     scope.remaining(),
   );
@@ -713,6 +702,7 @@ export async function isCommitted(
   directory: string,
   context: Context,
   deadlineMs: number,
+  excluded: readonly string[] = [],
 ): Promise<boolean> {
   const end = performance.now() + deadlineMs;
   if (!(await indexMatchesHead(env, directory, context, deadlineMs)))
@@ -720,7 +710,13 @@ export async function isCommitted(
   const untracked = await run(
     env,
     directory,
-    ["ls-files", "--others", "--exclude-standard", "-z"],
+    [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...excluded.map((path) => `--exclude=${excludePattern(path)}`),
+      "-z",
+    ],
     context,
     end - performance.now(),
   );
@@ -1332,7 +1328,10 @@ export async function excludeUntracked(
   return paths;
 }
 
-async function excludeFileOf(call: GitCall): Promise<string> {
+async function excludePaths(
+  call: GitCall,
+  paths: readonly string[],
+): Promise<void> {
   const excludeFile = resolve(
     call.directory,
     (
@@ -1346,35 +1345,12 @@ async function excludeFileOf(call: GitCall): Promise<string> {
     ).trim(),
   );
   ensureDirectory(dirname(excludeFile));
-  return excludeFile;
-}
-
-async function excludePaths(
-  call: GitCall,
-  paths: readonly string[],
-): Promise<void> {
   appendFileSync(
-    await excludeFileOf(call),
+    excludeFile,
     NEWLINE +
       paths
         .map((path) => `/${path.replace(EXCLUDE_SPECIAL, "\\$&")}\n`)
         .join(""),
-  );
-}
-
-export async function includePaths(
-  call: GitCall,
-  paths: readonly string[],
-): Promise<void> {
-  const excludeFile = await excludeFileOf(call);
-  if (!existsSync(excludeFile)) return;
-  const patterns = new Set(paths.map(excludePattern));
-  writeFileSync(
-    excludeFile,
-    readFileSync(excludeFile, "utf8")
-      .split(NEWLINE)
-      .filter((line) => !patterns.has(line))
-      .join(NEWLINE),
   );
 }
 
@@ -1483,7 +1459,7 @@ export async function untrackedPaths(call: GitCall): Promise<string[]> {
   )
     .split(NUL)
     .filter((entry) => entry.startsWith(UNTRACKED_PREFIX))
-    .map((entry) => entry.slice(STATUS_PREFIX_LENGTH));
+    .map((entry) => entry.slice(STATUS_PREFIX_LENGTH).replace(/\/$/, ""));
 }
 
 function remover(path: string): void {

@@ -408,7 +408,14 @@ async function settleCheckout(
     await concludeMerge(env, directory, turn.message, context, remaining());
   }
   checkout.head = await headCommit(env, directory, context, remaining());
-  await assertInvariant(env, checkout, state.nodeBranch, context, remaining);
+  await assertInvariant(
+    env,
+    checkout,
+    state.nodeBranch,
+    context,
+    remaining,
+    state.agent.verificationWrites(directory),
+  );
   return changed;
 }
 
@@ -473,6 +480,7 @@ async function assertInvariant(
   branch: string,
   context: Context,
   remaining: () => number,
+  excluded: readonly string[] = [],
 ): Promise<void> {
   const directory = checkout.directory;
   assert.equal(
@@ -483,7 +491,7 @@ async function assertInvariant(
     await headCommit(env, directory, context, remaining()),
     checkout.head,
   );
-  assert.ok(await isCommitted(env, directory, context, remaining()));
+  assert.ok(await isCommitted(env, directory, context, remaining(), excluded));
   assert.deepEqual(
     await operationsInProgress(env, directory, context, remaining()),
     [],

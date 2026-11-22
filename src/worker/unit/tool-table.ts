@@ -174,10 +174,9 @@ export function sessionTools(
             options(toolCallId, processes.operations(toolCallId)),
           )
           .execute(toolCallId, params, signal, onUpdate, context);
-      return verificationWrites?.isVerification(params.command)
-        ? verificationWrites.observe(run)
-        : run();
+      return verificationWrites?.track(params.command, run) ?? run();
     },
+    ...(verificationWrites ? { executionMode: "sequential" as const } : {}),
   };
   return {
     allowlist,
