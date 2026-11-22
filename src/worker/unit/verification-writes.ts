@@ -4,11 +4,12 @@ import { join, relative, resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Context } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
+import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { untrackedPaths } from "./local-git.ts";
 
 const OWNING_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
-const READ_LIMIT_MS = 30000;
 const MISSING = "missing";
+const GIT_DIRECTORY = ".git";
 const NO_PATHS = 0;
 
 export interface VerificationScope {
@@ -26,7 +27,15 @@ function digestOf(content: string | Buffer): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function fingerprintOf(path: string): string {
+function fingerprintOf(path: string): string | undefined {
+  try {
+    return readFingerprint(path);
+  } catch {
+    return undefined;
+  }
+}
+
+function readFingerprint(path: string): string {
   const stat = lstatSync(path, { throwIfNoEntry: false });
   if (stat === undefined) return MISSING;
   const header = `${stat.size}:${stat.mtimeMs}`;
@@ -34,9 +43,14 @@ function fingerprintOf(path: string): string {
   if (stat.isFile()) return `${header}:${digestOf(readFileSync(path))}`;
   if (!stat.isDirectory()) return header;
   const entries = readdirSync(path)
+    .filter((name) => name !== GIT_DIRECTORY)
     .sort()
-    .map((name) => `${name}=${fingerprintOf(join(path, name))}`);
+    .map((name) => `${name}=${readFingerprint(join(path, name))}`);
   return `${header}:${digestOf(entries.join("\n"))}`;
+}
+
+function unchanged(before: string | undefined, now: string | undefined) {
+  return before !== undefined && before === now;
 }
 
 function contains(recorded: string, changed: string): boolean {
@@ -116,13 +130,16 @@ export class VerificationWrites {
     }
   }
 
-  private releaseChanged(before: ReadonlyMap<string, string>): void {
+  private releaseChanged(
+    before: ReadonlyMap<string, string | undefined>,
+  ): void {
     for (const [absolute, fingerprint] of before)
-      if (fingerprintOf(absolute) !== fingerprint) this.release(absolute);
+      if (!unchanged(fingerprint, fingerprintOf(absolute)))
+        this.release(absolute);
   }
 
-  private fingerprints(): Map<string, string> {
-    const read = new Map<string, string>();
+  private fingerprints(): Map<string, string | undefined> {
+    const read = new Map<string, string | undefined>();
     for (const [directory, paths] of this.written)
       for (const path of paths)
         read.set(join(directory, path), fingerprintOf(join(directory, path)));
@@ -151,7 +168,7 @@ export class VerificationWrites {
             env: this.env,
             directory,
             context: this.context,
-            deadlineMs: READ_LIMIT_MS,
+            deadlineMs: COMMAND_LIMIT_MS,
           }),
         ),
       );

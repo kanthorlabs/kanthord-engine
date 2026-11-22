@@ -495,6 +495,36 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  test("a submodule edit that conflicts with the gitlink restore stops the turn and the edit stays", async (t) => {
+    const h = await fixture(t, [], []);
+    const source = await submoduleSource(t);
+    const upstream = simpleGit(source.address);
+    const third = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    writeFileSync(join(source.address, "file"), "fourth");
+    await upstream.add("file");
+    await upstream.raw([...COMMIT_IDENTITY, "commit", "-m", "fourth"]);
+    const fourth = (await upstream.raw(["rev-parse", "HEAD"])).trim();
+    await addSubmodule(h.root, source, SUBMODULE, third);
+    h.checkouts[0]!.head = await headOf(h.root);
+    const sub = simpleGit(join(h.root, SUBMODULE));
+    const agent = gatedAgent(h, GATE_MESSAGE);
+    t.mock.method(h.agent, "prompt", async () => {
+      await sub.raw(["checkout", "--detach", fourth]);
+      writeFileSync(join(h.root, SUBMODULE, "file"), EDITED_CONTENT);
+    });
+    const failure = await agent.prompt(EMPTY_PROMPT).then(
+      () => assert.fail("the turn ended without a stop"),
+      (error: unknown) => error,
+    );
+    assert.ok(failure instanceof Error);
+    assert.match(failure.message, /would be overwritten by checkout/);
+    assert.equal(await headOf(join(h.root, SUBMODULE)), fourth);
+    assert.equal(
+      readFileSync(join(h.root, SUBMODULE, "file"), "utf8"),
+      EDITED_CONTENT,
+    );
+  });
+
   test("a write turn that commits ordinary commits settles as one commit", async (t) => {
     const current = task("commits", `test -f ${WORK_FILE}`);
     const h = await fixture(

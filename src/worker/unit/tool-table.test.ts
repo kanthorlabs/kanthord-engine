@@ -646,6 +646,27 @@ test("a bash call that is no verification and changes a recorded path removes th
   assert.deepEqual(writes.pathsOf(directory), []);
 });
 
+test("(invariant guard) a recorded path that a later bash call makes unreadable leaves the record and the call keeps its result", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "mkdir -p gen && echo out > gen/out.txt",
+  );
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), ["gen/out.txt"]);
+  await runBash(tools, "chmod 000 gen/out.txt && echo locked");
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
+test("a change inside the .git directory of a recorded nested repository keeps the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "git init -q vendor/lib",
+  );
+  await runBash(tools, VERIFY);
+  await runBash(tools, "git -C vendor/lib config core.note changed");
+  assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
+});
+
 test("a verification run that creates a nested repository records it without a trailing slash", async (t) => {
   const { directory, writes, tools } = await verificationCheckout(
     t,
