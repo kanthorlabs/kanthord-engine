@@ -91,8 +91,7 @@ const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
-const REPORT_VERSION = 2;
-const REPORT_VERSION_WITH_LINES = 3;
+const REPORT_VERSION = 3;
 const SECONDS_ROUNDING = 10;
 const NO_SECONDS = 0;
 const TEXT_MAX_BYTES = 1024;
@@ -119,6 +118,7 @@ const EMPTY_LENGTH = 0;
 const STATUS_LETTER_INDEX = 0;
 const LIST_START = 0;
 const MIN_LIST_LENGTH = 1;
+const SINGLE_MATCH = 1;
 const MAIN_MODULE_INDEX = 1;
 const ORDER_BEFORE = -1;
 const ORDER_AFTER = 1;
@@ -587,6 +587,19 @@ function longestList(report) {
   );
 }
 
+function plainFlaky(report) {
+  return {
+    ...report,
+    flaky: report.flaky.map(({ file, name }) => ({ file, name })),
+  };
+}
+
+export function fitReport(report) {
+  if (Buffer.byteLength(JSON.stringify(report)) <= REPORT_MAX_BYTES)
+    return report;
+  return fitSize(plainFlaky(report));
+}
+
 function fitSize(report) {
   let list = longestList(report);
   while (
@@ -639,10 +652,11 @@ function testLines(root, { file, name }) {
   const source = readFileSync(join(root, file), "utf8");
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
   const part = name.split(NAME_SEPARATOR)[FIRST_NAME_PART];
-  const call = tree.statements.find((statement) =>
+  const calls = tree.statements.filter((statement) =>
     isTestCallNamed(statement, part),
   );
-  if (call === undefined) return null;
+  if (calls.length !== SINGLE_MATCH) return null;
+  const [call] = calls;
   return {
     start: lineOf(tree, call.getStart(tree)),
     end: lineOf(tree, call.getEnd()),
@@ -667,10 +681,8 @@ function buildReport(root, selected, failed, flaky, floor) {
   const entries = cutIds(flaky)
     .filter((id) => !failedKeys.has(idKey(id)))
     .map((id) => flakyEntry(root, selected.graph, id));
-  return fitSize({
-    version: entries.some((entry) => entry.lines !== undefined)
-      ? REPORT_VERSION_WITH_LINES
-      : REPORT_VERSION,
+  return fitReport({
+    version: REPORT_VERSION,
     selection: selected.selection,
     reason: selected.reason,
     tests: cutPaths(selected.tests),
