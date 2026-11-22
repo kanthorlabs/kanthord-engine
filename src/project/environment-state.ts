@@ -162,6 +162,12 @@ export function environmentDigest(input: EnvironmentDigestInput): string {
   });
 }
 
+const pushCredentialSchema = z.strictObject({
+  name: z.string().min(1),
+  revision: z.int().min(0),
+});
+export type PushCredential = z.infer<typeof pushCredentialSchema>;
+
 export const proofFileSchema = z.strictObject({
   digest: z.string().min(1),
   outcome: proofOutcomeSchema,
@@ -176,6 +182,7 @@ export const proofFileSchema = z.strictObject({
   repairs: z.int().min(0),
   ended_at: timestamp,
   commit: z.string().min(1),
+  push_credential: pushCredentialSchema.optional(),
 });
 export type ProofFile = z.infer<typeof proofFileSchema>;
 export type ProofFileInput = Omit<ProofFile, "repairs"> & { repairs?: number };

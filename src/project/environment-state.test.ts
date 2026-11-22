@@ -130,6 +130,35 @@ test("the environment digest changes with each input and ignores the key order",
     assert.notEqual(environmentDigest(other), first);
 });
 
+test("the environment digest of the same input is the same and holds no push credential", () => {
+  const first = environmentDigest(input());
+  assert.equal(environmentDigest(input()), first);
+  assert.equal(
+    environmentDigest({
+      ...input(),
+      push_credential: { name: "deploy", revision: 2 },
+    } as EnvironmentDigestInput),
+    first,
+  );
+});
+
+test("a proof file reads with and without the push credential", (t) => {
+  const files = new ProofFiles(temporary(t));
+  const path = "repository/github/acme/app";
+  const sum = "d".repeat(64);
+  const pushed = proofFile(sum, {
+    push_credential: { name: "deploy", revision: 2 },
+  });
+  files.write(path, pushed);
+  assert.deepEqual(files.read(path, sum)?.push_credential, {
+    name: "deploy",
+    revision: 2,
+  });
+  const legacy = "e".repeat(64);
+  files.write(path, proofFile(legacy));
+  assert.equal(files.read(path, legacy)?.push_credential, undefined);
+});
+
 test("a proof of commands that all end with exit 0 passes", () => {
   assert.deepEqual(
     classifyProof([

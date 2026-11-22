@@ -67,6 +67,7 @@ import {
   type ImageBuildResult,
   type ProofFile,
   ProofFiles,
+  proofFileSchema,
   type ProofInput,
   PROVED_SUFFIX,
 } from "./environment-state.ts";
@@ -92,16 +93,20 @@ import {
 } from "./store.ts";
 
 const PROJECT = "project_1";
+const PUSH_CREDENTIAL = "deploy";
+const PUSH_REVISION = 1;
 const APP: RepositoryGroup = {
   binding_id: "binding_app",
   binding_name: "app",
   resource_identity: "repository:github:acme/app",
+  ssh_credential: PUSH_CREDENTIAL,
   review_flow: null,
 };
 const DOCS: RepositoryGroup = {
   binding_id: "binding_docs",
   binding_name: "docs",
   resource_identity: "repository:github:acme/docs",
+  ssh_credential: PUSH_CREDENTIAL,
   review_flow: null,
 };
 const SECRET_VARIABLE = "REGISTRY_AUTH";
@@ -256,6 +261,7 @@ function proofFile(sum: string, override: Partial<ProofFile> = {}): ProofFile {
     repairs: 0,
     ended_at: 1,
     commit: BASE_COMMIT,
+    push_credential: { name: PUSH_CREDENTIAL, revision: PUSH_REVISION },
     ...override,
   };
 }
@@ -289,6 +295,7 @@ class Harness {
   proveResults: CommandResult[] = [];
   proveError: Error | null = null;
   probeError: Error | null = null;
+  sshRevisions = new Map<string, number>();
   probeCalls: Array<{ bindingId: string; commit: string; runId: string }> = [];
   disk = { free_bytes: 50, total_bytes: 100 };
   images = new Map<string, string>([
@@ -451,6 +458,8 @@ class Harness {
         this.probeCalls.push({ bindingId, commit, runId });
         if (this.probeError !== null) throw this.probeError;
       },
+      sshCredentialRevisionOf: (credential) =>
+        this.sshRevisions.get(credential) ?? PUSH_REVISION,
       freeDisk: async () => {
         this.order.push("freeDisk");
         return this.disk;
@@ -734,6 +743,8 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     digest: "d",
     tag: "t",
     proof: null,
+    push_credential: { name: PUSH_CREDENTIAL, revision: PUSH_REVISION },
+    push_stale: false,
     repairs: 0,
     proved: false,
     read_succeeded: true,
@@ -2339,6 +2350,7 @@ function resolvingHarness(
       binding_id: binding.id,
       binding_name: "repo",
       resource_identity: binding.resource_identity,
+      ssh_credential: "ssh-github.com",
       review_flow: null,
     };
   });
@@ -2571,6 +2583,107 @@ test(
     assert.equal(h.state().failure?.class, PROBE_FAILED);
     assert.equal(h.sessionInputs.length, NO_CALLS);
     assert.equal(h.state().repairs, NO_REPAIRS);
+  },
+);
+
+const OTHER_PUSH_CREDENTIAL = "other";
+const NEW_PUSH_REVISION = 2;
+
+test(
+  "a new revision of the push credential makes a host group run the probe again",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    h.sshRevisions.set(PUSH_CREDENTIAL, NEW_PUSH_REVISION);
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    assert.equal(h.probeCalls.length, TWO_CALLS);
+    assert.deepEqual(h.proofOf(h.digest())?.push_credential, {
+      name: PUSH_CREDENTIAL,
+      revision: NEW_PUSH_REVISION,
+    });
+  },
+);
+
+test(
+  "another ssh credential name of the binding starts a run at the next read",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    h.bindings = facts([{ ...APP, ssh_credential: OTHER_PUSH_CREDENTIAL }], []);
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    assert.equal(h.probeCalls.length, TWO_CALLS);
+    assert.equal(
+      h.proofOf(h.digest())?.push_credential?.name,
+      OTHER_PUSH_CREDENTIAL,
+    );
+  },
+);
+
+test(
+  "a new revision of the push credential of a proved image starts a run that builds no image",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    const sum = h.digest();
+    h.existing.add(h.tagOf(sum));
+    h.existing.add(h.provedOf(sum));
+    h.writeProof(proofFile(sum));
+    await h.compute();
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(h.probeCalls.length, NO_CALLS);
+    const tag = h.state().tag;
+    h.sshRevisions.set(PUSH_CREDENTIAL, NEW_PUSH_REVISION);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.events.includes(BUILD), false);
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.state().tag, tag);
+    assert.equal(h.digest(), sum);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(h.proofOf(sum)?.push_credential?.revision, NEW_PUSH_REVISION);
+  },
+);
+
+test(
+  "an unchanged push credential starts no run and no second probe",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    await h.compute();
+    await turn();
+    await turn();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.logged(RUN_ENDED).length, ONE_CALL);
+  },
+);
+
+test(
+  "a stored proof file with no push credential starts one run and then none",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    const legacy = proofFile(h.digest(), { push_credential: undefined });
+    assert.equal(proofFileSchema.safeParse(legacy).success, true);
+    h.writeProof(legacy);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    await h.compute();
+    await turn();
+    await turn();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.logged(RUN_ENDED).length, ONE_CALL);
   },
 );
 
