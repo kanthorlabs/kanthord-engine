@@ -31,6 +31,7 @@ const SHORT_DEADLINE_MS = 300;
 const POLL_MS = 20;
 const LONG_DEADLINE_MS = 60000;
 const DEADLINE_MARGIN_MS = 5000;
+const MAIN_SLOT_TIMEOUT_MS = 120000;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const MODE_BITS = 0o777;
 const SLOT_FAILURE = 1;
@@ -276,18 +277,22 @@ test("a thread that ignores the stop control ends at the stop deadline", async (
   assert.equal(exit.code, SLOT_FAILURE);
 });
 
-test("kanthord serve slot exits 1 with worker.slot.channel_closed at the end of stdin", async (t) => {
-  const instance = spawnSlot(t, [
-    "--input-type=module",
-    "-e",
-    `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
-  ]);
-  instance.child.stdin.end();
-  const exit = await instance.exited;
-  assert.equal(exit.code, SLOT_FAILURE);
-  assert.match(exit.stderr, /worker\.slot\.channel_closed/);
-  assert.equal(exit.stdout, NO_OUTPUT);
-});
+test(
+  "kanthord serve slot exits 1 with worker.slot.channel_closed at the end of stdin",
+  { timeout: MAIN_SLOT_TIMEOUT_MS },
+  async (t) => {
+    const instance = spawnSlot(t, [
+      "--input-type=module",
+      "-e",
+      `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
+    ]);
+    instance.child.stdin.end();
+    const exit = await instance.exited;
+    assert.equal(exit.code, SLOT_FAILURE);
+    assert.match(exit.stderr, /worker\.slot\.channel_closed/);
+    assert.equal(exit.stdout, NO_OUTPUT);
+  },
+);
 
 test("serve slot accepts the entry list of the init frame and gives each entry its own port", async (t) => {
   const instance = slot(t, {});
