@@ -7,13 +7,7 @@ const rule = kanthordPlugin.rules["no-inline-object-type"];
 const tester = new RuleTester({
   languageOptions: { parser: tseslint.parser },
 });
-const refused = (code, count) => ({
-  code,
-  errors: Array.from({ length: count }, () => ({
-    message:
-      "Give the object type a named interface, and give a kind a const object.",
-  })),
-});
+const refused = (code, errors) => ({ code, errors });
 
 test("no-inline-object-type refuses the four inline forms", () => {
   tester.run("no-inline-object-type", rule, {
@@ -23,6 +17,7 @@ test("no-inline-object-type refuses the four inline forms", () => {
       "type U = A | B;",
       "function f(options: { a: number }) { return options; }",
       "type N = { a: number };",
+      "interface A { size: 1 | 2; on: true }",
     ],
     invalid: [
       refused("type U = { a: number } | null;", 1),

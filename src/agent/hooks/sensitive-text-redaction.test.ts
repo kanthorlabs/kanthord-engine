@@ -16,7 +16,6 @@ import type {
   ToolCallEvent,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { KnownSecrets } from "../known-secrets.ts";
 import { background } from "../../kernel/context.ts";
 import {
   overrideEnvironment,
@@ -36,6 +35,7 @@ import { scriptedProvider } from "../test-support.ts";
 import { checkoutConfinement } from "./checkout-confinement.ts";
 import { toolApproval } from "./tool-approval.ts";
 import {
+  type KnownSecrets,
   REDACTION_TABLE_MAX,
   RestoreReason,
   sensitiveTextRedaction,

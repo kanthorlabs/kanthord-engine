@@ -3,7 +3,6 @@ import type {
   InlineExtension,
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import type { KnownSecrets } from "../known-secrets.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import {
   findKnownText,
@@ -24,6 +23,8 @@ import {
   SESSION_MARKER_PATTERN,
   sessionMarker,
 } from "../sensitive-text.ts";
+
+export type KnownSecrets = () => Promise<readonly string[]>;
 
 export interface RedactionCounts {
   redacted: Partial<Record<SensitiveRule, number>>;

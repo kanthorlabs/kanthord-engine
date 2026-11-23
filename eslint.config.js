@@ -1135,6 +1135,7 @@ export default tseslint.config(
   },
   {
     files: noInlineObjectTypeFiles,
+    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
     rules: { "kanthord/no-inline-object-type": "error" },
   },
 );

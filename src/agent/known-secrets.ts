@@ -1,7 +1,6 @@
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import { SecretShape } from "../custody/contract.ts";
-
-export type KnownSecrets = () => Promise<readonly string[]>;
+import type { KnownSecrets } from "./hooks/sensitive-text-redaction.ts";
 
 export function credentialSecrets(
   store: CredentialStore,

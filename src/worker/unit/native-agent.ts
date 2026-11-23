@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { KnownSecrets } from "../../agent/known-secrets.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { digest, type WorkPrompt } from "../../agent/prompt-composer.ts";
@@ -17,6 +16,7 @@ import type {
   SessionTraceStart,
 } from "../../agent/agent-port.ts";
 import {
+  type KnownSecrets,
   redactionSummary,
   type SensitiveTextRedaction,
 } from "../../agent/hooks/sensitive-text-redaction.ts";
