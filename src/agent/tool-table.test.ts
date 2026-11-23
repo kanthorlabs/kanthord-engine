@@ -11,7 +11,6 @@ import {
   pidsIn,
   PROCESS_TREE_PIDS,
   processTreeCommand,
-  spawnedPids,
   survivingProcesses,
 } from "./test-support.ts";
 import {
@@ -184,7 +183,7 @@ async function killedBashCall(
       undefined,
       (update) => {
         if (pidsIn(update.content).length !== PROCESS_TREE_PIDS) return;
-        spawned = spawnedPids(t, update.content);
+        spawned = pidsIn(update.content);
         ready = true;
         processes.killAll();
       },
