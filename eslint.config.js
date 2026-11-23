@@ -207,6 +207,12 @@ const noInlineObjectType = {
 
 const noInlineObjectTypeFiles = [
   "src/agent/known-secrets.ts",
+  "src/agent/agent-session.ts",
+  "src/agent/redaction.ts",
+  "src/agent/hooks/marker-restore.ts",
+  "src/agent/hooks/input-redaction.ts",
+  "src/agent/hooks/output-finding.ts",
+  "src/agent/hooks/assistant-redaction.ts",
   "src/worker/contract.ts",
 ];
 
@@ -566,7 +572,7 @@ export default tseslint.config(
                       "pinned-layers",
                       "sensitive-text",
                       "hooks/checkout-confinement",
-                      "hooks/sensitive-text-redaction",
+                      "redaction",
                       "hooks/tool-allowlist",
                       "known-secrets",
                     ].join(",")}}.ts`,

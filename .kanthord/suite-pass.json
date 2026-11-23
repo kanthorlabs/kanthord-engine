@@ -4,6 +4,7 @@
     "src/apps/server/import-boundaries.test.ts",
     "src/apps/server/unwired-import.test.ts",
     "src/apps/server/worker-oauth-flows.test.ts",
-    "src/apps/server/worker-thread.test.ts"
+    "src/apps/server/worker-thread.test.ts",
+    "scripts/hooks-gate.test.mjs"
   ]
 }
