@@ -590,7 +590,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider,provider-failure,login,sessions,refresh-watch}.ts",
+                      "{model-connector,platforms,provider,login,sessions,refresh-watch}.ts",
                   }),
                 },
                 {
