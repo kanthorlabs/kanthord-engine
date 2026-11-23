@@ -55,6 +55,25 @@ describe("checkProxySettings", () => {
     assert.equal(row?.[1], NODE_OPTIONS_VAR);
   });
 
+  it("refuses a quoted --use-env-proxy and the = form in NODE_OPTIONS", () => {
+    for (const value of [
+      '"--use-env-proxy"',
+      "--use-env-proxy=true",
+      "--max-old-space-size=512  --use-env-proxy",
+    ])
+      assertDiagnostic(
+        () => checkProxySettings({ NODE_OPTIONS: value }, []),
+        ENV_PROXY,
+      );
+  });
+
+  it("refuses the = form of --use-env-proxy in execArgv", () => {
+    assertDiagnostic(
+      () => checkProxySettings({}, ["--use-env-proxy=true"]),
+      ENV_PROXY,
+    );
+  });
+
   it("passes when NODE_OPTIONS holds other tokens", () => {
     assert.doesNotThrow(() =>
       checkProxySettings({ NODE_OPTIONS: "--max-old-space-size=512" }, []),

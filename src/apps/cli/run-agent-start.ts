@@ -5,6 +5,13 @@ const NODE_USE_ENV_PROXY = "NODE_USE_ENV_PROXY";
 const NODE_OPTIONS = "NODE_OPTIONS";
 const USE_ENV_PROXY_FLAG = "--use-env-proxy";
 
+function isUseEnvProxy(token: string): boolean {
+  const option = token.replaceAll('"', "");
+  return (
+    option === USE_ENV_PROXY_FLAG || option.startsWith(`${USE_ENV_PROXY_FLAG}=`)
+  );
+}
+
 export function checkProxySettings(
   env: NodeJS.ProcessEnv,
   execArgv: readonly string[],
@@ -15,15 +22,13 @@ export function checkProxySettings(
       "run agent: NODE_USE_ENV_PROXY is set; a Node proxy setting would reach model requests.",
       { fields: [["variables", NODE_USE_ENV_PROXY]] },
     );
-  if (
-    env[NODE_OPTIONS]?.split(" ").some((token) => token === USE_ENV_PROXY_FLAG)
-  )
+  if (env[NODE_OPTIONS]?.split(/\s+/).some(isUseEnvProxy))
     throw new Diagnostic(
       ENV_PROXY,
       "run agent: NODE_OPTIONS holds --use-env-proxy; a Node proxy setting would reach model requests.",
       { fields: [["variables", NODE_OPTIONS]] },
     );
-  if (execArgv.includes(USE_ENV_PROXY_FLAG))
+  if (execArgv.some(isUseEnvProxy))
     throw new Diagnostic(
       ENV_PROXY,
       "run agent: --use-env-proxy is in process.execArgv; a Node proxy setting would reach model requests.",
