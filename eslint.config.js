@@ -222,6 +222,9 @@ const noInlineObjectTypeFiles = [
   "src/workbench/service.ts",
   "src/agent/run-budget.ts",
   "src/agent/run-outcome.ts",
+  "src/agent/agent-contract.ts",
+  "src/agent/tool-table.ts",
+  "src/agent/pinned-layers.ts",
 ];
 
 export const kanthordPlugin = {
