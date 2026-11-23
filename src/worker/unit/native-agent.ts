@@ -23,7 +23,7 @@ import {
 import { countTurns } from "../../agent/pinned-layers.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
-import { providerFailureOf } from "../../llm/provider-failure.ts";
+import { providerFailureOf } from "../../scheduler/contract.ts";
 import { redactReason, thrownReason } from "../../kernel/probe.ts";
 import { CodedError } from "../../kernel/errors.ts";
 import { type Attributes, SpanStatus } from "../../tracking/contract.ts";

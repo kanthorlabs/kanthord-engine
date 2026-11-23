@@ -220,6 +220,8 @@ const noInlineObjectTypeFiles = [
   "src/agent/prompt-chain.ts",
   "src/agent/prompt-render.ts",
   "src/workbench/service.ts",
+  "src/agent/run-budget.ts",
+  "src/agent/run-outcome.ts",
 ];
 
 export const kanthordPlugin = {
