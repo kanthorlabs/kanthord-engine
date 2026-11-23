@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration } from "./declarations.ts";
 import {
   InstructionFileState,
   PromptLayer,

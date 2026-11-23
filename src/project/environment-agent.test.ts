@@ -19,7 +19,7 @@ import {
 } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { SHIPPED_TEMPLATES } from "../agent/prompt-templates.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { getAgentDeclaration } from "../agent/declarations.ts";
 import {
   AgentErrorCode,
   type AgentView,

@@ -23,7 +23,7 @@ import {
 } from "./agent-port.ts";
 import { executionEvidence } from "./capabilities/execution-evidence.ts";
 import { linkUpdates } from "./capabilities/link-updates.ts";
-import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
+import { getProfile } from "../../agent/catalog.ts";
 import { piAgentDirectory } from "../../agent/pi.ts";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { background, CancellationContext } from "../../kernel/context.ts";
@@ -287,11 +287,12 @@ test("the active tools equal the declared set, and an undeclared capability tool
     ],
     { capabilities: [executionEvidence(() => unusedHostTools), capability] },
   );
-  const declared = AGENT_DECLARATIONS["swe@1"];
+  const sweProfile = getProfile("swe@1");
   assert.ok(api);
+  assert.ok(sweProfile);
   assert.deepEqual(
     api.getActiveTools().toSorted(),
-    [...declared.tools, ...declared.host_tools].toSorted(),
+    [...sweProfile.tools.builtin, ...sweProfile.tools.host].toSorted(),
   );
   await h.session.session.prompt("work");
   assert.deepEqual(ran, []);

@@ -29,7 +29,7 @@ import {
 } from "../agent/contract.ts";
 import type { PromptCommits } from "./contract.ts";
 import { packageVersion } from "../kernel/version.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { getAgentDeclaration } from "../agent/declarations.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {

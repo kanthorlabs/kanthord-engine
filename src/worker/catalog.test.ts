@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { getProfile } from "../agent/catalog.ts";
 import {
   agentsOfWorker,
   getWorkerDeclaration,
@@ -10,7 +10,7 @@ import {
 test("every native worker names an agent of the agent catalog", () => {
   for (const name of Object.keys(WORKER_CATALOG))
     for (const agentName of agentsOfWorker(name))
-      assert.equal(getAgentDeclaration(agentName)?.agent_name, agentName);
+      assert.ok(getProfile(agentName));
 });
 
 test("unknown and inherited names are not declarations", () => {

@@ -214,6 +214,9 @@ const noInlineObjectTypeFiles = [
   "src/agent/hooks/output-finding.ts",
   "src/agent/hooks/assistant-redaction.ts",
   "src/worker/contract.ts",
+  "src/agent/catalog.ts",
+  "src/agent/declarations.ts",
+  "src/agent/prompt-assets.ts",
 ];
 
 export const kanthordPlugin = {
