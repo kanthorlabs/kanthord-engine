@@ -1,13 +1,25 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import {
   AMBIENT_CREDENTIAL_NAMES,
   PROXY_NAMES,
   withoutAmbientCredentials,
 } from "./run-agent-environment.ts";
 
-const AMBIENT_COUNT = 47;
-const PROXY_COUNT = 8;
+const AMBIENT_LIST_NAME = "AMBIENT_CREDENTIAL_NAMES";
+const EIGHT_PROXY_NAMES = [
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+];
 const AGENT_HOME = "/run/agent/home";
 const AGENT_TMP = "/run/agent/tmp";
 const AWS_CONFIG_PATH = "/run/agent/home/.aws/config";
@@ -17,50 +29,41 @@ const METADATA_DETECTION_VALUE = "none";
 const PATH_VALUE = "/usr/bin:/usr/local/bin";
 const LANG_VALUE = "en_US.UTF-8";
 
-describe("AMBIENT_CREDENTIAL_NAMES", () => {
-  it("contains 47 names", () => {
-    assert.equal(AMBIENT_CREDENTIAL_NAMES.length, AMBIENT_COUNT);
-  });
+function taskSeedAmbientNames(): string[] {
+  const path = fileURLToPath(
+    new URL("../../worker/unit/tasks-seed.ts", import.meta.url),
+  );
+  const source = ts.createSourceFile(
+    path,
+    readFileSync(path, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  const names: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === AMBIENT_LIST_NAME &&
+      node.initializer &&
+      ts.isArrayLiteralExpression(node.initializer)
+    )
+      for (const element of node.initializer.elements)
+        if (ts.isStringLiteral(element)) names.push(element.text);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return names;
+}
 
-  it("includes AWS credential names", () => {
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AWS_ACCESS_KEY_ID"));
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AWS_SECRET_ACCESS_KEY"));
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AWS_SESSION_TOKEN"));
-  });
-
-  it("includes Google credential names", () => {
-    assert.ok(
-      AMBIENT_CREDENTIAL_NAMES.includes("GOOGLE_APPLICATION_CREDENTIALS"),
+describe("removal list", () => {
+  it("equals AMBIENT_CREDENTIAL_NAMES of tasks run plus the eight proxy names", () => {
+    const seedNames = taskSeedAmbientNames();
+    assert.ok(seedNames.length);
+    assert.deepEqual(
+      [...AMBIENT_CREDENTIAL_NAMES, ...PROXY_NAMES].sort(),
+      [...seedNames, ...EIGHT_PROXY_NAMES].sort(),
     );
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("GOOGLE_API_KEY"));
-  });
-
-  it("includes Azure credential names", () => {
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AZURE_CLIENT_ID"));
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AZURE_CLIENT_SECRET"));
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("AZURE_OPENAI_API_KEY"));
-  });
-
-  it("includes Anthropic names", () => {
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("ANTHROPIC_ORGANIZATION_ID"));
-    assert.ok(AMBIENT_CREDENTIAL_NAMES.includes("ANTHROPIC_WORKSPACE_ID"));
-  });
-});
-
-describe("PROXY_NAMES", () => {
-  it("contains exactly 8 names", () => {
-    assert.equal(PROXY_NAMES.length, PROXY_COUNT);
-  });
-
-  it("includes upper and lower case forms", () => {
-    assert.ok(PROXY_NAMES.includes("HTTP_PROXY"));
-    assert.ok(PROXY_NAMES.includes("http_proxy"));
-    assert.ok(PROXY_NAMES.includes("HTTPS_PROXY"));
-    assert.ok(PROXY_NAMES.includes("https_proxy"));
-    assert.ok(PROXY_NAMES.includes("ALL_PROXY"));
-    assert.ok(PROXY_NAMES.includes("all_proxy"));
-    assert.ok(PROXY_NAMES.includes("NO_PROXY"));
-    assert.ok(PROXY_NAMES.includes("no_proxy"));
   });
 });
 
