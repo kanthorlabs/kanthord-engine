@@ -63,7 +63,7 @@ export interface InputContext {
   currentDir: string;
   authDevIno: AuthDevIno | null;
   piDirectory: string;
-  configDirectory: string;
+  configDirectories: readonly string[];
 }
 
 function tryRealpath(p: string): string {
@@ -80,7 +80,7 @@ export function resolveInputValue(
 ): InputValueResult {
   if (!looksLikePath(value)) return { text: value, notice: false };
 
-  const { currentDir, authDevIno, piDirectory, configDirectory } = context;
+  const { currentDir, authDevIno, piDirectory, configDirectories } = context;
   const absPath = resolve(currentDir, value);
   const fields = [["path", absPath]] as [string, string][];
 
@@ -115,7 +115,9 @@ export function resolveInputValue(
     );
 
   if (
-    isUnder(realPath, tryRealpath(configDirectory)) ||
+    configDirectories.some((directory) =>
+      isUnder(realPath, tryRealpath(directory)),
+    ) ||
     isUnder(realPath, tryRealpath(piDirectory))
   )
     throw new Diagnostic(

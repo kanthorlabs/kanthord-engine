@@ -45,7 +45,7 @@ function ctx(
     currentDir,
     authDevIno,
     piDirectory: PI_DIR,
-    configDirectory: CONFIG_DIR,
+    configDirectories: [CONFIG_DIR],
   };
 }
 
@@ -190,7 +190,7 @@ describe("resolveInputValue", () => {
           currentDir: base,
           authDevIno: null,
           piDirectory: PI_DIR,
-          configDirectory: configDir,
+          configDirectories: [CONFIG_DIR, configDir],
         }),
       AUTH_PLACE,
     );
@@ -207,7 +207,7 @@ describe("resolveInputValue", () => {
           currentDir: base,
           authDevIno: null,
           piDirectory: piDir,
-          configDirectory: CONFIG_DIR,
+          configDirectories: [CONFIG_DIR],
         }),
       AUTH_PLACE,
     );
