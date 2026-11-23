@@ -12,8 +12,9 @@ import {
   processBashOperations,
   type ShellConfig,
 } from "./bash-process.ts";
+import { COMMAND_LIMIT_MS } from "./run-budget.ts";
+export { COMMAND_LIMIT_MS };
 
-export const COMMAND_LIMIT_MS = 600000;
 const MINIMUM_SECONDS = 1;
 const MILLISECONDS_PER_SECOND = 1000;
 const PROCESSES_MAX = 1024;
@@ -38,6 +39,7 @@ export class ToolProcesses {
   private readonly shell: ShellConfig;
   private readonly ended = new Map<string, BashProcess>();
   private readonly timeouts = new Map<string, ToolTimeout>();
+  private readonly live = new Map<string, AbortController>();
 
   constructor(shell: ShellConfig) {
     assert.ok(shell.shell);
@@ -46,14 +48,30 @@ export class ToolProcesses {
 
   operations(toolCallId: string): BashOperations {
     assert.ok(toolCallId);
-    return processBashOperations(
+    const controller = new AbortController();
+    this.live.set(toolCallId, controller);
+    const ops = processBashOperations(
       this.shell,
       (bashProcess) => {
+        this.live.delete(toolCallId);
         if (this.ended.size >= PROCESSES_MAX) this.ended.clear();
         this.ended.set(toolCallId, bashProcess);
       },
       { killGroupAtEnd: true },
     );
+    return {
+      exec: (command, directory, options) => {
+        const merged = options.signal
+          ? AbortSignal.any([controller.signal, options.signal])
+          : controller.signal;
+        return ops.exec(command, directory, { ...options, signal: merged });
+      },
+    };
+  }
+
+  killAll(): void {
+    for (const controller of this.live.values()) controller.abort();
+    this.live.clear();
   }
 
   take(toolCallId: string): BashProcess | undefined {
