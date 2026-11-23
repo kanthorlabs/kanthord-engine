@@ -2,6 +2,8 @@ import { BudgetLimit } from "./run-outcome.ts";
 
 const TIMER_LIMIT_MS = 2_147_483_647;
 
+export const COMMAND_LIMIT_MS = 600000;
+
 export interface RunBudget {
   deadline: number | null;
   usd: number | null;
@@ -42,5 +44,10 @@ export class WallTimer {
 
   budgetReached(): BudgetLimit | null {
     return this.reached;
+  }
+
+  remainingMs(): number {
+    if (this.deadline === null) return Number.POSITIVE_INFINITY;
+    return Math.max(0, this.deadline - Date.now());
   }
 }

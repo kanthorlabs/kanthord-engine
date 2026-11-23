@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BudgetLimit } from "./run-outcome.ts";
-import { WallTimer } from "./run-budget.ts";
+import { COMMAND_LIMIT_MS, WallTimer } from "./run-budget.ts";
 
 const CLOCK_START = 1_000_000;
 const WALL_MS = 1000;
@@ -47,6 +47,14 @@ test("WallTimer with null deadline never fires", (t) => {
   timer.dispose();
   assert.equal(fired, false);
   assert.equal(timer.budgetReached(), null);
+});
+
+test("command limit with a null deadline is COMMAND_LIMIT_MS", () => {
+  const timer = new WallTimer(null);
+  assert.equal(
+    Math.min(timer.remainingMs(), COMMAND_LIMIT_MS),
+    COMMAND_LIMIT_MS,
+  );
 });
 
 test("regression: WallTimer with a deadline past the setTimeout limit does not fire at once", (t) => {
