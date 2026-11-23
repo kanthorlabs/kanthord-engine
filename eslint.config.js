@@ -225,6 +225,17 @@ const noInlineObjectTypeFiles = [
   "src/agent/agent-contract.ts",
   "src/agent/tool-table.ts",
   "src/agent/pinned-layers.ts",
+  "src/apps/cli/run-agent-start.ts",
+  "src/apps/cli/run-agent-budget.ts",
+  "src/apps/cli/run-agent-environment.ts",
+  "src/apps/cli/run-agent-digest.ts",
+  "src/apps/cli/run-agent-session.ts",
+  "src/apps/cli/run-agent-output.ts",
+  "src/apps/cli/run-agent-pi.ts",
+  "src/apps/cli/run-agent-auth.ts",
+  "src/apps/cli/run-agent-model.ts",
+  "src/apps/cli/run-agent-input.ts",
+  "src/apps/cli/run-agent-options.ts",
 ];
 
 export const kanthordPlugin = {
