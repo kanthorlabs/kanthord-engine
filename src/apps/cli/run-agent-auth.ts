@@ -1,5 +1,5 @@
-import { lstatSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { z } from "zod";
 import type { Credential } from "@earendil-works/pi-ai";
@@ -245,9 +245,23 @@ function agentProvider(rawProvider: string, entryType: string): string {
   return rawProvider;
 }
 
+const OAUTH_PROVIDERS: readonly string[] = [
+  ANTHROPIC_SUBSCRIPTION_PLATFORM,
+  "github-copilot",
+  "openai-codex",
+];
+
 function secretShapeOf(provider: string): string {
-  if (provider === ANTHROPIC_SUBSCRIPTION_PLATFORM) return SecretShape.OAuth;
+  if (OAUTH_PROVIDERS.includes(provider)) return SecretShape.OAuth;
   return SecretShape.ApiKey;
+}
+
+function realPathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 const BOM_CODE = 0xfeff;
@@ -311,10 +325,9 @@ export function checkAuthFile(
       { fields },
     );
 
-  if (
-    absolute.startsWith(workspaceRealPath + "/") ||
-    absolute === workspaceRealPath
-  )
+  const realAuth = join(realPathOrSelf(dirname(absolute)), basename(absolute));
+  const realWorkspace = realPathOrSelf(workspaceRealPath);
+  if (realAuth.startsWith(realWorkspace + "/") || realAuth === realWorkspace)
     throw new Diagnostic(
       AUTH_PLACE,
       "run agent: the --auth file is inside the workspace.",
@@ -329,7 +342,10 @@ function parseApiKeyEntry(
   const result = rawApiKeyEntrySchema.safeParse(raw);
   if (!result.success) {
     const issue = result.error.issues[0];
-    const path = issue?.path.join(".") ?? "key";
+    const path =
+      issue?.path[0] === ENV_FIELD
+        ? ENV_FIELD
+        : (issue?.path.join(".") ?? "key");
     throw new Diagnostic(
       AUTH_ENTRY_INVALID,
       "run agent: the api_key entry failed schema validation.",
@@ -460,7 +476,7 @@ export function checkAuthEntry(
   const envObj = entry.type === SecretShape.ApiKey ? entry.env : undefined;
   const metadata = checkRoutingMetadata(envObj, rawProvider, absolute);
 
-  const credential = piCredentialSchema.parse(
+  const parsed = piCredentialSchema.safeParse(
     entry.type === SecretShape.ApiKey
       ? { type: entry.type, key: entry.key }
       : {
@@ -470,6 +486,15 @@ export function checkAuthEntry(
           expires: entry.expires,
         },
   );
+  if (!parsed.success)
+    throw new Diagnostic(
+      AUTH_ENTRY_INVALID,
+      "run agent: the entry failed the credential schema.",
+      {
+        fields: fields(entry.type === SecretShape.ApiKey ? "key" : "type"),
+      },
+    );
+  const credential = parsed.data;
 
   return {
     credential,
@@ -502,5 +527,13 @@ export function piProviderIdOf(provider: string): string {
 const AUTH_CONFIG_SUBPATH = join(".config", "kanthord", "auth.json");
 
 export function defaultAuthPath(): string {
-  return join(userInfo().homedir, AUTH_CONFIG_SUBPATH);
+  try {
+    return join(userInfo().homedir, AUTH_CONFIG_SUBPATH);
+  } catch {
+    throw new Diagnostic(
+      AUTH_FILE_INVALID,
+      "run agent: the user database gives no home directory.",
+      {},
+    );
+  }
 }

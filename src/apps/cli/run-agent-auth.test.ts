@@ -8,7 +8,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir, userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
@@ -48,6 +48,12 @@ const CF_WORKERS_AI_PROVIDER = "cloudflare-workers-ai";
 const CF_AI_GATEWAY_PROVIDER = "cloudflare-ai-gateway";
 const WINDOW = 300_000;
 const ROOT_UID = 0;
+const ROOT_OWNED_FILE = "/etc/hosts";
+const AUTH_FILE_OWNER = "cli.run.agent.auth_file_owner";
+const FIELD_ENV = "env";
+const GITHUB_COPILOT_PROVIDER = "github-copilot";
+const OPENAI_CODEX_PROVIDER = "openai-codex";
+const LONE_SURROGATE_KEY = "fixture-\ud800";
 
 let base: string;
 
@@ -97,10 +103,20 @@ describe("defaultAuthPath", () => {
     assert.ok(p.startsWith(userInfo().homedir));
   });
 
-  it("is not affected by HOME env var", () => {
-    const dbHome = userInfo().homedir;
-    const p = defaultAuthPath();
-    assert.ok(p.startsWith(dbHome));
+  it("ignores HOME, XDG_CONFIG_HOME and PI_CODING_AGENT_DIR", () => {
+    const names = ["HOME", "XDG_CONFIG_HOME", "PI_CODING_AGENT_DIR"];
+    const saved = names.map((name) => process.env[name]);
+    const expected = defaultAuthPath();
+    try {
+      for (const name of names) process.env[name] = base;
+      assert.equal(defaultAuthPath(), expected);
+      assert.ok(!defaultAuthPath().startsWith(base));
+    } finally {
+      names.forEach((name, index) => {
+        if (saved[index] === undefined) delete process.env[name];
+        else process.env[name] = saved[index];
+      });
+    }
   });
 });
 
@@ -145,6 +161,23 @@ describe("checkAuthFile", () => {
     const path = writeAuthJson(base, `mode604-${Date.now()}.json`);
     chmodSync(path, 0o604);
     assertDiagnostic(() => checkAuthFile(path, w), AUTH_FILE_MODE);
+  });
+
+  it("refuses a file of another user", () => {
+    if (userInfo().uid === ROOT_UID) return;
+    const w = workspace();
+    assertDiagnostic(() => checkAuthFile(ROOT_OWNED_FILE, w), AUTH_FILE_OWNER);
+  });
+
+  it("refuses a file inside the workspace through a symbolic link", () => {
+    const w = workspace();
+    const alias = join(base, `alias-${Date.now()}-${Math.random()}`);
+    symlinkSync(w, alias);
+    const path = writeAuthJson(w, `in-alias-${Date.now()}.json`);
+    assertDiagnostic(
+      () => checkAuthFile(join(alias, basename(path)), w),
+      AUTH_PLACE,
+    );
   });
 
   it("refuses a file inside the workspace", () => {
@@ -295,6 +328,49 @@ describe("checkAuthEntry - provider check", () => {
     };
     const result = checkAuthEntry(raw, ANTHROPIC_PROVIDER, authPath);
     assert.ok(result.metadata === null);
+  });
+
+  it("accepts openai-codex and github-copilot with oauth", () => {
+    const raw = {
+      type: "oauth",
+      access: "fixture-access",
+      refresh: "fixture-refresh",
+      expires: Date.now() + 3_600_000,
+    };
+    for (const provider of [OPENAI_CODEX_PROVIDER, GITHUB_COPILOT_PROVIDER])
+      assert.ok(checkAuthEntry(raw, provider, authPath).metadata === null);
+  });
+
+  it("refuses openai-codex and github-copilot with api_key", () => {
+    const raw = { type: "api_key", key: "fixture-api-key" };
+    for (const provider of [OPENAI_CODEX_PROVIDER, GITHUB_COPILOT_PROVIDER]) {
+      const error = assertDiagnostic(
+        () => checkAuthEntry(raw, provider, authPath),
+        AUTH_ENTRY_INVALID,
+      );
+      assert.ok(
+        error.fields.some(([k, v]) => k === FIELD_FIELD && v === FIELD_TYPE),
+      );
+    }
+  });
+
+  it("refuses a key that is not well-formed Unicode", () => {
+    const raw = { type: "api_key", key: LONE_SURROGATE_KEY };
+    assertDiagnostic(
+      () => checkAuthEntry(raw, ANTHROPIC_PROVIDER, authPath),
+      AUTH_ENTRY_INVALID,
+    );
+  });
+
+  it("names env when env holds a value that is no string", () => {
+    const raw = { type: "api_key", key: "fixture-api-key", env: { NAME: 1 } };
+    const error = assertDiagnostic(
+      () => checkAuthEntry(raw, ANTHROPIC_PROVIDER, authPath),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      error.fields.some(([k, v]) => k === FIELD_FIELD && v === FIELD_ENV),
+    );
   });
 
   it("refuses openai with oauth entry", () => {
