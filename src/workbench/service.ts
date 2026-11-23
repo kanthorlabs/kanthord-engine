@@ -50,7 +50,11 @@ import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
-import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
+import {
+  finalPrompt,
+  framingPartFromTemplates,
+  PromptConsumer,
+} from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -99,27 +103,31 @@ export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
 ) => Promise<{ runtime: ModelRuntime; model: Model<Api> }>;
 
+interface WorkbenchAgentPrompt {
+  compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
+  templates(context: Context): Promise<PromptTemplates>;
+}
+
+interface WorkbenchAgentConfiguration {
+  validateEntry(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkbenchConfiguration,
+  ): void;
+  agentView(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkbenchConfiguration,
+  ): AgentView | null;
+}
+
 export interface Dependencies {
   store: Store;
   logger: Logger;
   stateDirectory: string;
   hostHome?: string;
-  agentPrompt: {
-    compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
-    templates(context: Context): Promise<PromptTemplates>;
-  };
-  agentConfiguration: {
-    validateEntry(
-      tx: Transaction,
-      agentName: string,
-      entry: WorkbenchConfiguration,
-    ): void;
-    agentView(
-      tx: Transaction,
-      agentName: string,
-      entry: WorkbenchConfiguration,
-    ): AgentView | null;
-  };
+  agentPrompt: WorkbenchAgentPrompt;
+  agentConfiguration: WorkbenchAgentConfiguration;
   credentialMetadata: CredentialMetadataFn;
   workbenchCredentials: WorkbenchCredentialsFn;
   modelRuntimeFactory?: WorkbenchModelRuntimeFactory;
@@ -372,7 +380,11 @@ export class WorkbenchService implements Service {
         context,
       );
       const templates = await this.dependencies.agentPrompt.templates(context);
-      const prompt = systemPrompt(parts, PromptConsumer.Workbench, templates);
+      const prompt = finalPrompt([
+        ...parts,
+        framingPartFromTemplates(templates, PromptConsumer.Workbench),
+      ]);
+      assert.ok(prompt !== null);
       const builtin = builtinTools(
         await loadPi(),
         session.agentName,

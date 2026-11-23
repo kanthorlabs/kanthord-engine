@@ -55,7 +55,12 @@ import {
   AGENT_COMPONENT_NAME,
   AgentErrorCode,
   agentOperations,
+  PromptOrigin,
+  PromptPart,
+  PromptPartState,
 } from "../agent/contract.ts";
+import { digest } from "../agent/prompt-composer.ts";
+import { promptPart } from "../agent/prompt-render.ts";
 import { AgentProviderKind } from "../agent/enablements.ts";
 import { type CallerContext, OperationRegistry } from "../kernel/operation.ts";
 import { background, CancellationContext } from "../kernel/context.ts";
@@ -106,6 +111,9 @@ import {
   shippedFraming,
 } from "./test-support.ts";
 import { stopAfter } from "../kernel/stop-test-support.ts";
+
+const STANDARD_FILE = "base.md";
+const STANDARD_TEXT = "Standard text.";
 import {
   SESSION_READ_WAIT_MS,
   SessionAbsentReason,
@@ -1771,7 +1779,21 @@ function authorizationFixture(t: TestContext) {
       credentialMetadata: (_tx, name) => newestOf(name),
       promptTelemetry: memoryPromptTelemetry(),
       agentPrompt: {
-        compose: async () => [],
+        compose: async () => [
+          promptPart(
+            {
+              part: PromptPart.Standard,
+              name: STANDARD_FILE,
+              origin: PromptOrigin.Binary,
+              path: null,
+              binding_id: null,
+              commit: null,
+              digest: digest(STANDARD_TEXT),
+            },
+            PromptPartState.Resolved,
+            STANDARD_TEXT,
+          ),
+        ],
         templates: async () => SHIPPED_TEMPLATES,
         framing: async () => shippedFraming(),
       },

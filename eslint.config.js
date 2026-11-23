@@ -217,6 +217,9 @@ const noInlineObjectTypeFiles = [
   "src/agent/catalog.ts",
   "src/agent/declarations.ts",
   "src/agent/prompt-assets.ts",
+  "src/agent/prompt-chain.ts",
+  "src/agent/prompt-render.ts",
+  "src/workbench/service.ts",
 ];
 
 export const kanthordPlugin = {
