@@ -54,6 +54,9 @@ export interface SessionRedaction {
   redactEvent(
     message: Record<string, unknown>,
   ): Record<string, unknown> | undefined;
+  redactErrorMessage(
+    message: Record<string, unknown>,
+  ): Record<string, unknown> | undefined;
   redactSummaryText(summary: string): string;
   redactSessionCompact(summary: string): string;
   recordOutputFinding(
@@ -70,18 +73,13 @@ export interface RedactionSummary {
   redaction_failed: number;
   unkept: number;
   restore_blocked: number;
-  output_found_count: number;
-  output_found_rules: SensitiveRule[];
-  thinking_kept: number;
   compaction_residual: number;
+  thinking_kept: number;
 }
 
 export function redactionSummary(counts: RedactionCounts): RedactionSummary {
   const rules = (Object.keys(counts.redacted) as SensitiveRule[])
     .filter((rule) => counts.redacted[rule])
-    .sort();
-  const outputRules = (Object.keys(counts.output_found) as SensitiveRule[])
-    .filter((rule) => counts.output_found[rule])
     .sort();
   return {
     redaction_count: rules.reduce(
@@ -92,13 +90,8 @@ export function redactionSummary(counts: RedactionCounts): RedactionSummary {
     redaction_failed: counts.scan_failed,
     unkept: counts.unkept,
     restore_blocked: counts.restore_blocked,
-    output_found_count: outputRules.reduce(
-      (sum, rule) => sum + (counts.output_found[rule] ?? 0),
-      0,
-    ),
-    output_found_rules: outputRules,
-    thinking_kept: counts.thinking_kept,
     compaction_residual: counts.compaction_residual,
+    thinking_kept: counts.thinking_kept,
   };
 }
 
@@ -142,6 +135,7 @@ const REASONING_FIELDS: ReadonlySet<string> = new Set([
   "reasoning_text",
 ]);
 const CONTENT_KEY = "content";
+const ERROR_MESSAGE_KEY = "errorMessage";
 
 interface TableEntry {
   index: number;
@@ -218,6 +212,13 @@ function stringsOf(value: unknown): string[] {
     return text;
   });
   return strings;
+}
+
+function everyString(value: unknown): string[] {
+  if (isString(value)) return [value];
+  if (Array.isArray(value)) return value.flatMap(everyString);
+  if (!isObject(value)) return [];
+  return Object.values(value as Record<string, unknown>).flatMap(everyString);
 }
 
 export function createRedaction(
@@ -527,24 +528,28 @@ export function createRedaction(
     }
   };
 
-  const hasKnownSecretIn = (value: unknown): boolean => {
-    for (const text of stringsOf(value))
-      try {
-        if (findKnownText(text, secretMatcher).length) return true;
-      } catch {
-        void 0;
-      }
-    return false;
+  const hasKnownSecretIn = (value: unknown): boolean =>
+    everyString(value).some(
+      (text) => findKnownText(text, secretMatcher).length,
+    );
+
+  const redactErrorMessage = (message: Message): Message | undefined => {
+    const error = message[ERROR_MESSAGE_KEY];
+    if (!isString(error)) return undefined;
+    const next = redactStrings([error], []).get(error)!;
+    return next === error
+      ? undefined
+      : { ...message, [ERROR_MESSAGE_KEY]: next };
   };
 
   const recordOutputFinding = (message: Message): SecretWarning | undefined => {
     const content = message[CONTENT_KEY];
     let count = 0;
-    for (const text of stringsOf(content))
+    for (const text of everyString(content))
       try {
         count += findKnownText(text, secretMatcher).length;
       } catch {
-        void 0;
+        counts.scan_failed++;
       }
     if (!count) return undefined;
     counts.output_found[SensitiveRule.LlmCredential] =
@@ -587,6 +592,7 @@ export function createRedaction(
     },
     hasKnownSecretIn,
     redactEvent,
+    redactErrorMessage,
     redactSummaryText: (summary) => {
       try {
         return redactStrings([summary], []).get(summary)!;

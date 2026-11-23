@@ -9,6 +9,10 @@ import {
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import type {
+  AgentSession,
+  InlineExtension,
+} from "@earendil-works/pi-coding-agent";
 import { background } from "../../kernel/context.ts";
 import {
   overrideEnvironment,
@@ -17,6 +21,7 @@ import {
 } from "../../kernel/test-support.ts";
 import {
   openSession,
+  openSessionRuntime,
   RUNTIME_SETUP_DEADLINE_MS,
   withDeadline,
 } from "../../agent/agent-session.ts";
@@ -115,13 +120,29 @@ test("native session isolates filesystem discovery, settings and session persist
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
 const CONSUMER_EVENT = "input";
 const RESTORE_EVENTS = ["agent_end", "tool_call"];
-const INPUT_REDACTION_EVENTS = ["message_end", "turn_start"];
+const INPUT_REDACTION_EVENTS = ["context", "message_end", "turn_start"];
 const ASSISTANT_REDACTION_EVENTS = [
   "context",
   "message_end",
   "session_compact",
 ];
 const HOME_EVENTS = ["before_agent_start"];
+const OPEN_PATH_EVENTS = [
+  HOME_EVENTS,
+  RESTORE_EVENTS,
+  [CONSUMER_EVENT],
+  INPUT_REDACTION_EVENTS,
+  ASSISTANT_REDACTION_EVENTS,
+];
+const consumerHook: InlineExtension = (pi) => {
+  pi.on(CONSUMER_EVENT, () => undefined);
+};
+
+function handlerEvents(session: AgentSession): string[][] {
+  return session.resourceLoader
+    .getExtensions()
+    .extensions.map((extension) => [...extension.handlers.keys()].sort());
+}
 
 async function redactedSessionSetup(t: TestContext) {
   const home = temporary(t);
@@ -173,26 +194,11 @@ test("openSession installs the restore after the cwd hook and the redaction hook
   const { provider, input } = await redactedSessionSetup(t);
   const opened = await openSession({
     ...input,
-    hooks: [
-      (pi) => {
-        pi.on(CONSUMER_EVENT, () => undefined);
-      },
-    ],
+    hooks: [consumerHook],
     knownSecrets: async () => [],
   });
   stopAfter(t, () => opened.session.dispose());
-  assert.deepEqual(
-    opened.session.resourceLoader
-      .getExtensions()
-      .extensions.map((extension) => [...extension.handlers.keys()].sort()),
-    [
-      HOME_EVENTS,
-      RESTORE_EVENTS,
-      [CONSUMER_EVENT],
-      INPUT_REDACTION_EVENTS,
-      ASSISTANT_REDACTION_EVENTS,
-    ],
-  );
+  assert.deepEqual(handlerEvents(opened.session), OPEN_PATH_EVENTS);
   assert.ok(!opened.systemPrompt.includes(FAKE_KEY));
   const [systemTag] = markerTags(opened.systemPrompt);
   assert.ok(systemTag);
@@ -201,6 +207,18 @@ test("openSession installs the restore after the cwd hook and the redaction hook
   const userTags = markerTags(JSON.stringify(opened.session.messages));
   assert.ok(userTags.length);
   for (const tag of userTags) assert.equal(tag, systemTag);
+});
+
+test("openSessionRuntime installs the extensions of openSession in the same order", async (t) => {
+  const { input } = await redactedSessionSetup(t);
+  const opened = await openSessionRuntime({
+    ...input,
+    hooks: [consumerHook],
+    knownSecrets: async () => [],
+  });
+  stopAfter(t, () => opened.runtime.dispose());
+  assert.deepEqual(handlerEvents(opened.runtime.session), OPEN_PATH_EVENTS);
+  assert.ok(!opened.systemPrompt.includes(FAKE_KEY));
 });
 
 test("openSession uses a passed redaction and creates none", async (t) => {

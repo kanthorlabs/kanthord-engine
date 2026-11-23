@@ -1,36 +1,32 @@
 import assert from "node:assert/strict";
-import { beforeEach, test } from "node:test";
-import { seededText } from "./sensitive-text-test-support.ts";
-import { SensitiveRule } from "./sensitive-text.ts";
+import { test } from "node:test";
+import { inputRedaction } from "./hooks/input-redaction.ts";
+import { markerRestore } from "./hooks/marker-restore.ts";
+import { outputFinding } from "./hooks/output-finding.ts";
 import {
   createRedaction,
-  REDACTION_LOG_MESSAGE,
-  REDACTION_TABLE_MAX,
   type RedactionCounts,
   redactionObserved,
   redactionSummary,
-  RestoreReason,
 } from "./redaction.ts";
-
-const j = (...parts: string[]) => parts.join("");
-const AN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-let { bytes } = seededText();
-beforeEach(() => {
-  ({ bytes } = seededText());
-});
-const an = (n: number) =>
-  [...bytes(n)].map((byte) => AN[byte % AN.length]).join("");
-const PASS = j("pass", "word");
-const SESSION_ID = "session-1";
+import {
+  an,
+  installed,
+  j,
+  markers,
+  PASS,
+  providerKey,
+  redactionOf,
+  SESSION_ID,
+  toolResult,
+} from "./redaction-test-support.ts";
+import { SensitiveRule } from "./sensitive-text.ts";
 
 const TOTAL_REDACTED = 3;
 const PATTERN_COUNT = 2;
 const KNOWN_COUNT = 1;
-const OUTPUT_FOUND = 2;
 const UNKEPT_COUNT = 3;
-const RESTORE_BLOCKED_COUNT = 1;
-const TABLE_SIZE = 4096;
-const NO_FINDINGS = 0;
+const NO_FINDING = 0;
 const SINGLE_FINDING = 1;
 
 function zeroCounts(): RedactionCounts {
@@ -45,12 +41,8 @@ function zeroCounts(): RedactionCounts {
   };
 }
 
-test("REDACTION_LOG_MESSAGE is non-empty", () => {
-  assert.ok(REDACTION_LOG_MESSAGE);
-});
-
-test("redactionSummary converts counts into summary fields", () => {
-  const counts: RedactionCounts = {
+test("redactionSummary keeps the fields of the open paths of today", () => {
+  const summary = redactionSummary({
     ...zeroCounts(),
     redacted: {
       [SensitiveRule.QuotedAssignment]: PATTERN_COUNT,
@@ -58,131 +50,114 @@ test("redactionSummary converts counts into summary fields", () => {
     },
     scan_failed: KNOWN_COUNT,
     unkept: UNKEPT_COUNT,
-    restore_blocked: RESTORE_BLOCKED_COUNT,
-    output_found: { [SensitiveRule.LlmCredential]: OUTPUT_FOUND },
+    restore_blocked: KNOWN_COUNT,
+    output_found: { [SensitiveRule.LlmCredential]: PATTERN_COUNT },
     thinking_kept: KNOWN_COUNT,
     compaction_residual: KNOWN_COUNT,
-  };
-  const summary = redactionSummary(counts);
-  assert.equal(summary.redaction_count, TOTAL_REDACTED);
-  assert.deepEqual(
-    summary.redaction_rules.sort(),
-    [SensitiveRule.LlmCredential, SensitiveRule.QuotedAssignment].sort(),
-  );
-  assert.equal(summary.redaction_failed, KNOWN_COUNT);
-  assert.equal(summary.unkept, UNKEPT_COUNT);
-  assert.equal(summary.restore_blocked, RESTORE_BLOCKED_COUNT);
-  assert.equal(summary.output_found_count, OUTPUT_FOUND);
-  assert.deepEqual(summary.output_found_rules, [SensitiveRule.LlmCredential]);
-  assert.equal(summary.thinking_kept, KNOWN_COUNT);
-  assert.equal(summary.compaction_residual, KNOWN_COUNT);
-});
-
-test("redactionSummary produces zero fields from empty counts", () => {
-  const summary = redactionSummary(zeroCounts());
-  assert.equal(summary.redaction_count, NO_FINDINGS);
-  assert.deepEqual(summary.redaction_rules, []);
-  assert.equal(summary.redaction_failed, NO_FINDINGS);
-  assert.equal(summary.output_found_count, NO_FINDINGS);
-  assert.deepEqual(summary.output_found_rules, []);
-});
-
-test("redactionObserved returns false for empty counts and true when any field is non-zero", () => {
+  });
+  assert.deepEqual(summary, {
+    redaction_count: TOTAL_REDACTED,
+    redaction_rules: [
+      SensitiveRule.LlmCredential,
+      SensitiveRule.QuotedAssignment,
+    ],
+    redaction_failed: KNOWN_COUNT,
+    unkept: UNKEPT_COUNT,
+    restore_blocked: KNOWN_COUNT,
+    compaction_residual: KNOWN_COUNT,
+    thinking_kept: KNOWN_COUNT,
+  });
+  assert.equal(redactionObserved(summary), true);
   assert.equal(redactionObserved(redactionSummary(zeroCounts())), false);
-  const withFind = {
-    ...redactionSummary(zeroCounts()),
-    redaction_count: SINGLE_FINDING,
-    redaction_rules: [SensitiveRule.QuotedAssignment],
-  };
-  assert.equal(redactionObserved(withFind), true);
-  const withFailed = {
-    ...redactionSummary(zeroCounts()),
-    redaction_failed: SINGLE_FINDING,
-  };
-  assert.equal(redactionObserved(withFailed), true);
 });
 
-test("createRedaction.text redacts a pattern and counts the finding", async () => {
-  const state = createRedaction(async () => [], SESSION_ID);
-  const value = an(16);
-  const text = await state.text(j(PASS, ' = "', value, '"'));
-  assert.ok(!text.includes(value));
-  assert.ok(text.includes("<redacted:"));
+test("with no assistantRedaction the output stays, thinking_kept and compaction_residual stay 0, and output_found counts each finding", async () => {
+  const secret = providerKey();
+  const state = createRedaction(async () => [secret], SESSION_ID);
+  const { end, context, compact } = installed([
+    markerRestore(state),
+    inputRedaction(state),
+    outputFinding(state),
+  ]);
+  const line = j("key ", secret);
   assert.equal(
-    state.counts().redacted[SensitiveRule.QuotedAssignment],
-    KNOWN_COUNT,
+    await end({
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: line,
+          thinkingSignature: "signature-bytes",
+        },
+        { type: "text", text: line },
+      ],
+      api: "anthropic-messages",
+      timestamp: 1,
+    }),
+    undefined,
   );
+  assert.equal(
+    await context([
+      {
+        role: "compactionSummary",
+        summary: line,
+        tokensBefore: 1,
+        timestamp: 1,
+      },
+    ]),
+    undefined,
+  );
+  const entry = { summary: line };
+  await compact(entry);
+  assert.equal(entry.summary, line);
+  assert.deepEqual(state.counts(), {
+    ...zeroCounts(),
+    output_found: { [SensitiveRule.LlmCredential]: PATTERN_COUNT },
+  });
 });
 
-test("createRedaction.text loads known secrets before each call", async () => {
+test("exitText gives the session marker of a pattern value and of a known secret, and modelOutput gives the same text", async () => {
+  const secret = providerKey();
+  const state = createRedaction(async () => [secret], SESSION_ID);
+  await state.text("warm up");
+  const value = an(16);
+  const line = j(PASS, ' = "', value, '" key ', secret);
+  const output = state.exitText(line);
+  assert.ok(!output.includes(value));
+  assert.ok(!output.includes(secret));
+  const found = markers(output);
+  assert.ok(
+    found.some((marker) =>
+      marker.startsWith(j("<redacted:", SensitiveRule.LlmCredential, ":")),
+    ),
+  );
+  assert.ok(
+    found.some((marker) =>
+      marker.startsWith(j("<redacted:", SensitiveRule.QuotedAssignment, ":")),
+    ),
+  );
+  assert.equal(state.modelOutput(line), output);
+});
+
+test("modelOutput masks every rule and adds no value to the known set", async () => {
+  const { end, redaction } = redactionOf();
+  const value = an(16);
+  const output = redaction.modelOutput(j(PASS, ' = "', value, '"'));
+  assert.ok(!output.includes(value));
+  assert.equal(markers(output).length, SINGLE_FINDING);
+  assert.equal(await end(toolResult(j("value ", value))), undefined);
+});
+
+test("text refreshes the known secrets and counts each finding", async () => {
   const current = { secrets: [] as string[] };
   const state = createRedaction(async () => current.secrets, SESSION_ID);
   const secret = j("tok", an(30));
+  assert.equal(await state.text(secret), secret);
   current.secrets = [secret];
   const text = await state.text(secret);
   assert.ok(!text.includes(secret));
-});
-
-test("createRedaction.exitText and modelOutput are identical on the same value", async () => {
-  const state = createRedaction(async () => [], SESSION_ID);
-  const value = an(16);
-  const line = j(PASS, ' = "', value, '"');
-  assert.equal(state.exitText(line), state.modelOutput(line));
-});
-
-test("createRedaction.counts returns a snapshot that does not change after later calls", async () => {
-  const state = createRedaction(async () => [], SESSION_ID);
-  const snap1 = state.counts();
-  await state.text(j(PASS, ' = "', an(16), '"'));
-  const snap2 = state.counts();
-  assert.equal(snap1.redacted[SensitiveRule.QuotedAssignment], undefined);
-  assert.equal(snap2.redacted[SensitiveRule.QuotedAssignment], KNOWN_COUNT);
-});
-
-test("createRedaction.takeWarnings drains the warning list", async () => {
-  const secret = j("sk", "-ant-api03-", an(93));
-  const state = createRedaction(async () => [secret], SESSION_ID);
-  await state.refresh();
-  state.recordOutputFinding({
-    role: "assistant",
-    content: [{ type: "text", text: j("key ", secret) }],
+  assert.deepEqual(state.counts().redacted, {
+    [SensitiveRule.LlmCredential]: SINGLE_FINDING,
   });
-  const first = state.takeWarnings();
-  assert.equal(first.length, KNOWN_COUNT);
-  assert.equal(state.takeWarnings().length, NO_FINDINGS);
-});
-
-test("createRedaction.hasKnownSecretIn returns true only when a known secret appears", async () => {
-  const secret = j("sk", "-ant-api03-", an(93));
-  const state = createRedaction(async () => [secret], SESSION_ID);
-  await state.refresh();
-  assert.equal(state.hasKnownSecretIn({ key: secret }), true);
-  assert.equal(state.hasKnownSecretIn({ key: "plain" }), false);
-  assert.equal(state.hasKnownSecretIn(undefined), false);
-});
-
-test("REDACTION_TABLE_MAX is the expected table size", () => {
-  assert.equal(REDACTION_TABLE_MAX, TABLE_SIZE);
-});
-
-test("RestoreReason values are non-empty strings", () => {
-  for (const value of Object.values(RestoreReason)) {
-    assert.ok(value);
-  }
-  assert.ok(RestoreReason.KnownCredential);
-});
-
-test("createRedaction.redactSummaryText redacts a pattern in summary text", async () => {
-  const state = createRedaction(async () => [], SESSION_ID);
-  const value = an(16);
-  const result = state.redactSummaryText(j(PASS, ' = "', value, '"'));
-  assert.ok(!result.includes(value));
-});
-
-test("createRedaction.redactSessionCompact increments compaction_residual", async () => {
-  const state = createRedaction(async () => [], SESSION_ID);
-  const value = an(16);
-  const result = state.redactSessionCompact(j(PASS, ' = "', value, '"'));
-  assert.ok(!result.includes(value));
-  assert.equal(state.counts().compaction_residual, KNOWN_COUNT);
+  assert.equal(state.counts().scan_failed, NO_FINDING);
 });

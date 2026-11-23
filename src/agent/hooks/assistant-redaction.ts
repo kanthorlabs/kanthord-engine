@@ -2,7 +2,6 @@ import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { SessionRedaction } from "../redaction.ts";
 
 const ASSISTANT_ROLE = "assistant";
-const CUSTOM_ROLE = "custom";
 const COMPACTION_SUMMARY_ROLE = "compactionSummary";
 
 export function assistantRedaction(state: SessionRedaction): InlineExtension {
@@ -18,18 +17,12 @@ export function assistantRedaction(state: SessionRedaction): InlineExtension {
       let changed = false;
       const messages = event.messages.map((message) => {
         const record = message as unknown as Record<string, unknown>;
-        if (record.role === COMPACTION_SUMMARY_ROLE) {
-          const summary = String(record.summary);
-          const next = state.redactSummaryText(summary);
-          if (next === summary) return message;
-          changed = true;
-          return { ...message, summary: next } as typeof message;
-        }
-        if (record.role !== CUSTOM_ROLE) return message;
-        const copy = state.redactEvent(record);
-        if (!copy) return message;
+        if (record.role !== COMPACTION_SUMMARY_ROLE) return message;
+        const summary = String(record.summary);
+        const next = state.redactSummaryText(summary);
+        if (next === summary) return message;
         changed = true;
-        return copy as unknown as typeof message;
+        return { ...message, summary: next } as typeof message;
       });
       return changed ? { messages } : undefined;
     });

@@ -9,7 +9,7 @@ const TOOL_CALL = "tool_call";
 const BASH = "bash";
 const READ = "read";
 const WRITE = "write";
-const UNDECLARED_REASON_FRAGMENT = BASH;
+const UNDECLARED_REASON = "The tool bash is not declared for this agent.";
 
 function fire(
   declared: readonly string[],
@@ -37,7 +37,8 @@ function fire(
 test("toolAllowlist passes a declared tool and blocks an undeclared one", () => {
   assert.equal(fire([READ, WRITE], READ), undefined);
   assert.equal(fire([READ, WRITE], WRITE), undefined);
-  const blocked = fire([READ], BASH);
-  assert.ok(blocked?.block);
-  assert.ok(blocked?.reason.includes(UNDECLARED_REASON_FRAGMENT));
+  assert.deepEqual(fire([READ], BASH), {
+    block: true,
+    reason: UNDECLARED_REASON,
+  });
 });
