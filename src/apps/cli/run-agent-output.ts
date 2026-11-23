@@ -1,8 +1,9 @@
 import { constants, lstatSync, realpathSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { openPrivate } from "../../kernel/files.ts";
+import type { BudgetDigestField } from "./run-agent-digest.ts";
 
 const OUTPUT_INVALID = "cli.run.agent.output_invalid";
 const OUTPUT_PLACE = "cli.run.agent.output_place";
@@ -55,7 +56,7 @@ function checkOutputParentDir(
   outputPath: string,
   uid: number,
   fields: [string, string][],
-): void {
+): string {
   const realParent = tryRealpath(dirname(outputPath));
   if (realParent === null)
     throw new Diagnostic(
@@ -82,6 +83,7 @@ function checkOutputParentDir(
       "run agent: the output file parent directory has a group or other write bit.",
       { fields },
     );
+  return realParent;
 }
 
 function checkExistingOutputEntry(
@@ -133,12 +135,13 @@ export function checkOutputPath(
   const fields = [["path", outputPath]] as [string, string][];
   const uid = userInfo().uid;
 
-  checkOutputParentDir(outputPath, uid, fields);
+  const realParent = checkOutputParentDir(outputPath, uid, fields);
   checkExistingOutputEntry(outputPath, uid, fields);
 
+  const realOutput = join(realParent, basename(outputPath));
   if (
-    isUnder(outputPath, workspaceRealPath) ||
-    isUnder(outputPath, piDirectoryPath)
+    isUnder(realOutput, tryRealpath(workspaceRealPath) ?? workspaceRealPath) ||
+    isUnder(realOutput, tryRealpath(piDirectoryPath) ?? piDirectoryPath)
   )
     throw new Diagnostic(
       OUTPUT_PLACE,
@@ -146,7 +149,6 @@ export function checkOutputPath(
       { fields },
     );
 
-  const realOutput = tryRealpath(outputPath);
   if (authRealPath !== null && realOutput === authRealPath)
     throw new Diagnostic(
       OUTPUT_PLACE,
@@ -154,7 +156,7 @@ export function checkOutputPath(
       { fields },
     );
 
-  if (realOutput !== null && realOutput === sessionRealPath(sessionAbsPath))
+  if (realOutput === sessionRealPath(sessionAbsPath))
     throw new Diagnostic(
       OUTPUT_PLACE,
       "run agent: the output file is the session file.",
@@ -230,4 +232,58 @@ export function textLayout(input: TextLayoutInput): string {
   lines.push("");
   lines.push(input.text ?? "(no text)");
   return lines.join("\n");
+}
+
+export interface RunAgentResult {
+  agent: string;
+  engine_version: string;
+  provider: string;
+  model: string;
+  reasoning_effort: string;
+  budget: BudgetDigestField;
+  budget_reached: string | null;
+  input_digest: string;
+  system_prompt_digest: string;
+  workspace: string;
+  session: string;
+  end: string;
+  class: string | null;
+  failure: string | null;
+  duration_ms: number;
+  model_calls: number;
+  tool_calls: number;
+  usage: UsageStats;
+  list_price_usd: number;
+  text: string | null;
+}
+
+export function resultLine(result: RunAgentResult): string {
+  const line: RunAgentResult = {
+    agent: result.agent,
+    engine_version: result.engine_version,
+    provider: result.provider,
+    model: result.model,
+    reasoning_effort: result.reasoning_effort,
+    budget: { wall_ms: result.budget.wall_ms, usd: result.budget.usd },
+    budget_reached: result.budget_reached,
+    input_digest: result.input_digest,
+    system_prompt_digest: result.system_prompt_digest,
+    workspace: result.workspace,
+    session: result.session,
+    end: result.end,
+    class: result.class,
+    failure: result.failure,
+    duration_ms: result.duration_ms,
+    model_calls: result.model_calls,
+    tool_calls: result.tool_calls,
+    usage: {
+      input: result.usage.input,
+      output: result.usage.output,
+      cache_read: result.usage.cache_read,
+      cache_write: result.usage.cache_write,
+    },
+    list_price_usd: result.list_price_usd,
+    text: result.text,
+  };
+  return `${JSON.stringify(line)}\n`;
 }

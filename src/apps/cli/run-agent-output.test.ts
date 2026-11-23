@@ -4,20 +4,28 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir, userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { checkOutputPath, textLayout } from "./run-agent-output.ts";
+import {
+  checkOutputPath,
+  parseOutputTarget,
+  resultLine,
+  textLayout,
+} from "./run-agent-output.ts";
+import type { RunAgentResult } from "./run-agent-output.ts";
 import type { OutputPathContext } from "./run-agent-output.ts";
 
 const OUTPUT_INVALID = "cli.run.agent.output_invalid";
 const ROOT_UID = 0;
 const OUTPUT_PLACE = "cli.run.agent.output_place";
 const DONE_TEXT = "done-1";
+const ROOT_OWNED_DIRECTORY = "/usr";
 
 let base: string;
 const PI_DIR = "/nonexistent-pi-dir-output";
@@ -109,6 +117,69 @@ describe("checkOutputPath", () => {
     );
   });
 
+  it("refuses a path inside the workspace through a symbolic link", () => {
+    const w = workspace();
+    const alias = join(base, `alias-${Date.now()}-${Math.random()}`);
+    symlinkSync(w, alias);
+    const output = join(alias, "result.jsonl");
+    const session = join(base, "session.jsonl");
+    assertDiagnostic(
+      () => checkOutputPath(output, makeContext(w, session)),
+      OUTPUT_PLACE,
+    );
+  });
+
+  it("refuses a path inside the pi directory", () => {
+    const w = workspace();
+    const piDir = join(base, `pi-${Date.now()}-${Math.random()}`);
+    mkdirSync(piDir, { mode: 0o700 });
+    const output = join(piDir, "result.jsonl");
+    const session = join(base, "session.jsonl");
+    assertDiagnostic(
+      () =>
+        checkOutputPath(output, {
+          ...makeContext(w, session),
+          piDirectoryPath: piDir,
+        }),
+      OUTPUT_PLACE,
+    );
+  });
+
+  it("refuses the --auth file", () => {
+    const w = workspace();
+    const auth = join(base, `auth-${Date.now()}-${Math.random()}.json`);
+    writeFileSync(auth, "{}", { mode: 0o600 });
+    const session = join(base, "session.jsonl");
+    assertDiagnostic(
+      () =>
+        checkOutputPath(auth, {
+          ...makeContext(w, session),
+          authRealPath: realpathSync(auth),
+        }),
+      OUTPUT_PLACE,
+    );
+  });
+
+  it("refuses the session file path", () => {
+    const w = workspace();
+    const session = join(base, `s-${Date.now()}-${Math.random()}.jsonl`);
+    assertDiagnostic(
+      () => checkOutputPath(session, makeContext(w, session)),
+      OUTPUT_PLACE,
+    );
+  });
+
+  it("refuses a parent of another user", () => {
+    if (userInfo().uid === ROOT_UID) return;
+    const w = workspace();
+    const output = join(ROOT_OWNED_DIRECTORY, `r-${Date.now()}.jsonl`);
+    const session = join(base, "session.jsonl");
+    assertDiagnostic(
+      () => checkOutputPath(output, makeContext(w, session)),
+      OUTPUT_INVALID,
+    );
+  });
+
   it("refuses absent parent directory", () => {
     const w = workspace();
     const output = join(base, "absent", "result.jsonl");
@@ -133,6 +204,23 @@ describe("checkOutputPath", () => {
       OUTPUT_INVALID,
     );
     chmodSync(dir, 0o700);
+  });
+});
+
+describe("parseOutputTarget", () => {
+  it("selects stdout with no value", () => {
+    assert.deepEqual(parseOutputTarget(undefined), { kind: "stdout" });
+  });
+
+  it("selects stdout for the value stdout", () => {
+    assert.deepEqual(parseOutputTarget("stdout"), { kind: "stdout" });
+  });
+
+  it("selects a file for ./stdout", () => {
+    assert.deepEqual(parseOutputTarget("./stdout"), {
+      kind: "path",
+      path: resolve("stdout"),
+    });
   });
 });
 
@@ -213,5 +301,38 @@ describe("textLayout", () => {
   it("shows (no text) when text is null", () => {
     const output = textLayout({ ...sample, text: null });
     assert.ok(output.endsWith("(no text)"));
+  });
+});
+
+describe("resultLine", () => {
+  const result: RunAgentResult = {
+    agent: "swe@1",
+    engine_version: "0.0.0",
+    provider: "openai-compatible",
+    model: "stub-1",
+    reasoning_effort: "off",
+    budget: { wall_ms: 7200000, usd: null },
+    budget_reached: null,
+    input_digest: "a",
+    system_prompt_digest: "b",
+    workspace: "/w",
+    session: "/d/s.jsonl",
+    end: "completed",
+    class: null,
+    failure: null,
+    duration_ms: 400,
+    model_calls: 3,
+    tool_calls: 2,
+    usage: { input: 30, output: 6, cache_read: 0, cache_write: 0 },
+    list_price_usd: 0,
+    text: DONE_TEXT,
+  };
+
+  it("writes one compact JSON line with exactly the result fields", () => {
+    const extra = { ...result, extra: "x", usage: { ...result.usage, y: 1 } };
+    const line = resultLine(extra);
+    assert.ok(line.endsWith("\n"));
+    assert.equal(line.indexOf("\n"), line.length - 1);
+    assert.deepEqual(JSON.parse(line), result);
   });
 });
