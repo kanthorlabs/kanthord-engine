@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
 
@@ -13,6 +13,14 @@ const GROUP_OTHER_WRITE = 0o022;
 
 function isUnder(path: string, dir: string): boolean {
   return path.startsWith(dir + "/") || path === dir;
+}
+
+function realPathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
 }
 
 function realParentOf(sessionPath: string, fields: [string, string][]): string {
@@ -67,14 +75,15 @@ export function checkSessionPath(
       { fields },
     );
 
-  if (isUnder(absolute, workspaceRealPath))
+  const realSession = join(realParent, basename(absolute));
+  if (isUnder(realSession, realPathOrSelf(workspaceRealPath)))
     throw new Diagnostic(
       SESSION_PLACE,
       "run agent: the session file path is inside the workspace.",
       { fields },
     );
 
-  if (isUnder(absolute, piDirectoryPath))
+  if (isUnder(realSession, realPathOrSelf(piDirectoryPath)))
     throw new Diagnostic(
       SESSION_PLACE,
       "run agent: the session file path is inside the pi directory.",

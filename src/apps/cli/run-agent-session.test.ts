@@ -18,6 +18,8 @@ const ROOT_UID = 0;
 const SESSION_DIR_INVALID = "cli.run.agent.session_directory_invalid";
 const SESSION_PLACE = "cli.run.agent.session_place";
 const SESSION_DIR_MODE = "cli.run.agent.session_directory_mode";
+const SESSION_DIR_OWNER = "cli.run.agent.session_directory_owner";
+const ROOT_OWNED_DIRECTORY = "/usr";
 const FIELD_PATH = "path";
 
 let base: string;
@@ -107,6 +109,24 @@ describe("checkSessionPath", () => {
     const w = workspace();
     const session = join(piDir, "session.jsonl");
     assertDiagnostic(() => checkSessionPath(session, w, piDir), SESSION_PLACE);
+  });
+
+  it("refuses a path inside the workspace through a symbolic link", () => {
+    const w = workspace();
+    const alias = join(base, `alias-${Date.now()}-${Math.random()}`);
+    symlinkSync(w, alias);
+    const session = join(alias, "session.jsonl");
+    assertDiagnostic(() => checkSessionPath(session, w, PI_DIR), SESSION_PLACE);
+  });
+
+  it("refuses a parent of another user", () => {
+    if (userInfo().uid === ROOT_UID) return;
+    const w = workspace();
+    const session = join(ROOT_OWNED_DIRECTORY, `s-${Date.now()}.jsonl`);
+    assertDiagnostic(
+      () => checkSessionPath(session, w, PI_DIR),
+      SESSION_DIR_OWNER,
+    );
   });
 
   it("passes when session is a sibling of the workspace", () => {
