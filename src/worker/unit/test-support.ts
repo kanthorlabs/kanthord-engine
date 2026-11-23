@@ -62,7 +62,7 @@ import {
 import { agentPort, type SessionPort } from "./agent-port.ts";
 import { executionEvidence } from "./capabilities/execution-evidence.ts";
 import { linkUpdates } from "./capabilities/link-updates.ts";
-import type { KnownSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
+import type { KnownSecrets } from "../../agent/redaction.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";

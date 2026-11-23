@@ -28,7 +28,7 @@ import {
 } from "../agent/contract.ts";
 import { InvalidReason } from "../agent/prompt-source.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
-import { REDACTION_LOG_MESSAGE } from "../agent/hooks/sensitive-text-redaction.ts";
+import { REDACTION_LOG_MESSAGE } from "../agent/redaction.ts";
 import { SensitiveRule } from "../agent/sensitive-text.ts";
 import { loadPi, PI_DIRECTORY_NAME, usePiDirectory } from "../agent/pi.ts";
 import { installPiTools } from "../agent/pi-tools.ts";

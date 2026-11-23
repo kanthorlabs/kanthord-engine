@@ -25,8 +25,8 @@ import {
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,
-  type SensitiveTextRedaction,
-} from "../agent/hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../agent/redaction.ts";
 import { loadPi } from "../agent/pi.ts";
 import type {
   AgentView,
@@ -131,7 +131,7 @@ type UsableView = AgentView & {
 
 interface OpenedSession {
   session: AgentSession;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
 }
 
 function usable(view: AgentView | null): view is UsableView {
@@ -184,10 +184,7 @@ export class EnvironmentAgent {
       : EnvironmentSessionEnd.Ended;
   }
 
-  private logRedaction(
-    sessionId: string,
-    redaction: SensitiveTextRedaction,
-  ): void {
+  private logRedaction(sessionId: string, redaction: SessionRedaction): void {
     const summary = redactionSummary(redaction.counts());
     if (redactionObserved(summary))
       this.dependencies.logger.info(

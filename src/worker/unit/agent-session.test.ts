@@ -20,7 +20,7 @@ import {
   RUNTIME_SETUP_DEADLINE_MS,
   withDeadline,
 } from "../../agent/agent-session.ts";
-import { sensitiveTextRedaction } from "../../agent/hooks/sensitive-text-redaction.ts";
+import { createRedaction } from "../../agent/redaction.ts";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";
 import { piAgentDirectory } from "../../agent/pi.ts";
 import {
@@ -102,7 +102,7 @@ test("native session isolates filesystem discovery, settings and session persist
     session.resourceLoader
       .getExtensions()
       .extensions.map((extension) => extension.sourceInfo.source),
-    [INLINE_SOURCE, INLINE_SOURCE, INLINE_SOURCE],
+    [INLINE_SOURCE, INLINE_SOURCE, INLINE_SOURCE, INLINE_SOURCE],
   );
   assert.equal(readFileSync(hostSettings, "utf8"), emptySettings);
   assert.deepEqual(readdirSync(join(home, ".pi"), { recursive: true }), [
@@ -115,7 +115,12 @@ test("native session isolates filesystem discovery, settings and session persist
 const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
 const CONSUMER_EVENT = "input";
 const RESTORE_EVENTS = ["agent_end", "tool_call"];
-const HOOK_EVENTS = ["context", "message_end", "session_compact", "turn_start"];
+const INPUT_REDACTION_EVENTS = ["message_end", "turn_start"];
+const ASSISTANT_REDACTION_EVENTS = [
+  "context",
+  "message_end",
+  "session_compact",
+];
 const HOME_EVENTS = ["before_agent_start"];
 
 async function redactedSessionSetup(t: TestContext) {
@@ -180,7 +185,13 @@ test("openSession installs the restore after the cwd hook and the redaction hook
     opened.session.resourceLoader
       .getExtensions()
       .extensions.map((extension) => [...extension.handlers.keys()].sort()),
-    [HOME_EVENTS, RESTORE_EVENTS, [CONSUMER_EVENT], HOOK_EVENTS],
+    [
+      HOME_EVENTS,
+      RESTORE_EVENTS,
+      [CONSUMER_EVENT],
+      INPUT_REDACTION_EVENTS,
+      ASSISTANT_REDACTION_EVENTS,
+    ],
   );
   assert.ok(!opened.systemPrompt.includes(FAKE_KEY));
   const [systemTag] = markerTags(opened.systemPrompt);
@@ -194,7 +205,7 @@ test("openSession installs the restore after the cwd hook and the redaction hook
 
 test("openSession uses a passed redaction and creates none", async (t) => {
   const { input } = await redactedSessionSetup(t);
-  const redaction = sensitiveTextRedaction(async () => [], "passed_session");
+  const redaction = createRedaction(async () => [], "passed_session");
   const expected = await redaction.text(input.systemPrompt);
   const opened = await openSession({ ...input, hooks: [], redaction });
   stopAfter(t, () => opened.session.dispose());

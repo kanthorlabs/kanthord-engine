@@ -19,11 +19,14 @@ import {
 } from "../kernel/context.ts";
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
 import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
+import { markerRestore } from "./hooks/marker-restore.ts";
+import { inputRedaction } from "./hooks/input-redaction.ts";
+import { assistantRedaction } from "./hooks/assistant-redaction.ts";
 import {
+  createRedaction,
   type KnownSecrets,
-  sensitiveTextRedaction,
-  type SensitiveTextRedaction,
-} from "./hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "./redaction.ts";
 
 export const RUNTIME_SETUP_DEADLINE_MS = 30000;
 
@@ -73,14 +76,21 @@ export interface OpenSessionInput {
   sessionManager?: SessionManager;
 }
 
-export type SessionRedactionInput =
-  { knownSecrets: KnownSecrets } | { redaction: SensitiveTextRedaction };
+export interface FreshRedaction {
+  knownSecrets: KnownSecrets;
+}
+
+export interface ReusedRedaction {
+  redaction: SessionRedaction;
+}
+
+export type SessionRedactionInput = FreshRedaction | ReusedRedaction;
 
 interface SessionParts {
   pi: PiCodingAgent;
   settingsManager: SettingsManager;
   sessionManager: SessionManager;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
   systemPrompt: string;
   resourceLoader: ResourceLoader;
 }
@@ -102,10 +112,7 @@ async function sessionParts(
   const redaction =
     "redaction" in input
       ? input.redaction
-      : sensitiveTextRedaction(
-          input.knownSecrets,
-          sessionManager.getSessionId(),
-        );
+      : createRedaction(input.knownSecrets, sessionManager.getSessionId());
   const systemPrompt = await withDeadline(
     redaction.text(input.systemPrompt),
     input.context,
@@ -122,9 +129,10 @@ async function sessionParts(
     systemPrompt,
     extensionFactories: [
       homeRelativeCwd(input.hostHome),
-      redaction.restore,
+      markerRestore(redaction),
       ...input.hooks,
-      redaction.hook,
+      inputRedaction(redaction),
+      assistantRedaction(redaction),
     ],
   });
   await withDeadline(resourceLoader.reload(), input.context);
@@ -142,7 +150,7 @@ export async function openSession(
   input: OpenSessionInput & SessionRedactionInput,
 ): Promise<{
   session: AgentSession;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
   systemPrompt: string;
 }> {
   const parts = await sessionParts(input);
@@ -171,7 +179,7 @@ export async function openSession(
 
 export interface OpenedRuntime {
   runtime: AgentSessionRuntime;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
   systemPrompt: string;
 }
 

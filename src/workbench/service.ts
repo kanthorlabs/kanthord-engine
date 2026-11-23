@@ -44,8 +44,8 @@ import {
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,
-  type SensitiveTextRedaction,
-} from "../agent/hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../agent/redaction.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
@@ -148,7 +148,7 @@ interface OpenSession {
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
-  redaction: SensitiveTextRedaction | null;
+  redaction: SessionRedaction | null;
   secrets: KnownSecrets;
 }
 

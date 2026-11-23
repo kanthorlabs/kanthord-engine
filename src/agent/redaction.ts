@@ -1,9 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
-import type {
-  InlineExtension,
-  ToolCallEvent,
-} from "@earendil-works/pi-coding-agent";
-import { isObject, isString } from "../../kernel/values.ts";
+import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { isObject, isString } from "../kernel/values.ts";
 import {
   findKnownText,
   findPatternText,
@@ -22,25 +19,46 @@ import {
   type SensitiveSpan,
   SESSION_MARKER_PATTERN,
   sessionMarker,
-} from "../sensitive-text.ts";
+} from "./sensitive-text.ts";
 
 export type KnownSecrets = () => Promise<readonly string[]>;
+
+export interface SecretWarning {
+  rule: SensitiveRule;
+  count: number;
+}
 
 export interface RedactionCounts {
   redacted: Partial<Record<SensitiveRule, number>>;
   scan_failed: number;
   unkept: number;
   restore_blocked: number;
-  compaction_residual: number;
+  output_found: Partial<Record<SensitiveRule, number>>;
   thinking_kept: number;
+  compaction_residual: number;
 }
 
-export interface SensitiveTextRedaction {
-  restore: InlineExtension;
-  hook: InlineExtension;
+export interface SessionRedaction {
   text(value: string): Promise<string>;
+  exitText(value: string): string;
   modelOutput(value: string): string;
   counts(): RedactionCounts;
+  takeWarnings(): readonly SecretWarning[];
+  refresh(): Promise<void>;
+  outermostCallId(event: ToolCallEvent): string;
+  restoreInput(event: ToolCallEvent): RestoreReason | undefined;
+  addRestoreBlocked(): void;
+  deletePending(id: string): void;
+  clearPending(): void;
+  hasKnownSecretIn(value: unknown): boolean;
+  redactEvent(
+    message: Record<string, unknown>,
+  ): Record<string, unknown> | undefined;
+  redactSummaryText(summary: string): string;
+  redactSessionCompact(summary: string): string;
+  recordOutputFinding(
+    message: Record<string, unknown>,
+  ): SecretWarning | undefined;
 }
 
 export const REDACTION_TABLE_MAX = 4096;
@@ -52,13 +70,18 @@ export interface RedactionSummary {
   redaction_failed: number;
   unkept: number;
   restore_blocked: number;
-  compaction_residual: number;
+  output_found_count: number;
+  output_found_rules: SensitiveRule[];
   thinking_kept: number;
+  compaction_residual: number;
 }
 
 export function redactionSummary(counts: RedactionCounts): RedactionSummary {
   const rules = (Object.keys(counts.redacted) as SensitiveRule[])
     .filter((rule) => counts.redacted[rule])
+    .sort();
+  const outputRules = (Object.keys(counts.output_found) as SensitiveRule[])
+    .filter((rule) => counts.output_found[rule])
     .sort();
   return {
     redaction_count: rules.reduce(
@@ -69,8 +92,13 @@ export function redactionSummary(counts: RedactionCounts): RedactionSummary {
     redaction_failed: counts.scan_failed,
     unkept: counts.unkept,
     restore_blocked: counts.restore_blocked,
-    compaction_residual: counts.compaction_residual,
+    output_found_count: outputRules.reduce(
+      (sum, rule) => sum + (counts.output_found[rule] ?? 0),
+      0,
+    ),
+    output_found_rules: outputRules,
     thinking_kept: counts.thinking_kept,
+    compaction_residual: counts.compaction_residual,
   };
 }
 
@@ -89,6 +117,8 @@ export const RestoreReason = {
     "The input holds a marker of the LLM credential. No tool receives this value.",
   Shell:
     "A command cannot hold a masked value. To write the value into a file, use the write or edit tool. Otherwise read the value through the shell from its source, for example with $(sed -n ...), then repeat the call.",
+  KnownCredential:
+    "The input holds a value of a known credential. No tool receives this value.",
 } as const;
 export type RestoreReason = (typeof RestoreReason)[keyof typeof RestoreReason];
 
@@ -100,17 +130,9 @@ const NOT_FOUND = -1;
 const NESTED_CALL_SEPARATOR = "/";
 const RESTORE_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
 const SHELL_TOOL = "bash";
-const REDACTED_ROLES: ReadonlySet<string> = new Set([
-  "system",
-  "user",
-  "assistant",
-  "toolResult",
-  "custom",
-]);
 const ASSISTANT_ROLE = "assistant";
 const TOOL_RESULT_ROLE = "toolResult";
 const CUSTOM_ROLE = "custom";
-const COMPACTION_SUMMARY_ROLE = "compactionSummary";
 const THINKING_TYPE = "thinking";
 const TEXT_TYPE = "text";
 const REASONING_FIELD_API = "openai-completions";
@@ -198,10 +220,10 @@ function stringsOf(value: unknown): string[] {
   return strings;
 }
 
-export function sensitiveTextRedaction(
+export function createRedaction(
   known: KnownSecrets,
   sessionId: string,
-): SensitiveTextRedaction {
+): SessionRedaction {
   const sessionPart = markerTag(sessionPartOf(sessionId));
   const tag =
     sessionPart + markerTag(randomBytes(TAG_PART_BYTES).toString("hex"));
@@ -216,11 +238,13 @@ export function sensitiveTextRedaction(
     scan_failed: 0,
     unkept: 0,
     restore_blocked: 0,
-    compaction_residual: 0,
+    output_found: {},
     thinking_kept: 0,
+    compaction_residual: 0,
   };
   const failedMarker = sessionMarker(SCAN_FAILED, UNKEPT_INDEX, tag);
   let residual = false;
+  const warnings: SecretWarning[] = [];
 
   const refresh = async () => {
     let current: readonly string[];
@@ -431,26 +455,42 @@ export function sensitiveTextRedaction(
       else reason ??= next;
     };
     const restored: string[] = [];
-    const restoreText = (text: string) =>
-      text.replace(
-        SESSION_MARKER_PATTERN,
-        (whole, rule: string, index: string, markerTag: string) => {
-          if (!markerTag.startsWith(sessionPart)) return whole;
-          const entry =
-            markerTag === tag ? byIndex.get(markerIndex(index)) : undefined;
-          const refusal = markerRefusal(
-            { rule, markerTag, entry },
-            { shell, writes, tag },
-          );
-          if (refusal) {
-            noteRefusal(refusal);
-            return whole;
-          }
-          if (!writes || !entry) return whole;
-          restored.push(entry.value);
-          return entry.value;
-        },
-      );
+    const restoreText = (text: string): string => {
+      let result = "";
+      let last = 0;
+      for (const match of text.matchAll(SESSION_MARKER_PATTERN)) {
+        const [whole, rule, index, markerTagValue] = match as unknown as [
+          string,
+          string,
+          string,
+          string,
+        ];
+        result += text.slice(last, match.index);
+        last = match.index + whole.length;
+        if (!markerTagValue.startsWith(sessionPart)) {
+          result += whole;
+          continue;
+        }
+        const entry =
+          markerTagValue === tag ? byIndex.get(markerIndex(index)) : undefined;
+        const refusal = markerRefusal(
+          { rule, markerTag: markerTagValue, entry },
+          { shell, writes, tag },
+        );
+        if (refusal) {
+          noteRefusal(refusal);
+          result += whole;
+          continue;
+        }
+        if (!writes || !entry) {
+          result += whole;
+          continue;
+        }
+        restored.push(entry.value);
+        result += entry.value;
+      }
+      return result + text.slice(last);
+    };
     const input = event.input as Record<string, unknown>;
     const copy = mapSensitiveStrings(input, restoreText, true) as Record<
       string,
@@ -475,25 +515,6 @@ export function sensitiveTextRedaction(
     return undefined;
   };
 
-  const restore: InlineExtension = (pi) => {
-    pi.on("tool_call", (event) => {
-      let reason: RestoreReason | undefined;
-      try {
-        reason = restoreInput(event);
-      } catch {
-        reason = RestoreReason.Unkept;
-      }
-      if (!reason) return undefined;
-      counts.restore_blocked++;
-      if (outermostCall(event) === event.toolCallId)
-        pending.delete(event.toolCallId);
-      return { block: true, reason };
-    });
-    pi.on("agent_end", () => {
-      pending.clear();
-    });
-  };
-
   const redactEvent = (message: Message) => {
     const owner =
       message.role === TOOL_RESULT_ROLE ? String(message.toolCallId) : "";
@@ -506,64 +527,83 @@ export function sensitiveTextRedaction(
     }
   };
 
-  const hook: InlineExtension = (pi) => {
-    pi.on("turn_start", async () => {
-      await refresh();
-    });
-    pi.on("message_end", async (event) => {
-      const message = event.message as unknown as Message;
-      if (!REDACTED_ROLES.has(String(message.role))) return undefined;
-      if (message.role === ASSISTANT_ROLE) await refresh();
-      const copy = redactEvent(message);
-      return copy ? { message: copy as typeof event.message } : undefined;
-    });
-    pi.on("context", (event) => {
-      let changed = false;
-      const messages = event.messages.map((message) => {
-        const record = message as unknown as Message;
-        if (record.role === COMPACTION_SUMMARY_ROLE) {
-          const summary = String(record.summary);
-          let next: string;
-          try {
-            next = redactStrings([summary], []).get(summary)!;
-          } catch {
-            next = failedMarker;
-          }
-          if (next === summary) return message;
-          changed = true;
-          return { ...message, summary: next } as typeof message;
-        }
-        if (record.role !== CUSTOM_ROLE) return message;
-        const copy = redactEvent(record);
-        if (!copy) return message;
-        changed = true;
-        return copy as unknown as typeof message;
-      });
-      return changed ? { messages } : undefined;
-    });
-    pi.on("session_compact", (event) => {
-      const summary = event.compactionEntry.summary;
-      residual = true;
+  const hasKnownSecretIn = (value: unknown): boolean => {
+    for (const text of stringsOf(value))
       try {
-        event.compactionEntry.summary = redactStrings([summary], []).get(
-          summary,
-        )!;
+        if (findKnownText(text, secretMatcher).length) return true;
       } catch {
-        event.compactionEntry.summary = failedMarker;
-      } finally {
-        residual = false;
+        void 0;
       }
-    });
+    return false;
   };
 
+  const recordOutputFinding = (message: Message): SecretWarning | undefined => {
+    const content = message[CONTENT_KEY];
+    let count = 0;
+    for (const text of stringsOf(content))
+      try {
+        count += findKnownText(text, secretMatcher).length;
+      } catch {
+        void 0;
+      }
+    if (!count) return undefined;
+    counts.output_found[SensitiveRule.LlmCredential] =
+      (counts.output_found[SensitiveRule.LlmCredential] ?? 0) + count;
+    const warning: SecretWarning = {
+      rule: SensitiveRule.LlmCredential,
+      count,
+    };
+    warnings.push(warning);
+    return warning;
+  };
+
+  const exitText = (value: string): string =>
+    redactStrings([value], [], outputScan).get(value)!;
+
   return {
-    restore,
-    hook,
     text: async (value) => {
       await refresh();
       return redactStrings([value], []).get(value)!;
     },
-    modelOutput: (value) => redactStrings([value], [], outputScan).get(value)!,
+    exitText,
+    modelOutput: exitText,
     counts: () => structuredClone(counts),
+    takeWarnings: () => {
+      const taken = [...warnings];
+      warnings.length = 0;
+      return taken;
+    },
+    refresh,
+    outermostCallId: outermostCall,
+    restoreInput,
+    addRestoreBlocked: () => {
+      counts.restore_blocked++;
+    },
+    deletePending: (id) => {
+      pending.delete(id);
+    },
+    clearPending: () => {
+      pending.clear();
+    },
+    hasKnownSecretIn,
+    redactEvent,
+    redactSummaryText: (summary) => {
+      try {
+        return redactStrings([summary], []).get(summary)!;
+      } catch {
+        return failedMarker;
+      }
+    },
+    redactSessionCompact: (summary) => {
+      residual = true;
+      try {
+        return redactStrings([summary], []).get(summary)!;
+      } catch {
+        return failedMarker;
+      } finally {
+        residual = false;
+      }
+    },
+    recordOutputFinding,
   };
 }

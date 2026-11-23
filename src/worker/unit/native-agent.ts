@@ -18,8 +18,8 @@ import type {
 import {
   type KnownSecrets,
   redactionSummary,
-  type SensitiveTextRedaction,
-} from "../../agent/hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../../agent/redaction.ts";
 import { countTurns } from "../../agent/pinned-layers.ts";
 import type { ExecutionSetup } from "../contract.ts";
 import { EndReason, ExecutionStop } from "./execution-stop.ts";
@@ -112,7 +112,7 @@ export interface NativeTrace extends SessionTrace {
   watch(opened: PortSession<NativeTrace>, tracing: TraceWatch): void;
 }
 
-function redactionAttributes(redaction: SensitiveTextRedaction): Attributes {
+function redactionAttributes(redaction: SessionRedaction): Attributes {
   return Object.fromEntries(
     Object.entries(redactionSummary(redaction.counts())).map(
       ([name, value]) => [`kanthord.session.${name}`, value],
@@ -261,7 +261,7 @@ function nativeAgent(
 }
 
 async function redactedWork(
-  redaction: SensitiveTextRedaction,
+  redaction: SessionRedaction,
   work: WorkPrompt,
 ): Promise<WorkPrompt> {
   return { ...work, text: await redaction.text(work.text) };

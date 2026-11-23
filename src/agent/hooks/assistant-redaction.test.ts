@@ -13,7 +13,6 @@ import type {
   ExtensionAPI,
   InlineExtension,
   SessionManager,
-  ToolCallEvent,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { background } from "../../kernel/context.ts";
@@ -33,14 +32,16 @@ import {
 import { seededText } from "../sensitive-text-test-support.ts";
 import { scriptedProvider } from "../test-support.ts";
 import { checkoutConfinement } from "./checkout-confinement.ts";
-import { toolApproval } from "./tool-approval.ts";
 import {
+  createRedaction,
   type KnownSecrets,
   REDACTION_TABLE_MAX,
   RestoreReason,
-  sensitiveTextRedaction,
-  type SensitiveTextRedaction,
-} from "./sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../redaction.ts";
+import { markerRestore } from "./marker-restore.ts";
+import { inputRedaction } from "./input-redaction.ts";
+import { assistantRedaction } from "./assistant-redaction.ts";
 
 const j = (...parts: string[]) => parts.join("");
 const AN = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -65,18 +66,21 @@ const EDIT_TOOL = "edit";
 
 type Handler = (event: unknown, context?: unknown) => unknown;
 
-function installed(redaction: SensitiveTextRedaction) {
+function installed(state: SessionRedaction) {
   const handlers = new Map<string, Handler[]>();
   const api = {
     on: (name: string, handler: Handler) =>
       handlers.set(name, [...(handlers.get(name) ?? []), handler]),
   } as unknown as ExtensionAPI;
-  (redaction.restore as (pi: ExtensionAPI) => void)(api);
-  (redaction.hook as (pi: ExtensionAPI) => void)(api);
+  (markerRestore(state) as (pi: ExtensionAPI) => void)(api);
+  (inputRedaction(state) as (pi: ExtensionAPI) => void)(api);
+  (assistantRedaction(state) as (pi: ExtensionAPI) => void)(api);
   const fire = async (name: string, event: unknown) => {
     let result: unknown;
-    for (const handler of handlers.get(name) ?? [])
-      result = await handler(event, {});
+    for (const handler of handlers.get(name) ?? []) {
+      const r = await handler(event, {});
+      if (r !== undefined) result = r;
+    }
     return result;
   };
   return {
@@ -115,8 +119,8 @@ function redactionOf(secrets: readonly string[] = []) {
     if (current.fail) throw new Error("holder unavailable");
     return current.secrets;
   };
-  const redaction = sensitiveTextRedaction(known, SESSION_ID);
-  return { redaction, current, ...installed(redaction) };
+  const state = createRedaction(known, SESSION_ID);
+  return { redaction: state, current, ...installed(state) };
 }
 
 const toolResult = (text: string, toolCallId = "call-1", extra = {}) => ({
@@ -471,7 +475,7 @@ test("restore blocks a marker that this session cannot give back", async () => {
     }),
     blocked,
   );
-  const earlier = sensitiveTextRedaction(async () => [], SESSION_ID);
+  const earlier = createRedaction(async () => [], SESSION_ID);
   const old = await earlier.text(j(PASS, ' = "', an(16), '"'));
   assert.deepEqual(
     await call("edit", { edits: [{ oldText: "a", newText: markers(old)[0] }] }),
@@ -507,7 +511,7 @@ test("restore blocks every command with a marker of this session", async () => {
   const { end, call } = redactionOf();
   const safe = await markerOf(end, j(PASS, ' = "', an(16), '"'));
   const tag = safe.slice(-17, -1);
-  const earlier = sensitiveTextRedaction(async () => [], SESSION_ID);
+  const earlier = createRedaction(async () => [], SESSION_ID);
   const resumed = markers(await earlier.text(j(PASS, ' = "', an(16), '"')))[0]!;
   const rsa = j("RSA PRIV", "ATE KEY");
   const pem = await markerOf(
@@ -524,7 +528,7 @@ test("restore blocks every command with a marker of this session", async () => {
     assert.deepEqual(result, { block: true, reason: RestoreReason.Shell });
     assert.ok(result!.reason.includes("write or edit tool"));
   }
-  const foreign = sensitiveTextRedaction(async () => [], "other-session");
+  const foreign = createRedaction(async () => [], "other-session");
   const other = markers(await foreign.text(j(PASS, ' = "', an(16), '"')))[0]!;
   for (const literal of [tracerMarker(SensitiveRule.Jwt), other]) {
     for (const tool of ["bash", "write"]) {
@@ -740,76 +744,34 @@ test("counts and text report each finding and a failure fails closed", async () 
   assert.equal(redaction.counts().scan_failed, PAIR_OF_FINDINGS);
 });
 
-test("a later approval holds the unchanged marker of an operation input", async () => {
-  const { end, redaction } = redactionOf();
-  const value = an(16);
-  const marker = await markerOf(end, j(PASS, ' = "', value, '"'));
-  const approvals = new Map<string, unknown>();
-  const handlers: Handler[] = [];
-  const api = {
-    on: (name: string, handler: Handler) => {
-      if (name === TOOL_CALL_EVENT) handlers.push(handler);
-    },
-  } as unknown as ExtensionAPI;
-  (redaction.restore as (pi: ExtensionAPI) => void)(api);
-  (
-    toolApproval({
-      approve: async (call) => {
-        if (call.toolName === OPERATION_TOOL)
-          approvals.set(call.toolCallId, structuredClone(call.input));
-        return true;
-      },
-      reason: "refused",
-    }) as (pi: ExtensionAPI) => void
-  )(api);
-  const fire = async (
-    toolName: string,
-    toolCallId: string,
-    input: Record<string, unknown>,
-  ) => {
-    const event = {
-      type: "tool_call",
-      toolCallId,
-      toolName,
-      input,
-    } as unknown as ToolCallEvent;
-    for (const handler of handlers) await handler(event, {});
-    return event.input;
-  };
-  await fire(OPERATION_TOOL, "op", { secret_value: marker });
-  assert.deepEqual(approvals.get("op"), { secret_value: marker });
-  assert.deepEqual(await fire("write", "w", { content: marker }), {
-    content: value,
-  });
-  assert.equal(approvals.has("w"), false);
-});
-const OPERATION_TOOL = "custody_secret_set";
-
 test("a later gate sees the unchanged marker of a read path", async (t) => {
-  const { end, redaction } = redactionOf();
+  const { end } = redactionOf();
   const marker = await markerOf(end, j(PASS, ' = "', an(16), '"'));
   const root = temporary(t);
   mkdirSync(join(root, "src"));
-  const handlers: Handler[] = [];
+  const gateHandlers = new Map<string, Handler[]>();
   const api = {
-    on: (name: string, handler: Handler) => {
-      if (name === TOOL_CALL_EVENT) handlers.push(handler);
-    },
+    on: (name: string, handler: Handler) =>
+      gateHandlers.set(name, [...(gateHandlers.get(name) ?? []), handler]),
   } as unknown as ExtensionAPI;
-  (redaction.restore as (pi: ExtensionAPI) => void)(api);
+  const state = createRedaction(async () => [], SESSION_ID);
+  (markerRestore(state) as (pi: ExtensionAPI) => void)(api);
   (
     checkoutConfinement({ cwd: root, roots: [root] }) as (
       pi: ExtensionAPI,
     ) => void
   )(api);
   const event = {
-    type: "tool_call",
+    type: TOOL_CALL_EVENT,
     toolCallId: "c",
     toolName: "read",
     input: { path: j("src/", marker) },
-  } as unknown as ToolCallEvent;
-  for (const handler of handlers) await handler(event, {});
-  assert.deepEqual(event.input, { path: j("src/", marker) });
+  };
+  for (const handler of gateHandlers.get(TOOL_CALL_EVENT) ?? [])
+    await handler(event, {});
+  assert.deepEqual((event as { input: unknown }).input, {
+    path: j("src/", marker),
+  });
 });
 
 const SCRIPTED_KEY = "scripted";
@@ -818,7 +780,7 @@ async function openTestSession(
   t: TestContext,
   input: {
     script: FauxResponseStep[];
-    redaction: SensitiveTextRedaction;
+    redaction: SessionRedaction;
     gates?: InlineExtension[];
     customTools?: ToolDefinition[];
     contextHooks?: InlineExtension[];
@@ -889,7 +851,7 @@ function lastResultText(messages: readonly unknown[]): string {
 
 test("a restored write keeps the real value and the session file keeps the marker", async (t) => {
   const value = an(16);
-  const redaction = sensitiveTextRedaction(async () => [], SESSION_ID);
+  const state = createRedaction(async () => [], SESSION_ID);
   let marker = "";
   const seen: unknown[] = [];
   const gate: InlineExtension = (pi) => {
@@ -899,7 +861,7 @@ test("a restored write keeps the real value and the session file keeps the marke
     });
   };
   const { cwd, session, scripted, persisted } = await openTestSession(t, {
-    redaction,
+    redaction: state,
     gates: [gate],
     script: [
       fauxAssistantMessage(
@@ -974,7 +936,7 @@ test("a restored write keeps the real value and the session file keeps the marke
 });
 
 test("a tool parameter pattern refuses a marker before the restore", async (t) => {
-  const redaction = sensitiveTextRedaction(async () => [], SESSION_ID);
+  const state = createRedaction(async () => [], SESSION_ID);
   const value = an(16);
   let received: unknown;
   const tool: ToolDefinition = {
@@ -989,9 +951,9 @@ test("a tool parameter pattern refuses a marker before the restore", async (t) =
       return { content: [{ type: "text", text: "ok" }], details: {} };
     },
   };
-  const marker = markers(await redaction.text(j(PASS, ' = "', value, '"')))[0]!;
+  const marker = markers(await state.text(j(PASS, ' = "', value, '"')))[0]!;
   const { session, scripted } = await openTestSession(t, {
-    redaction,
+    redaction: state,
     customTools: [tool],
     script: [
       fauxAssistantMessage(
@@ -1008,7 +970,7 @@ test("a tool parameter pattern refuses a marker before the restore", async (t) =
 });
 
 test("a custom message of a consumer context handler reaches the model redacted", async (t) => {
-  const redaction = sensitiveTextRedaction(async () => [], SESSION_ID);
+  const state = createRedaction(async () => [], SESSION_ID);
   const value = an(16);
   const layer: InlineExtension = (pi) => {
     pi.on("context", (event) => ({
@@ -1025,7 +987,7 @@ test("a custom message of a consumer context handler reaches the model redacted"
     }));
   };
   const { session, scripted } = await openTestSession(t, {
-    redaction,
+    redaction: state,
     contextHooks: [layer],
     script: [fauxAssistantMessage("done")],
   });

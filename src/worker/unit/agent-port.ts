@@ -17,10 +17,7 @@ import {
 } from "../../agent/agent-session.ts";
 import { isConfinedAgent } from "../../agent/catalog.ts";
 import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
-import type {
-  KnownSecrets,
-  SensitiveTextRedaction,
-} from "../../agent/hooks/sensitive-text-redaction.ts";
+import type { KnownSecrets, SessionRedaction } from "../../agent/redaction.ts";
 import { toolAllowlist } from "../../agent/hooks/tool-allowlist.ts";
 import { loadPi, type PiCodingAgent } from "../../agent/pi.ts";
 import { pinnedLayers } from "../../agent/pinned-layers.ts";
@@ -82,7 +79,7 @@ export interface PortSession<T extends SessionTrace> {
   agent: AgentSetup;
   session: AgentSession;
   context: CancellationContext;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
   pins: ReturnType<typeof pinnedLayers>;
   processes: ToolProcesses;
   trace: T | null;
