@@ -185,11 +185,34 @@ const noInlineParamType = {
     ),
 };
 
-const kanthordPlugin = {
+const inlineObjectTypeMessage =
+  "Give the object type a named interface, and give a kind a const object.";
+const inlineObjectTypeSelectors = [
+  "TSUnionType > TSTypeLiteral",
+  "TSPropertySignature > TSTypeAnnotation > TSTypeLiteral",
+  "TSPropertySignature > TSTypeAnnotation > TSLiteralType[literal.value=type(string)]",
+  "TSPropertySignature > TSTypeAnnotation > TSUnionType > TSLiteralType[literal.value=type(string)]",
+];
+
+const noInlineObjectType = {
+  meta: { type: "problem", schema: [] },
+  create: (context) =>
+    Object.fromEntries(
+      inlineObjectTypeSelectors.map((selector) => [
+        selector,
+        (node) => context.report({ node, message: inlineObjectTypeMessage }),
+      ]),
+    ),
+};
+
+const noInlineObjectTypeFiles = ["src/agent/known-secrets.ts"];
+
+export const kanthordPlugin = {
   rules: {
     "no-cwd-data-read": noCwdDataRead,
     "no-comments": noComments,
     "no-inline-param-type": noInlineParamType,
+    "no-inline-object-type": noInlineObjectType,
   },
 };
 
@@ -546,6 +569,7 @@ export default tseslint.config(
                       "pinned-layers",
                       "sensitive-text",
                       "hooks/sensitive-text-redaction",
+                      "known-secrets",
                     ].join(",")}}.ts`,
                   }),
                 },
@@ -1108,5 +1132,10 @@ export default tseslint.config(
       "@typescript-eslint/max-params": ["error", { max: 3 }],
       "kanthord/no-inline-param-type": "error",
     },
+  },
+  {
+    files: noInlineObjectTypeFiles,
+    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    rules: { "kanthord/no-inline-object-type": "error" },
   },
 );

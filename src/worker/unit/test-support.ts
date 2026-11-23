@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import type { TestContext } from "node:test";
 import {
   appendFileSync,
@@ -11,6 +10,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { credentialSecrets } from "../../agent/known-secrets.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {

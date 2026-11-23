@@ -1,9 +1,6 @@
+import { credentialSecrets, mergedSecrets } from "../../agent/known-secrets.ts";
 import { ExecutionBudget } from "./budget.ts";
-import {
-  credentialSecrets,
-  mergedSecrets,
-  RestoreReason,
-} from "../../agent/hooks/sensitive-text-redaction.ts";
+import { RestoreReason } from "../../agent/hooks/sensitive-text-redaction.ts";
 import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,

@@ -1,6 +1,6 @@
+import { credentialSecrets } from "../../agent/known-secrets.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { BudgetLimit, EnvironmentFailure } from "../../scheduler/contract.ts";
-import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
 import { unusedHostTools } from "./test-support.ts";
 import { existsSync, writeFileSync } from "node:fs";
