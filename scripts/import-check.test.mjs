@@ -1,51 +1,107 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import { builtinModules } from "node:module";
+import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
+import ts from "typescript";
 
-const AGENT_SRC = join(import.meta.dirname, "../src/agent");
-const DISALLOWED_PATHS = [
-  "src/worker/",
-  "src/project/",
-  "src/mission/",
-  "src/tracking/",
+const ROOT = join(import.meta.dirname, "..");
+const KERNEL = "src/kernel/";
+const RUNTIME_MODULES = [
+  "src/agent/agent-contract.ts",
+  "src/agent/agent-session.ts",
+  "src/agent/bash-process.ts",
+  "src/agent/catalog.ts",
+  "src/agent/environment.ts",
+  "src/agent/hooks/assistant-redaction.ts",
+  "src/agent/hooks/checkout-confinement.ts",
+  "src/agent/hooks/home-relative-cwd.ts",
+  "src/agent/hooks/input-redaction.ts",
+  "src/agent/hooks/marker-restore.ts",
+  "src/agent/hooks/output-finding.ts",
+  "src/agent/hooks/pinned-layers.ts",
+  "src/agent/hooks/tool-allowlist.ts",
+  "src/agent/pi-tools.ts",
+  "src/agent/pi.ts",
+  "src/agent/pinned-layers.ts",
+  "src/agent/prompt-assets.ts",
+  "src/agent/prompt-chain.ts",
+  "src/agent/redaction.ts",
+  "src/agent/run-budget.ts",
+  "src/agent/run-outcome.ts",
+  "src/agent/sensitive-text.ts",
+  "src/agent/tool-table.ts",
 ];
-const DISALLOWED_IDENTIFIERS = ["setGlobalDispatcher", "EnvHttpProxyAgent"];
+const SERVICE_CONTRACTS = ["src/scheduler/contract.ts"];
+const PACKAGES = [
+  "@earendil-works/pi-coding-agent",
+  "@earendil-works/pi-ai",
+  "@earendil-works/pi-agent-core",
+  "zod",
+];
+const REFUSED_IDENTIFIERS = ["setGlobalDispatcher", "EnvHttpProxyAgent"];
+const BUILTINS = new Set(builtinModules);
 
-function agentRuntimeFiles(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    if (entry.isDirectory()) return agentRuntimeFiles(join(dir, entry.name));
-    if (!entry.name.endsWith(".ts")) return [];
-    if (entry.name.endsWith(".test.ts")) return [];
-    if (entry.name.includes("test-support")) return [];
-    return [join(dir, entry.name)];
-  });
+function specifiersOf(file) {
+  const source = readFileSync(join(ROOT, file), "utf8");
+  return ts
+    .preProcessFile(source, true, true)
+    .importedFiles.map((entry) => entry.fileName);
 }
 
-test("no runtime module in src/agent imports a disallowed module", () => {
-  const files = agentRuntimeFiles(AGENT_SRC);
+function isPackageAllowed(specifier) {
+  if (specifier.startsWith("node:")) return true;
+  if (BUILTINS.has(specifier.split("/")[0])) return true;
+  return PACKAGES.some(
+    (name) => specifier === name || specifier.startsWith(`${name}/`),
+  );
+}
+
+const ALLOWED_MODULES = new Set([...RUNTIME_MODULES, ...SERVICE_CONTRACTS]);
+
+function closureViolations(entries) {
+  const seen = new Set();
+  const pending = [...entries];
   const violations = [];
-  for (const file of files) {
-    const content = readFileSync(file, "utf8");
-    for (const disallowed of DISALLOWED_PATHS) {
-      if (new RegExp(`from ["'][^"']*${disallowed}[^"']*["']`).test(content)) {
-        violations.push(`${file}: imports from ${disallowed}`);
+  while (pending.length) {
+    const file = pending.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const specifier of specifiersOf(file)) {
+      if (!specifier.startsWith(".")) {
+        if (!isPackageAllowed(specifier))
+          violations.push(`${file} imports ${specifier}`);
+        continue;
       }
+      const target = relative(ROOT, resolve(ROOT, dirname(file), specifier));
+      if (target.startsWith(KERNEL)) continue;
+      if (!ALLOWED_MODULES.has(target)) {
+        violations.push(`${file} imports ${target}`);
+        continue;
+      }
+      pending.push(target);
     }
   }
-  assert.deepEqual(violations, [], violations.join(", "));
+  return violations;
+}
+
+test("the import closure of each runtime module stays in the allowed set", () => {
+  const violations = closureViolations(RUNTIME_MODULES);
+  assert.deepEqual(violations, [], violations.join("\n"));
 });
 
-test("no runtime module in src/agent references setGlobalDispatcher or EnvHttpProxyAgent", () => {
-  const files = agentRuntimeFiles(AGENT_SRC);
-  const violations = [];
-  for (const file of files) {
-    const content = readFileSync(file, "utf8");
-    for (const id of DISALLOWED_IDENTIFIERS) {
-      if (content.includes(id)) {
-        violations.push(`${file}: references ${id}`);
-      }
-    }
-  }
-  assert.deepEqual(violations, [], violations.join(", "));
+test("the import check refuses a runtime import outside the allowed set", () => {
+  assert.deepEqual(closureViolations(["src/agent/known-secrets.ts"]), [
+    "src/agent/known-secrets.ts imports src/custody/contract.ts",
+  ]);
+});
+
+test("no runtime module names setGlobalDispatcher or EnvHttpProxyAgent", () => {
+  const violations = RUNTIME_MODULES.flatMap((file) => {
+    const source = readFileSync(join(ROOT, file), "utf8");
+    return REFUSED_IDENTIFIERS.filter((name) => source.includes(name)).map(
+      (name) => `${file} names ${name}`,
+    );
+  });
+  assert.deepEqual(violations, [], violations.join("\n"));
 });
