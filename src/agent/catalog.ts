@@ -1,9 +1,4 @@
-import {
-  EVIDENCE_UPLOAD_PARAMETERS,
-  HOST_TOOL_PARAMETERS,
-  HostTool,
-  LINK_UPDATE_LIST_PARAMETERS,
-} from "../worker/contract.ts";
+import { HostTool } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
   ENV_AGENT_PROMPT,
@@ -23,12 +18,6 @@ export interface AgentDeclaration {
 export interface ToolEntry {
   locations: readonly string[];
 }
-
-export {
-  EVIDENCE_UPLOAD_PARAMETERS,
-  HOST_TOOL_PARAMETERS,
-  LINK_UPDATE_LIST_PARAMETERS,
-};
 
 export const BuiltinTool = {
   Read: "read",
