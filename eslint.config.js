@@ -537,6 +537,19 @@ export default tseslint.config(
                     fileInternalPath: "parser.ts",
                   }),
                 },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath:
+                      "{pi,pi-tools,environment,agent-contract}.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "llm" },
+                    fileInternalPath: "{model-connector,platforms}.ts",
+                  }),
+                },
               ],
             },
             {
