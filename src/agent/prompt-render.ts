@@ -214,7 +214,14 @@ export function finalPrompt(parts: readonly PromptPartAnswer[]): string | null {
   assert.equal(parts.at(-1)?.part, PromptPart.Framing);
   if (!parts.every(({ state }) => state === PromptPartState.Resolved))
     return null;
-  return composeSystemPrompt(parts.map(toPromptText), []);
+  const texts = parts.map(toPromptText);
+  const profileEnd = parts.findIndex(
+    ({ layer }) => layer !== PromptLayer.KanthorD,
+  );
+  return composeSystemPrompt(
+    texts.slice(0, profileEnd),
+    texts.slice(profileEnd),
+  );
 }
 
 export function framingPartFromTemplates(

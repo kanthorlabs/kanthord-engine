@@ -32,12 +32,7 @@ import { packageVersion } from "../kernel/version.ts";
 import { getAgentDeclaration } from "../agent/declarations.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
-import {
-  finalPrompt,
-  framing,
-  PromptConsumer,
-  promptPart,
-} from "../agent/prompt-render.ts";
+import { framing, PromptConsumer, promptPart } from "../agent/prompt-render.ts";
 import {
   anthropicSetup,
   memoryPromptTelemetry,
@@ -288,7 +283,11 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const [answered] = answer.agents;
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
-    final: finalPrompt([...promptParts, shippedFraming()])!,
+    final: [
+      STANDARD_TEXT,
+      AGENT_TEXT,
+      framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
+    ].join("\n\n"),
     sources: [...promptParts, shippedFraming()].map(promptReference),
   });
   assert.ok(

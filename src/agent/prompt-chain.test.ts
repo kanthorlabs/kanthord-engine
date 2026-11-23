@@ -5,7 +5,13 @@ import {
   profilePrompt,
   systemPromptDigest,
 } from "./prompt-chain.ts";
-import { PROFILE_NAMES } from "./catalog.ts";
+import { getProfile, PROFILE_NAMES } from "./catalog.ts";
+import { BASE_PROMPT } from "./prompt-assets.ts";
+
+const HEADING_WITH_EMPTY_TEXT = "profile\n\nHeading:\n\n";
+const DIGEST_INPUT = "abc";
+const DIGEST_INPUT_SHA256 =
+  "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
 test("composeSystemPrompt joins profile then instructions with a separator", () => {
   const result = composeSystemPrompt(
@@ -50,37 +56,28 @@ test("composeSystemPrompt asserts the profile is not empty", () => {
   );
 });
 
-test("composeSystemPrompt asserts each profile text is not empty", () => {
-  assert.throws(() => composeSystemPrompt([{ heading: null, text: "" }], []));
-});
-
-test("composeSystemPrompt asserts each instruction text is not empty", () => {
-  assert.throws(() =>
-    composeSystemPrompt(
-      [{ heading: null, text: "profile" }],
-      [{ heading: null, text: "" }],
-    ),
+test("composeSystemPrompt renders a heading with an empty text as the heading and the separator", () => {
+  const result = composeSystemPrompt(
+    [{ heading: null, text: "profile" }],
+    [{ heading: "Heading:", text: "" }],
   );
+  assert.equal(result, HEADING_WITH_EMPTY_TEXT);
 });
 
-test("profilePrompt gives parts with no heading for each profile name", () => {
+test("profilePrompt gives the Standard, the coding text of a coding profile and the Role, with no heading", () => {
   for (const name of PROFILE_NAMES) {
-    const parts = profilePrompt(name);
-    assert.ok(parts.length);
-    for (const p of parts) assert.equal(p.heading, null);
+    const { prompt } = getProfile(name)!;
+    assert.deepEqual(
+      profilePrompt(name),
+      [
+        BASE_PROMPT,
+        ...(prompt.coding === null ? [] : [prompt.coding]),
+        prompt.role,
+      ].map((text) => ({ heading: null, text })),
+    );
   }
 });
 
-test("profilePrompt gives fewer parts for a profile without a coding prompt", () => {
-  assert.ok(profilePrompt("swe@1").length > profilePrompt("env@1").length);
-});
-
-test("systemPromptDigest is a SHA-256 hex string", () => {
-  const d = systemPromptDigest("text");
-  assert.match(d, /^[a-f0-9]{64}$/);
-});
-
-test("systemPromptDigest is deterministic", () => {
-  assert.equal(systemPromptDigest("same"), systemPromptDigest("same"));
-  assert.notEqual(systemPromptDigest("a"), systemPromptDigest("b"));
+test("systemPromptDigest is the SHA-256 hex digest of the UTF-8 text", () => {
+  assert.equal(systemPromptDigest(DIGEST_INPUT), DIGEST_INPUT_SHA256);
 });

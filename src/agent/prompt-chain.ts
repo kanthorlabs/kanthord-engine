@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { BASE_PROMPT } from "./prompt-assets.ts";
 import { getProfile, type ProfileName } from "./catalog.ts";
-import { digest } from "./prompt-composer.ts";
 
 export interface PromptText {
   heading: string | null;
@@ -19,8 +19,6 @@ export function composeSystemPrompt(
   instructions: readonly PromptText[],
 ): string {
   assert.ok(profile.length);
-  for (const p of profile) assert.ok(p.text.length);
-  for (const p of instructions) assert.ok(p.text.length);
   return [...profile, ...instructions].map(renderPart).join(PART_SEPARATOR);
 }
 
@@ -37,5 +35,5 @@ export function profilePrompt(name: ProfileName): readonly PromptText[] {
 }
 
 export function systemPromptDigest(composed: string): string {
-  return digest(composed);
+  return createHash("sha256").update(composed, "utf8").digest("hex");
 }
