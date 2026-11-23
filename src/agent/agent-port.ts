@@ -7,6 +7,7 @@ import type {
   InlineExtension,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
+import type { KnownSecrets } from "./known-secrets.ts";
 import type { CancellationContext, Context } from "../kernel/context.ts";
 import { SpanStatus } from "../tracking/contract.ts";
 import type { AgentSetup, ExecutionSetup } from "../worker/contract.ts";
@@ -17,10 +18,7 @@ import {
 } from "./agent-session.ts";
 import { isConfinedAgent } from "./catalog.ts";
 import { checkoutConfinement } from "./hooks/checkout-confinement.ts";
-import type {
-  KnownSecrets,
-  SensitiveTextRedaction,
-} from "./hooks/sensitive-text-redaction.ts";
+import type { SensitiveTextRedaction } from "./hooks/sensitive-text-redaction.ts";
 import { toolAllowlist } from "./hooks/tool-allowlist.ts";
 import { loadPi, type PiCodingAgent } from "./pi.ts";
 import { pinnedLayers } from "./pinned-layers.ts";

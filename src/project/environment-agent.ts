@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
+import { credentialSecrets } from "../agent/known-secrets.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import type { Environment, EnvironmentSource } from "../kernel/devcontainer.ts";
@@ -21,7 +22,6 @@ import { getAgentDeclaration } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import {
-  credentialSecrets,
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,

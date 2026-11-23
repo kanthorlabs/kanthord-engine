@@ -1,10 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { CredentialStore } from "@earendil-works/pi-ai";
 import type {
   InlineExtension,
   ToolCallEvent,
 } from "@earendil-works/pi-coding-agent";
-import { SecretShape } from "../../custody/contract.ts";
+import type { KnownSecrets } from "../known-secrets.ts";
 import { isObject, isString } from "../../kernel/values.ts";
 import {
   findKnownText,
@@ -25,8 +24,6 @@ import {
   SESSION_MARKER_PATTERN,
   sessionMarker,
 } from "../sensitive-text.ts";
-
-export type KnownSecrets = () => Promise<readonly string[]>;
 
 export interface RedactionCounts {
   redacted: Partial<Record<SensitiveRule, number>>;
@@ -122,28 +119,6 @@ const REASONING_FIELDS: ReadonlySet<string> = new Set([
   "reasoning_text",
 ]);
 const CONTENT_KEY = "content";
-
-export function credentialSecrets(
-  store: CredentialStore,
-  providerId: string,
-): KnownSecrets {
-  return async () => {
-    const stored = await store.read(providerId);
-    if (stored === undefined) return [];
-    if (stored.type === SecretShape.OAuth)
-      return [stored.access, stored.refresh];
-    return stored.key === undefined ? [] : [stored.key];
-  };
-}
-
-export function mergedSecrets(sources: readonly KnownSecrets[]): KnownSecrets {
-  const seen = new Set<string>();
-  return async () => {
-    for (const secrets of await Promise.all(sources.map((source) => source())))
-      for (const secret of secrets) seen.add(secret);
-    return [...seen];
-  };
-}
 
 interface TableEntry {
   index: number;

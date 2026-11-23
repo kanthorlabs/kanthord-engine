@@ -12,6 +12,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { KnownSecrets } from "./known-secrets.ts";
 import {
   CancellationContext,
   cancelled,
@@ -20,7 +21,6 @@ import {
 import { loadPi, piAgentDirectory, type PiCodingAgent } from "./pi.ts";
 import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
 import {
-  type KnownSecrets,
   sensitiveTextRedaction,
   type SensitiveTextRedaction,
 } from "./hooks/sensitive-text-redaction.ts";

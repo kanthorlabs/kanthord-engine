@@ -9,6 +9,10 @@ import type {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import {
+  credentialSecrets,
+  type KnownSecrets,
+} from "../agent/known-secrets.ts";
+import {
   background,
   CancellationContext,
   cancelled,
@@ -39,8 +43,6 @@ import {
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
-  credentialSecrets,
-  type KnownSecrets,
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,

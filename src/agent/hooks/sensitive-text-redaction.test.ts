@@ -16,6 +16,7 @@ import type {
   ToolCallEvent,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
+import type { KnownSecrets } from "../known-secrets.ts";
 import { background } from "../../kernel/context.ts";
 import {
   overrideEnvironment,
@@ -35,9 +36,6 @@ import { scriptedProvider } from "../test-support.ts";
 import { checkoutConfinement } from "./checkout-confinement.ts";
 import { toolApproval } from "./tool-approval.ts";
 import {
-  credentialSecrets,
-  type KnownSecrets,
-  mergedSecrets,
   REDACTION_TABLE_MAX,
   RestoreReason,
   sensitiveTextRedaction,
@@ -740,25 +738,6 @@ test("counts and text report each finding and a failure fails closed", async () 
   const closed = await end(failing);
   assert.deepEqual(closed!.content, [{ type: "text", text: markers(copy)[0] }]);
   assert.equal(redaction.counts().scan_failed, PAIR_OF_FINDINGS);
-});
-
-test("mergedSecrets returns the secrets of every source", async () => {
-  const merged = mergedSecrets([
-    async () => ["a", "b"],
-    async () => ["b", "c"],
-  ]);
-  assert.deepEqual(await merged(), ["a", "b", "c"]);
-  const store = new InMemoryCredentialStore();
-  await store.modify("anthropic", async () => ({ type: "api_key", key: "k1" }));
-  await store.modify("openai", async () => ({
-    type: "oauth",
-    access: "a1",
-    refresh: "r1",
-    expires: 1,
-  }));
-  assert.deepEqual(await credentialSecrets(store, "anthropic")(), ["k1"]);
-  assert.deepEqual(await credentialSecrets(store, "openai")(), ["a1", "r1"]);
-  assert.deepEqual(await credentialSecrets(store, "absent")(), []);
 });
 
 test("a later approval holds the unchanged marker of an operation input", async () => {
