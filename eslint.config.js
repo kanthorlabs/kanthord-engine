@@ -220,6 +220,8 @@ const noInlineObjectTypeFiles = [
   "src/agent/prompt-chain.ts",
   "src/agent/prompt-render.ts",
   "src/workbench/service.ts",
+  "src/agent/run-budget.ts",
+  "src/agent/run-outcome.ts",
 ];
 
 export const kanthordPlugin = {
@@ -588,7 +590,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider,provider-failure,login,sessions,refresh-watch}.ts",
+                      "{model-connector,platforms,provider,login,sessions,refresh-watch}.ts",
                   }),
                 },
                 {

@@ -38,7 +38,7 @@ import {
   type Platform,
   ReasoningLevel,
 } from "./platforms.ts";
-import { providerFailureOf } from "./provider-failure.ts";
+import { providerFailureOf } from "../scheduler/contract.ts";
 import {
   frozenStore,
   insideRefreshWindow,
