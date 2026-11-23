@@ -17,11 +17,10 @@ import {
 } from "../../agent/test-support.ts";
 import { sessionTools, ToolProcesses } from "../../agent/tool-table.ts";
 import { childEnvironment } from "../../agent/environment.ts";
-import { evidenceUploadTool } from "../../agent/capabilities/execution-evidence.ts";
-import { linkUpdateListTool } from "../../agent/capabilities/link-updates.ts";
+import { evidenceUploadTool } from "./capabilities/execution-evidence.ts";
+import { linkUpdateListTool } from "./capabilities/link-updates.ts";
 import { unusedHostTools } from "./test-support.ts";
-import { HOST_TOOL_PARAMETERS } from "../../agent/catalog.ts";
-import { HostTool } from "../contract.ts";
+import { HOST_TOOL_PARAMETERS, HostTool } from "../contract.ts";
 
 const MILLISECONDS_PER_SECOND = 1000;
 const MODEL_TIMEOUT_SECONDS = 30;

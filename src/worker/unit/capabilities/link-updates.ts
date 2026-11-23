@@ -3,14 +3,14 @@ import type {
   InlineExtension,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { canonicalJSON } from "../../kernel/json.ts";
+import { canonicalJSON } from "../../../kernel/json.ts";
 import {
   HostTool,
   type HostTools,
   LINK_UPDATE_LIMIT_DEFAULT,
+  LINK_UPDATE_LIST_PARAMETERS,
   linkUpdateReadSchema,
-} from "../../worker/contract.ts";
-import { LINK_UPDATE_LIST_PARAMETERS } from "../catalog.ts";
+} from "../../contract.ts";
 import { asToolError, type SessionHostTools } from "./host-tools.ts";
 
 type LinkUpdateListTool = ToolDefinition<typeof LINK_UPDATE_LIST_PARAMETERS>;

@@ -1252,7 +1252,7 @@
       "count": 1
     },
     "kanthord/no-inline-param-type": {
-      "count": 6
+      "count": 5
     }
   },
   "src/worker/execution-setup.ts": {

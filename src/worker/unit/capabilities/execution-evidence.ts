@@ -3,13 +3,13 @@ import type {
   InlineExtension,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { canonicalJSON } from "../../kernel/json.ts";
+import { canonicalJSON } from "../../../kernel/json.ts";
 import {
+  EVIDENCE_UPLOAD_PARAMETERS,
   HostTool,
   type HostTools,
   uploadResultSchema,
-} from "../../worker/contract.ts";
-import { EVIDENCE_UPLOAD_PARAMETERS } from "../catalog.ts";
+} from "../../contract.ts";
 import { asToolError, type SessionHostTools } from "./host-tools.ts";
 
 type EvidenceUploadTool = ToolDefinition<typeof EVIDENCE_UPLOAD_PARAMETERS>;

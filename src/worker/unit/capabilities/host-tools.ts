@@ -1,5 +1,5 @@
-import { Diagnostic } from "../../kernel/errors.ts";
-import type { HostTools } from "../../worker/contract.ts";
+import { Diagnostic } from "../../../kernel/errors.ts";
+import type { HostTools } from "../../contract.ts";
 
 export type SessionHostTools = (workspace: string) => HostTools;
 

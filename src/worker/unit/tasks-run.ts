@@ -7,10 +7,10 @@ import {
   type SessionModelFactory,
   type SessionPort,
   type SessionTrace,
-} from "../../agent/agent-port.ts";
-import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
-import type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
-import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+} from "./agent-port.ts";
+import { executionEvidence } from "./capabilities/execution-evidence.ts";
+import type { SessionHostTools } from "./capabilities/host-tools.ts";
+import { linkUpdates } from "./capabilities/link-updates.ts";
 import {
   PI_DIRECTORY_NAME,
   piAgentDirectory,

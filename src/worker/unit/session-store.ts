@@ -44,7 +44,7 @@ export function executionSessionRoot(dataDirectory: string): string {
   return join(sessionRootOf(dataDirectory), EXECUTION_DIRECTORY);
 }
 
-export { executionSessionDirectory } from "../../agent/session-directory.ts";
+export { executionSessionDirectory } from "./session-directory.ts";
 
 class Unreadable extends Error {}
 

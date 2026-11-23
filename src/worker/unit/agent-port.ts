@@ -7,26 +7,26 @@ import type {
   InlineExtension,
   ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
-import type { CancellationContext, Context } from "../kernel/context.ts";
-import { SpanStatus } from "../tracking/contract.ts";
-import type { AgentSetup, ExecutionSetup } from "../worker/contract.ts";
+import type { CancellationContext, Context } from "../../kernel/context.ts";
+import { SpanStatus } from "../../tracking/contract.ts";
+import type { AgentSetup, ExecutionSetup } from "../contract.ts";
 import {
   closeRuntime,
   openSessionRuntime,
   withDeadline,
-} from "./agent-session.ts";
-import { isConfinedAgent } from "./catalog.ts";
-import { checkoutConfinement } from "./hooks/checkout-confinement.ts";
+} from "../../agent/agent-session.ts";
+import { isConfinedAgent } from "../../agent/catalog.ts";
+import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
 import type {
   KnownSecrets,
   SensitiveTextRedaction,
-} from "./hooks/sensitive-text-redaction.ts";
-import { toolAllowlist } from "./hooks/tool-allowlist.ts";
-import { loadPi, type PiCodingAgent } from "./pi.ts";
-import { pinnedLayers } from "./pinned-layers.ts";
+} from "../../agent/hooks/sensitive-text-redaction.ts";
+import { toolAllowlist } from "../../agent/hooks/tool-allowlist.ts";
+import { loadPi, type PiCodingAgent } from "../../agent/pi.ts";
+import { pinnedLayers } from "../../agent/pinned-layers.ts";
+import { sessionTools, ToolProcesses } from "../../agent/tool-table.ts";
 import { type ReviewRoots, reviewRootsOf } from "./review-roots.ts";
 import { executionSessionDirectory } from "./session-directory.ts";
-import { sessionTools, ToolProcesses } from "./tool-table.ts";
 
 const WORKING_AGENT = 0;
 const SINGLE_CHECKOUT = 1;

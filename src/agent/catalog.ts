@@ -1,9 +1,4 @@
-import { type TSchema, Type } from "@earendil-works/pi-ai";
-import {
-  HostTool,
-  LINK_UPDATE_LIMIT_MAX,
-  LINK_UPDATE_LIMIT_MIN,
-} from "../worker/contract.ts";
+import { HostTool } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
   ENV_AGENT_PROMPT,
@@ -23,29 +18,6 @@ export interface AgentDeclaration {
 export interface ToolEntry {
   locations: readonly string[];
 }
-
-export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
-  { path: Type.String({ minLength: 1 }) },
-  { additionalProperties: false },
-);
-
-export const LINK_UPDATE_LIST_PARAMETERS = Type.Object(
-  {
-    cursor: Type.Optional(Type.String({ minLength: 1 })),
-    limit: Type.Optional(
-      Type.Integer({
-        minimum: LINK_UPDATE_LIMIT_MIN,
-        maximum: LINK_UPDATE_LIMIT_MAX,
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
-
-export const HOST_TOOL_PARAMETERS: Readonly<Record<HostTool, TSchema>> = {
-  [HostTool.EvidenceUpload]: EVIDENCE_UPLOAD_PARAMETERS,
-  [HostTool.LinkUpdateList]: LINK_UPDATE_LIST_PARAMETERS,
-};
 
 export const BuiltinTool = {
   Read: "read",

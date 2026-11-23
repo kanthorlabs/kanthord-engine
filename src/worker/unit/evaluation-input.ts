@@ -13,7 +13,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import { join, relative } from "node:path";
-import { evidencePlacementOf } from "../../agent/review-roots.ts";
+import { evidencePlacementOf } from "./review-roots.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import {
   CancellationContext,
