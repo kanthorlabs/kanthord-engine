@@ -19,7 +19,9 @@ export interface ParsedModelForm {
 
 export function checkTokenRefused(token: string | undefined): void {
   if (token !== undefined)
-    throw new Diagnostic(TOKEN, "run agent: --token is not accepted.", {});
+    throw new Diagnostic(TOKEN, "run agent: --token is not accepted.", {
+      fields: [["option", "--token"]],
+    });
 }
 
 export function parseModelForm(value: string): ParsedModelForm {

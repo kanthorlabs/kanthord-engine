@@ -52,7 +52,11 @@ describe("checkTokenRefused", () => {
   });
 
   it("refuses any token value", () => {
-    assertDiagnostic(() => checkTokenRefused("some-token-value"), TOKEN_CODE);
+    const error = assertDiagnostic(
+      () => checkTokenRefused("some-token-value"),
+      TOKEN_CODE,
+    );
+    assert.ok(error.fields.some(([name]) => name === FIELD_OPTION));
   });
 
   it("refuses an empty token string", () => {
