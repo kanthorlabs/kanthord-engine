@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import {
+  contentText,
   fauxAssistantMessage,
   type FauxResponseStep,
+  fauxToolCall,
   InMemoryCredentialStore,
 } from "@earendil-works/pi-ai";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  InlineExtension,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
   overrideEnvironment,
@@ -15,11 +21,16 @@ import {
   temporary,
 } from "../kernel/test-support.ts";
 import { loadPi } from "./pi.ts";
-import { scriptedProvider } from "./test-support.ts";
-import type { KnownSecrets } from "./redaction.ts";
+import { scriptedProvider, survivingProcesses } from "./test-support.ts";
+import { getProfile } from "./catalog.ts";
+import { SensitiveRule } from "./sensitive-text.ts";
+import { createRedaction, type KnownSecrets } from "./redaction.ts";
 import {
   AgentOpenError,
   AgentOpenKind,
+  BudgetLimit,
+  contractGuards,
+  InternalFailure,
   openAgent,
   RunEnd,
   SessionKind,
@@ -37,9 +48,18 @@ const CODE_TOOL_UNDECLARED = "agent.tool_undeclared";
 const CODE_LEVEL_UNSUPPORTED = "agent.level_unsupported";
 const CODE_OPEN_FAILED = "agent.open_failed";
 const MSG_ABORTED = "aborted";
+const MARKER_PREFIX = "<redacted:";
+const PID_FILE = "child.pid";
+const CHILD_SECONDS = 30;
+const POLL_MS = 10;
+const NO_CALLS = 0;
+const WALL_MS = 500;
+const SINGLE = 1;
+const TOOL_RESULT_ROLE = "toolResult";
 
 interface InputOptions {
   script?: FauxResponseStep[];
+  credential?: boolean;
   signal?: AbortSignal;
   knownSecrets?: KnownSecrets;
   consumerTools?: ToolDefinition[];
@@ -61,10 +81,11 @@ async function makeInput(
   const pi = await loadPi();
   const scripted = scriptedProvider(options.script ?? []);
   const credentials = new InMemoryCredentialStore();
-  await credentials.modify(PROVIDER_ID, async () => ({
-    type: "api_key",
-    key: SCRIPTED_KEY,
-  }));
+  if (options.credential !== false)
+    await credentials.modify(PROVIDER_ID, async () => ({
+      type: "api_key",
+      key: SCRIPTED_KEY,
+    }));
   const runtime = await pi.ModelRuntime.create({
     credentials,
     modelsPath: null,
@@ -112,16 +133,15 @@ async function openAndRun(
   return { run, scripted };
 }
 
-test("an undeclared consumer tool throws agent.tool_undeclared", async (t) => {
-  const { agentInput } = await makeInput(t);
-  agentInput.consumerTools = [
-    { name: "undeclared_tool" } as unknown as ToolDefinition,
-  ];
+test("an undeclared consumer tool throws agent.tool_undeclared, and the AgentOpenError message holds K zero times", async (t) => {
+  const { agentInput } = await makeInput(t, { knownSecrets: WITH_SECRET });
+  agentInput.consumerTools = [{ name: K } as unknown as ToolDefinition];
   await assert.rejects(
     () => openAgent(agentInput),
     (err: unknown) => {
       assert.ok(err instanceof AgentOpenError);
       assert.equal(err.code, CODE_TOOL_UNDECLARED);
+      assert.ok(err.message);
       assert.ok(!err.message.includes(K));
       return true;
     },
@@ -142,32 +162,167 @@ test("an unsupported thinking level throws agent.level_unsupported", async (t) =
   );
 });
 
-test("an abort during open throws agent.open_failed with the message aborted, and the message holds K zero times", async (t) => {
+test("an abort during open throws agent.open_failed with the message aborted, and leaves no session file", async (t) => {
   const controller = new AbortController();
   controller.abort();
   const { agentInput } = await makeInput(t, { signal: controller.signal });
+  const path = join(agentInput.workspace.cwd, "..", "session.jsonl");
+  agentInput.session = { kind: SessionKind.NewFile, path };
   await assert.rejects(
     () => openAgent(agentInput),
     (err: unknown) => {
       assert.ok(err instanceof AgentOpenError);
       assert.equal(err.code, CODE_OPEN_FAILED);
       assert.equal(err.message, MSG_ABORTED);
-      assert.ok(!err.message.includes(K));
       return true;
     },
   );
+  assert.equal(existsSync(path), false);
 });
 
-test("TurnEnd.text holds K zero times when the model returns K", async (t) => {
+test("TurnEnd.text holds K zero times when the model returns K, and the run gives one rotate warning and its summary", async (t) => {
   const { run } = await openAndRun(t, {
-    script: [fauxAssistantMessage(K)],
+    script: [fauxAssistantMessage(`The key is ${K}`)],
     knownSecrets: WITH_SECRET,
   });
   const result = await run.send("hello", { work: null });
   assert.equal(result.end, RunEnd.Completed);
   assert.ok(result.text !== null);
   assert.ok(!result.text!.includes(K));
+  assert.deepEqual(result.warnings, [
+    { rule: SensitiveRule.LlmCredential, count: SINGLE },
+  ]);
+  const summary = run.redactionSummary();
+  assert.equal(summary.output_found_count, SINGLE);
+  assert.deepEqual(summary.output_found_rules, [SensitiveRule.LlmCredential]);
   await run.close();
+});
+
+test("TurnEnd.text holds K zero times when K is in a tool result that the model repeats", async (t) => {
+  const { agentInput, scripted } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage(fauxToolCall("read", { path: "key.txt" }), {
+        stopReason: "toolUse",
+      }),
+      (context) =>
+        fauxAssistantMessage(
+          context.messages
+            .filter((message) => message.role === TOOL_RESULT_ROLE)
+            .map((message) => contentText(message.content))
+            .join("\n"),
+        ),
+    ],
+    knownSecrets: WITH_SECRET,
+  });
+  writeFileSync(join(agentInput.workspace.cwd, "key.txt"), `key=${K}\n`);
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("read key.txt", { work: null });
+  assert.equal(result.end, RunEnd.Completed);
+  assert.ok(result.text?.includes("key="));
+  assert.ok(!result.text!.includes(K));
+  assert.ok(!JSON.stringify(scripted.calls).includes(K));
+});
+
+test("the open sends no request, and a declared consumer tool with no implementation is absent from the request", async (t) => {
+  const { run, scripted } = await openAndRun(t, {
+    script: [fauxAssistantMessage("done")],
+  });
+  assert.equal(scripted.calls.length, NO_CALLS);
+  await run.send("hello", { work: null });
+  const [tools] = scripted.tools;
+  assert.ok(tools);
+  assert.ok(tools.includes("bash"));
+  for (const name of getProfile("swe@1")!.tools.host)
+    assert.ok(!tools.includes(name), name);
+});
+
+test("the guard order is homeRelativeCwd, toolAllowlist, markerRestore, checkoutConfinement, pinnedLayersHook, inputRedaction, outputFinding", async (t) => {
+  const { agentInput } = await makeInput(t);
+  const pinHook: InlineExtension = (pi) => {
+    pi.on("context", () => undefined);
+  };
+  const events = (profile: "swe@1" | "re@1") =>
+    contractGuards(
+      { ...agentInput, profile },
+      getProfile(profile)!,
+      pinHook,
+    )(createRedaction(NO_SECRETS, "guard-order")).map((guard) => {
+      const names: string[] = [];
+      (guard as (pi: ExtensionAPI) => void)({
+        on: (name: string) => names.push(name),
+      } as unknown as ExtensionAPI);
+      return names.sort();
+    });
+  const home = ["before_agent_start"];
+  const allowlist = ["tool_call"];
+  const restore = ["agent_end", "tool_call"];
+  const pins = ["context"];
+  const input = ["context", "message_end", "turn_start"];
+  const output = ["message_end"];
+  assert.deepEqual(events("swe@1"), [
+    home,
+    allowlist,
+    restore,
+    pins,
+    input,
+    output,
+  ]);
+  assert.deepEqual(events("re@1"), [
+    home,
+    allowlist,
+    restore,
+    ["tool_call"],
+    pins,
+    input,
+    output,
+  ]);
+});
+
+test("an extension handler error ends the run with the failure internal, and its reason holds K zero times", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [fauxAssistantMessage("done")],
+    knownSecrets: WITH_SECRET,
+  });
+  agentInput.hostHome = {
+    [Symbol.toPrimitive]: () => {
+      throw new Error(`home ${K}`);
+    },
+  } as unknown as string;
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.Failed);
+  assert.equal(result.failure?.kind, InternalFailure.Internal);
+  assert.ok(result.failure.reason.includes("home"));
+  assert.ok(!result.failure.reason.includes(K));
+});
+
+test("a thrown session.prompt ends the run with the failure internal", async (t) => {
+  const { run } = await openAndRun(t, {
+    script: [fauxAssistantMessage("done")],
+    credential: false,
+  });
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.Failed);
+  assert.equal(result.failure?.kind, InternalFailure.Internal);
+});
+
+test("no runtime module writes to process.stdout or process.stderr", async (t) => {
+  const stdout = t.mock.method(process.stdout, "write");
+  const stderr = t.mock.method(process.stderr, "write");
+  const { run } = await openAndRun(t, {
+    script: [fauxAssistantMessage(`The key is ${K}`)],
+    knownSecrets: WITH_SECRET,
+  });
+  await run.send("hello", { work: null });
+  await run.close();
+  assert.equal(stdout.mock.callCount(), NO_CALLS);
+  assert.equal(stderr.mock.callCount(), NO_CALLS);
 });
 
 test("RunFailure.reason holds K zero times when the provider returns an error containing K", async (t) => {
@@ -194,29 +349,45 @@ test("send redacts work before setting the work pin, and work null clears the pi
   });
 
   await run.send("hello", { work: K });
-  assert.ok(scripted.calls.length);
-  assert.ok(
-    !scripted.calls.some((call) => JSON.stringify(call.messages).includes(K)),
-    "K must not appear in model calls after work redaction",
-  );
-
   await run.send("world", { work: null });
+  const [pinned, cleared] = scripted.calls;
+  assert.ok(pinned && cleared);
+  assert.ok(!JSON.stringify(scripted.calls).includes(K));
+  assert.ok(JSON.stringify(pinned.messages).includes(MARKER_PREFIX));
+  assert.ok(!JSON.stringify(cleared.messages).includes(MARKER_PREFIX));
   await run.close();
 });
 
-test("forceStop returns at once with the current totals", async (t) => {
-  const { run } = await openAndRun(t, {
-    script: [fauxAssistantMessage("done")],
+test("forceStop returns at once with the totals so far and kills each live child process, and close after forceStop does nothing", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage(
+        fauxToolCall("bash", {
+          command: `sleep ${CHILD_SECONDS} & echo $! > ${PID_FILE}; wait`,
+        }),
+        { stopReason: "toolUse" },
+      ),
+    ],
   });
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const pidFile = join(agentInput.workspace.cwd, PID_FILE);
+  const sending = run.send("hello", { work: null });
+  while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim())
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
 
-  const sendPromise = run.send("hello", { work: null });
-  const forceResult = run.forceStop();
+  const forced = run.forceStop();
 
-  assert.ok(forceResult);
-  assert.equal(forceResult.end, RunEnd.Stopped);
-
-  await sendPromise;
+  assert.equal(forced.end, RunEnd.Stopped);
+  assert.equal(forced.totals.modelCalls, SINGLE);
+  assert.equal(forced.totals.toolCalls, SINGLE);
+  assert.deepEqual(await sending, forced);
+  assert.deepEqual(await survivingProcesses([pid]), []);
   await run.close();
+  assert.deepEqual(run.forceStop().totals, forced.totals);
 });
 
 test("an abort of the input signal during send gives RunEnd.Stopped", async (t) => {
@@ -237,4 +408,27 @@ test("an abort of the input signal during send gives RunEnd.Stopped", async (t) 
 
   assert.equal(result.end, RunEnd.Stopped);
   await run.close();
+});
+
+test("the wall timer aborts the session at the deadline, and the end is budget_end with wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+  const after = await run.send("again", { work: null });
+  assert.equal(after.end, RunEnd.BudgetEnd);
 });
