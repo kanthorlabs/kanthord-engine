@@ -1,6 +1,7 @@
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
+import type { ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { loadPi } from "../../agent/pi.ts";
 import { Diagnostic } from "../../kernel/errors.ts";
 
 const MODEL_UNKNOWN = "cli.run.agent.model_unknown";
@@ -21,47 +22,38 @@ export interface ResolvedModel {
   reasoning_effort: string;
 }
 
-function fuzzyMatch(
-  models: readonly Model<Api>[],
-  provider: string,
-  model: string,
-): Model<Api> | undefined {
-  const lp = provider.toLowerCase();
-  const lm = model.toLowerCase();
-  return models.find(
-    (m) =>
-      m.provider.toLowerCase() === lp &&
-      (m.id.startsWith(model) || m.id.toLowerCase() === lm),
-  );
+function refuse(code: string, message: string): never {
+  throw new Diagnostic(code, message, { fields: OPTION_FIELD });
 }
 
-export function resolveAgentModel(
+export async function resolveAgentModel(
   form: AgentModelForm,
   modelRuntime: ModelRuntime,
-): ResolvedModel {
+): Promise<ResolvedModel> {
   const { provider, model, level } = form;
-  const exact = modelRuntime.getModel(provider, model);
-
-  if (!exact) {
-    const near = fuzzyMatch(modelRuntime.getModels(), provider, model);
-    if (near)
-      throw new Diagnostic(
-        MODEL_INEXACT,
-        "run agent: the model selection does not match exactly.",
-        { fields: OPTION_FIELD },
-      );
-    throw new Diagnostic(MODEL_UNKNOWN, "run agent: the model is unknown.", {
-      fields: OPTION_FIELD,
-    });
-  }
-
-  const supportedLevels = getSupportedThinkingLevels(exact);
-  if (!supportedLevels.includes(level as ModelThinkingLevel))
-    throw new Diagnostic(
+  const { resolveCliModel } = await loadPi();
+  const result = resolveCliModel({
+    cliModel: `${provider}/${model}:${level}`,
+    modelRuntime,
+  });
+  const found = result.model;
+  if (result.error !== undefined || found === undefined)
+    refuse(MODEL_UNKNOWN, "run agent: the model is unknown.");
+  if (modelRuntime.getModel(found.provider, found.id) !== found)
+    refuse(MODEL_UNKNOWN, "run agent: the model is unknown.");
+  if (
+    found.provider !== provider ||
+    found.id !== model ||
+    result.thinkingLevel !== level
+  )
+    refuse(
+      MODEL_INEXACT,
+      "run agent: the model selection does not match exactly.",
+    );
+  if (!getSupportedThinkingLevels(found).includes(level as ModelThinkingLevel))
+    refuse(
       LEVEL_UNSUPPORTED,
       "run agent: the reasoning level is not supported by this model.",
-      { fields: OPTION_FIELD },
     );
-
   return { provider, model, reasoning_effort: level };
 }
