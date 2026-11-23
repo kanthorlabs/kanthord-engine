@@ -1,7 +1,4 @@
-import assert from "node:assert/strict";
 import { z } from "zod";
-import { findEnvKeys } from "@earendil-works/pi-ai/compat";
-import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { KnownProvider } from "@earendil-works/pi-ai";
 import { ANTHROPIC_SUBSCRIPTION_PLATFORM } from "../kernel/pi-provider.ts";
 import { HttpMethod, HttpStatus } from "../kernel/http.ts";
@@ -751,30 +748,3 @@ export const agentOperations = {
       "Clear the cooldown of one credential copy so that the next claim can select its chain entries again. The holder defaults to server.",
   },
 } as const satisfies Record<string, Operation>;
-
-export function childEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  assert.ok(env);
-  const output = { ...env };
-  const providerEnv = Object.fromEntries(
-    Object.entries(env).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
-    ),
-  );
-  for (const provider of getBuiltinProviders())
-    for (const name of findEnvKeys(provider, providerEnv) ?? [])
-      delete output[name];
-  for (const name of [
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_OAUTH_TOKEN",
-    "SSH_AUTH_SOCK",
-    "SSH_AGENT_PID",
-    "KANTHORD_WORKER_CONFIG",
-    "KANTHORD_MACHINE_CONFIG",
-    "KANTHORD_TOKEN",
-    "KANTHORD_ENDPOINT",
-  ])
-    delete output[name];
-  assert.notEqual(output, env);
-  return output;
-}

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { childEnvironment } from "../../agent/contract.ts";
+import { childEnvironment } from "../../agent/environment.ts";
 
 const AWS_DIRECTORY = ".aws";
 const AWS_CONFIG = "config";

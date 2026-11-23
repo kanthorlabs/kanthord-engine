@@ -2,17 +2,11 @@ import { join } from "node:path";
 import { lstatSync } from "node:fs";
 import { userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
-import { directories } from "../../kernel/xdg.ts";
 
-const PI_DIRECTORY_NAME = "pi";
 const PI_AUTH_FILE = "auth.json";
 const AUTH_IN_PI_DIRECTORY = "cli.run.agent.auth_in_pi_directory";
 const PI_DIRECTORY_INVALID = "cli.run.agent.pi_directory_invalid";
 const TOOL_INSTALL_FAILED = "cli.run.agent.tool_install_failed";
-
-export function piDirectoryOf(env: NodeJS.ProcessEnv): string {
-  return join(directories(env).state, PI_DIRECTORY_NAME);
-}
 
 export function checkPiDirectory(piDir: string): void {
   const fields = [["path", piDir]] as [string, string][];
