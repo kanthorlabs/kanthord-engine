@@ -8,7 +8,7 @@ import { HealthScope, type ResourceEntry } from "../kernel/health.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { OperationRegistry } from "../kernel/operation.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration } from "./declarations.ts";
 import type { AgentConfig } from "./config.ts";
 import {
   chainConfigurations,

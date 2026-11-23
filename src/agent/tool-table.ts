@@ -4,7 +4,7 @@ import type {
   BashToolOptions,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { BuiltinTool, getAgentDeclaration } from "./catalog.ts";
+import { BuiltinTool, getProfile } from "./catalog.ts";
 import type { PiCodingAgent } from "./pi.ts";
 import { childEnvironment } from "./environment.ts";
 import {
@@ -80,12 +80,12 @@ export function sessionTools(
   agentName: string,
   input: SessionToolsInput,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
-  const agent = getAgentDeclaration(agentName);
-  assert.ok(agent);
+  const profile = getProfile(agentName);
+  assert.ok(profile);
   assert.ok(input.cwd);
   const { cwd, budget, env, processes } = input;
-  const allowlist: string[] = [...agent.tools, ...agent.host_tools];
-  if (!agent.tools.includes(BuiltinTool.Bash))
+  const allowlist: string[] = [...profile.tools.builtin, ...profile.tools.host];
+  if (!profile.tools.builtin.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
   const options = (
     toolCallId: string,

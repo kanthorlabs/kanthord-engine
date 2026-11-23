@@ -18,7 +18,7 @@ import { FacilityError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { getProfile } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import {
@@ -207,8 +207,8 @@ export class EnvironmentAgent {
     lifetime: CancellationContext,
   ): Promise<OpenedSession> {
     const { effective } = view;
-    const declaration = getAgentDeclaration(ENV_AGENT_NAME);
-    assert.ok(declaration);
+    const profile = getProfile(ENV_AGENT_NAME);
+    assert.ok(profile);
     const credentials = this.dependencies.serverAgentCredentials({
       session_id: sessionId,
       platform: effective.provider,
@@ -295,7 +295,7 @@ export class EnvironmentAgent {
         templates,
       ),
       allowlist: [
-        ...declaration.tools,
+        ...profile.tools.builtin,
         ...customTools.map((tool) => tool.name),
       ],
       customTools,

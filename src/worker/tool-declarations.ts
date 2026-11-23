@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
+import { BuiltinTool, getProfile } from "../agent/catalog.ts";
 import { ToolSource } from "../agent/contract.ts";
 import { HOST_TOOL_PARAMETERS } from "./contract.ts";
 import { loadPi, piAgentDirectory } from "../agent/pi.ts";
@@ -11,8 +11,8 @@ export async function toolDeclarations(agentName: string): Promise<
     input_schema: Record<string, unknown>;
   }[]
 > {
-  const agent = getAgentDeclaration(agentName);
-  assert.ok(agent, "Tool declarations require a known agent");
+  const profile = getProfile(agentName);
+  assert.ok(profile, "Tool declarations require a known agent");
   const pi = await loadPi();
   const factories = {
     [BuiltinTool.Read]: pi.createReadToolDefinition,
@@ -23,8 +23,10 @@ export async function toolDeclarations(agentName: string): Promise<
     [BuiltinTool.Ls]: pi.createLsToolDefinition,
     [BuiltinTool.Bash]: pi.createBashToolDefinition,
   };
-  assert.ok(agent.tools.every((name) => Object.hasOwn(factories, name)));
-  const builtin = agent.tools.map((name) => {
+  assert.ok(
+    profile.tools.builtin.every((name) => Object.hasOwn(factories, name)),
+  );
+  const builtin = profile.tools.builtin.map((name) => {
     const definition = factories[name](piAgentDirectory());
     return {
       name: definition.name,
@@ -37,7 +39,7 @@ export async function toolDeclarations(agentName: string): Promise<
   });
   return [
     ...builtin,
-    ...agent.host_tools.map((name) => ({
+    ...profile.tools.host.map((name) => ({
       name,
       source: ToolSource.Host,
       input_schema: JSON.parse(

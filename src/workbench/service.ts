@@ -36,7 +36,7 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import {
   getAgentDeclaration,
   WORKBENCH_AGENT_NAMES,
-} from "../agent/catalog.ts";
+} from "../agent/declarations.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
