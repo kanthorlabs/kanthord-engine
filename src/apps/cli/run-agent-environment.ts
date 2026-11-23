@@ -1,0 +1,90 @@
+import { join } from "node:path";
+import { childEnvironment } from "../../agent/environment.ts";
+
+const AWS_DIRECTORY = ".aws";
+const AWS_CONFIG = "config";
+const AWS_CREDENTIALS = "credentials";
+
+export const AMBIENT_CREDENTIAL_NAMES: readonly string[] = [
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "AWS_ROLE_ARN",
+  "AWS_ROLE_SESSION_NAME",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+  "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+  "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+  "AWS_SDK_LOAD_CONFIG",
+  "GOOGLE_APPLICATION_CREDENTIALS",
+  "GOOGLE_API_KEY",
+  "GOOGLE_CLOUD_PROJECT",
+  "GCLOUD_PROJECT",
+  "CLOUDSDK_CONFIG",
+  "AZURE_CLIENT_ID",
+  "AZURE_CLIENT_SECRET",
+  "AZURE_TENANT_ID",
+  "AZURE_CLIENT_CERTIFICATE_PATH",
+  "AZURE_CLIENT_CERTIFICATE_PASSWORD",
+  "AZURE_FEDERATED_TOKEN_FILE",
+  "AZURE_USERNAME",
+  "AZURE_PASSWORD",
+  "AZURE_OPENAI_API_KEY",
+  "XDG_CONFIG_HOME",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+  "AWS_ENDPOINT_URL",
+  "AWS_ENDPOINT_URL_BEDROCK",
+  "AWS_ENDPOINT_URL_BEDROCK_RUNTIME",
+  "AWS_BEDROCK_SKIP_AUTH",
+  "AZURE_OPENAI_BASE_URL",
+  "AZURE_OPENAI_RESOURCE_NAME",
+  "AZURE_OPENAI_API_VERSION",
+  "AZURE_OPENAI_DEPLOYMENT_NAME_MAP",
+  "GOOGLE_CLOUD_LOCATION",
+  "CLOUDFLARE_ACCOUNT_ID",
+  "CLOUDFLARE_GATEWAY_ID",
+  "ANTHROPIC_FEDERATION_RULE_ID",
+  "ANTHROPIC_ORGANIZATION_ID",
+  "ANTHROPIC_SERVICE_ACCOUNT_ID",
+  "ANTHROPIC_IDENTITY_TOKEN_FILE",
+  "ANTHROPIC_WORKSPACE_ID",
+];
+
+export const PROXY_NAMES: readonly string[] = [
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+];
+
+export function withoutAmbientCredentials(
+  env: NodeJS.ProcessEnv,
+  home: string,
+  tmpdir: string,
+): void {
+  const stripped = childEnvironment(env);
+  for (const name of Object.keys(env))
+    if (
+      !(name in stripped) ||
+      AMBIENT_CREDENTIAL_NAMES.includes(name) ||
+      PROXY_NAMES.includes(name)
+    )
+      delete env[name];
+  Object.assign(env, {
+    HOME: home,
+    TMPDIR: tmpdir,
+    AWS_CONFIG_FILE: join(home, AWS_DIRECTORY, AWS_CONFIG),
+    AWS_SHARED_CREDENTIALS_FILE: join(home, AWS_DIRECTORY, AWS_CREDENTIALS),
+    AWS_EC2_METADATA_DISABLED: "true",
+    METADATA_SERVER_DETECTION: "none",
+  });
+}
