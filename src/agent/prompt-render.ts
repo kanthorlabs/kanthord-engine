@@ -12,6 +12,7 @@ import {
 } from "./contract.ts";
 import { digest } from "./prompt-composer.ts";
 import { renderTemplate } from "./prompt-templates.ts";
+import { composeSystemPrompt, type PromptText } from "./prompt-chain.ts";
 
 export const PromptConsumer = {
   Workbench: "workbench",
@@ -41,7 +42,6 @@ export function framing(
   return renderTemplate(templates, framingTemplate(consumer), {});
 }
 
-const PART_SEPARATOR = "\n\n";
 const NO_CHARACTERS = 0;
 
 const PART_LAYERS: Record<PromptPart, PromptLayer | null> = {
@@ -96,27 +96,31 @@ export function promptPart(
   };
 }
 
+interface InstructionFileResolved {
+  state: typeof PromptPartState.Resolved;
+  path: string;
+  commit: string;
+  text: string;
+}
+
+interface InstructionFileUnresolved {
+  state: typeof PromptPartState.Invalid | typeof PromptPartState.Unreachable;
+  path: string;
+  commit: string | null;
+}
+
 export type InstructionFilePart =
-  | {
-      state: typeof PromptPartState.Resolved;
-      path: string;
-      commit: string;
-      text: string;
-    }
-  | {
-      state:
-        typeof PromptPartState.Invalid | typeof PromptPartState.Unreachable;
-      path: string;
-      commit: string | null;
-    };
+  InstructionFileResolved | InstructionFileUnresolved;
+
+interface RepositoryPromptsContent {
+  repository?: string;
+  agents?: Partial<Record<AgentName, string>>;
+}
 
 export interface RepositoryPrompts {
   binding_id: string;
   name: string;
-  prompts: {
-    repository?: string;
-    agents?: Partial<Record<AgentName, string>>;
-  };
+  prompts: RepositoryPromptsContent;
 }
 
 function databasePart(
@@ -201,26 +205,35 @@ export function bindingParts(
   });
 }
 
-function partText(part: PromptPartAnswer): string {
+function toPromptText(part: PromptPartAnswer): PromptText {
   assert.ok(part.state === PromptPartState.Resolved && part.text !== null);
-  return part.heading === null
-    ? part.text
-    : `${part.heading}${PART_SEPARATOR}${part.text}`;
+  return { heading: part.heading, text: part.text };
 }
 
 export function finalPrompt(parts: readonly PromptPartAnswer[]): string | null {
   assert.equal(parts.at(-1)?.part, PromptPart.Framing);
-  return parts.every(({ state }) => state === PromptPartState.Resolved)
-    ? parts.map(partText).join(PART_SEPARATOR)
-    : null;
+  if (!parts.every(({ state }) => state === PromptPartState.Resolved))
+    return null;
+  return composeSystemPrompt(parts.map(toPromptText), []);
 }
 
-export function systemPrompt(
-  parts: readonly PromptPartAnswer[],
-  consumer: PromptConsumer,
+export function framingPartFromTemplates(
   templates: PromptTemplates,
-): string {
-  return [...parts.map(partText), framing(templates, consumer)].join(
-    PART_SEPARATOR,
+  consumer: PromptConsumer,
+): PromptPartAnswer {
+  const name = framingTemplate(consumer);
+  const text = framing(templates, consumer);
+  return promptPart(
+    {
+      part: PromptPart.Framing,
+      name,
+      origin: PromptOrigin.Binary,
+      path: null,
+      binding_id: null,
+      commit: null,
+      digest: digest(text),
+    },
+    PromptPartState.Resolved,
+    text,
   );
 }

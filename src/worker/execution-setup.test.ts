@@ -33,10 +33,10 @@ import { getAgentDeclaration } from "../agent/declarations.ts";
 import { resolveAgentPrompt } from "../agent/prompt-files.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import {
+  finalPrompt,
   framing,
   PromptConsumer,
   promptPart,
-  systemPrompt,
 } from "../agent/prompt-render.ts";
 import {
   anthropicSetup,
@@ -288,7 +288,7 @@ test("setup answers the system and agent prompt after its single snapshot and su
   const [answered] = answer.agents;
   assert.ok(answered);
   assert.deepEqual(answered.prompt, {
-    final: systemPrompt(promptParts, PromptConsumer.Worker, SHIPPED_TEMPLATES),
+    final: finalPrompt([...promptParts, shippedFraming()])!,
     sources: [...promptParts, shippedFraming()].map(promptReference),
   });
   assert.ok(

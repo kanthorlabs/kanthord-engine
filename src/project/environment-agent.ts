@@ -36,8 +36,9 @@ import type {
 } from "../agent/contract.ts";
 import {
   bindingParts,
+  finalPrompt,
+  framingPartFromTemplates,
   PromptConsumer,
-  systemPrompt,
 } from "../agent/prompt-render.ts";
 import { pinnedInstructionFiles } from "../agent/instruction-files.ts";
 import {
@@ -269,6 +270,13 @@ export class EnvironmentAgent {
             this.dependencies.instructionFileOf,
             input.context,
           );
+    const envPromptParts = [
+      ...parts,
+      ...bindingParts(repository ? [repository] : [], ENV_AGENT_NAME, files),
+      framingPartFromTemplates(templates, PromptConsumer.Worker),
+    ];
+    const envPrompt = finalPrompt(envPromptParts);
+    assert.ok(envPrompt !== null);
     let ended = false;
     const customTools = input.tools({
       session_id: sessionId,
@@ -282,18 +290,7 @@ export class EnvironmentAgent {
       modelRuntime: runtime,
       model,
       thinkingLevel: effective.reasoning_effort as ReasoningLevel,
-      systemPrompt: systemPrompt(
-        [
-          ...parts,
-          ...bindingParts(
-            repository ? [repository] : [],
-            ENV_AGENT_NAME,
-            files,
-          ),
-        ],
-        PromptConsumer.Worker,
-        templates,
-      ),
+      systemPrompt: envPrompt,
       allowlist: [...profile.tools.builtin, ...profile.tools.environment],
       customTools,
       hostHome: this.dependencies.hostHome,
