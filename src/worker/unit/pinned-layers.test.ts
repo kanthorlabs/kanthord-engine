@@ -10,7 +10,6 @@ import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { background } from "../../kernel/context.ts";
 import { stopAfter, temporary } from "../../kernel/test-support.ts";
-import { SWE_AGENT_PROMPT } from "../../agent/prompt-assets.ts";
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import { framing, PromptConsumer } from "../../agent/prompt-render.ts";
 import { openSession } from "../../agent/agent-session.ts";
@@ -29,7 +28,7 @@ const FAKE_KEY = ["AKIA", "KANTHORDCANARY01"].join("");
 function composedPrompt(first: string, second: string) {
   return {
     systemPrompt: [
-      SWE_AGENT_PROMPT,
+      "AGENT_MARKER",
       first,
       second,
       framing(SHIPPED_TEMPLATES, PromptConsumer.Worker),
@@ -116,7 +115,7 @@ test("pinned prompt layers survive compaction and all model calls retain their o
         .map((entry) => contentText(entry.content)),
       [work.text],
     );
-    assert.ok(call.systemPrompt?.includes(SWE_AGENT_PROMPT));
+    assert.match(call.systemPrompt ?? "", /AGENT_MARKER/);
     assert.equal(call.apiKey, expectedKey);
   }
 });

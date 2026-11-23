@@ -8,96 +8,99 @@ import {
   SWE_ROLE_PROMPT,
 } from "./prompt-assets.ts";
 
+const FORBIDDEN_ROLE_WORDS = /\b(worker|node branch|gate)\b/i;
+const LAST_RE_JUDGEMENT_ITEM = 7;
+const EXECUTION_HEADING = "## Execution";
+const JUDGEMENT_HEADING = "## Judgement";
+
 function sectionsOf(text: string): Map<string, string> {
   const sections = new Map<string, string>();
-  const parts = text.split(/^(## .+)$/m);
-  for (let i = 1; i < parts.length; i += 2) {
-    const heading = parts[i]!.trim();
-    const body = (parts[i + 1] ?? "").replace(/^\n+/, "").replace(/\n+$/, "");
-    sections.set(heading, body);
+  for (const part of text.split(/^(?=## )/m)) {
+    sections.set(part.slice(0, part.indexOf("\n")), part);
   }
   return sections;
 }
 
-function sharedCodingSections(agentText: string): string {
-  const sections = sectionsOf(agentText);
-  const principles = sections.get("## Code principles") ?? "";
-  const code = sections.get("## Code") ?? "";
-  const tests = sections.get("## Tests") ?? "";
-  return [
-    `## Code principles\n\n${principles}`,
-    `## Code\n\n${code}`,
-    `## Tests\n\n${tests}`,
-  ].join("\n\n");
+function joinSections(
+  text: string,
+  headings: readonly string[],
+  edit: (heading: string, section: string) => string = (_, section) => section,
+): string {
+  const sections = sectionsOf(text);
+  const parts = headings.map((heading) => {
+    const section = sections.get(heading);
+    assert.ok(section, `missing section ${heading}`);
+    return edit(heading, section);
+  });
+  return parts.join("").replace(/\n+$/, "\n");
 }
 
+function replaceOnce(text: string, from: string, to: string): string {
+  assert.ok(text.includes(from), `missing protocol text ${from}`);
+  return text.replace(from, to);
+}
+
+function withoutProtocolText(heading: string, section: string): string {
+  if (heading !== EXECUTION_HEADING) return section;
+  const withoutVerifications = replaceOnce(
+    section,
+    " The worker runs the verifications after the turn.",
+    "",
+  );
+  return replaceOnce(
+    withoutVerifications,
+    "into the node branch. The worker merges the base branch itself.",
+    "into the branch of the workspace.",
+  );
+}
+
+function judgementItemsOneToSeven(heading: string, section: string): string {
+  if (heading !== JUDGEMENT_HEADING) return section;
+  return section
+    .split("\n")
+    .filter((line) => {
+      const item = /^(\d+)\. /.exec(line);
+      return !item || Number(item[1]) <= LAST_RE_JUDGEMENT_ITEM;
+    })
+    .join("\n");
+}
+
+const SHARED_CODING_HEADINGS = ["## Code principles", "## Code", "## Tests"];
+
 test("coding.md equals the three shared sections of swe@1.md and re@1.md", () => {
-  const fromSwe = sharedCodingSections(SWE_AGENT_PROMPT);
-  const fromRe = sharedCodingSections(RE_AGENT_PROMPT);
-  assert.equal(fromSwe, fromRe);
-  assert.equal(CODING_PROMPT.trim(), fromSwe.trim());
+  assert.equal(
+    CODING_PROMPT,
+    joinSections(SWE_AGENT_PROMPT, SHARED_CODING_HEADINGS),
+  );
+  assert.equal(
+    CODING_PROMPT,
+    joinSections(RE_AGENT_PROMPT, SHARED_CODING_HEADINGS),
+  );
 });
 
 test("role/swe@1.md equals swe@1.md less the shared sections and the protocol text", () => {
-  const sweRoleText = SWE_ROLE_PROMPT;
-  assert.ok(!sweRoleText.includes("worker"), "Role must not mention 'worker'");
-  assert.ok(
-    !sweRoleText.includes("node branch"),
-    "Role must not mention 'node branch'",
-  );
-  assert.ok(!sweRoleText.includes("gate"), "Role must not mention 'gate'");
-  const sweRoleSections = sectionsOf(sweRoleText);
-  assert.ok(sweRoleSections.has("## Role"), "role/swe@1.md must have ## Role");
-  assert.ok(
-    sweRoleSections.has("## Execution"),
-    "role/swe@1.md must have ## Execution",
-  );
-  assert.ok(
-    sweRoleSections.has("## Findings"),
-    "role/swe@1.md must have ## Findings",
-  );
-  assert.ok(
-    !sweRoleSections.has("## Code principles"),
-    "role/swe@1.md must not have ## Code principles",
-  );
-  assert.ok(
-    !sweRoleSections.has("## Code"),
-    "role/swe@1.md must not have ## Code",
-  );
-  assert.ok(
-    !sweRoleSections.has("## Tests"),
-    "role/swe@1.md must not have ## Tests",
+  assert.equal(
+    SWE_ROLE_PROMPT,
+    joinSections(
+      SWE_AGENT_PROMPT,
+      ["## Role", EXECUTION_HEADING, "## Findings"],
+      withoutProtocolText,
+    ),
   );
 });
 
 test("role/re@1.md equals re@1.md Role and Judgement items 1 to 7", () => {
-  const reRoleText = RE_ROLE_PROMPT;
-  assert.ok(!reRoleText.includes("worker"), "Role must not mention 'worker'");
-  assert.ok(
-    !reRoleText.includes("node branch"),
-    "Role must not mention 'node branch'",
-  );
-  assert.ok(!reRoleText.includes("gate"), "Role must not mention 'gate'");
-  const reRoleSections = sectionsOf(reRoleText);
-  assert.ok(reRoleSections.has("## Role"), "role/re@1.md must have ## Role");
-  assert.ok(
-    reRoleSections.has("## Judgement"),
-    "role/re@1.md must have ## Judgement",
-  );
-  assert.ok(
-    !reRoleSections.has("## Findings"),
-    "role/re@1.md must not have ## Findings",
-  );
-  assert.ok(
-    !reRoleSections.has("## Code principles"),
-    "role/re@1.md must not have ## Code principles",
-  );
-  const judgement = reRoleSections.get("## Judgement") ?? "";
-  const items = judgement.match(/^\d+\./gm) ?? [];
-  const JUDGEMENT_ITEM_COUNT = 7;
   assert.equal(
-    items.length,
-    JUDGEMENT_ITEM_COUNT,
-    "role/re@1.md Judgement must have exactly 7 items",
+    RE_ROLE_PROMPT,
+    joinSections(
+      RE_AGENT_PROMPT,
+      ["## Role", JUDGEMENT_HEADING],
+      judgementItemsOneToSeven,
+    ),
   );
+});
+
+test("no Role holds the words worker, node branch or gate", () => {
+  for (const role of [SWE_ROLE_PROMPT, RE_ROLE_PROMPT])
+    assert.doesNotMatch(role, FORBIDDEN_ROLE_WORDS);
 });

@@ -569,7 +569,6 @@ export default tseslint.config(
                       "tool-table",
                       "environment",
                       "catalog",
-                      "prompt-assets",
                       "prompt-composer",
                       "prompt-render",
                       "prompt-templates",

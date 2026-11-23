@@ -294,10 +294,7 @@ export class EnvironmentAgent {
         PromptConsumer.Worker,
         templates,
       ),
-      allowlist: [
-        ...profile.tools.builtin,
-        ...customTools.map((tool) => tool.name),
-      ],
+      allowlist: [...profile.tools.builtin, ...profile.tools.environment],
       customTools,
       hostHome: this.dependencies.hostHome,
       hooks: [checkoutConfinement({ cwd: checkout, roots: [checkout] })],
