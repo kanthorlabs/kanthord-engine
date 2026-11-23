@@ -164,7 +164,7 @@ test("TurnEnd.text holds K zero times when the model returns K", async (t) => {
     knownSecrets: WITH_SECRET,
   });
   const result = await run.send("hello", { work: null });
-  assert.equal(result.end, RunEnd.Done);
+  assert.equal(result.end, RunEnd.Completed);
   assert.ok(result.text !== null);
   assert.ok(!result.text!.includes(K));
   await run.close();

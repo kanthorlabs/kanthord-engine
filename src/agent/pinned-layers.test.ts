@@ -17,7 +17,9 @@ function hasWork(messages: readonly unknown[]): boolean {
   return messages.some(
     (m) =>
       (m as { role: string }).role === USER_ROLE &&
-      contentText((m as { content: unknown }).content) === WORK_TEXT,
+      contentText(
+        (m as { content: Parameters<typeof contentText>[0] }).content,
+      ) === WORK_TEXT,
   );
 }
 
