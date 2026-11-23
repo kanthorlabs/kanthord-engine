@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { z } from "zod";
@@ -13,7 +13,9 @@ import {
   piCredentialSchema,
   SecretShape,
 } from "../../custody/contract.ts";
-import { OPENAI_COMPATIBLE_PROVIDER } from "../../agent/contract.ts";
+import { loadPi } from "../../agent/pi.ts";
+import { METADATA_ENV } from "../../llm/model-connector.ts";
+import { isLlmPlatform, LLM_PLATFORMS, Platform } from "../../llm/platforms.ts";
 
 const AUTH_FILE_INVALID = "cli.run.agent.auth_file_invalid";
 const AUTH_FILE_OWNER = "cli.run.agent.auth_file_owner";
@@ -30,10 +32,6 @@ const PI_OAUTH_REFRESH_WINDOW_MS = 300000;
 
 const ANTHROPIC_PROVIDER = "anthropic";
 const TYPEOF_OBJECT = "object";
-const TYPEOF_STRING = "string";
-
-const BASE_URL_PATTERN = /^https?:\/\/[^?#]+[^?#/]$/;
-const nonblankString = z.string().min(1).refine(isNonblank);
 
 const rawApiKeyEntrySchema = z.strictObject({
   type: z.literal(SecretShape.ApiKey),
@@ -60,183 +58,107 @@ export type CheckedAuthEntry = {
 
 const ENV_FIELD = "env";
 
-type FieldValidator = (envName: string, value: string) => boolean;
-
-interface ProviderMetadataRule {
+interface MetadataName {
   envName: string;
   metaField: string;
-  validate: FieldValidator;
-  transform?: (value: string) => unknown;
+  json?: boolean;
+}
+
+interface MappedMetadata {
+  metadata: Record<string, unknown>;
+  failedNames: Set<string>;
+}
+
+interface RoutingMetadataInput {
+  env: Record<string, string>;
+  provider: Platform;
+  authPath: string;
+}
+
+const OPENAI_COMPATIBLE_NAMES: readonly MetadataName[] = [
+  { envName: "OPENAI_COMPATIBLE_BASE_URL", metaField: "base_url" },
+  { envName: "OPENAI_COMPATIBLE_MODELS", metaField: "models", json: true },
+];
+
+function metadataNamesOf(provider: Platform): readonly MetadataName[] {
+  if (provider === Platform.OpenAICompatible) return OPENAI_COMPATIBLE_NAMES;
+  return Object.entries(METADATA_ENV[provider] ?? {}).map(
+    ([metaField, envName]) => ({ envName, metaField }),
+  );
 }
 
 function envFieldName(name: string): string {
   return `${ENV_FIELD}.${name}`;
 }
 
-function nonblankValidator(_: string, value: string): boolean {
-  return nonblankString.safeParse(value).success;
-}
-
-function urlValidator(_: string, value: string): boolean {
-  return BASE_URL_PATTERN.test(value);
-}
-
-function jsonArrayValidator(_: string, value: string): boolean {
-  try {
-    const parsed = JSON.parse(value);
-    if (!Array.isArray(parsed)) return false;
-    for (const item of parsed) {
-      if (!item || typeof item !== TYPEOF_OBJECT) return false;
-      const id = (item as Record<string, unknown>)["id"];
-      if (typeof id !== TYPEOF_STRING || !(id as string).trim()) return false;
+function mapMetadata(
+  names: readonly MetadataName[],
+  env: Record<string, string>,
+): MappedMetadata {
+  const metadata: Record<string, unknown> = {};
+  const failedNames = new Set<string>();
+  for (const { envName, metaField, json } of names) {
+    if (!Object.hasOwn(env, envName)) {
+      failedNames.add(envName);
+      continue;
     }
-    return true;
-  } catch {
-    return false;
+    const text = env[envName]!;
+    if (!json) {
+      metadata[metaField] = text;
+      continue;
+    }
+    try {
+      metadata[metaField] = JSON.parse(text);
+    } catch {
+      failedNames.add(envName);
+    }
   }
+  return { metadata, failedNames };
 }
 
-const OPENAI_COMPATIBLE_RULES: ProviderMetadataRule[] = [
-  {
-    envName: "OPENAI_COMPATIBLE_BASE_URL",
-    metaField: "base_url",
-    validate: urlValidator,
-  },
-  {
-    envName: "OPENAI_COMPATIBLE_MODELS",
-    metaField: "models",
-    validate: jsonArrayValidator,
-    transform: (v) => JSON.parse(v),
-  },
-];
-
-const AMAZON_BEDROCK_PROVIDER = "amazon-bedrock";
-const GOOGLE_VERTEX_PROVIDER = "google-vertex";
-const AZURE_PROVIDER = "azure";
-const CLOUDFLARE_WORKERS_AI_PROVIDER = "cloudflare-workers-ai";
-const CLOUDFLARE_AI_GATEWAY_PROVIDER = "cloudflare-ai-gateway";
-
-const PROVIDER_RULES: Readonly<
-  Record<string, ProviderMetadataRule[] | undefined>
-> = {
-  [OPENAI_COMPATIBLE_PROVIDER]: OPENAI_COMPATIBLE_RULES,
-  [AMAZON_BEDROCK_PROVIDER]: [
-    { envName: "AWS_REGION", metaField: "region", validate: nonblankValidator },
-  ],
-  [GOOGLE_VERTEX_PROVIDER]: [
+function refuseEnv(authPath: string, field: string): never {
+  throw new Diagnostic(
+    AUTH_ENTRY_INVALID,
+    "run agent: the entry env does not pass the metadata schema of the provider.",
     {
-      envName: "GOOGLE_CLOUD_PROJECT",
-      metaField: "project",
-      validate: nonblankValidator,
+      fields: [
+        ["path", authPath],
+        ["field", field],
+      ],
     },
-    {
-      envName: "GOOGLE_CLOUD_LOCATION",
-      metaField: "location",
-      validate: nonblankValidator,
-    },
-  ],
-  [AZURE_PROVIDER]: [
-    {
-      envName: "AZURE_OPENAI_RESOURCE_NAME",
-      metaField: "resource_name",
-      validate: nonblankValidator,
-    },
-  ],
-  [CLOUDFLARE_WORKERS_AI_PROVIDER]: [
-    {
-      envName: "CLOUDFLARE_ACCOUNT_ID",
-      metaField: "account_id",
-      validate: nonblankValidator,
-    },
-  ],
-  [CLOUDFLARE_AI_GATEWAY_PROVIDER]: [
-    {
-      envName: "CLOUDFLARE_ACCOUNT_ID",
-      metaField: "account_id",
-      validate: nonblankValidator,
-    },
-    {
-      envName: "CLOUDFLARE_GATEWAY_ID",
-      metaField: "gateway_id",
-      validate: nonblankValidator,
-    },
-  ],
-};
-
-function providerRulesOf(provider: string): ProviderMetadataRule[] | null {
-  return PROVIDER_RULES[provider] ?? null;
+  );
 }
 
-function checkNoExtraEnvNames(
-  envObj: Record<string, string>,
-  requiredNames: string[],
-  makeFields: (f: string) => [string, string][],
-): void {
-  for (const name of Object.keys(envObj).sort()) {
-    if (!requiredNames.includes(name))
-      throw new Diagnostic(
-        AUTH_ENTRY_INVALID,
-        "run agent: the entry env holds a name outside the provider list.",
-        {
-          fields: makeFields(envFieldName(name)),
-        },
-      );
-  }
+function firstExtraName(
+  names: readonly MetadataName[],
+  env: Record<string, string>,
+): string | undefined {
+  return Object.keys(env)
+    .sort()
+    .find((name) => !names.some(({ envName }) => envName === name));
 }
 
 function checkRoutingMetadata(
-  env: Record<string, string> | undefined,
-  provider: string,
-  authPath: string,
+  input: RoutingMetadataInput,
 ): Record<string, unknown> | null {
-  const makeFields = (field: string) =>
-    [
-      ["path", authPath],
-      ["field", field],
-    ] as [string, string][];
-  const rules = providerRulesOf(provider);
-
-  if (rules === null) {
-    if (env !== undefined && Object.keys(env).length)
-      throw new Diagnostic(
-        AUTH_ENTRY_INVALID,
-        "run agent: the entry env has no names for this provider.",
-        {
-          fields: makeFields(`${ENV_FIELD}.${Object.keys(env).sort()[0]!}`),
-        },
-      );
-    return null;
-  }
-
-  const envObj = env ?? {};
-  const requiredNames = rules.map((r) => r.envName);
-  const meta: Record<string, unknown> = {};
-
-  for (const rule of rules) {
-    const { envName, metaField, validate, transform } = rule;
-    if (!(envName in envObj))
-      throw new Diagnostic(
-        AUTH_ENTRY_INVALID,
-        "run agent: the entry env is missing a required name.",
-        {
-          fields: makeFields(envFieldName(envName)),
-        },
-      );
-    const value = envObj[envName]!;
-    if (!validate(envName, value))
-      throw new Diagnostic(
-        AUTH_ENTRY_INVALID,
-        "run agent: the entry env value is invalid.",
-        {
-          fields: makeFields(envFieldName(envName)),
-        },
-      );
-    meta[metaField] = transform ? transform(value) : value;
-  }
-
-  checkNoExtraEnvNames(envObj, requiredNames, makeFields);
-
-  return meta;
+  const { env, provider, authPath } = input;
+  const schema = LLM_PLATFORMS[provider].metadata_schema;
+  const names = metadataNamesOf(provider);
+  const { metadata, failedNames } = mapMetadata(names, env);
+  const result = schema?.safeParse(metadata);
+  const failedFields = (result?.error?.issues ?? []).map(
+    (issue) => issue.path[0],
+  );
+  const failed = names.find(
+    ({ envName, metaField }) =>
+      failedNames.has(envName) || failedFields.includes(metaField),
+  );
+  if (failed) refuseEnv(authPath, envFieldName(failed.envName));
+  const extra = firstExtraName(names, env);
+  if (extra !== undefined) refuseEnv(authPath, envFieldName(extra));
+  if (result === undefined) return null;
+  if (!result.success) refuseEnv(authPath, ENV_FIELD);
+  return result.data;
 }
 
 function agentProvider(rawProvider: string, entryType: string): string {
@@ -245,15 +167,9 @@ function agentProvider(rawProvider: string, entryType: string): string {
   return rawProvider;
 }
 
-const OAUTH_PROVIDERS: readonly string[] = [
-  ANTHROPIC_SUBSCRIPTION_PLATFORM,
-  "github-copilot",
-  "openai-codex",
-];
-
-function secretShapeOf(provider: string): string {
-  if (OAUTH_PROVIDERS.includes(provider)) return SecretShape.OAuth;
-  return SecretShape.ApiKey;
+function envOf(entry: RawAuthEntry): Record<string, string> {
+  if (entry.type !== SecretShape.ApiKey) return {};
+  return entry.env ?? {};
 }
 
 function realPathOrSelf(path: string): string {
@@ -261,19 +177,6 @@ function realPathOrSelf(path: string): string {
     return realpathSync(path);
   } catch {
     return path;
-  }
-}
-
-const BOM_CODE = 0xfeff;
-
-function readRawEntry(providerId: string, authPath: string): unknown {
-  try {
-    const text = readFileSync(authPath, "utf-8");
-    const stripped = text.charCodeAt(0) === BOM_CODE ? text.slice(1) : text;
-    const data = JSON.parse(stripped) as Record<string, unknown>;
-    return data[providerId];
-  } catch {
-    return undefined;
   }
 }
 
@@ -410,16 +313,17 @@ function parseRawEntry(raw: unknown, authPath: string): RawAuthEntry {
   );
 }
 
-export function readAuthEntry(
+export async function readAuthEntry(
   piProviderIdValue: string,
   authPath: string,
-): unknown {
+): Promise<unknown> {
   const absolute = resolve(authPath);
   const fields = [
     ["path", absolute],
     ["field", piProviderIdValue],
   ] as [string, string][];
-  const raw = readRawEntry(piProviderIdValue, absolute);
+  const { readStoredCredential } = await loadPi();
+  const raw: unknown = readStoredCredential(piProviderIdValue, absolute);
   if (raw === undefined)
     throw new Diagnostic(
       AUTH_ENTRY_MISSING,
@@ -462,9 +366,11 @@ export function checkAuthEntry(
       );
   }
 
-  const agentProv = agentProvider(rawProvider, entry.type);
-  const expectedShape = secretShapeOf(agentProv);
-  if (entry.type !== expectedShape)
+  const provider = agentProvider(rawProvider, entry.type);
+  if (
+    !isLlmPlatform(provider) ||
+    entry.type !== LLM_PLATFORMS[provider].secret_shape
+  )
     throw new Diagnostic(
       AUTH_ENTRY_INVALID,
       "run agent: the entry type does not match the provider credential shape.",
@@ -473,8 +379,11 @@ export function checkAuthEntry(
       },
     );
 
-  const envObj = entry.type === SecretShape.ApiKey ? entry.env : undefined;
-  const metadata = checkRoutingMetadata(envObj, rawProvider, absolute);
+  const metadata = checkRoutingMetadata({
+    env: envOf(entry),
+    provider,
+    authPath: absolute,
+  });
 
   const parsed = piCredentialSchema.safeParse(
     entry.type === SecretShape.ApiKey

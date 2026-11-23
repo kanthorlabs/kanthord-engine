@@ -92,6 +92,20 @@ function assertDiagnostic(action: () => unknown, code: string): Diagnostic {
   return result!;
 }
 
+async function assertRejectedDiagnostic(
+  action: Promise<unknown>,
+  code: string,
+): Promise<Diagnostic> {
+  let result: Diagnostic | undefined;
+  await assert.rejects(action, (e: unknown) => {
+    if (!(e instanceof Diagnostic)) return false;
+    assert.equal(e.code, code);
+    result = e;
+    return true;
+  });
+  return result!;
+}
+
 describe("defaultAuthPath", () => {
   it("ends with .config/kanthord/auth.json", () => {
     const p = defaultAuthPath();
@@ -188,30 +202,30 @@ describe("checkAuthFile", () => {
 });
 
 describe("readAuthEntry", () => {
-  it("returns the raw entry for a present provider", () => {
+  it("returns the raw entry for a present provider", async () => {
     const path = writeAuthJson(base, `present-${Date.now()}.json`, {
       anthropic: { type: "api_key", key: "fixture-test-api-key" },
     });
-    const result = readAuthEntry(ANTHROPIC_PROVIDER, path);
+    const result = await readAuthEntry(ANTHROPIC_PROVIDER, path);
     assert.ok(result !== undefined);
   });
 
-  it("refuses when the provider entry is absent", () => {
+  it("refuses when the provider entry is absent", async () => {
     const path = writeAuthJson(base, `no-entry-${Date.now()}.json`, {
       "other-provider": { type: "api_key", key: "fixture-other-key" },
     });
-    const error = assertDiagnostic(
-      () => readAuthEntry(ANTHROPIC_PROVIDER, path),
+    const error = await assertRejectedDiagnostic(
+      readAuthEntry(ANTHROPIC_PROVIDER, path),
       AUTH_ENTRY_MISSING,
     );
     assert.ok(error.fields.some(([k]) => k === FIELD_FIELD));
   });
 
-  it("refuses when the file holds no valid JSON", () => {
+  it("refuses when the file holds no valid JSON", async () => {
     const path = join(base, `invalid-json-${Date.now()}.json`);
     writeFileSync(path, "not-json", { mode: 0o600 });
-    assertDiagnostic(
-      () => readAuthEntry(ANTHROPIC_PROVIDER, path),
+    await assertRejectedDiagnostic(
+      readAuthEntry(ANTHROPIC_PROVIDER, path),
       AUTH_ENTRY_MISSING,
     );
   });
@@ -474,6 +488,27 @@ describe("checkAuthEntry - routing metadata", () => {
       env: {
         OPENAI_COMPATIBLE_BASE_URL: BASE_URL_VALUE,
         OPENAI_COMPATIBLE_MODELS: "not-json",
+      },
+    };
+    const error = assertDiagnostic(
+      () => checkAuthEntry(raw, OPENAI_COMPAT_PROVIDER, authPath),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      error.fields.some(([k, v]) => k === FIELD_FIELD && v === ENV_MODELS),
+    );
+  });
+
+  it("regression: refuses OPENAI_COMPATIBLE_MODELS that the metadata schema of the platform refuses", () => {
+    const raw = {
+      type: "api_key",
+      key: "fixture-key",
+      env: {
+        OPENAI_COMPATIBLE_BASE_URL: BASE_URL_VALUE,
+        OPENAI_COMPATIBLE_MODELS: JSON.stringify([
+          { id: "stub-1" },
+          { id: "stub-1" },
+        ]),
       },
     };
     const error = assertDiagnostic(
