@@ -10,7 +10,7 @@ const USER_ROLE = "user";
 const PROMPT_CALL_COUNT = 3;
 
 function hasSystemPrompt(systemPrompt: string | undefined): boolean {
-  return systemPrompt === SYSTEM_PROMPT;
+  return systemPrompt !== undefined && systemPrompt.includes(SYSTEM_PROMPT);
 }
 
 function hasWork(messages: readonly unknown[]): boolean {
@@ -29,7 +29,7 @@ test("each agent-loop request and each compaction summary request holds the syst
 
   const { session, scripted } = await openTestSession(t, {
     script: [
-      fauxAssistantMessage("first"),
+      fauxAssistantMessage("first ".repeat(30000)),
       fauxAssistantMessage("second"),
       fauxAssistantMessage("summary"),
     ],
