@@ -8,7 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
 import {
   checkAuthNotInPiDirectory,
@@ -20,6 +20,8 @@ const PI_DIR_INVALID = "cli.run.agent.pi_directory_invalid";
 const AUTH_IN_PI_DIR = "cli.run.agent.auth_in_pi_directory";
 const TOOL_INSTALL_FAILED = "cli.run.agent.tool_install_failed";
 const FIELD_PATH = "path";
+const ROOT_UID = 0;
+const ROOT_OWNED_DIRECTORY = "/usr";
 const FIELD_TOOL = "tool";
 const FIELD_TARGET = "target";
 const FIELD_REASON = "reason";
@@ -67,6 +69,14 @@ describe("checkPiDirectory", () => {
       PI_DIR_INVALID,
     );
     assert.ok(error.fields.some(([k]) => k === FIELD_PATH));
+  });
+
+  it("refuses a directory of another user", () => {
+    if (userInfo().uid === ROOT_UID) return;
+    assertDiagnostic(
+      () => checkPiDirectory(ROOT_OWNED_DIRECTORY),
+      PI_DIR_INVALID,
+    );
   });
 
   it("refuses a regular file", () => {
