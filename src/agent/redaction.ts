@@ -95,6 +95,47 @@ export function redactionSummary(counts: RedactionCounts): RedactionSummary {
   };
 }
 
+export interface AgentRedactionSummary {
+  redaction_count: number;
+  redaction_rules: SensitiveRule[];
+  redaction_failed: number;
+  unkept: number;
+  restore_blocked: number;
+  output_found_count: number;
+  output_found_rules: SensitiveRule[];
+}
+
+function countedRules(
+  counts: Partial<Record<SensitiveRule, number>>,
+): SensitiveRule[] {
+  return (Object.keys(counts) as SensitiveRule[])
+    .filter((rule) => counts[rule])
+    .sort();
+}
+
+function ruleTotal(
+  counts: Partial<Record<SensitiveRule, number>>,
+  rules: readonly SensitiveRule[],
+): number {
+  return rules.reduce((sum, rule) => sum + (counts[rule] ?? 0), 0);
+}
+
+export function agentRedactionSummary(
+  counts: RedactionCounts,
+): AgentRedactionSummary {
+  const redacted = countedRules(counts.redacted);
+  const found = countedRules(counts.output_found);
+  return {
+    redaction_count: ruleTotal(counts.redacted, redacted),
+    redaction_rules: redacted,
+    redaction_failed: counts.scan_failed,
+    unkept: counts.unkept,
+    restore_blocked: counts.restore_blocked,
+    output_found_count: ruleTotal(counts.output_found, found),
+    output_found_rules: found,
+  };
+}
+
 export function redactionObserved(summary: RedactionSummary): boolean {
   return Object.values(summary).some((value) =>
     Array.isArray(value) ? value.length : value,

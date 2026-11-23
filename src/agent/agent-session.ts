@@ -4,6 +4,7 @@ import type {
   AgentSession,
   AgentSessionRuntime,
   CreateAgentSessionRuntimeFactory,
+  ExtensionError,
   InlineExtension,
   ModelRuntime,
   ResourceLoader,
@@ -76,6 +77,16 @@ export interface OpenSessionInput {
   sessionManager?: SessionManager;
 }
 
+export type SessionPartsInput = Omit<OpenSessionInput, "hooks">;
+
+export type GuardList = (redaction: SessionRedaction) => InlineExtension[];
+
+export type ExtensionErrorListener = (error: ExtensionError) => void;
+
+interface RuntimeBindings {
+  onError?: ExtensionErrorListener;
+}
+
 export interface FreshRedaction {
   knownSecrets: KnownSecrets;
 }
@@ -95,8 +106,19 @@ interface SessionParts {
   resourceLoader: ResourceLoader;
 }
 
+function openPathGuards(input: OpenSessionInput): GuardList {
+  return (redaction) => [
+    homeRelativeCwd(input.hostHome),
+    markerRestore(redaction),
+    ...input.hooks,
+    inputRedaction(redaction),
+    assistantRedaction(redaction),
+  ];
+}
+
 async function sessionParts(
-  input: OpenSessionInput & SessionRedactionInput,
+  input: SessionPartsInput & SessionRedactionInput,
+  guards: GuardList,
 ): Promise<SessionParts> {
   assert.ok(input.cwd);
   assert.ok(input.hostHome);
@@ -127,13 +149,7 @@ async function sessionParts(
     noThemes: true,
     noContextFiles: true,
     systemPrompt,
-    extensionFactories: [
-      homeRelativeCwd(input.hostHome),
-      markerRestore(redaction),
-      ...input.hooks,
-      inputRedaction(redaction),
-      assistantRedaction(redaction),
-    ],
+    extensionFactories: guards(redaction),
   });
   await withDeadline(resourceLoader.reload(), input.context);
   return {
@@ -153,7 +169,7 @@ export async function openSession(
   redaction: SessionRedaction;
   systemPrompt: string;
 }> {
-  const parts = await sessionParts(input);
+  const parts = await sessionParts(input, openPathGuards(input));
   const { session } = await withDeadline(
     parts.pi.createAgentSession({
       cwd: input.cwd,
@@ -184,7 +200,7 @@ export interface OpenedRuntime {
 }
 
 function runtimeFactory(
-  input: OpenSessionInput,
+  input: SessionPartsInput,
   parts: SessionParts,
 ): CreateAgentSessionRuntimeFactory {
   return async (options) => {
@@ -240,7 +256,23 @@ function setupCleanup(parent: Context): CancellationContext {
 export async function openSessionRuntime(
   input: OpenSessionInput & SessionRedactionInput,
 ): Promise<OpenedRuntime> {
-  const parts = await sessionParts(input);
+  return guardedRuntime(input, openPathGuards(input), {});
+}
+
+export async function openContractRuntime(
+  input: SessionPartsInput & FreshRedaction,
+  guards: GuardList,
+  onError: ExtensionErrorListener,
+): Promise<OpenedRuntime> {
+  return guardedRuntime(input, guards, { onError });
+}
+
+async function guardedRuntime(
+  input: SessionPartsInput & SessionRedactionInput,
+  guards: GuardList,
+  bindings: RuntimeBindings,
+): Promise<OpenedRuntime> {
+  const parts = await sessionParts(input, guards);
   const runtime = await withDeadline(
     parts.pi.createAgentSessionRuntime(runtimeFactory(input, parts), {
       cwd: input.cwd,
@@ -251,7 +283,7 @@ export async function openSessionRuntime(
     (late) => void closeRuntime(late, setupCleanup(input.context)),
   );
   try {
-    await withDeadline(runtime.session.bindExtensions({}), input.context);
+    await withDeadline(runtime.session.bindExtensions(bindings), input.context);
   } catch (error) {
     await closeRuntime(runtime, setupCleanup(input.context));
     throw error;
