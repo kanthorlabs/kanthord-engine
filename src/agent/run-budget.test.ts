@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BudgetLimit } from "./run-outcome.ts";
-import { COMMAND_LIMIT_MS, WallTimer } from "./run-budget.ts";
+import { WallTimer } from "./run-budget.ts";
 
 const CLOCK_START = 1_000_000;
 const WALL_MS = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
+const EXPIRED_MS = 0;
 
 test("WallTimer fires at the deadline and sets budgetReached to wall", (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: CLOCK_START });
@@ -49,12 +50,13 @@ test("WallTimer with null deadline never fires", (t) => {
   assert.equal(timer.budgetReached(), null);
 });
 
-test("command limit with a null deadline is COMMAND_LIMIT_MS", () => {
-  const timer = new WallTimer(null);
-  assert.equal(
-    Math.min(timer.remainingMs(), COMMAND_LIMIT_MS),
-    COMMAND_LIMIT_MS,
-  );
+test("remainingMs gives the time to the deadline, zero after it, and no limit with a null deadline", (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: CLOCK_START });
+  const timer = new WallTimer(CLOCK_START + WALL_MS);
+  assert.equal(timer.remainingMs(), WALL_MS);
+  t.mock.timers.tick(WALL_MS * 2);
+  assert.equal(timer.remainingMs(), EXPIRED_MS);
+  assert.equal(new WallTimer(null).remainingMs(), Number.POSITIVE_INFINITY);
 });
 
 test("regression: WallTimer with a deadline past the setTimeout limit does not fire at once", (t) => {
