@@ -20,9 +20,9 @@ import {
   agentPort,
   type SessionBudget,
   type SessionOpenRequest,
-} from "../../agent/agent-port.ts";
-import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
-import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
+} from "./agent-port.ts";
+import { executionEvidence } from "./capabilities/execution-evidence.ts";
+import { linkUpdates } from "./capabilities/link-updates.ts";
 import { AGENT_DECLARATIONS } from "../../agent/catalog.ts";
 import { piAgentDirectory } from "../../agent/pi.ts";
 import { SESSION_MARKER_PATTERN } from "../../agent/sensitive-text.ts";

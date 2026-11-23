@@ -20,10 +20,10 @@ import {
 import { Diagnostic } from "../kernel/errors.ts";
 import { PRIVATE_DIRECTORY_MODE } from "../kernel/files.ts";
 import type { Row } from "../kernel/rows.ts";
-import { WorkerErrorCode } from "../worker/contract.ts";
 import { childEnvironment } from "./environment.ts";
 import { piDirectory } from "./pi.ts";
 
+const START_TOOL_MISSING = "worker.start.tool_missing";
 const BIN_DIRECTORY_NAME = "bin";
 const LICENSES_DIRECTORY_NAME = "licenses";
 const BINARY_MODE = 0o755;
@@ -70,7 +70,7 @@ function toolMissing(
   message: string,
   fields: readonly Row[] = [],
 ): Diagnostic {
-  return new Diagnostic(WorkerErrorCode.StartToolMissing, `${message}.`, {
+  return new Diagnostic(START_TOOL_MISSING, `${message}.`, {
     fields: [["tool", tool], ...fields],
   });
 }

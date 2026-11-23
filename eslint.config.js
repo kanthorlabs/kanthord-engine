@@ -205,7 +205,10 @@ const noInlineObjectType = {
     ),
 };
 
-const noInlineObjectTypeFiles = ["src/agent/known-secrets.ts"];
+const noInlineObjectTypeFiles = [
+  "src/agent/known-secrets.ts",
+  "src/worker/contract.ts",
+];
 
 export const kanthordPlugin = {
   rules: {
@@ -554,12 +557,6 @@ export default tseslint.config(
                       "pi-tools",
                       "bash-process",
                       "agent-session",
-                      "agent-port",
-                      "capabilities/execution-evidence",
-                      "capabilities/host-tools",
-                      "capabilities/link-updates",
-                      "review-roots",
-                      "session-directory",
                       "tool-table",
                       "environment",
                       "catalog",
@@ -568,7 +565,9 @@ export default tseslint.config(
                       "prompt-templates",
                       "pinned-layers",
                       "sensitive-text",
+                      "hooks/checkout-confinement",
                       "hooks/sensitive-text-redaction",
+                      "hooks/tool-allowlist",
                       "known-secrets",
                     ].join(",")}}.ts`,
                   }),
@@ -1028,11 +1027,28 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/agent/capabilities/**/*.ts"],
+    files: workerFiles,
     rules: {
       "no-restricted-syntax": [
         "error",
         ...syntaxRules,
+        {
+          selector: "ImportExpression",
+          message: "A worker unit imports its modules statically.",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/worker/unit/capabilities/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...syntaxRules,
+        {
+          selector: "ImportExpression",
+          message: "A worker unit imports its modules statically.",
+        },
         ...["modelRegistry", "registerProvider"].flatMap((name) =>
           [
             `MemberExpression[property.name='${name}']`,
@@ -1045,19 +1061,6 @@ export default tseslint.config(
               "A capability reads no model registry and registers no provider.",
           })),
         ),
-      ],
-    },
-  },
-  {
-    files: workerFiles,
-    rules: {
-      "no-restricted-syntax": [
-        "error",
-        ...syntaxRules,
-        {
-          selector: "ImportExpression",
-          message: "A worker unit imports its modules statically.",
-        },
       ],
     },
   },

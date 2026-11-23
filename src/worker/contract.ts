@@ -1,3 +1,4 @@
+import { type TSchema, Type } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { identitySchema } from "../kernel/identity.ts";
 import {
@@ -299,21 +300,39 @@ export const RepositoryAction = {
 export const ConversationAction = {
   Reply: "reply",
 } as const;
+export const RepositoryEndState = {
+  PullRequestMerged: "pull_request_merged",
+  BaseBranchPushed: "base_branch_pushed",
+} as const;
+export const ReplyEndState = {
+  Posted: "posted",
+} as const;
+export const RepositoryLanding = {
+  Human: "human",
+  Kanthord: "kanthord",
+} as const;
+export interface RepositoryActionConfiguration {
+  base_branch: string;
+  landing: (typeof RepositoryLanding)[keyof typeof RepositoryLanding];
+}
+export interface ReplyActionConfiguration {
+  external_link: ExternalLink;
+}
 export type RepositoryFrozenAction = {
   key: string;
   binding_id: string;
   action: (typeof RepositoryAction)[keyof typeof RepositoryAction];
-  expected_end_state: "pull_request_merged" | "base_branch_pushed";
+  expected_end_state: (typeof RepositoryEndState)[keyof typeof RepositoryEndState];
   follows: string | null;
-  configuration: { base_branch: string; landing: "human" | "kanthord" };
+  configuration: RepositoryActionConfiguration;
 };
 export type ReplyFrozenAction = {
   key: string;
   binding_id: string;
   action: typeof ConversationAction.Reply;
-  expected_end_state: "posted";
+  expected_end_state: typeof ReplyEndState.Posted;
   follows: string | null;
-  configuration: { external_link: ExternalLink };
+  configuration: ReplyActionConfiguration;
 };
 export type FrozenAction = RepositoryFrozenAction | ReplyFrozenAction;
 export type RepositoryActionEntry = Omit<
@@ -355,24 +374,27 @@ export type RepositorySnapshot = {
   binding_id: string;
   commit: string;
 };
+export interface ProducedSnapshot {
+  kind: typeof TestedInputKind.Produced;
+  sha256: string;
+}
+export interface ObjectSnapshot {
+  kind: typeof TestedInputKind.Object;
+  location: string;
+  version?: string;
+  sha256?: string;
+}
 export type TestedInput =
-  | RepositorySnapshot
-  | RepositorySnapshot[]
-  | { kind: typeof TestedInputKind.Produced; sha256: string }
-  | {
-      kind: typeof TestedInputKind.Object;
-      location: string;
-      version?: string;
-      sha256?: string;
-    };
+  RepositorySnapshot | RepositorySnapshot[] | ProducedSnapshot | ObjectSnapshot;
+export interface CurrentAssessment {
+  result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
+  tested_input: TestedInput;
+}
 export type ActionContext = {
   state: (typeof ActionNodeState)[keyof typeof ActionNodeState];
   node_name: string;
   request_addresses: PlatformAddress[];
-  current_assessment: {
-    result: (typeof ActionAssessmentResult)[keyof typeof ActionAssessmentResult];
-    tested_input: TestedInput;
-  } | null;
+  current_assessment: CurrentAssessment | null;
   actions: {
     action: FrozenAction;
     resource_identity: string;
@@ -446,7 +468,7 @@ export interface IntakeActions {
     method: ActionReadMethod,
     evidenceId: string,
     page: ActionReadPage,
-  ): Promise<{ body: unknown; next_cursor: string | null } | ResultClassAnswer>;
+  ): Promise<ActionReadBody | ResultClassAnswer>;
   describe(
     call: IntakeActionCall,
     inboundEventId: string,
@@ -457,20 +479,29 @@ export interface IntakeActions {
     occurred_at: number | null;
   }>;
 }
+export interface ActionReadBody {
+  body: unknown;
+  next_cursor: string | null;
+}
+export interface EvidenceRequestParams {
+  node_id: string;
+}
+export interface EvidenceRequestBody {
+  execution_id: string;
+  attempt: number;
+  node_revision: number;
+  requirement_key: string;
+  subject: string;
+  address: PlatformAddress;
+}
+export interface EvidenceRequestInput {
+  params: EvidenceRequestParams;
+  query: Record<string, never>;
+  body: EvidenceRequestBody;
+}
 export interface EvidenceRequests {
   request(
-    input: {
-      params: { node_id: string };
-      query: Record<string, never>;
-      body: {
-        execution_id: string;
-        attempt: number;
-        node_revision: number;
-        requirement_key: string;
-        subject: string;
-        address: PlatformAddress;
-      };
-    },
+    input: EvidenceRequestInput,
     options: ClientOptions,
   ): Promise<OperationResult<unknown>>;
 }
@@ -553,11 +584,11 @@ export interface InstanceIssuer {
   ): string;
   clientSecret(clientId: string): string;
 }
-export type WorkerBindingOf = (
-  tx: Transaction,
-  projectId: string,
-  resourceIdentity: string,
-) => {
+export interface ResourceBudget {
+  turns: number;
+  wall_time_ms: number;
+}
+export interface WorkerBindingData {
   binding_id: string;
   name: string;
   project_name: string;
@@ -567,10 +598,15 @@ export type WorkerBindingOf = (
   worker_instances?: string[];
   environment?: string | null;
   generation: number;
-  resource_budget: { turns: number; wall_time_ms: number } | null;
+  resource_budget: ResourceBudget | null;
   entries: Array<WorkerEntry & { agent: string }>;
   tombstone: boolean;
-} | null;
+}
+export type WorkerBindingOf = (
+  tx: Transaction,
+  projectId: string,
+  resourceIdentity: string,
+) => WorkerBindingData | null;
 
 export type WorkerBindingsOf = (
   tx: Transaction,
@@ -591,10 +627,7 @@ export const AuthorizationRefusal = {
 export type AuthorizationRefusal =
   (typeof AuthorizationRefusal)[keyof typeof AuthorizationRefusal];
 
-export type WorkerBindingRowOf = (
-  tx: Transaction,
-  bindingId: string,
-) => {
+export interface WorkerBindingRowData {
   binding_id: string;
   project_id: string;
   resource_identity: string;
@@ -604,13 +637,19 @@ export type WorkerBindingRowOf = (
   worker_instances: string[];
   environment?: string | null;
   entries: Array<WorkerEntry & { agent: string }>;
-  resource_budget: { turns: number; wall_time_ms: number } | null;
-} | null;
-
-export type RepositoryPolicyOf = (
+  resource_budget: ResourceBudget | null;
+}
+export type WorkerBindingRowOf = (
   tx: Transaction,
   bindingId: string,
-) => {
+) => WorkerBindingRowData | null;
+
+export interface RepositoryPrompts {
+  instruction_file?: string;
+  repository?: string;
+  agents?: Partial<Record<AgentName, string>>;
+}
+export interface RepositoryPolicyData {
   binding_id: string;
   resource_identity: string;
   name: string;
@@ -619,14 +658,14 @@ export type RepositoryPolicyOf = (
   ssh_credential: string;
   base_branch: string;
   upstream_branch?: string;
-  prompts: {
-    instruction_file?: string;
-    repository?: string;
-    agents?: Partial<Record<AgentName, string>>;
-  };
+  prompts: RepositoryPrompts;
   environment: Environment | null;
   repository_environment: boolean;
-} | null;
+}
+export type RepositoryPolicyOf = (
+  tx: Transaction,
+  bindingId: string,
+) => RepositoryPolicyData | null;
 
 export type RepositoryBindingIdsOf = (
   tx: Transaction,
@@ -791,6 +830,13 @@ export const registrationRecordSchema = z
     ]),
   );
 
+export interface ExecutionRef {
+  execution_id: string;
+}
+export interface AgentPinSet {
+  worker_binding_id: string;
+  pins: AgentPin[];
+}
 export interface SchedulerClaims {
   requireRunning(
     tx: Transaction,
@@ -807,21 +853,18 @@ export interface SchedulerClaims {
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
-  ): { execution_id: string } | null;
+  ): ExecutionRef | null;
   unendedExecutionOf(
     tx: Transaction,
     runtimeIdentity: string,
-  ): { execution_id: string } | null;
+  ): ExecutionRef | null;
   activityOf(
     tx: Transaction,
     runtimeIdentity: string,
     now: number,
   ): { activity: RegistrationActivity; execution_id: string | null };
   agentSelectionsOf(tx: Transaction, executionId: string): AgentSelection[];
-  agentPinsOf(
-    tx: Transaction,
-    executionId: string,
-  ): { worker_binding_id: string; pins: AgentPin[] } | null;
+  agentPinsOf(tx: Transaction, executionId: string): AgentPinSet | null;
 }
 
 export type WorkerEntry = {
@@ -845,6 +888,28 @@ export type PinnedCredentialMetadataFn = (
   now: number,
 ) => CredentialMetadataRecord | null;
 
+export const AgentSelectKind = {
+  Selected: "selected",
+  Cooling: "cooling",
+  Invalid: "invalid",
+} as const;
+export interface SelectedAgent {
+  kind: typeof AgentSelectKind.Selected;
+  selection: AgentSelection;
+  enablement_id: string;
+}
+export interface CoolingAgent {
+  kind: typeof AgentSelectKind.Cooling;
+  available_at: number;
+}
+export interface InvalidAgent {
+  kind: typeof AgentSelectKind.Invalid;
+}
+export type AgentSelectResult = SelectedAgent | CoolingAgent | InvalidAgent;
+export interface ClientAttribution {
+  client_id: string;
+  name: string;
+}
 export const REGISTRATION_CAPABILITY = "liveness of a registration";
 export const REGISTRATION_TARGET_KIND = "registration";
 
@@ -869,10 +934,7 @@ export interface AgentConfiguration {
     agentName: string,
     entry: WorkerEntry | null,
     scope: HolderScope,
-  ):
-    | { kind: "selected"; selection: AgentSelection; enablement_id: string }
-    | { kind: "cooling"; available_at: number }
-    | { kind: "invalid" };
+  ): AgentSelectResult;
   selectionAt(
     tx: Transaction,
     agentName: string,
@@ -902,7 +964,7 @@ export interface WorkerRegistrations {
   clientAttributionOf(
     tx: Transaction,
     runtimeIdentity: string,
-  ): { client_id: string; name: string } | null;
+  ): ClientAttribution | null;
   heartbeat(runtimeIdentity: string): void;
 }
 
@@ -934,18 +996,22 @@ export interface SessionRead {
   entry_id: string;
   entry_type: string;
 }
+export interface ResolvedSessionRead {
+  outcome: typeof SessionReadOutcome.Resolved;
+  entry: Record<string, unknown>;
+}
+export interface TooLargeSessionRead {
+  outcome: typeof SessionReadOutcome.TooLarge;
+  bytes: number;
+}
+export interface UnreadableSessionRead {
+  outcome:
+    | typeof SessionReadOutcome.SessionAbsent
+    | typeof SessionReadOutcome.EntryAbsent
+    | typeof SessionReadOutcome.Unreadable;
+}
 export type SessionReadResult =
-  | {
-      outcome: typeof SessionReadOutcome.Resolved;
-      entry: Record<string, unknown>;
-    }
-  | { outcome: typeof SessionReadOutcome.TooLarge; bytes: number }
-  | {
-      outcome:
-        | typeof SessionReadOutcome.SessionAbsent
-        | typeof SessionReadOutcome.EntryAbsent
-        | typeof SessionReadOutcome.Unreadable;
-    };
+  ResolvedSessionRead | TooLargeSessionRead | UnreadableSessionRead;
 export const sessionReadIdSchema = identitySchema(SESSION_READ_PREFIX);
 export const sessionReadEntrySchema = z.strictObject({
   read_id: sessionReadIdSchema,
@@ -1058,7 +1124,6 @@ export const WorkerErrorCode = {
   UnitRecordUnitUnknown: "worker.unit_record.unit_unknown",
   UnitRecordBindingUnknown: "worker.unit_record.binding_unknown",
   UnitRecordIntentInvalid: "worker.unit_record.intent_invalid",
-  StartToolMissing: "worker.start.tool_missing",
   RuntimeSetupRefused: "worker.runtime.setup_refused",
   ClaimNotEvaluation: "worker.action_performer.claim_not_evaluation",
   AssessmentNotCurrent: "worker.action_performer.assessment_not_current",
@@ -1217,6 +1282,26 @@ export const HostTool = {
   LinkUpdateList: "link_update_list",
 } as const;
 export type HostTool = (typeof HostTool)[keyof typeof HostTool];
+export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
+  { path: Type.String({ minLength: 1 }) },
+  { additionalProperties: false },
+);
+export const LINK_UPDATE_LIST_PARAMETERS = Type.Object(
+  {
+    cursor: Type.Optional(Type.String({ minLength: 1 })),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: LINK_UPDATE_LIMIT_MIN,
+        maximum: LINK_UPDATE_LIMIT_MAX,
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+export const HOST_TOOL_PARAMETERS: Readonly<Record<HostTool, TSchema>> = {
+  [HostTool.EvidenceUpload]: EVIDENCE_UPLOAD_PARAMETERS,
+  [HostTool.LinkUpdateList]: LINK_UPDATE_LIST_PARAMETERS,
+};
 export const uploadResultSchema = z.strictObject({
   evidence_id: identitySchema("evidence"),
   asset_id: identitySchema("evidence_asset"),
@@ -1301,10 +1386,14 @@ export type SshHostKeysOf = (
   platform: string,
   address: string,
 ) => string;
+export interface CredentialMetadata {
+  platform: string;
+  metadata: Record<string, unknown> | null;
+}
 export type CredentialMetadataOf = (
   tx: Transaction,
   credentialName: string,
-) => { platform: string; metadata: Record<string, unknown> | null } | null;
+) => CredentialMetadata | null;
 export const agentSetupSchema = z.strictObject({
   agent_name: z.string().min(1),
   enablement_id: z.string().min(1).nullable(),

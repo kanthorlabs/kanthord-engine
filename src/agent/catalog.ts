@@ -1,8 +1,8 @@
-import { type TSchema, Type } from "@earendil-works/pi-ai";
 import {
+  EVIDENCE_UPLOAD_PARAMETERS,
+  HOST_TOOL_PARAMETERS,
   HostTool,
-  LINK_UPDATE_LIMIT_MAX,
-  LINK_UPDATE_LIMIT_MIN,
+  LINK_UPDATE_LIST_PARAMETERS,
 } from "../worker/contract.ts";
 import type { AgentName } from "./contract.ts";
 import {
@@ -24,27 +24,10 @@ export interface ToolEntry {
   locations: readonly string[];
 }
 
-export const EVIDENCE_UPLOAD_PARAMETERS = Type.Object(
-  { path: Type.String({ minLength: 1 }) },
-  { additionalProperties: false },
-);
-
-export const LINK_UPDATE_LIST_PARAMETERS = Type.Object(
-  {
-    cursor: Type.Optional(Type.String({ minLength: 1 })),
-    limit: Type.Optional(
-      Type.Integer({
-        minimum: LINK_UPDATE_LIMIT_MIN,
-        maximum: LINK_UPDATE_LIMIT_MAX,
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
-
-export const HOST_TOOL_PARAMETERS: Readonly<Record<HostTool, TSchema>> = {
-  [HostTool.EvidenceUpload]: EVIDENCE_UPLOAD_PARAMETERS,
-  [HostTool.LinkUpdateList]: LINK_UPDATE_LIST_PARAMETERS,
+export {
+  EVIDENCE_UPLOAD_PARAMETERS,
+  HOST_TOOL_PARAMETERS,
+  LINK_UPDATE_LIST_PARAMETERS,
 };
 
 export const BuiltinTool = {

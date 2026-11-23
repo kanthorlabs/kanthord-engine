@@ -266,7 +266,7 @@ test("a dynamic import is a lint error in a worker element", async () => {
     );
 });
 
-const CAPABILITY_FILE = "src/agent/capabilities/probe.ts";
+const CAPABILITY_FILE = "src/worker/unit/capabilities/probe.ts";
 const REFUSED_CAPABILITY_SOURCES = [
   "export const probe = (ctx: { modelRegistry: unknown }) => ctx.modelRegistry;\n",
   'export const probe = (ctx: Record<string, unknown>) => ctx["modelRegistry"];\n',

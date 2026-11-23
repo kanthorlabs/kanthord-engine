@@ -14,7 +14,7 @@ import type {
   SessionTrace,
   SessionTraceFactory,
   SessionTraceStart,
-} from "../../agent/agent-port.ts";
+} from "./agent-port.ts";
 import {
   type KnownSecrets,
   redactionSummary,
