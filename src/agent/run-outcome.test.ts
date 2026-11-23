@@ -14,10 +14,8 @@ import {
 
 const RESPONSE_TEXT = "done";
 const UNAUTHORIZED_REASON = "401 Unauthorized";
-const RATE_LIMIT_REASON = "429 Rate limit exceeded";
 const UNKNOWN_FAILURE_REASON = "fetch failed";
 const INTERNAL_FAILURE_REASON = "unexpected error";
-const EXTENSION_FAILURE_REASON = "extension threw";
 
 function assistantMessage(params: {
   toolCallCount?: number;
@@ -129,20 +127,6 @@ test("buildTurnEnd gives failed with unauthorized provider failure kind", () => 
   assert.equal(result.failure.reason, UNAUTHORIZED_REASON);
 });
 
-test("buildTurnEnd gives failed with rate limited kind", () => {
-  const result = buildTurnEnd({
-    budgetReached: null,
-    stopped: false,
-    failure: { internal: false, reason: RATE_LIMIT_REASON },
-    text: null,
-    totals: zeroTotals(),
-    warnings: [],
-  });
-  assert.ok(result.failure);
-  assert.equal(result.failure.kind, ProviderFailure.RateLimited);
-  assert.equal(result.failure.class, FailureClass.Terminal);
-});
-
 test("buildTurnEnd gives failed with unavailable for an unknown error", () => {
   const result = buildTurnEnd({
     budgetReached: null,
@@ -157,7 +141,7 @@ test("buildTurnEnd gives failed with unavailable for an unknown error", () => {
   assert.equal(result.failure.class, FailureClass.Terminal);
 });
 
-test("buildTurnEnd gives failed with internal failure for a thrown error", () => {
+test("buildTurnEnd gives failed with internal failure for a runtime error", () => {
   const result = buildTurnEnd({
     budgetReached: null,
     stopped: false,
@@ -173,20 +157,6 @@ test("buildTurnEnd gives failed with internal failure for a thrown error", () =>
   assert.equal(result.failure.reason, INTERNAL_FAILURE_REASON);
 });
 
-test("buildTurnEnd gives internal failure for an extension error", () => {
-  const result = buildTurnEnd({
-    budgetReached: null,
-    stopped: false,
-    failure: { internal: true, reason: EXTENSION_FAILURE_REASON },
-    text: null,
-    totals: zeroTotals(),
-    warnings: [],
-  });
-  assert.ok(result.failure);
-  assert.equal(result.failure.kind, InternalFailure.Internal);
-  assert.equal(result.failure.class, FailureClass.Terminal);
-});
-
 test("budgetReached priority over stopped", () => {
   const result = buildTurnEnd({
     budgetReached: BudgetLimit.Wall,
@@ -197,15 +167,6 @@ test("budgetReached priority over stopped", () => {
     warnings: [],
   });
   assert.equal(result.end, RunEnd.BudgetEnd);
-});
-
-test("zeroTotals gives all-zero totals", () => {
-  assert.deepEqual(zeroTotals(), {
-    modelCalls: 0,
-    toolCalls: 0,
-    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    listPriceUsd: 0,
-  });
 });
 
 test("addMessageTotals accumulates model calls and token usage", () => {

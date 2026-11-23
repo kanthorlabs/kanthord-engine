@@ -1,10 +1,11 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import { ProviderFailure, providerFailureOf } from "../scheduler/contract.ts";
+import {
+  type ProviderFailure,
+  providerFailureOf,
+} from "../scheduler/contract.ts";
 import type { SecretWarning } from "./redaction.ts";
 
 const TOOL_CALL_PART = "toolCall";
-
-export { ProviderFailure };
 
 export const RunEnd = {
   Completed: "completed",
