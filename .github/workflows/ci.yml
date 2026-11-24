@@ -103,3 +103,41 @@ jobs:
           path: node_modules/.cache/suite-pass/records.json
           include-hidden-files: true
           retention-days: 7
+
+  agent-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v6
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run build && pnpm run pi-tools:fetch
+      - run: sudo useradd --create-home --home-dir /home/kanthord-e2e kanthord-e2e
+      - run: |
+          sudo ip netns add kanthord-n
+          sudo ip -n kanthord-n link set lo up
+          sudo ip -n kanthord-n route add blackhole 0.0.0.0/0
+      - name: Load nft table in kanthord-n
+        run: |
+          sudo ip netns exec kanthord-n nft -f - <<'EOF'
+          table ip kanthord {
+            set connections {
+              type ipv4_addr . inet_service
+              flags dynamic
+            }
+            chain output {
+              type filter hook output priority 0; policy accept
+              ip protocol tcp tcp flags & (fin | syn | rst | ack) == syn add @connections { ip daddr . tcp dport }
+            }
+          }
+          EOF
+      - run: sudo setfacl -R -m u:kanthord-e2e:rX "${{ github.workspace }}"
+      - run: sudo ip netns exec kanthord-n sudo -u "$USER" --preserve-env=PATH pnpm --silent run test:agent-e2e

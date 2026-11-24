@@ -393,7 +393,9 @@ export default tseslint.config(
               allow: [...allow("kernel"), { to: serviceEntry("contract.ts") }],
             },
             {
-              from: element("component", { fileInternalPath: "*.test.ts" }),
+              from: element("component", {
+                fileInternalPath: "{*.test.ts,*.linux-test.ts}",
+              }),
               allow: [
                 {
                   to: element("service", {
@@ -466,7 +468,7 @@ export default tseslint.config(
             },
             {
               from: element("apps-server", {
-                fileInternalPath: "{test-support.ts,*.test.ts}",
+                fileInternalPath: "{test-support.ts,*.test.ts,*.linux-test.ts}",
               }),
               allow: [
                 { to: applicationEntry("apps-worker") },
@@ -557,7 +559,8 @@ export default tseslint.config(
             },
             {
               from: element("apps-cli", {
-                fileInternalPath: "{*.test.ts,*-test-support.ts}",
+                fileInternalPath:
+                  "{*.test.ts,*.linux-test.ts,*-test-support.ts}",
               }),
               allow: [
                 {
@@ -660,7 +663,10 @@ export default tseslint.config(
             {
               from: element(
                 { anyOf: ["worker-unit", "apps-worker"] },
-                { fileInternalPath: "{test-support.ts,*.test.ts}" },
+                {
+                  fileInternalPath:
+                    "{test-support.ts,*.test.ts,*.linux-test.ts}",
+                },
               ),
               allow: [
                 {
@@ -986,7 +992,7 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
   },
   {
-    files: ["src/**/*.test.ts"],
+    files: ["src/**/*.test.ts", "src/**/*.linux-test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -1006,6 +1012,7 @@ export default tseslint.config(
   {
     files: [
       "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
       "src/**/*-support.ts",
       "src/**/test-support.ts",
     ],
@@ -1016,6 +1023,7 @@ export default tseslint.config(
     files: ["src/**/*.ts"],
     ignores: [
       "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
       "src/kernel/caller-mint.ts",
       "src/kernel/service-mint.ts",
       "src/apps/server/**/*.ts",
@@ -1029,7 +1037,7 @@ export default tseslint.config(
   },
   {
     files: ["src/apps/server/**/*.ts"],
-    ignores: ["src/**/*.test.ts"],
+    ignores: ["src/**/*.test.ts", "src/**/*.linux-test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -1154,7 +1162,11 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/**/*.test.ts", "src/**/*test-support.ts"],
+    ignores: [
+      "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
+      "src/**/*test-support.ts",
+    ],
     rules: {
       "@typescript-eslint/no-magic-numbers": [
         "error",
@@ -1173,7 +1185,12 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*.linux-test.ts",
+      "**/*test-support.ts",
+      "**/__fixtures__/**",
+    ],
     rules: {
       complexity: ["error", 10],
       "@typescript-eslint/max-params": ["error", { max: 3 }],
@@ -1182,7 +1199,12 @@ export default tseslint.config(
   },
   {
     files: noInlineObjectTypeFiles,
-    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*.linux-test.ts",
+      "**/*test-support.ts",
+      "**/__fixtures__/**",
+    ],
     rules: { "kanthord/no-inline-object-type": "error" },
   },
 );
