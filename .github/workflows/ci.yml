@@ -120,11 +120,14 @@ jobs:
           path: .pi-tools
           key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
       - run: pnpm run build && pnpm run pi-tools:fetch
+      - name: Install nft and setfacl
+        run: |
+          sudo sh -c 'command -v nft && command -v setfacl' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables acl; }
       - run: sudo useradd --create-home --home-dir /home/kanthord-e2e kanthord-e2e
       - run: |
           sudo ip netns add kanthord-n
           sudo ip -n kanthord-n link set lo up
-          sudo ip -n kanthord-n route add blackhole 0.0.0.0/0
+          sudo ip -n kanthord-n route add local 0.0.0.0/0 dev lo
       - name: Load nft table in kanthord-n
         run: |
           sudo ip netns exec kanthord-n nft -f - <<'EOF'
@@ -139,5 +142,17 @@ jobs:
             }
           }
           EOF
-      - run: sudo setfacl -R -m u:kanthord-e2e:rX "${{ github.workspace }}"
-      - run: sudo ip netns exec kanthord-n sudo -u "$USER" --preserve-env=PATH pnpm --silent run test:agent-e2e
+      - name: Give kanthord-e2e read access
+        run: |
+          grant() {
+            sudo setfacl -R -m u:kanthord-e2e:rX "$1"
+            directory=$(dirname "$1")
+            while [ "$directory" != / ]; do
+              sudo setfacl -m u:kanthord-e2e:x "$directory"
+              directory=$(dirname "$directory")
+            done
+          }
+          grant "$GITHUB_WORKSPACE"
+          grant "$(pnpm store path)"
+          grant "$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
+      - run: sudo ip netns exec kanthord-n sudo -u "$(id -un)" env "PATH=$PATH" pnpm --silent run test:agent-e2e

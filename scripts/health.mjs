@@ -15,6 +15,7 @@ const SOURCE_PREFIX = "src/";
 const SOURCE_PATHSPEC = ":(glob)src/**/*.ts";
 const TEST_PATHSPEC = ":(glob)src/**/*.test.ts";
 const TEST_SUFFIX = ".test.ts";
+const LINUX_TEST_SUFFIX = ".linux-test.ts";
 const TEST_SUPPORT_SUFFIX = "test-support.ts";
 const FIXTURES_SEGMENT = "__fixtures__";
 const CASE_PATTERN = /^\s*(test|it)\(/;
@@ -51,7 +52,7 @@ function git(root, args) {
 }
 
 function isTestFile(path) {
-  return path.endsWith(TEST_SUFFIX);
+  return path.endsWith(TEST_SUFFIX) || path.endsWith(LINUX_TEST_SUFFIX);
 }
 
 function isProductionFile(path) {

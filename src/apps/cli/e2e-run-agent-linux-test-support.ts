@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
-import { join } from "node:path";
 import { promisify } from "node:util";
+import {
+  BIN_PATH,
+  cliEnvironment,
+  runAgentArguments,
+} from "./e2e-run-agent-test-support.ts";
 import type {
   AgentFixtures,
   CliResult,
@@ -10,81 +14,68 @@ import type {
 } from "./e2e-run-agent-test-support.ts";
 
 const execFileAsync = promisify(execFile);
-const ENGINE_ROOT = new URL("../../../", import.meta.url).pathname;
-const BIN_PATH = join(ENGINE_ROOT, "bin", "kanthord.mjs");
-const TEST_USER = "kanthord-e2e";
-const STUB_PROVIDER = "openai-compatible";
-const STUB_MODEL_ID = "stub-1";
-const DEFAULT_MODEL = `${STUB_PROVIDER}/${STUB_MODEL_ID}:off`;
-const DEFAULT_PROFILE = "swe@1";
+
+export const TEST_USER = "kanthord-e2e";
+export const TEST_USER_HOME = "/home/kanthord-e2e";
+
 const NFT_TABLE = "kanthord";
-const TEE_SUCCESS_EXIT = 0;
 const NFT_SET = "connections";
+const SUCCESS_EXIT = 0;
+const WRITE_SCRIPT =
+  'umask 077 && mkdir -p "$(dirname "$1")" && cat > "$1" && chmod 0600 "$1"';
 
-export async function spawnCliAsTestUser(
-  fixtures: AgentFixtures,
-  options: RunOptions,
+export interface TestUserStart {
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  signal: AbortSignal;
+  cwd?: string;
+}
+
+export interface NftConnection {
+  address: string;
+  port: number;
+}
+
+interface NftElement {
+  concat: [string, number];
+}
+
+interface NftSet {
+  elem?: NftElement[];
+}
+
+interface NftObject {
+  set?: NftSet;
+}
+
+interface NftListing {
+  nftables: NftObject[];
+}
+
+function assignments(env: NodeJS.ProcessEnv): string[] {
+  return Object.entries(env).flatMap(([name, value]) =>
+    value === undefined ? [] : [`${name}=${value}`],
+  );
+}
+
+export async function spawnBinAsTestUser(
+  start: TestUserStart,
 ): Promise<CliResult> {
-  const profile = options.profile ?? DEFAULT_PROFILE;
-  const model = options.model ?? DEFAULT_MODEL;
-  const workspace = options.workspace ?? fixtures.W;
-  const session = options.session ?? fixtures.S;
-  const auth = options.auth ?? fixtures.authPath;
-  const prompts = options.prompt ?? ["run task"];
-  const systemPrompts = options.systemPrompt ?? [];
-
-  const args: string[] = [
-    "run",
-    "agent",
-    profile,
-    "--model",
-    model,
-    "--workspace",
-    workspace,
-    "--session",
-    session,
-    "--auth",
-    auth,
-  ];
-
-  for (const p of prompts) {
-    args.push("--prompt", p);
-  }
-  for (const sp of systemPrompts) {
-    args.push("--system-prompt", sp);
-  }
-  for (const b of options.budget ?? []) {
-    args.push("--budget", b);
-  }
-
-  if (options.output !== false) {
-    args.push("--output", options.output ?? fixtures.O);
-  }
-
-  const env: NodeJS.ProcessEnv = {
-    HOME: fixtures.H,
-    TMPDIR: fixtures.T,
-    XDG_STATE_HOME: fixtures.X,
-    PATH: process.env.PATH ?? "",
-    ...options.extraEnv,
-  };
-
-  const preserveEnv = Object.keys(env).join(",");
-
   const child = spawn(
     "sudo",
     [
       "-n",
       "-u",
       TEST_USER,
-      `--preserve-env=${preserveEnv}`,
+      "env",
+      "-i",
+      ...assignments(start.env),
       process.execPath,
       BIN_PATH,
-      ...args,
+      ...start.args,
     ],
-    { env, signal: options.signal, cwd: options.cwd },
+    { signal: start.signal, cwd: start.cwd },
   );
-
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
@@ -98,23 +89,35 @@ export async function spawnCliAsTestUser(
   return { status, stdout, stderr };
 }
 
+export async function spawnCliAsTestUser(
+  fixtures: AgentFixtures,
+  options: RunOptions,
+): Promise<CliResult> {
+  return spawnBinAsTestUser({
+    args: runAgentArguments(fixtures, options),
+    env: cliEnvironment(fixtures, options),
+    signal: options.signal,
+    cwd: options.cwd,
+  });
+}
+
 export async function writeFileAsTestUser(
   path: string,
   content: string,
 ): Promise<void> {
-  const child = spawn("sudo", ["-n", "-u", TEST_USER, "tee", path], {
-    stdio: "pipe",
-  });
-  child.stdout?.resume();
-  child.stdin.write(content);
-  child.stdin.end();
-  const [exitCode] = (await once(child, "close")) as [number | null];
-  assert.equal(exitCode, TEE_SUCCESS_EXIT);
-  await execFileAsync("sudo", ["-n", "-u", TEST_USER, "chmod", "0600", path]);
+  const child = spawn(
+    "sudo",
+    ["-n", "-u", TEST_USER, "sh", "-c", WRITE_SCRIPT, "sh", path],
+    { stdio: ["pipe", "ignore", "inherit"] },
+  );
+  child.stdin?.end(content);
+  const [status] = (await once(child, "close")) as [number | null];
+  assert.equal(status, SUCCESS_EXIT);
 }
 
-export async function nftConnectionSet(): Promise<string> {
+export async function nftConnections(): Promise<NftConnection[]> {
   const { stdout } = await execFileAsync("sudo", [
+    "-n",
     "nft",
     "-n",
     "-j",
@@ -124,5 +127,8 @@ export async function nftConnectionSet(): Promise<string> {
     NFT_TABLE,
     NFT_SET,
   ]);
-  return stdout;
+  const listing = JSON.parse(stdout) as NftListing;
+  return listing.nftables
+    .flatMap((object) => object.set?.elem ?? [])
+    .map(({ concat: [address, port] }) => ({ address, port }));
 }

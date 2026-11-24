@@ -18,6 +18,8 @@ const workerFiles = ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"];
 const workerTestFiles = [
   "src/worker/unit/**/*.test.ts",
   "src/apps/worker/**/*.test.ts",
+  "src/worker/unit/**/*.linux-test.ts",
+  "src/apps/worker/**/*.linux-test.ts",
   "src/worker/unit/**/test-support.ts",
   "src/apps/worker/**/test-support.ts",
   "src/apps/worker/**/*-test-support.ts",
