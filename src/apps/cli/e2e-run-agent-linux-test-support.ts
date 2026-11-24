@@ -23,12 +23,20 @@ const NFT_SET = "connections";
 const SUCCESS_EXIT = 0;
 const WRITE_SCRIPT =
   'umask 077 && mkdir -p "$(dirname "$1")" && cat > "$1" && chmod 0600 "$1"';
+const DIRECTORY_SCRIPT = 'umask 077 && mkdir -p "$1" && chmod 0700 "$1"';
+const WORKSPACE_SCRIPT = [
+  'umask 077 && git init -q -b main "$1"',
+  'printf workspace > "$1/README.md"',
+  'git -C "$1" add .',
+  'git -C "$1" -c user.name=Test -c user.email=test@example.invalid commit -q -m init',
+].join(" && ");
 
 export interface TestUserStart {
   args: string[];
   env: NodeJS.ProcessEnv;
   signal: AbortSignal;
   cwd?: string;
+  stdin?: string;
 }
 
 export interface NftConnection {
@@ -84,7 +92,7 @@ export async function spawnBinAsTestUser(
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
     stderr += chunk;
   });
-  child.stdin.end();
+  child.stdin.end(start.stdin);
   const [status] = (await once(child, "close")) as [number | null];
   return { status, stdout, stderr };
 }
@@ -92,12 +100,14 @@ export async function spawnBinAsTestUser(
 export async function spawnCliAsTestUser(
   fixtures: AgentFixtures,
   options: RunOptions,
+  stdin?: string,
 ): Promise<CliResult> {
   return spawnBinAsTestUser({
     args: runAgentArguments(fixtures, options),
     env: cliEnvironment(fixtures, options),
     signal: options.signal,
     cwd: options.cwd,
+    stdin,
   });
 }
 
@@ -113,6 +123,39 @@ export async function writeFileAsTestUser(
   child.stdin?.end(content);
   const [status] = (await once(child, "close")) as [number | null];
   assert.equal(status, SUCCESS_EXIT);
+}
+
+function shellAsTestUser(script: string, path: string): Promise<unknown> {
+  return execFileAsync("sudo", [
+    "-n",
+    "-u",
+    TEST_USER,
+    "sh",
+    "-c",
+    script,
+    "sh",
+    path,
+  ]);
+}
+
+export async function mkdirAsTestUser(path: string): Promise<void> {
+  await shellAsTestUser(DIRECTORY_SCRIPT, path);
+}
+
+export async function buildWorkspaceAsTestUser(path: string): Promise<void> {
+  await shellAsTestUser(WORKSPACE_SCRIPT, path);
+}
+
+export async function flushNftConnections(): Promise<void> {
+  await execFileAsync("sudo", [
+    "-n",
+    "nft",
+    "flush",
+    "set",
+    "ip",
+    NFT_TABLE,
+    NFT_SET,
+  ]);
 }
 
 export async function nftConnections(): Promise<NftConnection[]> {

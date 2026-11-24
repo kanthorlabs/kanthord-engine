@@ -65,13 +65,12 @@ function requireDist(): void {
   );
 }
 
-function writeAuthFile(
-  authPath: string,
+export function authFileText(
   key: string,
   baseUrl: string,
-  models: string,
-): void {
-  const entry = {
+  models: string = JSON.stringify([{ id: STUB_MODEL_ID }]),
+): string {
+  return JSON.stringify({
     [STUB_PROVIDER]: {
       type: "api_key",
       key,
@@ -80,8 +79,16 @@ function writeAuthFile(
         OPENAI_COMPATIBLE_MODELS: models,
       },
     },
-  };
-  writeFileSync(authPath, JSON.stringify(entry), { mode: 0o600 });
+  });
+}
+
+function writeAuthFile(
+  authPath: string,
+  key: string,
+  baseUrl: string,
+  models: string,
+): void {
+  writeFileSync(authPath, authFileText(key, baseUrl, models), { mode: 0o600 });
 }
 
 export async function commitAll(W: string, message: string): Promise<void> {
@@ -302,7 +309,7 @@ export interface RunOptions {
   prompt?: string[];
   systemPrompt?: string[];
   budget?: string[];
-  auth?: string;
+  auth?: string | false;
   cwd?: string;
   extraEnv?: Record<string, string | undefined>;
   signal: AbortSignal;
@@ -344,9 +351,9 @@ export function runAgentArguments(
     workspace,
     "--session",
     session,
-    "--auth",
-    auth,
   ];
+
+  if (auth !== false) args.push("--auth", auth);
 
   for (const p of prompts) {
     args.push("--prompt", p);
