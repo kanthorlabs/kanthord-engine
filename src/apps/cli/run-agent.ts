@@ -20,6 +20,7 @@ import {
   type AgentInput,
   AgentOpenError,
   AgentOpenKind,
+  type AgentRun,
   composeSystemPrompt,
   getProfile,
   type KnownSecrets,
@@ -64,6 +65,7 @@ import {
   budgetResultFields,
   checkBudgetUnpriced,
   parseBudget,
+  type ParsedBudget,
 } from "./run-agent-budget.ts";
 import { budgetDigestField, inputDigest } from "./run-agent-digest.ts";
 import {
@@ -74,12 +76,17 @@ import {
   agentClassValue,
   agentExitCode,
   CLASS_NONE,
-  printOpenFailed,
+  handleOpenFailed,
   printPostResultDiagnostic,
   printSecretWarnings,
   RunExitCode,
+  stoppedBySignalExit,
 } from "./run-agent-exit.ts";
-import { type AgentModelForm, resolveAgentModel } from "./run-agent-model.ts";
+import {
+  type AgentModelForm,
+  resolveAgentModel,
+  type ResolvedModel,
+} from "./run-agent-model.ts";
 import {
   checkRequiredOption,
   checkTokenRefused,
@@ -90,6 +97,7 @@ import {
   checkOutputPath,
   openOutputFile,
   OutputKind,
+  type OutputTarget,
   parseOutputTarget,
   resultLine,
   type RunAgentResult,
@@ -101,16 +109,14 @@ import {
   runPiToolInstall,
 } from "./run-agent-pi.ts";
 import { checkSessionPath } from "./run-agent-session.ts";
-import { stopOnSignal } from "./run-agent-signal.ts";
+import { type StopHandlers, stopOnSignal } from "./run-agent-signal.ts";
 import { checkProxySettings } from "./run-agent-start.ts";
 import { CommandName, ExitCode } from "./constants.ts";
 import { singleUse } from "./shared.ts";
 
 const RUN_AGENT_CREDENTIAL_ID = "run-agent";
 const AGENT_UNKNOWN = "cli.run.agent.agent_unknown";
-const OPEN_FAILED_CODE = "cli.run.agent.open_failed";
 const START_REFUSED_CODE = "cli.run.agent.start_refused";
-const STOPPED_CODE = "cli.run.agent.stopped";
 const NONZERO_CODE = "cli.run.agent.nonzero";
 
 function collect(value: string, previous: string[]): string[] {
@@ -131,6 +137,28 @@ interface RunAgentOptions {
 
 interface AgentRunOutcome {
   turnEnd: TurnEnd;
+  systemPromptDigest: string;
+}
+
+type OnAgentOpened = (run: AgentRun) => void;
+
+interface OpenRunOptions {
+  signal: AbortSignal;
+  promptText: string;
+  onAgentOpened: OnAgentOpened;
+}
+
+interface ResultContext {
+  monotonicStart: number;
+  outputTarget: OutputTarget;
+  outputFd: number | null;
+  parsedBudget: ParsedBudget;
+  rawBudget: string[];
+  profile: string;
+  digestValue: string;
+  sessionAbsPath: string;
+  workspaceRealPath: string;
+  resolvedModel: ResolvedModel;
   systemPromptDigest: string;
 }
 
@@ -175,27 +203,102 @@ function configDirectories(home: string | null): string[] {
     : [xdgConfig, join(home, ".config", "kanthord")];
 }
 
+function emitRunResult(ctx: ResultContext, turnEnd: TurnEnd): void {
+  const durationMs = Math.round(performance.now() - ctx.monotonicStart);
+  const exitCode = agentExitCode(turnEnd.end, turnEnd.failure);
+  const classValue = agentClassValue(turnEnd.end, turnEnd.failure);
+  const budgetFields = budgetResultFields(ctx.parsedBudget, ctx.rawBudget);
+
+  const result: RunAgentResult = {
+    agent: ctx.profile,
+    engine_version: packageVersion(),
+    provider: ctx.resolvedModel.provider,
+    model: ctx.resolvedModel.model,
+    reasoning_effort: ctx.resolvedModel.reasoning_effort,
+    budget: budgetDigestField(ctx.parsedBudget),
+    budget_reached: turnEnd.budgetReached,
+    input_digest: ctx.digestValue,
+    system_prompt_digest: ctx.systemPromptDigest,
+    workspace: ctx.workspaceRealPath,
+    session: ctx.sessionAbsPath,
+    end: turnEnd.end,
+    class: resultClass(classValue),
+    failure: failureKind(turnEnd.failure),
+    duration_ms: durationMs,
+    model_calls: turnEnd.totals.modelCalls,
+    tool_calls: turnEnd.totals.toolCalls,
+    usage: {
+      input: turnEnd.totals.usage.input,
+      output: turnEnd.totals.usage.output,
+      cache_read: turnEnd.totals.usage.cacheRead,
+      cache_write: turnEnd.totals.usage.cacheWrite,
+    },
+    list_price_usd: turnEnd.totals.listPriceUsd,
+    text: turnEnd.text,
+  };
+
+  const resultText = resultLine(result);
+  if (ctx.outputTarget.kind === OutputKind.Path) {
+    assert.ok(ctx.outputFd !== null);
+    writeSync(ctx.outputFd, Buffer.from(resultText));
+  } else {
+    process.stdout.write(
+      `${textLayout({
+        agent: ctx.profile,
+        end: turnEnd.end,
+        model: ctx.resolvedModel.model,
+        reasoning_effort: ctx.resolvedModel.reasoning_effort,
+        exitCode,
+        classValue,
+        failure: failureKind(turnEnd.failure),
+        budget_reached: turnEnd.budgetReached,
+        budgetDisplay: budgetFields.display,
+        duration_ms: durationMs,
+        model_calls: turnEnd.totals.modelCalls,
+        tool_calls: turnEnd.totals.toolCalls,
+        usage: {
+          input: turnEnd.totals.usage.input,
+          output: turnEnd.totals.usage.output,
+          cache_read: turnEnd.totals.usage.cacheRead,
+          cache_write: turnEnd.totals.usage.cacheWrite,
+        },
+        list_price_usd: turnEnd.totals.listPriceUsd,
+        session: ctx.sessionAbsPath,
+        workspace: ctx.workspaceRealPath,
+        text: turnEnd.text,
+        provider: ctx.resolvedModel.provider,
+      })}\n`,
+    );
+  }
+
+  printSecretWarnings(turnEnd.warnings);
+  if (turnEnd.failure !== null) printPostResultDiagnostic(turnEnd.failure);
+
+  if (exitCode !== ExitCode.Success) {
+    throw new CommanderError(
+      exitCode,
+      NONZERO_CODE,
+      `run agent: exit ${exitCode}`,
+    );
+  }
+}
+
 async function openAndRunAgent(
   agentInput: AgentInput,
-  signal: AbortSignal,
-  promptText: string,
+  options: OpenRunOptions,
 ): Promise<AgentRunOutcome> {
+  const { signal, promptText, onAgentOpened } = options;
   let agentOpen;
   try {
     agentOpen = await openAgent(agentInput);
   } catch (error) {
     if (error instanceof AgentOpenError) {
-      if (signal.aborted) {
-        throw new CommanderError(
-          RunExitCode.Stopped,
-          STOPPED_CODE,
-          "stopped by signal",
-        );
-      }
-      printOpenFailed(error);
-      throw new CommanderError(1, OPEN_FAILED_CODE, error.message);
+      throw handleOpenFailed(error, signal);
     }
     throw error;
+  }
+  if (signal.aborted) {
+    throw stoppedBySignalExit();
   }
   if (agentOpen.kind === AgentOpenKind.Refused) {
     throw new Diagnostic(
@@ -205,6 +308,7 @@ async function openAndRunAgent(
     );
   }
   const agentRun = agentOpen.run;
+  onAgentOpened(agentRun);
   try {
     const turnEnd = await agentRun.send(promptText, { work: null });
     return { turnEnd, systemPromptDigest: agentRun.systemPromptDigest };
@@ -214,11 +318,11 @@ async function openAndRunAgent(
 }
 
 async function cleanupResources(
-  releaseSignal: (() => void) | null,
+  stopHandlers: StopHandlers | null,
   R: string | null,
   outputFd: number | null,
 ): Promise<void> {
-  releaseSignal?.();
+  stopHandlers?.release();
   if (R !== null) {
     try {
       rmSync(R, { recursive: true, force: true });
@@ -310,7 +414,7 @@ async function runAgent(
 
   let R: string | null = null;
   let outputFd: number | null = null;
-  let releaseSignal: (() => void) | null = null;
+  let stopHandlers: StopHandlers | null = null;
 
   try {
     R = mkdtempSync(join(tmpdir(), "kanthord-run-"));
@@ -323,7 +427,7 @@ async function runAgent(
     }
     withoutAmbientCredentials(process.env, rHome, rTmp);
     const controller = new AbortController();
-    releaseSignal = stopOnSignal(controller);
+    stopHandlers = stopOnSignal(controller);
     const { signal } = controller;
 
     runPiToolInstall(() => installPiTools({ directory: piDirRaw }));
@@ -406,91 +510,48 @@ async function runAgent(
       budget: budgetDigestField(parsedBudget),
     });
 
-    const { turnEnd, systemPromptDigest } = await openAndRunAgent(
-      agentInput,
+    const { turnEnd, systemPromptDigest } = await openAndRunAgent(agentInput, {
       signal,
       promptText,
-    );
+      onAgentOpened: (agentRun) =>
+        stopHandlers!.setForceStop(() => agentRun.forceStop()),
+    });
 
-    const durationMs = Math.round(performance.now() - monotonicStart);
-    const exitCode = agentExitCode(turnEnd.end, turnEnd.failure);
-    const classValue = agentClassValue(turnEnd.end, turnEnd.failure);
-    const budgetFields = budgetResultFields(parsedBudget, rawBudget);
+    stopHandlers.release();
 
-    const result: RunAgentResult = {
-      agent: profile,
-      engine_version: packageVersion(),
-      provider: resolvedModel.provider,
-      model: resolvedModel.model,
-      reasoning_effort: resolvedModel.reasoning_effort,
-      budget: budgetDigestField(parsedBudget),
-      budget_reached: turnEnd.budgetReached,
-      input_digest: digestValue,
-      system_prompt_digest: systemPromptDigest,
-      workspace: workspaceRealPath,
-      session: sessionAbsPath,
-      end: turnEnd.end,
-      class: resultClass(classValue),
-      failure: failureKind(turnEnd.failure),
-      duration_ms: durationMs,
-      model_calls: turnEnd.totals.modelCalls,
-      tool_calls: turnEnd.totals.toolCalls,
-      usage: {
-        input: turnEnd.totals.usage.input,
-        output: turnEnd.totals.usage.output,
-        cache_read: turnEnd.totals.usage.cacheRead,
-        cache_write: turnEnd.totals.usage.cacheWrite,
-      },
-      list_price_usd: turnEnd.totals.listPriceUsd,
-      text: turnEnd.text,
-    };
-
-    const resultText = resultLine(result);
-    if (outputTarget.kind === OutputKind.Path) {
-      assert.ok(outputFd !== null);
-      writeSync(outputFd, Buffer.from(resultText));
-    } else {
-      process.stdout.write(
-        `${textLayout({
-          agent: profile,
-          end: turnEnd.end,
-          model: resolvedModel.model,
-          reasoning_effort: resolvedModel.reasoning_effort,
-          exitCode,
-          classValue,
-          failure: failureKind(turnEnd.failure),
-          budget_reached: turnEnd.budgetReached,
-          budgetDisplay: budgetFields.display,
-          duration_ms: durationMs,
-          model_calls: turnEnd.totals.modelCalls,
-          tool_calls: turnEnd.totals.toolCalls,
-          usage: {
-            input: turnEnd.totals.usage.input,
-            output: turnEnd.totals.usage.output,
-            cache_read: turnEnd.totals.usage.cacheRead,
-            cache_write: turnEnd.totals.usage.cacheWrite,
-          },
-          list_price_usd: turnEnd.totals.listPriceUsd,
-          session: sessionAbsPath,
-          workspace: workspaceRealPath,
-          text: turnEnd.text,
-          provider: resolvedModel.provider,
-        })}\n`,
-      );
+    if (R !== null) {
+      try {
+        rmSync(R, { recursive: true, force: true });
+      } catch {}
+      R = null;
     }
 
-    printSecretWarnings(turnEnd.warnings);
-    if (turnEnd.failure !== null) printPostResultDiagnostic(turnEnd.failure);
-
-    if (exitCode !== ExitCode.Success) {
+    if (!stopHandlers.forcedWithoutResult) {
+      emitRunResult(
+        {
+          monotonicStart,
+          outputTarget,
+          outputFd,
+          parsedBudget,
+          rawBudget,
+          profile,
+          digestValue,
+          sessionAbsPath,
+          workspaceRealPath,
+          resolvedModel,
+          systemPromptDigest,
+        },
+        turnEnd,
+      );
+    } else {
       throw new CommanderError(
-        exitCode,
+        RunExitCode.Stopped,
         NONZERO_CODE,
-        `run agent: exit ${exitCode}`,
+        "run agent: exit 2",
       );
     }
   } finally {
-    await cleanupResources(releaseSignal, R, outputFd);
+    await cleanupResources(stopHandlers, R, outputFd);
   }
 }
 

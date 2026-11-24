@@ -309,7 +309,7 @@ A later try also needs a workspace that passes the start preconditions.
 | ---- | ------------------------------------------------------------------------- |
 | `0`  | The end `completed`.                                                      |
 | `1`  | A refusal, a failed open (`cli.run.agent.open_failed`) or a syntax error. |
-| `2`  | The end `stopped`: one SIGINT stops the turn.                             |
+| `2`  | The end `stopped`: one SIGINT or SIGTERM stops the turn.                  |
 | `4`  | The end `budget_end`: the first budget limit (wall or usd) fired.         |
 | `5`  | The end `failed` with a terminal failure.                                 |
 | `75` | The end `failed` with a retryable failure.                                |
@@ -319,3 +319,25 @@ A later try also needs a workspace that passes the start preconditions.
   `cli.run.agent.provider_retryable`, `cli.run.agent.provider_failed` or
   `cli.run.agent.internal_error`, with the `reason` row.
 - No stderr line holds a credential value.
+
+### Shutdown
+
+SIGINT and SIGTERM stop the run.
+
+**Before the agent opens** (before the session opens and the first request is
+sent): the first signal gives exit `2` and writes no result. No open-failed
+diagnostic appears.
+
+**During the run** (after the agent opens):
+
+1. First signal: the run aborts the current turn. It waits up to 10 seconds
+   for the agent to finish the abort.
+2. If the agent finishes within 10 seconds: the run writes the result with the
+   end `stopped` and exits `2`.
+3. If the 10-second limit passes: the run forces a stop, writes the result
+   with the end `stopped` and exits `2`.
+4. Second signal before the run exits: the run forces a stop immediately and
+   exits `2` with no result.
+
+The run removes the resource directory and kills all tool children before it
+exits. A second signal gives no result and no diagnostic.

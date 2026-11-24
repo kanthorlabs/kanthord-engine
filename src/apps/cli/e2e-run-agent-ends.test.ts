@@ -23,9 +23,14 @@ import {
   type CliResult,
   commitAll,
   digestListing,
+  pollUntilCount,
+  pollUntilExists,
   porcelainStatus,
   resultLines,
+  sessionEntries,
+  sessionMessages,
   spawnCli,
+  spawnCliAndSignal,
   TEST_K,
   TEST_TIMEOUT_MS,
 } from "./e2e-run-agent-test-support.ts";
@@ -386,5 +391,125 @@ test(
     assert.ok(!result.stderr.includes(TEST_K));
     assert.ok(!readFileSync(fixtures.O, "utf8").includes(TEST_K));
     assert.ok(!readFileSync(fixtures.S, "utf8").includes(TEST_K));
+  },
+);
+
+const END_STOPPED = "stopped";
+const SIGNAL_MAX_EXIT_MS = 10000;
+const STOP_REASON_ABORTED = "aborted";
+const BASH_TOOL_NAME = "bash";
+const ASSISTANT_ROLE = "assistant";
+const ONE_CLOSED_REQUEST = 1;
+
+test(
+  "L2-AC11: variant 1 - SIGTERM stops the run and kills the tool child",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const pidFile = join(
+      (await import("node:os")).tmpdir(),
+      `ac11-pid-${Date.now()}`,
+    );
+    const stub = await llmStub(
+      t,
+      [
+        {
+          kind: "tool_calls",
+          calls: [
+            {
+              name: BASH_TOOL_NAME,
+              args: { command: `echo $$ > "${pidFile}"; exec sleep 600` },
+            },
+          ],
+        },
+      ],
+      "",
+    );
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCliAndSignal(
+      fixtures,
+      { signal: t.signal },
+      () => pollUntilExists(pidFile, t.signal),
+      "SIGTERM",
+    );
+
+    assert.equal(result.status, RunExitCode.Stopped, result.stderr);
+    assert.ok(
+      result.exitMs - result.signalMs < SIGNAL_MAX_EXIT_MS,
+      `exit took ${result.exitMs - result.signalMs}ms`,
+    );
+    assert.deepEqual(readdirSync(fixtures.T), []);
+    const lines = resultLines(fixtures.O);
+    assert.equal(lines.length, ONE_LINE);
+    const r = lines[0]!;
+    assert.equal(r["end"], END_STOPPED);
+    assert.equal(r["class"], CLASS_TERMINAL);
+
+    const pid = parseInt(readFileSync(pidFile, "utf8").trim(), 10);
+    let pidAlive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      pidAlive = false;
+    }
+    assert.ok(!pidAlive, `pid ${pid} still alive after exit`);
+
+    const toolCalls = sessionEntries(fixtures.S).filter(
+      (e) =>
+        e.message?.role === ASSISTANT_ROLE &&
+        Array.isArray(e.message.content) &&
+        e.message.content.some((b) => b.name === BASH_TOOL_NAME),
+    );
+    assert.ok(
+      toolCalls.length > NO_REQUESTS,
+      "session holds no bash tool call",
+    );
+  },
+);
+
+test(
+  "L2-AC11: variant 2 - SIGINT stops the run and the stub records a closed connection",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(
+      t,
+      [{ kind: "text", text: "ok", delayMs: 30000 }],
+      "",
+    );
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCliAndSignal(
+      fixtures,
+      { signal: t.signal },
+      () => pollUntilCount(() => stub.requests.length, ONE_LINE, t.signal),
+      "SIGINT",
+    );
+
+    assert.equal(result.status, RunExitCode.Stopped, result.stderr);
+    assert.ok(
+      result.exitMs - result.signalMs < SIGNAL_MAX_EXIT_MS,
+      `exit took ${result.exitMs - result.signalMs}ms`,
+    );
+    assert.deepEqual(readdirSync(fixtures.T), []);
+    const lines = resultLines(fixtures.O);
+    assert.equal(lines.length, ONE_LINE);
+    const r = lines[0]!;
+    assert.equal(r["end"], END_STOPPED);
+    assert.equal(r["class"], CLASS_TERMINAL);
+
+    assert.ok(
+      stub.closedRequestCount() >= ONE_CLOSED_REQUEST,
+      "stub recorded no closed connection",
+    );
+
+    const assistantMsgs = sessionMessages(fixtures.S, ASSISTANT_ROLE);
+    assert.ok(
+      assistantMsgs.length > NO_REQUESTS,
+      "session holds no assistant entry",
+    );
+    assert.ok(
+      assistantMsgs.some((m) => m.stopReason === STOP_REASON_ABORTED),
+      "no assistant entry with aborted stop reason",
+    );
   },
 );
