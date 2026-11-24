@@ -181,6 +181,32 @@ checks run before the session opens.
   credential.
 - The run blocks a tool call whose input holds a known secret.
 
+### Start preconditions
+
+Each profile declares a list of start preconditions. The run checks each one
+before it opens the session, sends a request or writes any file. A failed
+precondition gives `cli.run.agent.start_refused` with a `reason` row that
+starts with the precondition id.
+
+| Id                    | Condition                                                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `workspace_directory` | The working directory and each root are directories that exist.                                                       |
+| `git_worktree`        | For each root, `git rev-parse --show-toplevel` exits `0` and prints the real path of the root.                        |
+| `git_clean`           | For each root, `git --no-optional-locks status --porcelain=v1 --untracked-files=normal` exits `0` and prints nothing. |
+
+- `swe@1` checks all three. `re@1` and `env@1` check only `workspace_directory`.
+- `git_worktree` requires the root to be the top level of its worktree. A
+  subdirectory of a worktree fails.
+- `git_clean` checks for uncommitted changes and untracked files. Any output
+  from the command fails the check.
+- Each git command runs with an isolated environment. The environment contains
+  only the names of `childEnvironment` plus `PATH`. It sets
+  `core.hooksPath=/dev/null` and `core.fsmonitor=false`, so the check runs no
+  hook and no fsmonitor command. Filter drivers run as configured.
+- The `git_clean` output on a clean workspace differs from `git status` for a
+  developer: the isolated environment and `--no-optional-locks` suppress hooks,
+  fsmonitor and index refresh writes.
+
 ### Directories and environment
 
 - The pi directory is `kanthord/pi` under the KanthorD XDG state directory. The

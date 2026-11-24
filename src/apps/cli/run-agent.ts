@@ -73,6 +73,7 @@ import {
   printOpenFailed,
   printPostResultDiagnostic,
   printSecretWarnings,
+  printStartRefused,
   RunExitCode,
 } from "./run-agent-exit.ts";
 import { type AgentModelForm, resolveAgentModel } from "./run-agent-model.ts";
@@ -105,6 +106,7 @@ import { singleUse } from "./shared.ts";
 const RUN_AGENT_CREDENTIAL_ID = "run-agent";
 const AGENT_UNKNOWN = "cli.run.agent.agent_unknown";
 const OPEN_FAILED_CODE = "cli.run.agent.open_failed";
+const START_REFUSED_CODE = "cli.run.agent.start_refused";
 const STOPPED_CODE = "cli.run.agent.stopped";
 const NONZERO_CODE = "cli.run.agent.nonzero";
 
@@ -192,10 +194,10 @@ async function openAndRunAgent(
     }
     throw error;
   }
-  assert.ok(
-    agentOpen.kind === AgentOpenKind.Opened,
-    "unexpected agent refused",
-  );
+  if (agentOpen.kind === AgentOpenKind.Refused) {
+    printStartRefused(agentOpen.refusal.reason);
+    throw new CommanderError(1, START_REFUSED_CODE, agentOpen.refusal.reason);
+  }
   const agentRun = agentOpen.run;
   try {
     const turnEnd = await agentRun.send(promptText, { work: null });

@@ -225,6 +225,7 @@ const noInlineObjectTypeFiles = [
   "src/agent/run-budget.ts",
   "src/agent/run-outcome.ts",
   "src/agent/agent-contract.ts",
+  "src/agent/start-preconditions.ts",
   "src/agent/tool-table.ts",
   "src/agent/pinned-layers.ts",
   "src/apps/cli/run-agent-start.ts",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
+import { simpleGit } from "simple-git";
 import {
   contentText,
   fauxAssistantMessage,
@@ -77,6 +78,20 @@ async function makeInput(
   overrideEnvironment(t, { HOME: home, XDG_STATE_HOME: join(home, "state") });
   const cwd = join(home, "workspace");
   mkdirSync(cwd, { recursive: true });
+  await simpleGit(cwd).raw(["init", "--quiet", "-b", "main"]);
+  writeFileSync(join(cwd, ".gitkeep"), "");
+  const git = simpleGit(cwd);
+  await git.add(".");
+  await git.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "init",
+  ]);
 
   const pi = await loadPi();
   const scripted = scriptedProvider(options.script ?? []);
@@ -109,7 +124,7 @@ async function makeInput(
     budget: { deadline: null, usd: null },
     session: { kind: SessionKind.Memory },
     knownSecrets: options.knownSecrets ?? NO_SECRETS,
-    childEnvironment: {},
+    childEnvironment: { PATH: process.env["PATH"] ?? "" },
     hostHome: home,
     consumerTools: options.consumerTools ?? [],
     signal: options.signal ?? new AbortController().signal,
@@ -160,6 +175,17 @@ test("an unsupported thinking level throws agent.level_unsupported", async (t) =
       return true;
     },
   );
+});
+
+test("L3-U7: a refused open returns AgentRefused, writes no session file and sends no request", async (t) => {
+  const { agentInput, scripted } = await makeInput(t);
+  const path = join(agentInput.workspace.cwd, "..", "session.jsonl");
+  agentInput.session = { kind: SessionKind.NewFile, path };
+  writeFileSync(join(agentInput.workspace.cwd, "dirty.txt"), "dirty");
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Refused);
+  assert.equal(existsSync(path), false);
+  assert.equal(scripted.calls.length, NO_CALLS);
 });
 
 test("an abort during open throws agent.open_failed with the message aborted, and leaves no session file", async (t) => {
@@ -215,6 +241,18 @@ test("TurnEnd.text holds K zero times when K is in a tool result that the model 
     knownSecrets: WITH_SECRET,
   });
   writeFileSync(join(agentInput.workspace.cwd, "key.txt"), `key=${K}\n`);
+  const keyGit = simpleGit(agentInput.workspace.cwd);
+  await keyGit.add("key.txt");
+  await keyGit.raw([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "commit",
+    "--quiet",
+    "-m",
+    "add key",
+  ]);
   const opened = await openAgent(agentInput);
   assert.equal(opened.kind, AgentOpenKind.Opened);
   const { run } = opened as AgentOpened;
@@ -313,12 +351,16 @@ test("a thrown session.prompt ends the run with the failure internal", async (t)
 });
 
 test("no runtime module writes to process.stdout or process.stderr", async (t) => {
-  const stdout = t.mock.method(process.stdout, "write");
-  const stderr = t.mock.method(process.stderr, "write");
-  const { run } = await openAndRun(t, {
+  const { agentInput } = await makeInput(t, {
     script: [fauxAssistantMessage(`The key is ${K}`)],
     knownSecrets: WITH_SECRET,
   });
+  const stdout = t.mock.method(process.stdout, "write");
+  const stderr = t.mock.method(process.stderr, "write");
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
   await run.send("hello", { work: null });
   await run.close();
   assert.equal(stdout.mock.callCount(), NO_CALLS);
