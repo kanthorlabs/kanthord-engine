@@ -7,9 +7,11 @@ import {
   CLASS_NONE,
   CLASS_RETRYABLE,
   CLASS_TERMINAL,
+  handleOpenFailed,
   printOpenFailed,
   printPostResultDiagnostic,
   RunExitCode,
+  stoppedBySignalExit,
 } from "./run-agent-exit.ts";
 import {
   AgentOpenError,
@@ -20,6 +22,7 @@ import {
 import type { RunFailure } from "../../agent/agent-contract.ts";
 
 const PROVIDER_FAILURE = "unavailable" as const;
+const NO_STDERR_LINES = 0;
 
 function terminalFailure(
   kind: typeof PROVIDER_FAILURE = PROVIDER_FAILURE,
@@ -162,4 +165,47 @@ test("printPostResultDiagnostic writes internal_error for internal failure", () 
     process.stderr.write = original;
   }
   assert.ok(lines.some((l) => l.includes("cli.run.agent.internal_error")));
+});
+
+test("stoppedBySignalExit returns exit code 2", () => {
+  const err = stoppedBySignalExit();
+  assert.equal(err.exitCode, RunExitCode.Stopped);
+});
+
+test("handleOpenFailed with aborted signal returns stopped exit without stderr", () => {
+  const signal = AbortSignal.abort();
+  const error = new AgentOpenError("agent.open_failed", "aborted");
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  };
+  let result;
+  try {
+    result = handleOpenFailed(error, signal);
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.equal(result.exitCode, RunExitCode.Stopped);
+  assert.equal(lines.length, NO_STDERR_LINES);
+});
+
+test("handleOpenFailed with active signal returns open_failed exit with stderr", () => {
+  const signal = new AbortController().signal;
+  const error = new AgentOpenError("agent.open_failed", "open error");
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  };
+  let result;
+  try {
+    result = handleOpenFailed(error, signal);
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.equal(result.exitCode, ExitCode.Failure);
+  assert.ok(lines.some((l) => l.includes("cli.run.agent.open_failed")));
 });

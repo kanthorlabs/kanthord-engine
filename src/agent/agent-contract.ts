@@ -263,7 +263,8 @@ function buildRun(ctx: RunContext): AgentRun {
 
   const originalFinishTurn = session.agent.finishTurn;
   session.agent.finishTurn = async (turn, signal) => {
-    if (endAfterTurnFlag || budgetReached !== null) return { action: "end" };
+    if (endAfterTurnFlag || budgetReached !== null || inputSignal.aborted)
+      return { action: "end" };
     return (await originalFinishTurn?.(turn, signal)) ?? undefined;
   };
 

@@ -408,3 +408,74 @@ export async function spawnCli(
   const [status] = (await once(child, "close")) as [number | null];
   return { status, stdout, stderr };
 }
+
+export interface SignaledCliResult extends CliResult {
+  signalMs: number;
+  exitMs: number;
+}
+
+export async function spawnCliAndSignal(
+  fixtures: AgentFixtures,
+  options: RunOptions,
+  waitForCondition: () => Promise<void>,
+  signalName: NodeJS.Signals,
+): Promise<SignaledCliResult> {
+  const args = [BIN_PATH, ...runAgentArguments(fixtures, options)];
+  const env = cliEnvironment(fixtures, options);
+
+  const child = spawn(process.execPath, args, {
+    env,
+    signal: options.signal,
+    cwd: options.cwd,
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  child.stdin.end();
+
+  await waitForCondition();
+  const signalMs = Date.now();
+  child.kill(signalName);
+
+  const [status] = (await once(child, "close")) as [number | null];
+  const exitMs = Date.now();
+  return { status, stdout, stderr, signalMs, exitMs };
+}
+
+export async function pollUntilExists(
+  path: string,
+  signal: AbortSignal,
+): Promise<void> {
+  while (!existsSync(path)) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 50);
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    if (signal.aborted) return;
+  }
+}
+
+export async function pollUntilCount(
+  getCount: () => number,
+  target: number,
+  signal: AbortSignal,
+): Promise<void> {
+  while (getCount() < target) {
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 50);
+      signal.addEventListener("abort", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    if (signal.aborted) return;
+  }
+}

@@ -456,6 +456,41 @@ test("an abort of the input signal during send gives RunEnd.Stopped", async (t) 
   await run.close();
 });
 
+test("an abort of the input signal during a tool call gives RunEnd.Stopped and no model call after the abort", async (t) => {
+  const controller = new AbortController();
+  const { agentInput, scripted } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage(
+        fauxToolCall("bash", {
+          command: `sleep ${CHILD_SECONDS} & echo $! > ${PID_FILE}; wait`,
+        }),
+        { stopReason: "toolUse" },
+      ),
+      fauxAssistantMessage("done"),
+    ],
+    signal: controller.signal,
+  });
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const pidFile = join(agentInput.workspace.cwd, PID_FILE);
+  const sending = run.send("hello", { work: null });
+  while (!existsSync(pidFile) || !readFileSync(pidFile, "utf8").trim())
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+
+  controller.abort();
+  const result = await sending;
+
+  assert.equal(result.end, RunEnd.Stopped);
+  assert.equal(result.failure, null);
+  assert.equal(result.totals.modelCalls, SINGLE);
+  assert.equal(scripted.calls.length, SINGLE);
+  assert.deepEqual(await survivingProcesses([pid]), []);
+  await run.close();
+});
+
 test("the wall timer aborts the session at the deadline, and the end is budget_end with wall", async (t) => {
   const { agentInput } = await makeInput(t, {
     script: [

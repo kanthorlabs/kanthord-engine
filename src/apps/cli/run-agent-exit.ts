@@ -1,3 +1,4 @@
+import { CommanderError } from "commander";
 import { Diagnostic, diagnostic, diagnosticRows } from "../../kernel/errors.ts";
 import {
   FailureClass,
@@ -9,6 +10,7 @@ import type { RunFailure, SecretWarning } from "../../agent/agent-contract.ts";
 import { ExitCode } from "./constants.ts";
 
 const OPEN_FAILED = "cli.run.agent.open_failed";
+const STOPPED_BY_SIGNAL = "cli.run.agent.stopped";
 const PROVIDER_RETRYABLE = "cli.run.agent.provider_retryable";
 const PROVIDER_FAILED = "cli.run.agent.provider_failed";
 const INTERNAL_ERROR = "cli.run.agent.internal_error";
@@ -46,6 +48,23 @@ export function agentClassValue(
 
 function reasonField(reason: string): [string, string][] {
   return [["reason", reason.replace(/[\r\n]+/g, " ")]];
+}
+
+export function stoppedBySignalExit(): CommanderError {
+  return new CommanderError(
+    RunExitCode.Stopped,
+    STOPPED_BY_SIGNAL,
+    "stopped by signal",
+  );
+}
+
+export function handleOpenFailed(
+  error: AgentOpenError,
+  signal: AbortSignal,
+): CommanderError {
+  if (signal.aborted) return stoppedBySignalExit();
+  printOpenFailed(error);
+  return new CommanderError(ExitCode.Failure, OPEN_FAILED, error.message);
 }
 
 export function printOpenFailed(error: AgentOpenError): void {

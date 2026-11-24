@@ -54,6 +54,7 @@ export interface LlmStub {
   baseUrl: string;
   requests: StubRequestRecord[];
   connectionCount: () => number;
+  closedRequestCount: () => number;
 }
 
 function sseEvent(event: object): string {
@@ -169,6 +170,7 @@ export async function llmStub(
   const requests: StubRequestRecord[] = [];
   let callIndex = 0;
   let connections = 0;
+  let closedRequests = 0;
 
   const server = createServer((req, res) => {
     let raw = "";
@@ -183,6 +185,9 @@ export async function llmStub(
         string | string[] | undefined
       >;
       requests.push({ headers, body });
+      res.on("close", () => {
+        if (!res.writableEnded) closedRequests += 1;
+      });
 
       if (options.fixedStatus !== undefined) {
         const { status, body: fixedBody } = options.fixedStatus;
@@ -245,5 +250,6 @@ export async function llmStub(
     baseUrl: `http://127.0.0.1:${port}/v1`,
     requests,
     connectionCount: () => connections,
+    closedRequestCount: () => closedRequests,
   };
 }
