@@ -105,6 +105,11 @@ const MAX_FINDINGS = 20;
 const EVIDENCE_MAX = 500;
 const TRANSCRIPT_TOOL_RESULT_LIMIT = 4000;
 const TRANSCRIPT_ENTRY_TYPE = "message";
+const TOOL_RESULT_ROLE = "toolResult";
+const TEXT_PART = "text";
+const TOOL_CALL_PART = "toolCall";
+const SEVERITIES_NOT_GOOD = ["high", "medium"];
+const DIAGNOSED_ASPECTS = ["A5", "A6", "A7"];
 const MODE_CONVENTIONS = "conventions";
 const MODE_FAIL_TO_PASS = "fail_to_pass";
 const MODE_PASS_TO_PASS = "pass_to_pass";
@@ -551,106 +556,73 @@ export function checkProxyEnv(env, execArgv) {
   return execArgv.some(isUseEnvProxy);
 }
 
+function partText(part) {
+  if (part.type === TEXT_PART) return part.text;
+  if (part.type === TOOL_CALL_PART)
+    return `Tool call ${part.name}: ${JSON.stringify(part.arguments)}`;
+  return null;
+}
+
 function messageText(message) {
   const { role, content } = message;
-  if (role === "toolResult") {
-    const text = (Array.isArray(content) ? content : [])
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
-      .join("");
-    return text.slice(0, TRANSCRIPT_TOOL_RESULT_LIMIT);
-  }
   if (typeof content === "string") return content;
-  if (Array.isArray(content))
-    return content
-      .filter((part) => part.type === "text")
-      .map((part) => part.text)
-      .join("");
-  return "";
+  if (!Array.isArray(content)) return "";
+  const texts = content.map(partText).filter((text) => text !== null);
+  if (role === TOOL_RESULT_ROLE)
+    return texts.join("").slice(0, TRANSCRIPT_TOOL_RESULT_LIMIT);
+  return texts.join("\n");
+}
+
+function transcriptSection(raw) {
+  let entry;
+  try {
+    entry = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (entry?.type !== TRANSCRIPT_ENTRY_TYPE || !isObject(entry.message))
+    return [];
+  const { id, message } = entry;
+  return [
+    `## ${id}`,
+    "",
+    `Role: ${message.role}`,
+    "",
+    messageText(message),
+    "",
+  ];
 }
 
 export function writeTranscript(sessionPath, transcriptPath) {
-  const lines = [];
-  if (!existsSync(sessionPath)) {
-    writeFileSync(transcriptPath, "", { mode: FILE_MODE });
-    return;
-  }
-  for (const raw of readFileSync(sessionPath, "utf8")
-    .split("\n")
-    .filter(Boolean)) {
-    let entry;
-    try {
-      entry = JSON.parse(raw);
-    } catch {
-      continue;
-    }
-    if (entry.type !== TRANSCRIPT_ENTRY_TYPE) continue;
-    const { id, message } = entry;
-    if (!message) continue;
-    lines.push(
-      `## ${id}`,
-      "",
-      `Role: ${message.role}`,
-      "",
-      messageText(message),
-      "",
-    );
-  }
+  const text = existsSync(sessionPath) ? readFileSync(sessionPath, "utf8") : "";
+  const lines = text.split("\n").filter(Boolean).flatMap(transcriptSection);
   writeFileSync(transcriptPath, lines.join("\n"), { mode: FILE_MODE });
 }
 
-function extractJsonObjects(text) {
-  const objects = [];
-  let depth = 0;
-  let start = -1;
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === "{") {
-      if (depth === 0) start = i;
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      if (depth === 0 && start !== -1) {
-        objects.push(text.slice(start, i + 1));
-        start = -1;
-      }
-    }
-  }
-  return objects;
+function findingValid(finding) {
+  if (!isObject(finding) || Object.keys(finding).length !== 3) return false;
+  const { aspect, evidence, severity } = finding;
+  if (!DIAGNOSIS_ASPECTS.includes(aspect)) return false;
+  if (typeof evidence !== "string") return false;
+  if (evidence.length < 1 || evidence.length > EVIDENCE_MAX) return false;
+  return DIAGNOSIS_SEVERITIES.includes(severity);
 }
 
 export function parseDiagnosis(text, end) {
-  if (end !== END_COMPLETED) return { valid: false, findings: [] };
-  if (typeof text !== "string") return { valid: false, findings: [] };
-  const objects = extractJsonObjects(text);
-  if (objects.length !== 1) return { valid: false, findings: [] };
+  const invalid = { valid: false, findings: [] };
+  if (end !== END_COMPLETED || typeof text !== "string") return invalid;
   let parsed;
   try {
-    parsed = JSON.parse(objects[0]);
+    parsed = JSON.parse(text);
   } catch {
-    return { valid: false, findings: [] };
+    return invalid;
   }
-  if (!isObject(parsed)) return { valid: false, findings: [] };
-  if (Object.keys(parsed).length !== 1 || !Array.isArray(parsed.findings))
-    return { valid: false, findings: [] };
-  if (parsed.findings.length > MAX_FINDINGS)
-    return { valid: false, findings: [] };
-  for (const finding of parsed.findings) {
-    if (!isObject(finding)) return { valid: false, findings: [] };
-    if (Object.keys(finding).length !== 3)
-      return { valid: false, findings: [] };
-    if (!DIAGNOSIS_ASPECTS.includes(finding.aspect))
-      return { valid: false, findings: [] };
-    if (
-      typeof finding.evidence !== "string" ||
-      finding.evidence.length < 1 ||
-      finding.evidence.length > EVIDENCE_MAX
-    )
-      return { valid: false, findings: [] };
-    if (!DIAGNOSIS_SEVERITIES.includes(finding.severity))
-      return { valid: false, findings: [] };
-  }
-  return { valid: true, findings: parsed.findings };
+  if (!isObject(parsed) || Object.keys(parsed).length !== 1) return invalid;
+  const { findings } = parsed;
+  if (!Array.isArray(findings) || findings.length > MAX_FINDINGS)
+    return invalid;
+  if (!findings.every(findingValid)) return invalid;
+  return { valid: true, findings };
 }
 
 export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
@@ -897,9 +869,9 @@ function credentialStop(run, count) {
   return breachStop(run, BREACH_CREDENTIAL);
 }
 
-async function refreshForRun(run, deps) {
-  const provider = parseModelSelection(run.config.model).provider;
-  const validity = parseWallMs(run.caseJson.wall) + REFRESH_MARGIN_MS;
+async function refreshForCall(run, deps, call) {
+  const provider = parseModelSelection(call.model).provider;
+  const validity = parseWallMs(call.wall) + REFRESH_MARGIN_MS;
   try {
     await deps.refresh(run.authPath, provider, validity);
     return true;
@@ -908,20 +880,37 @@ async function refreshForRun(run, deps) {
   }
 }
 
-async function refreshForJudge(run, deps) {
-  const provider = parseModelSelection(run.config.judge_model).provider;
-  const validity = parseWallMs(JUDGE_WALL) + REFRESH_MARGIN_MS;
-  try {
-    await deps.refresh(run.authPath, provider, validity);
-    return true;
-  } catch {
-    return false;
-  }
+async function guardedAgentCall(run, deps, call) {
+  if (!(await refreshForCall(run, deps, call)))
+    return { stop: "the credential refresh failed" };
+  const refreshed = captureAuthState(run.authPath);
+  if (refreshedAuthBreach(refreshed, run.authStart))
+    return breachStop(run, BREACH_AUTH_FILE);
+  for (const value of extractCredentialValues(run.authPath))
+    run.credValues.add(value);
+  let inputCount = 0;
+  for (const path of call.inputPaths)
+    inputCount += countCredentialInFile(path, run.credValues);
+  if (inputCount > 0) return credentialStop(run, inputCount);
+  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
+  const exit = deps.runAgent(call.args, call.stderrPath);
+  const count = countCredentialInFile(call.sessionPath, run.credValues);
+  if (count > 0) return credentialStop(run, count);
+  if (checkAuthFileBreach(run.authPath, refreshed))
+    return breachStop(run, BREACH_AUTH_FILE);
+  const stderrText = readFileSync(call.stderrPath, "latin1");
+  if (runActionForExit(exit, stderrText) === ACTION_STOP)
+    return { stop: `${call.label} exit ${exit}` };
+  return { stop: null };
 }
 
 function nextJudgeAttempt(runDir) {
   let n = 1;
-  while (existsSync(join(runDir, `judge-${n}.jsonl`))) n++;
+  while (
+    existsSync(join(runDir, `judge-${n}.jsonl`)) ||
+    existsSync(join(runDir, `judge-${n}-stderr.txt`))
+  )
+    n++;
   return n;
 }
 
@@ -932,9 +921,7 @@ function resultEnd(run) {
   return line?.end ?? END_ABSENT;
 }
 
-function gradeDiff(run, roots) {
-  const gradingRoot = makeRoot(run.workBaseDir);
-  roots.push(gradingRoot);
+function gradeDiff(run, gradingRoot) {
   return gradeRun({
     caseFolder: run.caseFolder,
     caseJson: run.caseJson,
@@ -944,14 +931,14 @@ function gradeDiff(run, roots) {
   });
 }
 
-function gradeWorkspace(run, session, roots) {
+function gradeWorkspace(run, session) {
   const diffPath = join(run.runDir, "diff.patch");
   const diffOptions = { savedConfig: session.savedConfig, diffPath };
   let aspects = { a1: false, a2: false, a3: false, a4: false };
   if (diffSteps(session.workspace, run.caseJson.commit, diffOptions)) {
     const diffCount = removeRunFilesOnCredential(run.runDir, run.credValues);
     if (diffCount > 0) return credentialStop(run, diffCount);
-    const graded = gradeDiff(run, roots);
+    const graded = gradeDiff(run, session.gradingRoot);
     if (graded.stop) return graded;
     const checkCount = removeRunFilesOnCredential(run.runDir, run.credValues);
     if (checkCount > 0) return credentialStop(run, checkCount);
@@ -968,20 +955,19 @@ function gradeWorkspace(run, session, roots) {
   return { stop: null };
 }
 
-async function runDiagnosis(run, judgeRoot, deps) {
-  const judgeWorkspace = join(judgeRoot, JUDGE_DIR);
-  mkdirSync(judgeWorkspace, { recursive: true, mode: DIRECTORY_MODE });
+function writeJudgeWorkspace(run, judgeWorkspace) {
+  mkdirSync(judgeWorkspace, { mode: DIRECTORY_MODE });
   writeTranscript(run.sessionPath, join(judgeWorkspace, "transcript.md"));
   for (const name of ["diff.patch", "check.txt"]) {
-    const src = join(run.runDir, name);
-    if (existsSync(src)) copyFileSync(src, join(judgeWorkspace, name));
+    const source = join(run.runDir, name);
+    if (existsSync(source)) copyFileSync(source, join(judgeWorkspace, name));
   }
   const checkLine = readJsonLines(run.checksPath).findLast(
-    (line) => line.case === run.caseId && line.repeat === run.repeat,
+    (line) => line.session === run.sessionPath,
   );
   writeFileSync(
     join(judgeWorkspace, "check.json"),
-    `${JSON.stringify(checkLine ?? {})}\n`,
+    `${JSON.stringify(checkLine)}\n`,
     { mode: FILE_MODE },
   );
   copyFileSync(
@@ -989,45 +975,40 @@ async function runDiagnosis(run, judgeRoot, deps) {
     join(judgeWorkspace, "task.md"),
   );
   if (run.stage === BINDING_STAGE) {
-    const binding = join(run.evalSetDir, "binding", `${run.caseJson.kind}.md`);
-    copyFileSync(binding, join(judgeWorkspace, `${run.caseJson.kind}.md`));
+    const name = `${run.caseJson.kind}.md`;
+    copyFileSync(
+      join(run.evalSetDir, "binding", name),
+      join(judgeWorkspace, name),
+    );
   }
+  return readdirSync(judgeWorkspace).map((name) => join(judgeWorkspace, name));
+}
+
+async function runDiagnosis(run, gradingRoot, deps) {
   const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
-  const judgeReserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
-  if (!checkStartGate(sum, judgeReserve, run.config.cap_usd))
+  const reserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
+  if (!checkStartGate(sum, reserve, run.config.cap_usd))
     return { stop: STOP_CAP };
-  const attemptN = nextJudgeAttempt(run.runDir);
-  const judgeSessionPath = join(run.runDir, `judge-${attemptN}.jsonl`);
-  const judgeStderrPath = join(run.runDir, `judge-${attemptN}-stderr.txt`);
-  if (!(await refreshForJudge(run, deps)))
-    return { stop: "the credential refresh failed" };
-  const refreshed = captureAuthState(run.authPath);
-  if (refreshedAuthBreach(refreshed, run.authStart))
-    return breachStop(run, BREACH_AUTH_FILE);
-  for (const value of extractCredentialValues(run.authPath))
-    run.credValues.add(value);
-  const exit = deps.runAgent(
-    runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath),
-    judgeStderrPath,
-  );
-  const count = countCredentialInFile(judgeSessionPath, run.credValues);
-  if (count > 0) return credentialStop(run, count);
-  if (checkAuthFileBreach(run.authPath, refreshed))
-    return breachStop(run, BREACH_AUTH_FILE);
-  const stderrText = readFileSync(judgeStderrPath, "latin1");
-  if (runActionForExit(exit, stderrText) === ACTION_STOP)
-    return { stop: `judge exit ${exit}` };
+  const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
+  const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
+  const attempt = nextJudgeAttempt(run.runDir);
+  const sessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
+  const called = await guardedAgentCall(run, deps, {
+    label: "judge",
+    model: run.config.judge_model,
+    wall: JUDGE_WALL,
+    args: runAgentArgsJudge(run, judgeWorkspace, sessionPath),
+    inputPaths,
+    sessionPath,
+    stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+  });
+  if (called.stop) return called;
   const resultLine = readJsonLines(run.resultsPath).findLast(
-    (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
-  );
-  const { valid, findings } = parseDiagnosis(
-    resultLine?.text ?? null,
-    resultLine?.end ?? END_ABSENT,
+    (line) => line.agent === PROFILE_RE && line.session === sessionPath,
   );
   appendJsonLine(run.diagnosesPath, {
-    session: judgeSessionPath,
-    valid,
-    findings,
+    session: sessionPath,
+    ...parseDiagnosis(resultLine?.text, resultLine?.end),
   });
   return { stop: null };
 }
@@ -1039,31 +1020,21 @@ async function evaluateInRoots(run, deps, roots) {
   if (savedConfig === null) return { stop: "the workspace clone failed" };
   if (!runSetup(run.caseFolder, workspace))
     return { stop: "setup.sh failed in the workspace" };
-  if (!(await refreshForRun(run, deps)))
-    return { stop: "the credential refresh failed" };
-  const refreshed = captureAuthState(run.authPath);
-  if (refreshedAuthBreach(refreshed, run.authStart))
-    return breachStop(run, BREACH_AUTH_FILE);
-  for (const value of extractCredentialValues(run.authPath))
-    run.credValues.add(value);
-  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const stderrPath = join(run.runDir, "stderr.txt");
-  const exit = deps.runAgent(runAgentArgs(run, workspace), stderrPath);
-  const count = countCredentialInFile(run.sessionPath, run.credValues);
-  if (count > 0) return credentialStop(run, count);
-  if (checkAuthFileBreach(run.authPath, refreshed))
-    return breachStop(run, BREACH_AUTH_FILE);
-  const stderrText = readFileSync(stderrPath, "latin1");
-  if (runActionForExit(exit, stderrText) === ACTION_STOP)
-    return { stop: `run agent exit ${exit}` };
-  const gradeResult = gradeWorkspace(run, { workspace, savedConfig }, roots);
-  if (gradeResult.stop) return gradeResult;
-  if (run.set === SET_DEV) {
-    const judgeRoot = makeRoot(run.workBaseDir);
-    roots.push(judgeRoot);
-    return runDiagnosis(run, judgeRoot, deps);
-  }
-  return gradeResult;
+  const called = await guardedAgentCall(run, deps, {
+    label: "run agent",
+    model: run.config.model,
+    wall: run.caseJson.wall,
+    args: runAgentArgs(run, workspace),
+    inputPaths: [],
+    sessionPath: run.sessionPath,
+    stderrPath: join(run.runDir, "stderr.txt"),
+  });
+  if (called.stop) return called;
+  const gradingRoot = makeRoot(run.workBaseDir);
+  roots.push(gradingRoot);
+  const graded = gradeWorkspace(run, { workspace, savedConfig, gradingRoot });
+  if (graded.stop || run.set !== SET_DEV) return graded;
+  return runDiagnosis(run, gradingRoot, deps);
 }
 
 export async function evaluateRun(run, deps) {
@@ -1239,7 +1210,7 @@ export async function startRun(start) {
 function baseCostSum(resultsPath, sweR, judgeR) {
   let sum = 0;
   for (const line of readJsonLines(resultsPath)) {
-    const r = line.agent === PROFILE_RE ? (judgeR ?? null) : (sweR ?? null);
+    const r = line.agent === PROFILE_RE ? judgeR : sweR;
     sum += computeBaseCost(line.list_price_usd ?? 0, r);
   }
   return sum;
@@ -1366,27 +1337,54 @@ function shareText(part, whole) {
   return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
-function goodOnAspect(diagnoses, aspect, check) {
+function lastCheckLines(checks) {
+  const byRun = new Map();
+  for (const line of checks) byRun.set(`${line.case}:${line.repeat}`, line);
+  return [...byRun.values()];
+}
+
+function diagnosisOf(diagnoses, check) {
   const runDir = dirname(check.session);
-  const diag = diagnoses.findLast((d) => dirname(d.session) === runDir);
-  if (!diag || !diag.valid) return false;
-  return !diag.findings.some(
-    (f) =>
-      f.aspect === aspect && (f.severity === "high" || f.severity === "medium"),
+  return diagnoses.findLast((line) => dirname(line.session) === runDir);
+}
+
+function goodOnAspect(diagnosis, aspect) {
+  if (!diagnosis?.valid) return false;
+  return !diagnosis.findings.some(
+    (finding) =>
+      finding.aspect === aspect &&
+      SEVERITIES_NOT_GOOD.includes(finding.severity),
   );
 }
 
-function findingsForAspect(diagnoses, aspect, severity) {
-  return diagnoses.reduce(
-    (count, d) =>
-      count +
-      (d.valid
-        ? d.findings.filter(
-            (f) => f.aspect === aspect && f.severity === severity,
-          ).length
-        : 0),
-    0,
-  );
+function goodRuns(report, checks, aspect) {
+  return checks.filter((check) =>
+    goodOnAspect(diagnosisOf(report.diagnoses, check), aspect),
+  ).length;
+}
+
+function findingCounts(diagnoses, aspect) {
+  const findings = diagnoses
+    .flatMap((line) => line.findings)
+    .filter((finding) => finding.aspect === aspect);
+  return DIAGNOSIS_SEVERITIES.map((severity) => {
+    const count = findings.filter((f) => f.severity === severity).length;
+    return `${count} ${severity}`;
+  }).join(", ");
+}
+
+function diagnosisLines(report) {
+  const lines = [];
+  for (const aspect of DIAGNOSIS_ASPECTS) {
+    const counts = findingCounts(report.diagnoses, aspect);
+    const good = DIAGNOSED_ASPECTS.includes(aspect)
+      ? ` good runs: ${goodRuns(report, report.checks, aspect)},`
+      : "";
+    lines.push(`${aspect}${good} findings: ${counts}`);
+  }
+  const invalid = report.diagnoses.filter((line) => !line.valid).length;
+  lines.push(`invalid diagnoses: ${invalid}`);
+  return lines;
 }
 
 function goalLines(report, joined) {
@@ -1405,20 +1403,7 @@ function goalLines(report, joined) {
     const good = checks.filter((line) => line[aspect]).length;
     lines.push(`${aspect.toUpperCase()} good runs: ${good}`);
   }
-  if (report.iteration.set === SET_DEV) {
-    const diagnoses = report.diagnoses ?? [];
-    const invalid = diagnoses.filter((d) => !d.valid).length;
-    for (const aspect of ["A5", "A6", "A7"]) {
-      const good = checks.filter((c) =>
-        goodOnAspect(diagnoses, aspect, c),
-      ).length;
-      const counts = DIAGNOSIS_SEVERITIES.map(
-        (sev) => `${findingsForAspect(diagnoses, aspect, sev)} ${sev}`,
-      ).join(", ");
-      lines.push(`${aspect} good runs: ${good}, findings: ${counts}`);
-    }
-    lines.push(`invalid diagnoses: ${invalid}`);
-  }
+  if (report.iteration.set === SET_DEV) lines.push(...diagnosisLines(report));
   lines.push(
     `A8: base cost median ${numberText(median(costs))}, base cost sum ${numberText(costs.reduce((a, b) => a + b, 0))}, duration_ms median ${medianOf("duration_ms")}, model_calls median ${medianOf("model_calls")}, tool_calls median ${medianOf("tool_calls")}`,
     `A9 breaches: ${breaches.length}${names ? ` (${names})` : ""}`,
@@ -1465,59 +1450,61 @@ function agentCostBlock(results, r, label) {
 
 function costLines(report) {
   const planned = report.cases.length * report.iteration.repeats;
-  const diagnoses = report.diagnoses ?? [];
-  const unstartedDiag =
-    report.iteration.set === SET_DEV ? planned - diagnoses.length : null;
+  const unstartedDiagnoses =
+    report.iteration.set === SET_DEV
+      ? `, unstarted diagnoses: ${planned - report.diagnoses.length}`
+      : "";
   return [
     "## Cost",
     "",
     ...agentCostBlock(report.results, report.r, PROFILE_SWE),
-    ...agentCostBlock(report.results, report.judgeR ?? null, PROFILE_RE),
+    ...agentCostBlock(report.results, report.judgeR, PROFILE_RE),
     `cap_usd of each call: ${report.calls.map((line) => line.cap_usd).join(", ") || NONE_TEXT}`,
-    `unstarted runs: ${planned - report.checks.length}${unstartedDiag !== null ? `, unstarted diagnoses: ${unstartedDiag}` : ""}`,
+    `unstarted runs: ${planned - report.checks.length}${unstartedDiagnoses}`,
     "",
   ];
 }
 
-function devCaseLines(report) {
+function devLines(report) {
   const { checks, cases, iteration } = report;
-  const diagnoses = report.diagnoses ?? [];
   const lines = ["## Dev cases", ""];
-  for (const c of cases) {
-    const caseChecks = checks.filter((line) => line.case === c.id);
-    const passes = caseChecks.filter((line) => line.pass).length;
-    const good = (key) => caseChecks.filter((line) => line[key]).length;
-    const goodDiag = (aspect) =>
-      caseChecks.filter((c) => goodOnAspect(diagnoses, aspect, c)).length;
+  const full = [];
+  for (const entry of cases) {
+    const own = checks.filter((line) => line.case === entry.id);
+    const good = (key) => own.filter((line) => line[key]).length;
+    const diagnosed = DIAGNOSED_ASPECTS.map(
+      (aspect) => `${aspect} ${goodRuns(report, own, aspect)}`,
+    ).join(", ");
     lines.push(
-      `case ${c.id}: passes ${passes}, A1 ${good("a1")}, A2 ${good("a2")}, A3 ${good("a3")}, A4 ${good("a4")}, A5 ${goodDiag("A5")}, A6 ${goodDiag("A6")}, A7 ${goodDiag("A7")}`,
+      `case ${entry.id}: passes ${good("pass")}, A1 ${good("a1")}, A2 ${good("a2")}, A3 ${good("a3")}, A4 ${good("a4")}, ${diagnosed}`,
     );
+    if (own.length === iteration.repeats) full.push(good("pass"));
   }
+  const ceiling = full.filter((passes) => passes === iteration.repeats).length;
+  const floor = full.filter((passes) => passes === 0).length;
   const planned = cases.length * iteration.repeats;
-  const ceiling = cases.filter((c) => {
-    const cc = checks.filter((line) => line.case === c.id);
-    return cc.length > 0 && cc.every((line) => line.pass);
-  }).length;
-  const floor = cases.filter((c) => {
-    const cc = checks.filter((line) => line.case === c.id);
-    return cc.length > 0 && cc.every((line) => !line.pass);
-  }).length;
+  const complete =
+    checks.length === planned && report.diagnoses.length === planned;
+  const verdict = complete ? VERDICT_COMPLETE : VERDICT_NONE;
   lines.push(
     "",
     `set-difficulty: ${ceiling} ceiling, ${floor} floor of ${cases.length}`,
+    `verdict ${verdict}`,
     "",
   );
-  const plannedDiagnoses = planned;
-  const doneDiagnoses = diagnoses.length;
-  const doneChecks = checks.length;
-  const verdict =
-    doneChecks >= planned && doneDiagnoses >= plannedDiagnoses
-      ? VERDICT_COMPLETE
-      : VERDICT_NONE;
   return { lines, verdict };
 }
 
-export function buildReport(report) {
+function runRecords(report) {
+  const checks = lastCheckLines(report.checks);
+  const diagnoses = checks
+    .map((check) => diagnosisOf(report.diagnoses ?? [], check))
+    .filter((line) => line !== undefined);
+  return { ...report, checks, diagnoses, judgeR: report.judgeR ?? null };
+}
+
+export function buildReport(input) {
+  const report = runRecords(input);
   const { iteration } = report;
   const sessions = new Set(report.checks.map((line) => line.session));
   const joined = report.results.filter((line) => sessions.has(line.session));
@@ -1537,10 +1524,9 @@ export function buildReport(report) {
     lines.push(...gate.lines);
   }
   if (iteration.set === SET_DEV) {
-    const dev = devCaseLines(report);
+    const dev = devLines(report);
     verdict = dev.verdict;
     lines.push(...dev.lines);
-    lines.push(`verdict ${verdict}`, "");
   }
   lines.push(...costLines(report));
   return { text: lines.join("\n"), verdict };
@@ -1552,21 +1538,17 @@ function writeReport(evaluation) {
   const earlier = heldOutEvaluations(resultsBaseDir, iteration.stage).filter(
     (entry) => entry.id !== evalId && entry.startedMs < startedMs,
   ).length;
-  const diagnosesFile = join(resultsDir, DIAGNOSES_FILE);
-  const diagnoses = existsSync(diagnosesFile)
-    ? readJsonLines(diagnosesFile)
-    : [];
   const report = buildReport({
     evalId,
     iteration,
     cases: evaluation.cases,
     r: evaluation.ratio.r,
-    judgeR: evaluation.judgeRatio?.r ?? null,
+    judgeR: evaluation.judgeRatio.r,
     earlier,
     checks: readJsonLines(join(resultsDir, "checks.jsonl")),
     results: readJsonLines(join(resultsDir, "results.jsonl")),
     calls: readJsonLines(join(resultsDir, "calls.jsonl")),
-    diagnoses,
+    diagnoses: readJsonLines(join(resultsDir, DIAGNOSES_FILE)),
   });
   writeFileSync(join(resultsDir, "report.md"), report.text, {
     mode: FILE_MODE,

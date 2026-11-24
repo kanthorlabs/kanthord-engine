@@ -41,19 +41,21 @@ export type StubHttpErrorTurn = {
 
 export type StubTurn = StubTextTurn | StubToolCallTurn | StubHttpErrorTurn;
 
-export type StubRequestRecord = {
-  headers: Record<string, string | string[] | undefined>;
-  body: unknown;
+export interface StubSelection {
   selectedRole?: string;
   selectedTask?: string;
+}
+
+export type StubSelectedTurn = StubTurn & StubSelection;
+
+export type StubRequestRecord = StubSelection & {
+  headers: Record<string, string | string[] | undefined>;
+  body: unknown;
 };
 
 export interface LlmStubOptions {
   fixedStatus?: { status: number; body: string };
-  responder?: (
-    body: unknown,
-  ) =>
-    (StubTurn & { selectedRole?: string; selectedTask?: string }) | undefined;
+  responder?: (body: unknown) => StubSelectedTurn | undefined;
 }
 
 export interface LlmStub {
@@ -191,7 +193,8 @@ export async function llmStub(
         string,
         string | string[] | undefined
       >;
-      requests.push({ headers, body });
+      const record: StubRequestRecord = { headers, body };
+      requests.push(record);
       res.on("close", () => {
         if (!res.writableEnded) closedRequests += 1;
       });
@@ -206,9 +209,7 @@ export async function llmStub(
       const currentRequestIndex = requestIndex;
       requestIndex += 1;
 
-      let turn:
-        | (StubTurn & { selectedRole?: string; selectedTask?: string })
-        | undefined;
+      let turn: StubSelectedTurn | undefined;
       if (options.responder !== undefined) {
         turn = options.responder(body);
       } else {
@@ -216,13 +217,10 @@ export async function llmStub(
         callIndex += 1;
       }
 
-      if (turn !== undefined) {
-        const last = requests[requests.length - 1];
-        if (last !== undefined) {
-          last.selectedRole = turn.selectedRole;
-          last.selectedTask = turn.selectedTask;
-        }
-      }
+      if (turn?.selectedRole !== undefined)
+        record.selectedRole = turn.selectedRole;
+      if (turn?.selectedTask !== undefined)
+        record.selectedTask = turn.selectedTask;
 
       if (turn === undefined) {
         res.writeHead(500, { "content-type": "application/json" });

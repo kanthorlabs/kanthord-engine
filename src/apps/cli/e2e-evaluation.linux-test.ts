@@ -1,21 +1,26 @@
 import assert from "node:assert/strict";
-import { basename, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import type { EvaluationFixture } from "./e2e-evaluation-test-support.ts";
 import { ENGINE_ROOT } from "./e2e-run-agent-test-support.ts";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
+import type { StubRequestRecord } from "./e2e-llm-stub-test-support.ts";
 import {
+  AGENT_SWE,
   asTestUser,
   buildEvaluationSet,
   l4Responder,
-  l4ResponderAC2,
-  l4ResponderAC9,
+  NO_FINDINGS_TURN,
   runnerAsTestUser,
+  TASK_D1,
+  TASK_D2,
+  WRITE_NEW_SH_TURN,
 } from "./e2e-evaluation-test-support.ts";
 
 interface ResultLine {
   agent: string;
-  input_digest?: string;
+  session: string;
+  input_digest: string;
 }
 
 interface CheckLine {
@@ -28,9 +33,14 @@ interface CheckLine {
   breach: string | null;
 }
 
+interface Finding {
+  aspect: string;
+  severity: string;
+}
+
 interface DiagnosisLine {
   valid: boolean;
-  findings: Array<{ aspect: string; severity: string }>;
+  findings: Finding[];
 }
 
 const RUNNER = join(ENGINE_ROOT, "scripts", "evaluation", "agent");
@@ -39,62 +49,6 @@ const REPORT_SH = join(RUNNER, "report.sh");
 const TEST_TIMEOUT_MS = 300000;
 const SUCCESS_EXIT = 0;
 const GATE_PREFIX = "gate: ";
-const XS_WORK = ["kanthord", "evaluation", "work"];
-const AGENT_SWE = "swe@1";
-const AGENT_RE = "re@1";
-const CASE_D1 = "d1";
-const CASE_D2 = "d2";
-const ASPECT_A5 = "A5";
-const SESSION_PATH_SEP_D1 = "/d1/";
-const TEXT_BACKEND_FIXTURE = "backend fixture";
-const TEXT_FRONTEND_FIXTURE = "frontend fixture";
-const TEXT_TEST_NEW_SH = "test/new.sh";
-
-function jsonLines<T>(text: string): T[] {
-  return text
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as T);
-}
-
-async function runEval(
-  fixture: EvaluationFixture,
-  evalId: string,
-  set: string,
-  stage: string,
-  signal: AbortSignal,
-  extraArgs: string[] = [],
-): Promise<{
-  runStatus: number;
-  reportStatus: number;
-  runStderr: string;
-  reportStderr: string;
-}> {
-  const run = await runnerAsTestUser(fixture, {
-    script: RUN_SH,
-    args: [
-      "--evaluation",
-      evalId,
-      "--stage",
-      stage,
-      "--set",
-      set,
-      ...extraArgs,
-    ],
-    signal,
-  });
-  const report = await runnerAsTestUser(fixture, {
-    script: REPORT_SH,
-    args: ["--evaluation", evalId],
-    signal,
-  });
-  return {
-    runStatus: run.status ?? 1,
-    reportStatus: report.status ?? 1,
-    runStderr: run.stderr,
-    reportStderr: report.stderr,
-  };
-}
 const AC4_GATE_PARTS = [
   "pass share backend 100.0%",
   "gate_share 0.5",
@@ -105,9 +59,131 @@ const AC4_RESULT_AGENTS = ["swe@1", "swe@1"];
 const AC4_SESSIONS = ["h1/1-1/session.jsonl", "h1/2-1/session.jsonl"];
 const AC4_CASE = "h1";
 const AC4_ABSENT_FILES = ["diagnoses.jsonl", "check.txt"];
+const SET_DEV = "dev";
+const CASE_D1 = "d1";
+const CASE_D2 = "d2";
+const DEV_CASES = [CASE_D1, CASE_D2];
+const DEV_RUNS = ["d1/1-1", "d1/2-1", "d2/1-1", "d2/2-1"];
+const REPEATS = 2;
+const DEV_RUN_COUNT = 4;
+const D1_CHECK = [true, true, true, true, true, null];
+const D2_CHECK = [false, true, true, true, false, null];
+const DEV_RUN_FILES = [
+  "check.txt",
+  "diff.patch",
+  "judge-1-stderr.txt",
+  "judge-1.jsonl",
+  "session.jsonl",
+  "stderr.txt",
+];
+const AC1_RESULT_AGENTS = [
+  "re@1",
+  "re@1",
+  "re@1",
+  "re@1",
+  "swe@1",
+  "swe@1",
+  "swe@1",
+  "swe@1",
+];
+const ONE_DIGEST = 1;
+const NO_OUTPUT = "";
+const AC1_FINDINGS = [{ aspect: "A5", severity: "medium" }];
+const AC1_REPORT_LINES = [
+  "verdict complete",
+  "A1 good runs: 2",
+  "passes: 2 of 4 planned runs",
+  "A5 good runs: 0, findings: 0 high, 4 medium, 0 low",
+  "set-difficulty: 1 ceiling, 1 floor of 2",
+  "swe@1: list price 0, r none, base cost 0",
+  "re@1: list price 0, r none, base cost 0",
+  "cap_usd of each call: 15",
+];
+const AC9_REPORT_LINES = ["invalid diagnoses: 4", "verdict complete"];
+const TEXT_FIXTURE = "fixture";
+const TEXT_BACKEND_FIXTURE = "backend fixture";
+const TEXT_FRONTEND_FIXTURE = "frontend fixture";
+const TEXT_TEST_NEW_SH = "test/new.sh";
+const XS_WORK = ["kanthord", "evaluation", "work"];
 
 function lines(text: string): string[] {
   return text.split("\n").filter(Boolean);
+}
+
+async function jsonLines<T>(path: string): Promise<T[]> {
+  const text = await asTestUser(["cat", path]);
+  return lines(text).map((line) => JSON.parse(line) as T);
+}
+
+function caseOf(session: string): string {
+  return basename(dirname(dirname(session)));
+}
+
+function checkValues(line: CheckLine): (boolean | string | null)[] {
+  return [line.a1, line.a2, line.a3, line.a4, line.pass, line.breach];
+}
+
+function checksOf(checks: CheckLine[], caseId: string): CheckLine[] {
+  return checks.filter((line) => line.case === caseId);
+}
+
+function sweLines(results: ResultLine[]): ResultLine[] {
+  return results.filter((line) => line.agent === AGENT_SWE);
+}
+
+function sweRequests(
+  requests: StubRequestRecord[],
+  task: string,
+): StubRequestRecord[] {
+  return requests.filter(
+    (record) =>
+      record.selectedRole === AGENT_SWE && record.selectedTask === task,
+  );
+}
+
+function holds(record: StubRequestRecord, text: string): boolean {
+  return JSON.stringify(record.body).includes(text);
+}
+
+async function runAndReport(
+  fixture: EvaluationFixture,
+  args: string[],
+  signal: AbortSignal,
+): Promise<void> {
+  const run = await runnerAsTestUser(fixture, { script: RUN_SH, args, signal });
+  assert.equal(run.status, SUCCESS_EXIT, run.stderr);
+  const report = await runnerAsTestUser(fixture, {
+    script: REPORT_SH,
+    args: args.slice(0, 2),
+    signal,
+  });
+  assert.equal(report.status, SUCCESS_EXIT, report.stderr);
+}
+
+function devArgs(evaluation: string, stage: string): string[] {
+  return ["--evaluation", evaluation, "--stage", stage, "--set", SET_DEV];
+}
+
+async function assertReportLines(
+  results: string,
+  expected: string[],
+): Promise<void> {
+  const text = await asTestUser(["cat", join(results, "report.md")]);
+  const reportLines = lines(text);
+  for (const line of expected) assert.ok(reportLines.includes(line), text);
+}
+
+async function assertBaselineChecks(results: string): Promise<void> {
+  const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+  assert.equal(checks.length, DEV_RUN_COUNT);
+  assert.deepEqual(checksOf(checks, CASE_D1).map(checkValues), [
+    D1_CHECK,
+    D1_CHECK,
+  ]);
+  assert.deepEqual(checksOf(checks, CASE_D2).map(checkValues), [
+    D2_CHECK,
+    D2_CHECK,
+  ]);
 }
 
 test(
@@ -169,142 +245,114 @@ test(
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
     const results = join(fixture.runs, "e1");
 
-    const { runStatus, reportStatus, runStderr, reportStderr } = await runEval(
-      fixture,
-      "e1",
-      "dev",
+    await runAndReport(fixture, devArgs("e1", "1"), t.signal);
+
+    const resultLines = await jsonLines<ResultLine>(
+      join(results, "results.jsonl"),
+    );
+    assert.deepEqual(
+      resultLines.map((line) => line.agent).sort(),
+      AC1_RESULT_AGENTS,
+    );
+    for (const caseId of DEV_CASES) {
+      const digests = sweLines(resultLines)
+        .filter((line) => caseOf(line.session) === caseId)
+        .map((line) => line.input_digest);
+      assert.equal(digests.length, REPEATS, caseId);
+      assert.equal(new Set(digests).size, ONE_DIGEST, caseId);
+    }
+
+    const requests = stub.requests.filter(
+      (record) => record.selectedRole === AGENT_SWE,
+    );
+    assert.ok(requests.length >= DEV_RUN_COUNT);
+    assert.deepEqual(
+      requests.filter((record) => holds(record, TEXT_FIXTURE)),
+      [],
+    );
+
+    await assertBaselineChecks(results);
+
+    const diagnoses = await jsonLines<DiagnosisLine>(
+      join(results, "diagnoses.jsonl"),
+    );
+    assert.equal(diagnoses.length, DEV_RUN_COUNT);
+    for (const line of diagnoses) {
+      assert.equal(line.valid, true);
+      assert.deepEqual(
+        line.findings.map(({ aspect, severity }) => ({ aspect, severity })),
+        AC1_FINDINGS,
+      );
+    }
+
+    await assertReportLines(results, AC1_REPORT_LINES);
+
+    for (const run of DEV_RUNS) {
+      const files = lines(await asTestUser(["ls", "-A", join(results, run)]));
+      assert.deepEqual(files.sort(), DEV_RUN_FILES, run);
+    }
+    const emptyDiffs = lines(
+      await asTestUser([
+        "find",
+        join(results, CASE_D2),
+        "-name",
+        "diff.patch",
+        "-empty",
+      ]),
+    );
+    assert.equal(emptyDiffs.length, REPEATS);
+
+    const roots = await asTestUser([
+      "find",
+      join(fixture.xs, ...XS_WORK),
+      "-mindepth",
       "1",
-      t.signal,
-    );
-    assert.equal(runStatus, SUCCESS_EXIT, runStderr);
-    assert.equal(reportStatus, SUCCESS_EXIT, reportStderr);
-
-    const resultLines = jsonLines<ResultLine>(
-      await asTestUser(["cat", join(results, "results.jsonl")]),
-    );
-    const AC1_RESULT_COUNT = 4;
-    const AC1_SWE_D1_MIN = 2;
-    assert.equal(
-      resultLines.filter((l) => l.agent === AGENT_SWE).length,
-      AC1_RESULT_COUNT,
-      "4 swe@1 lines",
-    );
-    assert.equal(
-      resultLines.filter((l) => l.agent === AGENT_RE).length,
-      AC1_RESULT_COUNT,
-      "4 re@1 lines",
-    );
-
-    const sweD1 = resultLines.filter(
-      (l) =>
-        l.agent === AGENT_SWE &&
-        (l as unknown as { session: string }).session.includes(
-          SESSION_PATH_SEP_D1,
-        ),
-    );
-    assert.ok(sweD1.length >= AC1_SWE_D1_MIN);
-    const firstD1 = sweD1[0];
-    assert.ok(
-      sweD1.every((l) => l.input_digest === firstD1?.input_digest),
-      "d1 swe@1 lines share one input_digest",
-    );
-
-    const checkLines = jsonLines<CheckLine>(
-      await asTestUser(["cat", join(results, "checks.jsonl")]),
-    );
-    const AC1_CHECK_COUNT = 4;
-    assert.equal(checkLines.length, AC1_CHECK_COUNT);
-    for (const line of checkLines.filter((l) => l.case === CASE_D1)) {
-      assert.deepEqual(
-        [line.a1, line.a2, line.a3, line.a4, line.pass, line.breach],
-        [true, true, true, true, true, null],
-      );
-    }
-    for (const line of checkLines.filter((l) => l.case === CASE_D2)) {
-      assert.deepEqual(
-        [line.a1, line.a2, line.a3, line.a4, line.pass, line.breach],
-        [false, true, true, true, false, null],
-      );
-    }
-
-    const diagLines = jsonLines<DiagnosisLine>(
-      await asTestUser(["cat", join(results, "diagnoses.jsonl")]),
-    );
-    const AC1_DIAG_COUNT = 4;
-    assert.equal(diagLines.length, AC1_DIAG_COUNT);
-    for (const diag of diagLines) {
-      assert.equal(diag.valid, true, JSON.stringify(diag));
-      const AC1_FINDING_COUNT = 1;
-      assert.equal(diag.findings.length, AC1_FINDING_COUNT);
-      assert.equal(diag.findings[0]?.aspect, ASPECT_A5);
-    }
-
-    const reportText = await asTestUser(["cat", join(results, "report.md")]);
-    assert.match(reportText, /verdict complete/);
-    assert.match(reportText, /swe@1: list price 0, r none, base cost 0/);
-    assert.match(reportText, /re@1: list price 0, r none, base cost 0/);
-    assert.match(reportText, /cap_usd of each call: 15/);
-
-    const sweRequests = stub.requests.filter(
-      (r) => r.selectedRole === AGENT_SWE,
-    );
-    for (const req of sweRequests) {
-      assert.ok(
-        !JSON.stringify(req.body).includes("fixture"),
-        "no swe@1 request holds fixture",
-      );
-    }
-
-    const workDir = join(fixture.xs, ...XS_WORK);
-    const workExists = await asTestUser(["test", "-d", workDir])
-      .then(() => true)
-      .catch(() => false);
-    assert.equal(workExists, false, "no workspace root remains");
-
-    t.diagnostic("L4-AC1 fixture available for L4-AC3");
-    (t as unknown as { fixture: EvaluationFixture }).fixture = fixture;
+    ]);
+    assert.equal(roots, NO_OUTPUT);
+    const status = await asTestUser([
+      "git",
+      "-C",
+      fixture.set,
+      "status",
+      "--porcelain",
+    ]);
+    assert.equal(status, NO_OUTPUT);
   },
 );
 
 test(
-  "L4-AC2: the hidden tests replace the agent files, and a change outside scope fails A3",
+  "L4-AC2: the hidden tests replace the agent files of the same name, and a change outside the scope fails A3",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const stub = await llmStub(t, [], ENGINE_ROOT, {
-      responder: l4ResponderAC2(),
+      responder: l4Responder({ firstTurns: { [TASK_D2]: WRITE_NEW_SH_TURN } }),
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
     const results = join(fixture.runs, "e2");
 
-    const { runStatus, reportStatus, runStderr, reportStderr } = await runEval(
-      fixture,
-      "e2",
-      "dev",
-      "1",
-      t.signal,
-    );
-    assert.equal(runStatus, SUCCESS_EXIT, runStderr);
-    assert.equal(reportStatus, SUCCESS_EXIT, reportStderr);
+    await runAndReport(fixture, devArgs("e2", "1"), t.signal);
 
-    const checkLines = jsonLines<CheckLine>(
-      await asTestUser(["cat", join(results, "checks.jsonl")]),
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.deepEqual(
+      checksOf(checks, CASE_D2).map((line) => [line.a1, line.a3, line.pass]),
+      [
+        [false, false, false],
+        [false, false, false],
+      ],
     );
-    for (const line of checkLines.filter((l) => l.case === CASE_D2)) {
-      assert.equal(line.a1, false, "d2 a1 false");
-      assert.equal(line.a3, false, "d2 a3 false");
-      assert.equal(line.pass, false, "d2 pass false");
-    }
 
-    const d2Files = lines(
-      await asTestUser(["find", join(results, CASE_D2), "-name", "diff.patch"]),
+    const diffs = lines(
+      await asTestUser([
+        "grep",
+        "-l",
+        "-F",
+        "-r",
+        "--include=diff.patch",
+        TEXT_TEST_NEW_SH,
+        join(results, CASE_D2),
+      ]),
     );
-    for (const f of d2Files) {
-      const content = await asTestUser(["cat", f]);
-      assert.ok(
-        content.includes(TEXT_TEST_NEW_SH),
-        `diff.patch of d2 holds test/new.sh: ${f}`,
-      );
-    }
+    assert.equal(diffs.length, REPEATS);
   },
 );
 
@@ -316,78 +364,39 @@ test(
       responder: l4Responder(),
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
-    const results = join(fixture.runs, "e3");
 
-    const { runStatus: run1Status, runStderr: run1Err } = await runEval(
-      fixture,
-      "e1ac3",
-      "dev",
-      "1",
-      t.signal,
-    );
-    assert.equal(run1Status, SUCCESS_EXIT, run1Err);
+    await runAndReport(fixture, devArgs("e1", "1"), t.signal);
+    const stageOneRequests = stub.requests.length;
+    await runAndReport(fixture, devArgs("e3", "2"), t.signal);
 
-    const { runStatus, reportStatus, runStderr, reportStderr } = await runEval(
-      fixture,
-      "e3",
-      "dev",
-      "2",
-      t.signal,
-    );
-    assert.equal(runStatus, SUCCESS_EXIT, runStderr);
-    assert.equal(reportStatus, SUCCESS_EXIT, reportStderr);
-
-    const sweRequests = stub.requests.filter(
-      (r) => r.selectedRole === AGENT_SWE,
-    );
-    const TASK_D1 = `task ${CASE_D1}`;
-    const TASK_D2 = `task ${CASE_D2}`;
-
-    const e3Bodies = sweRequests.slice(
-      sweRequests.findIndex((r) => JSON.stringify(r.body).includes(TASK_D1)),
-    );
-    const d1Bodies = e3Bodies.filter((r) =>
-      JSON.stringify(r.body).includes(TASK_D1),
-    );
-    const d2Bodies = e3Bodies.filter((r) =>
-      JSON.stringify(r.body).includes(TASK_D2),
-    );
-
-    for (const req of d1Bodies) {
-      assert.ok(
-        JSON.stringify(req.body).includes(TEXT_BACKEND_FIXTURE),
-        "d1 request holds backend fixture",
-      );
-      assert.ok(
-        !JSON.stringify(req.body).includes(TEXT_FRONTEND_FIXTURE),
-        "d1 request holds no frontend fixture",
-      );
+    const requests = stub.requests.slice(stageOneRequests);
+    const d1 = sweRequests(requests, TASK_D1);
+    const d2 = sweRequests(requests, TASK_D2);
+    assert.ok(d1.length >= REPEATS);
+    assert.ok(d2.length >= REPEATS);
+    for (const record of d1) {
+      assert.equal(holds(record, TEXT_BACKEND_FIXTURE), true);
+      assert.equal(holds(record, TEXT_FRONTEND_FIXTURE), false);
     }
-    for (const req of d2Bodies) {
-      assert.ok(
-        JSON.stringify(req.body).includes(TEXT_FRONTEND_FIXTURE),
-        "d2 request holds frontend fixture",
-      );
-      assert.ok(
-        !JSON.stringify(req.body).includes(TEXT_BACKEND_FIXTURE),
-        "d2 request holds no backend fixture",
-      );
+    for (const record of d2) {
+      assert.equal(holds(record, TEXT_FRONTEND_FIXTURE), true);
+      assert.equal(holds(record, TEXT_BACKEND_FIXTURE), false);
     }
 
-    const e1Digests = jsonLines<ResultLine>(
-      await asTestUser(["cat", join(fixture.runs, "e1ac3", "results.jsonl")]),
-    )
-      .filter((l) => l.agent === AGENT_SWE)
-      .map((l) => l.input_digest);
-
-    const e3Digests = jsonLines<ResultLine>(
-      await asTestUser(["cat", join(results, "results.jsonl")]),
-    )
-      .filter((l) => l.agent === AGENT_SWE)
-      .map((l) => l.input_digest);
-
-    for (const d of e3Digests) {
-      assert.ok(!e1Digests.includes(d), `e3 digest ${d} differs from e1`);
+    const stageOne = sweLines(
+      await jsonLines<ResultLine>(join(fixture.runs, "e1", "results.jsonl")),
+    );
+    const stageTwo = sweLines(
+      await jsonLines<ResultLine>(join(fixture.runs, "e3", "results.jsonl")),
+    );
+    assert.equal(stageOne.length, DEV_RUN_COUNT);
+    assert.equal(stageTwo.length, DEV_RUN_COUNT);
+    for (const line of stageTwo) {
+      const earlier = stageOne
+        .filter((other) => caseOf(other.session) === caseOf(line.session))
+        .map((other) => other.input_digest);
+      assert.equal(earlier.length, REPEATS);
+      assert.equal(earlier.includes(line.input_digest), false);
     }
   },
 );
@@ -397,64 +406,21 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const stub = await llmStub(t, [], ENGINE_ROOT, {
-      responder: l4ResponderAC9(),
+      responder: l4Responder({ reTurn: NO_FINDINGS_TURN }),
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
-    const results9 = join(fixture.runs, "e9");
+    const results = join(fixture.runs, "e9");
 
-    const { runStatus, reportStatus, runStderr, reportStderr } = await runEval(
-      fixture,
-      "e9",
-      "dev",
-      "1",
-      t.signal,
-    );
-    assert.equal(runStatus, SUCCESS_EXIT, runStderr);
-    assert.equal(reportStatus, SUCCESS_EXIT, reportStderr);
+    await runAndReport(fixture, devArgs("e9", "1"), t.signal);
 
-    const AC9_DIAG_COUNT = 4;
-    const AC9_NO_FINDINGS = 0;
-    const diagLines = jsonLines<DiagnosisLine>(
-      await asTestUser(["cat", join(results9, "diagnoses.jsonl")]),
+    const diagnoses = await jsonLines<DiagnosisLine>(
+      join(results, "diagnoses.jsonl"),
     );
-    assert.equal(diagLines.length, AC9_DIAG_COUNT, "4 diagnosis lines");
-    for (const diag of diagLines) {
-      assert.equal(diag.valid, false, `valid false: ${JSON.stringify(diag)}`);
-      assert.equal(
-        diag.findings.length,
-        AC9_NO_FINDINGS,
-        `no findings: ${JSON.stringify(diag)}`,
-      );
-    }
-
-    const stub1 = await llmStub(t, [], ENGINE_ROOT, {
-      responder: l4Responder(),
-    });
-    const fixture1 = await buildEvaluationSet(t, stub1.baseUrl);
-    const results1 = join(fixture1.runs, "e1cmp");
-    const { runStatus: r1 } = await runEval(
-      fixture1,
-      "e1cmp",
-      "dev",
-      "1",
-      t.signal,
+    assert.deepEqual(
+      diagnoses.map((line) => [line.valid, line.findings.length]),
+      Array.from({ length: DEV_RUN_COUNT }, () => [false, 0]),
     );
-    assert.equal(r1, SUCCESS_EXIT);
-
-    const checks9 = jsonLines<CheckLine>(
-      await asTestUser(["cat", join(results9, "checks.jsonl")]),
-    );
-    const checks1 = jsonLines<CheckLine>(
-      await asTestUser(["cat", join(results1, "checks.jsonl")]),
-    );
-    for (const c9 of checks9) {
-      const c1 = checks1.find((c) => c.case === c9.case);
-      if (!c1) continue;
-      assert.equal(c9.pass, c1.pass, `pass unchanged for case ${c9.case}`);
-    }
-
-    const reportText = await asTestUser(["cat", join(results9, "report.md")]);
-    assert.match(reportText, /invalid diagnoses: 4/);
-    assert.match(reportText, /verdict complete/);
+    await assertBaselineChecks(results);
+    await assertReportLines(results, AC9_REPORT_LINES);
   },
 );
