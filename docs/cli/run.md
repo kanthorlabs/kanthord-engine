@@ -37,7 +37,7 @@ The script refuses a prompt in more than one argument. A relative prompt path re
 
 The script verifies that `dist/main.js` is present and not older than each `.ts` file of `src/`. When either condition fails, it runs `pnpm run build` first, with the build output on stderr. Use `--no-build` to skip this check.
 
-Unless `--no-refresh` is given, the script calls `ModelRuntime.create` and `getAuth` from `@earendil-works/pi-coding-agent` to refresh an `oauth` entry. The refresh requires a token validity of the budget plus 10 minutes. The result is discarded. Before the refresh, the script refuses these conditions with one fixed line on stderr and exit `1`:
+Unless `--no-refresh` is given, the script calls `ModelRuntime.create` and `getAuth` from `@earendil-works/pi-coding-agent` to refresh an `oauth` entry. The entry type comes from `listCredentials` of pi, which resolves no key. An `api_key` entry or an absent entry gets no refresh, so the script runs no `!` command and resolves no `$` reference of a key. The refresh requires a token validity of the budget plus 10 minutes. The result is discarded. Before the refresh, the script refuses these conditions with one fixed line on stderr and exit `1`:
 
 - `NODE_USE_ENV_PROXY` is set, or `--use-env-proxy` is in `NODE_OPTIONS` or in the Node arguments.
 - The `--auth` file is absent, is no regular file, has another owner or has a group or other mode bit.

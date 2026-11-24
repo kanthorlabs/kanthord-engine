@@ -30,6 +30,7 @@ const ENV_PROXY_LINE =
 const PROMPT_COUNT_LINE =
   "play-run-agent: give the prompt as one quoted argument\n";
 const USE_ENV_PROXY_FLAG = "--use-env-proxy";
+const OAUTH_TYPE = "oauth";
 const REFRESH_MARGIN_MS = 10 * 60000;
 const GROUP_AND_OTHER_BITS = 0o077;
 
@@ -86,6 +87,13 @@ export async function refreshAuthWith(
     allowModelNetwork: false,
     refreshOnCreate: false,
   });
+  const entries = await runtime.listCredentials();
+  const isOAuth = entries.some(
+    (entry) => entry.providerId === provider && entry.type === OAUTH_TYPE,
+  );
+  if (!isOAuth) {
+    return;
+  }
   const result = await runtime.getAuth(provider, { minOAuthValidityMs });
   if (result === undefined) {
     throw new Error("refresh returned no result");

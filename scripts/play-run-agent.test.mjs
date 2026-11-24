@@ -525,7 +525,7 @@ test("play setup: --no-refresh with --refresh-only skips the refresh and exits 0
   );
 });
 
-test("play setup: without --no-refresh, --refresh-only exits 1 when the entry is absent", (t) => {
+test("play setup: without --no-refresh, --refresh-only skips the refresh of an absent entry", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-refresh-fail-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -562,11 +562,8 @@ test("play setup: without --no-refresh, --refresh-only exits 1 when the entry is
     },
   );
 
-  assert.equal(
-    result.status,
-    FAILURE,
-    `expected exit 1 when refresh entry is absent`,
-  );
+  assert.equal(result.status, SUCCESS, result.stderr);
+  assert.equal(readFileSync(authPath, "utf8"), JSON.stringify({}));
 });
 
 test("play setup: --no-build skips the build step", (t) => {
@@ -625,6 +622,26 @@ test("play setup: the refresh of an api_key entry changes no file and reads no p
   assert.deepEqual(readdirSync(fixture.H), []);
   assert.ok(!result.stdout.includes(TEST_K));
   assert.ok(!result.stderr.includes(TEST_K));
+});
+
+test("play setup: the refresh step runs no command of an api_key entry and resolves no reference", (t) => {
+  const fixture = refreshFixture(t, undefined);
+  const marker = join(fixture.root, "marker");
+  for (const key of [`!touch '${marker}'`, "$FIXTURE_VAR"]) {
+    writeFileSync(
+      fixture.authPath,
+      JSON.stringify({ [REFRESH_PROVIDER]: { type: "api_key", key } }),
+    );
+    chmodSync(fixture.authPath, FILE_MODE);
+    const before = digest(fixture.authPath);
+
+    const result = refreshOnly(fixture, { FIXTURE_VAR: TEST_K });
+
+    assert.equal(result.status, SUCCESS, result.stderr);
+    assert.equal(existsSync(marker), false);
+    assert.equal(digest(fixture.authPath), before);
+    assert.deepEqual(readdirSync(fixture.authDir), ["auth.json"]);
+  }
 });
 
 test("play setup: an oauth entry that outlives the budget gets no refresh request and no write", async (t) => {
@@ -695,6 +712,7 @@ test("play setup: a prompt in more than one argument is refused", (t) => {
 
 test("play setup: refreshAuthWith throws when getAuth returns undefined", async () => {
   const fakeCreate = async () => ({
+    listCredentials: async () => [{ providerId: "anthropic", type: "oauth" }],
     getAuth: async () => undefined,
   });
   await assert.rejects(() =>
