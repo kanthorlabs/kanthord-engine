@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir, userInfo } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
@@ -23,6 +23,55 @@ const SAMPLE_AUTHOR_EMAIL = "sample@example.com";
 const GIT_MAIN_BRANCH = "main";
 const ARGUMENT_SEPARATOR = "--";
 const REFRESH_FAILED_LINE = "play-run-agent: the token refresh failed\n";
+const AUTH_FILE_LINE =
+  "play-run-agent: the --auth file is absent or is not a private file of the current user\n";
+const ENV_PROXY_LINE =
+  "play-run-agent: a Node proxy setting is on (NODE_USE_ENV_PROXY or --use-env-proxy)\n";
+const PROMPT_COUNT_LINE =
+  "play-run-agent: give the prompt as one quoted argument\n";
+const USE_ENV_PROXY_FLAG = "--use-env-proxy";
+const REFRESH_MARGIN_MS = 10 * 60000;
+const GROUP_AND_OTHER_BITS = 0o077;
+
+function isUseEnvProxy(token) {
+  const option = token.replaceAll('"', "");
+  return (
+    option === USE_ENV_PROXY_FLAG || option.startsWith(`${USE_ENV_PROXY_FLAG}=`)
+  );
+}
+
+function usesEnvProxy(env, execArgv) {
+  return (
+    env.NODE_USE_ENV_PROXY !== undefined ||
+    (env.NODE_OPTIONS ?? "").split(/\s+/).some(isUseEnvProxy) ||
+    execArgv.some(isUseEnvProxy)
+  );
+}
+
+function isPrivateFile(path) {
+  const stats = lstatSync(path, { throwIfNoEntry: false });
+  return (
+    stats !== undefined &&
+    stats.isFile() &&
+    stats.uid === process.getuid?.() &&
+    (stats.mode & GROUP_AND_OTHER_BITS) === 0
+  );
+}
+
+function refuse(line) {
+  process.stderr.write(line);
+  process.exit(1);
+}
+
+function refusePlayDirectory(path) {
+  const stats = lstatSync(path);
+  if (stats.isSymbolicLink()) {
+    refuse(`play-run-agent: ${path} is a symbolic link\n`);
+  }
+  if (stats.uid !== process.getuid?.()) {
+    refuse(`play-run-agent: ${path} is not owned by the current user\n`);
+  }
+}
 
 export async function refreshAuthWith(
   authPath,
@@ -63,6 +112,9 @@ if (IS_MAIN) {
     allowPositionals: true,
   });
 
+  if (positionals.length > 1) {
+    refuse(PROMPT_COUNT_LINE);
+  }
   const promptArg = positionals[0];
 
   if (!values["no-build"]) {
@@ -79,7 +131,7 @@ if (IS_MAIN) {
       try {
         execFileSync("pnpm", ["run", "build"], {
           cwd: ENGINE_ROOT,
-          stdio: "inherit",
+          stdio: ["ignore", process.stderr, process.stderr],
         });
       } catch {
         process.exit(1);
@@ -106,37 +158,29 @@ if (IS_MAIN) {
     return join(base, "kanthord", "play", `${year}${month}${day}`);
   })();
 
-  const dirExists = existsSync(playDir);
+  const playDirStats = lstatSync(playDir, { throwIfNoEntry: false });
 
-  if (dirExists) {
-    const stats = lstatSync(playDir);
-    if (stats.isSymbolicLink()) {
-      process.stderr.write(`play-run-agent: ${playDir} is a symbolic link\n`);
-      process.exit(1);
-    }
-    if ((stats.mode & 0o777) !== 0o700) {
-      process.stderr.write(`play-run-agent: ${playDir} mode is not 0700\n`);
-      process.exit(1);
-    }
-    if (stats.uid !== process.getuid?.()) {
-      process.stderr.write(
-        `play-run-agent: ${playDir} is not owned by the current user\n`,
-      );
-      process.exit(1);
-    }
+  if (playDirStats === undefined) {
+    mkdirSync(playDir, { recursive: true, mode: 0o700 });
+    chmodSync(playDir, 0o700);
+  } else if (
+    !playDirStats.isSymbolicLink() &&
+    (playDirStats.mode & 0o777) !== 0o700
+  ) {
+    refuse(`play-run-agent: ${playDir} mode is not 0700\n`);
+  }
+  refusePlayDirectory(dirname(playDir));
+  refusePlayDirectory(playDir);
+
+  const workspaceDir = join(playDir, "workspace");
+
+  if (existsSync(workspaceDir)) {
     if (values.repo !== undefined) {
       process.stderr.write(
         `play-run-agent: existing workspace used; --repo ignored\n`,
       );
     }
   } else {
-    mkdirSync(playDir, { recursive: true, mode: 0o700 });
-    chmodSync(playDir, 0o700);
-  }
-
-  const workspaceDir = join(playDir, "workspace");
-
-  if (!dirExists) {
     if (values.repo !== undefined) {
       execFileSync("git", [
         "clone",
@@ -198,12 +242,16 @@ if (IS_MAIN) {
       if (m[2] === "m") return v * 60000;
       return v * 3600000;
     })();
-    const minMs = Math.max(20 * 60000, budgetMs + 10 * 60000);
+    if (usesEnvProxy(process.env, process.execArgv)) {
+      refuse(ENV_PROXY_LINE);
+    }
+    if (!isPrivateFile(authPath)) {
+      refuse(AUTH_FILE_LINE);
+    }
     try {
-      await refreshAuthWith(authPath, provider, minMs);
+      await refreshAuthWith(authPath, provider, budgetMs + REFRESH_MARGIN_MS);
     } catch {
-      process.stderr.write(REFRESH_FAILED_LINE);
-      process.exit(1);
+      refuse(REFRESH_FAILED_LINE);
     }
   }
 
@@ -233,6 +281,7 @@ if (IS_MAIN) {
     `cd ${shellQuote(playDir)} || exit 1`,
     "mkdir -p sessions",
     `if [ -n "$1" ]; then PROMPT="$1"; else PROMPT="prompt.md"; fi`,
+    `LINES_BEFORE=$(cat result.jsonl 2>/dev/null | wc -l)`,
     `node ${shellQuote(BIN)} run agent swe@1 \\`,
     `  --model ${shellQuote(values.model)} \\`,
     `  --budget ${shellQuote(values.budget)} \\`,
@@ -243,7 +292,7 @@ if (IS_MAIN) {
     `  --prompt "$PROMPT"`,
     `EXIT=$?`,
     `echo "exit: $EXIT"`,
-    `if [ -f result.jsonl ]; then`,
+    `if [ "$(cat result.jsonl 2>/dev/null | wc -l)" -gt "$LINES_BEFORE" ]; then`,
     `  node -e "const d=JSON.parse(require('fs').readFileSync('result.jsonl','utf8').trim().split('\\n').pop());process.stdout.write('end: '+d.end+'\\nclass: '+String(d.class)+'\\ntext: '+String(d.text)+'\\n')"`,
     `fi`,
     `git -C workspace status --short`,

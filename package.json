@@ -22,7 +22,7 @@
     "pi-tools:fetch": "node scripts/pi-tools.mjs fetch",
     "pi-tools:update": "node scripts/pi-tools.mjs update",
     "typecheck": "tsrs -p . --noEmit --checkers 2",
-    "play:agent": "node scripts/play-run-agent.mjs",
+    "play:agent": "ulimit -c 0 && node scripts/play-run-agent.mjs",
     "test": "pnpm --silent run test:files --test-concurrency=8 'src/**/*.test.ts' scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs scripts/pi-tools.test.mjs scripts/health.test.mjs scripts/no-inline-object-type.test.mjs scripts/hooks-gate.test.mjs scripts/import-check.test.mjs scripts/play-run-agent.test.mjs",
     "test:files": "PATH=\"$(node scripts/test-path.mjs)\" NODE_COMPILE_CACHE=node_modules/.cache/node-compile node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000",
     "test:affected": "node scripts/pi-tools.mjs fetch && node scripts/affected-tests.mjs",

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import {
@@ -34,6 +35,62 @@ const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
 const SAMPLE_PROMPT_MARKER = "sum.mjs";
 const TEXT_PROMPT = "count to three";
+const REFRESH_PROVIDER = "anthropic";
+const REFRESH_MIN_MS = 1500000;
+const DAY_MS = 86400000;
+const UNPRICED_BUDGET = "1usd";
+
+function dateTag() {
+  const d = new Date();
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function digest(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function refreshFixture(t, entries) {
+  const root = mkdtempSync(join(tmpdir(), "kanthord play-refresh-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const X = join(root, "x");
+  const H = join(root, "h");
+  const authDir = join(root, "cfg");
+  const piDir = join(root, "pi");
+  for (const dir of [X, H, authDir, piDir]) mkdirSync(dir);
+  writeFileSync(join(piDir, "models.json"), "{");
+  const authPath = join(authDir, "auth.json");
+  if (entries !== undefined) {
+    writeFileSync(authPath, JSON.stringify(entries));
+    chmodSync(authPath, FILE_MODE);
+  }
+  const env = {
+    PATH: process.env.PATH ?? "",
+    HOME: H,
+    TMPDIR: root,
+    XDG_STATE_HOME: X,
+    PI_CODING_AGENT_DIR: piDir,
+  };
+  return { root, X, H, authDir, piDir, authPath, env };
+}
+
+function refreshOnly(fixture, extraEnv) {
+  return spawnSync(
+    process.execPath,
+    [
+      PLAY_SCRIPT,
+      "--",
+      "--auth",
+      fixture.authPath,
+      "--no-build",
+      "--refresh-only",
+    ],
+    {
+      encoding: "utf8",
+      env: { ...fixture.env, ...extraEnv },
+      timeout: 20000,
+    },
+  );
+}
 
 function spawnScript(args, env) {
   const child = spawn(process.execPath, [PLAY_SCRIPT, ...args], {
@@ -253,10 +310,21 @@ test(
       ),
       "last request does not hold text prompt",
     );
+
+    const run3 = spawnScript(
+      [...baseArgs, "--budget", UNPRICED_BUDGET, TEXT_PROMPT],
+      env,
+    );
+    const [status3] = await once(run3.child, "close");
+    assert.notEqual(status3, SUCCESS, "a refused run exits 0");
+    assert.ok(
+      !run3.getStdout().includes("end:"),
+      `regression: a refused run prints the result of an earlier run:\n${run3.getStdout()}`,
+    );
   },
 );
 
-test("L2-AC16: a play directory that is a symbolic link is refused", (t) => {
+test("play setup: a play directory that is a symbolic link is refused", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-link-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -268,9 +336,7 @@ test("L2-AC16: a play directory that is a symbolic link is refused", (t) => {
   const playBase = join(X, "kanthord", "play");
   mkdirSync(playBase, { recursive: true });
 
-  const d = new Date();
-  const dateTag = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  symlinkSync(target, join(playBase, dateTag));
+  symlinkSync(target, join(playBase, dateTag()));
 
   const authDir = join(root, "cfg");
   mkdirSync(authDir);
@@ -294,13 +360,39 @@ test("L2-AC16: a play directory that is a symbolic link is refused", (t) => {
   );
 
   assert.equal(result.status, FAILURE, "expected exit 1 for symlink play dir");
-  assert.ok(
-    result.stderr.includes("symbolic link"),
-    `stderr does not mention symbolic link:\n${result.stderr}`,
-  );
+  assert.deepEqual(readdirSync(target), []);
 });
 
-test("L2-AC16: a play directory with wrong mode is refused", (t) => {
+test("play setup: a play parent directory that is a symbolic link is refused", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "kanthord play-parent-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+
+  const X = join(root, "x");
+  const target = join(root, "real");
+  mkdirSync(join(X, "kanthord"), { recursive: true });
+  mkdirSync(target, { mode: 0o700 });
+  symlinkSync(target, join(X, "kanthord", "play"));
+
+  const result = spawnSync(
+    process.execPath,
+    [PLAY_SCRIPT, "--", "--no-refresh", "--no-build", "--refresh-only"],
+    {
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH ?? "",
+        HOME: root,
+        TMPDIR: root,
+        XDG_STATE_HOME: X,
+      },
+      timeout: 10000,
+    },
+  );
+
+  assert.equal(result.status, FAILURE);
+  assert.equal(existsSync(join(target, dateTag(), "workspace")), false);
+});
+
+test("play setup: a play directory with wrong mode is refused", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-mode-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -310,9 +402,7 @@ test("L2-AC16: a play directory with wrong mode is refused", (t) => {
   const playBase = join(X, "kanthord", "play");
   mkdirSync(playBase, { recursive: true });
 
-  const d = new Date();
-  const dateTag = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  const badDir = join(playBase, dateTag);
+  const badDir = join(playBase, dateTag());
   mkdirSync(badDir, { mode: 0o755 });
 
   const authDir = join(root, "cfg");
@@ -341,13 +431,10 @@ test("L2-AC16: a play directory with wrong mode is refused", (t) => {
     FAILURE,
     "expected exit 1 for wrong mode play dir",
   );
-  assert.ok(
-    result.stderr.includes("mode"),
-    `stderr does not mention mode:\n${result.stderr}`,
-  );
+  assert.deepEqual(readdirSync(badDir), []);
 });
 
-test("L2-AC16: the play directory name uses the local YYYYMMDD date", (t) => {
+test("play setup: the play directory name uses the local YYYYMMDD date", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-date-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -387,8 +474,7 @@ test("L2-AC16: the play directory name uses the local YYYYMMDD date", (t) => {
     `play directory name is not YYYYMMDD: ${dateSegment}`,
   );
 
-  const d = new Date();
-  const expected = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  const expected = dateTag();
   assert.equal(
     dateSegment,
     expected,
@@ -396,7 +482,7 @@ test("L2-AC16: the play directory name uses the local YYYYMMDD date", (t) => {
   );
 });
 
-test("L2-AC16: --no-refresh with --refresh-only skips the refresh and exits 0", (t) => {
+test("play setup: --no-refresh with --refresh-only skips the refresh and exits 0", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-norefresh-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -439,7 +525,7 @@ test("L2-AC16: --no-refresh with --refresh-only skips the refresh and exits 0", 
   );
 });
 
-test("L2-AC16: without --no-refresh, --refresh-only exits 1 when the entry is absent", (t) => {
+test("play setup: without --no-refresh, --refresh-only exits 1 when the entry is absent", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-refresh-fail-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -483,7 +569,7 @@ test("L2-AC16: without --no-refresh, --refresh-only exits 1 when the entry is ab
   );
 });
 
-test("L2-AC16: --no-build skips the build step", (t) => {
+test("play setup: --no-build skips the build step", (t) => {
   const root = mkdtempSync(join(tmpdir(), "kanthord play-build-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -523,31 +609,91 @@ test("L2-AC16: --no-build skips the build step", (t) => {
   assert.ok(!existsSync(markerFile), "--no-build still called pnpm build");
 });
 
-test("L2-AC16: refreshAuthWith calls getAuth with the given auth path and provider", async () => {
-  let capturedAuthPath;
-  let capturedProvider;
-  let capturedMinMs;
+test("play setup: the refresh of an api_key entry changes no file and reads no pi directory", (t) => {
+  const fixture = refreshFixture(t, {
+    [REFRESH_PROVIDER]: { type: "api_key", key: TEST_K },
+  });
+  const before = digest(fixture.authPath);
 
-  const fakeCreate = async ({ authPath }) => {
-    capturedAuthPath = authPath;
-    return {
-      getAuth: async (provider, { minOAuthValidityMs }) => {
-        capturedProvider = provider;
-        capturedMinMs = minOAuthValidityMs;
-        return { type: "api_key" };
-      },
-    };
-  };
+  const result = refreshOnly(fixture, {});
 
-  const authPath = join(tmpdir(), "unit-auth.json");
-  await refreshAuthWith(authPath, "test-provider", 100000, fakeCreate);
-
-  assert.equal(capturedAuthPath, authPath);
-  assert.equal(capturedProvider, "test-provider");
-  assert.equal(capturedMinMs, 100000);
+  assert.equal(result.status, SUCCESS, result.stderr);
+  assert.equal(digest(fixture.authPath), before);
+  assert.equal(statSync(fixture.authPath).mode & MODE_MASK, FILE_MODE);
+  assert.deepEqual(readdirSync(fixture.authDir), ["auth.json"]);
+  assert.deepEqual(readdirSync(fixture.piDir), ["models.json"]);
+  assert.deepEqual(readdirSync(fixture.H), []);
+  assert.ok(!result.stdout.includes(TEST_K));
+  assert.ok(!result.stderr.includes(TEST_K));
 });
 
-test("L2-AC16: refreshAuthWith throws when getAuth returns undefined", async () => {
+test("play setup: an oauth entry that outlives the budget gets no refresh request and no write", async (t) => {
+  const fixture = refreshFixture(t, {
+    [REFRESH_PROVIDER]: {
+      type: "oauth",
+      access: TEST_K,
+      refresh: TEST_K,
+      expires: Date.now() + DAY_MS,
+    },
+  });
+  const before = digest(fixture.authPath);
+
+  await refreshAuthWith(fixture.authPath, REFRESH_PROVIDER, REFRESH_MIN_MS);
+
+  assert.equal(digest(fixture.authPath), before);
+  assert.deepEqual(readdirSync(fixture.authDir), ["auth.json"]);
+});
+
+test("play setup: an absent --auth file is refused before the refresh and is not created", (t) => {
+  const fixture = refreshFixture(t, undefined);
+
+  const result = refreshOnly(fixture, {});
+
+  assert.equal(result.status, FAILURE);
+  assert.deepEqual(readdirSync(fixture.authDir), []);
+});
+
+test("play setup: an --auth file with a group or other bit is refused before the refresh", (t) => {
+  const fixture = refreshFixture(t, {
+    [REFRESH_PROVIDER]: { type: "api_key", key: TEST_K },
+  });
+  chmodSync(fixture.authPath, 0o644);
+
+  const result = refreshOnly(fixture, {});
+
+  assert.equal(result.status, FAILURE);
+  assert.deepEqual(readdirSync(fixture.authDir), ["auth.json"]);
+});
+
+test("play setup: a Node proxy setting is refused before the refresh", (t) => {
+  const fixture = refreshFixture(t, {
+    [REFRESH_PROVIDER]: { type: "api_key", key: TEST_K },
+  });
+
+  assert.equal(
+    refreshOnly(fixture, { NODE_USE_ENV_PROXY: "1" }).status,
+    FAILURE,
+  );
+  assert.equal(
+    refreshOnly(fixture, { NODE_OPTIONS: "--use-env-proxy" }).status,
+    FAILURE,
+  );
+});
+
+test("play setup: a prompt in more than one argument is refused", (t) => {
+  const fixture = refreshFixture(t, undefined);
+
+  const result = spawnSync(
+    process.execPath,
+    [PLAY_SCRIPT, "--", "--no-refresh", "--no-build", "count", "to", "three"],
+    { encoding: "utf8", env: fixture.env, timeout: 10000 },
+  );
+
+  assert.equal(result.status, FAILURE);
+  assert.deepEqual(readdirSync(fixture.X), []);
+});
+
+test("play setup: refreshAuthWith throws when getAuth returns undefined", async () => {
   const fakeCreate = async () => ({
     getAuth: async () => undefined,
   });
@@ -556,7 +702,7 @@ test("L2-AC16: refreshAuthWith throws when getAuth returns undefined", async () 
   );
 });
 
-test("L2-AC16: refreshAuthWith propagates a thrown error", async () => {
+test("play setup: refreshAuthWith propagates a thrown error", async () => {
   const fakeCreate = async () => {
     throw new Error("network unreachable");
   };
