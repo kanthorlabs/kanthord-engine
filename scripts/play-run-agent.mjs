@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
@@ -15,7 +15,11 @@ const SAMPLE_AUTHOR_NAME = "Sample";
 const SAMPLE_AUTHOR_EMAIL = "sample@example.com";
 const GIT_MAIN_BRANCH = "main";
 
+const ARGUMENT_SEPARATOR = "--";
+
+const given = process.argv.slice(2);
 const { values } = parseArgs({
+  args: given[0] === ARGUMENT_SEPARATOR ? given.slice(1) : given,
   options: {
     repo: { type: "string" },
     model: { type: "string", default: DEFAULT_MODEL },
@@ -41,8 +45,12 @@ function stateDirectory() {
   return join(base, "kanthord");
 }
 
+function shellQuote(text) {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
 function utcTag() {
-  return new Date().toISOString().replace(/[:.Z]/g, "").replace("T", "T");
+  return new Date().toISOString().replace(/[:.Z]/g, "");
 }
 
 const playDir = join(stateDirectory(), "play", utcTag());
@@ -50,7 +58,7 @@ mkdirSync(playDir, { recursive: true, mode: 0o700 });
 chmodSync(playDir, 0o700);
 
 const workspaceDir = join(playDir, "workspace");
-const authPath = values.auth ?? join(homedir(), DEFAULT_AUTH_SUBPATH);
+const authPath = resolve(values.auth ?? join(homedir(), DEFAULT_AUTH_SUBPATH));
 
 if (values.repo !== undefined) {
   execFileSync("git", [
@@ -98,20 +106,20 @@ writeFileSync(join(playDir, "prompt.md"), `${promptText}\n`);
 const provider = values.model.split("/")[0];
 const refreshLine = values["no-refresh"]
   ? ""
-  : `pi auth print-bearer-token --provider ${provider} --min-expiry 20m > /dev/null\n`;
+  : `pi auth print-bearer-token --provider ${shellQuote(provider)} --min-expiry 20m > /dev/null`;
 
 const runShLines = [
   "#!/bin/sh",
   "ulimit -c 0",
-  `cd ${JSON.stringify(playDir)}`,
+  `cd ${shellQuote(playDir)} || exit 1`,
   "mkdir -p sessions",
-  refreshLine.trimEnd(),
+  refreshLine,
   `SESSION="sessions/$(date -u +%Y%m%dT%H%M%S).jsonl"`,
   `if [ -n "$1" ]; then PROMPT="$1"; else PROMPT="prompt.md"; fi`,
-  `node ${JSON.stringify(BIN)} run agent swe@1 \\`,
-  `  --model ${JSON.stringify(values.model)} \\`,
-  `  --budget ${JSON.stringify(values.budget)} \\`,
-  `  --auth ${JSON.stringify(authPath)} \\`,
+  `node ${shellQuote(BIN)} run agent swe@1 \\`,
+  `  --model ${shellQuote(values.model)} \\`,
+  `  --budget ${shellQuote(values.budget)} \\`,
+  `  --auth ${shellQuote(authPath)} \\`,
   `  --workspace workspace \\`,
   `  --session "$SESSION" \\`,
   `  --output result.jsonl \\`,
@@ -123,10 +131,10 @@ const runShLines = [
   `fi`,
   `git -C workspace status --short`,
   `exit $EXIT`,
-  "",
 ]
   .filter((line) => line !== "")
-  .join("\n");
+  .map((line) => `${line}\n`)
+  .join("");
 
 const runShPath = join(playDir, "run.sh");
 writeFileSync(runShPath, runShLines);

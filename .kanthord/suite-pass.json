@@ -9,6 +9,7 @@
     "src/apps/cli/e2e-run-agent-boundary.test.ts",
     "src/apps/cli/e2e-run-agent-contract.test.ts",
     "scripts/hooks-gate.test.mjs",
-    "scripts/import-check.test.mjs"
+    "scripts/import-check.test.mjs",
+    "scripts/play-run-agent.test.mjs"
   ]
 }

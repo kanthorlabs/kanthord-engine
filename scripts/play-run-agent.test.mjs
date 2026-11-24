@@ -32,12 +32,12 @@ const FILE_MODE = 0o600;
 const SAMPLE_PROMPT_MARKER = "sum.mjs";
 
 test(
-  "the play setup gives a workspace, a placeholder prompt and a run that works",
+  "L2-AC16: the play setup gives a workspace, a placeholder prompt and a run that works",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     assert.ok(existsSync(DIST_MAIN), "dist/main.js absent; run pnpm run build");
 
-    const root = mkdtempSync(join(tmpdir(), "kanthord-play-test-"));
+    const root = mkdtempSync(join(tmpdir(), "kanthord play'$test-"));
     t.after(() => rmSync(root, { recursive: true, force: true }));
 
     const H = join(root, "h");
@@ -76,6 +76,7 @@ test(
       process.execPath,
       [
         PLAY_SCRIPT,
+        "--",
         "--model",
         `${STUB_PROVIDER}/${STUB_MODEL_ID}:off`,
         "--auth",
@@ -87,6 +88,7 @@ test(
 
     assert.equal(playResult.status, SUCCESS, playResult.stderr);
     assert.ok(!playResult.stdout.includes(TEST_K), "play stdout holds TEST_K");
+    assert.ok(!playResult.stderr.includes(TEST_K), "play stderr holds TEST_K");
 
     const runShPath = playResult.stdout
       .split("\n")
@@ -101,6 +103,7 @@ test(
     );
 
     const playDir = join(runShPath, "..");
+    assert.ok(playDir.startsWith(join(X, "kanthord", "play")), playDir);
     const playDirStat = statSync(playDir);
     assert.equal(
       playDirStat.mode & MODE_MASK,
@@ -140,7 +143,7 @@ test(
       `prompt.md does not hold sample text:\n${promptText}`,
     );
 
-    const runShChild = spawn(runShPath, [], { encoding: "utf8", env });
+    const runShChild = spawn(runShPath, [], { env });
     let runShStdout = "";
     let runShStderr = "";
     runShChild.stdout.on("data", (chunk) => {
@@ -158,6 +161,7 @@ test(
       `run.sh failed\nstderr:\n${runShStderr}\nstdout:\n${runShStdout}`,
     );
     assert.ok(!runShStdout.includes(TEST_K), "run.sh stdout holds TEST_K");
+    assert.ok(!runShStderr.includes(TEST_K), "run.sh stderr holds TEST_K");
 
     const userMessage = stub.requests
       .flatMap((r) => r.body?.input ?? [])
