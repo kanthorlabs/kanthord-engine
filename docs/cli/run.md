@@ -86,17 +86,21 @@ The `--auth` file is the only credential source of the run. The run reads the
 entry of the selected provider with the pi reader and writes nothing to the
 file.
 
-| Code                                | Condition                                                                            |
-| ----------------------------------- | ------------------------------------------------------------------------------------ |
-| `cli.run.agent.auth_file_invalid`   | The path is absent, a symbolic link or no regular file; or no default path exists.   |
-| `cli.run.agent.auth_file_owner`     | Another user owns the file.                                                          |
-| `cli.run.agent.auth_file_mode`      | The mode has a group or other bit.                                                   |
-| `cli.run.agent.auth_place`          | The file is inside the workspace.                                                    |
-| `cli.run.agent.auth_entry_missing`  | The file holds no entry of the provider, or holds no valid JSON.                     |
-| `cli.run.agent.auth_entry_invalid`  | The entry fails its schema, the provider shape or the metadata schema. Row: `field`. |
-| `cli.run.agent.auth_key_command`    | The `key` starts with `!`.                                                           |
-| `cli.run.agent.auth_key_reference`  | The `key` holds `$`.                                                                 |
-| `cli.run.agent.credential_expiring` | An `oauth` entry expires before the wall deadline plus 5 minutes.                    |
+| Code                                | Condition                                                                                                               |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `cli.run.agent.auth_file_invalid`   | The path is absent, a symbolic link or no regular file; the file holds no valid JSON object; or no default path exists. |
+| `cli.run.agent.auth_file_owner`     | Another user owns the file.                                                                                             |
+| `cli.run.agent.auth_file_mode`      | The mode has a group or other bit.                                                                                      |
+| `cli.run.agent.auth_place`          | The file is inside the workspace.                                                                                       |
+| `cli.run.agent.auth_entry_missing`  | The file holds no entry of the provider.                                                                                |
+| `cli.run.agent.auth_entry_invalid`  | An entry fails its schema, the provider shape or the metadata schema. Row: `field`.                                     |
+| `cli.run.agent.auth_key_command`    | The `key` starts with `!`.                                                                                              |
+| `cli.run.agent.auth_key_reference`  | The `key` holds `$`.                                                                                                    |
+| `cli.run.agent.credential_expiring` | An `oauth` entry expires before the wall deadline plus 5 minutes.                                                       |
+
+The run applies the entry schema to every entry of the file. A failed schema
+gives the `field` row `<provider>` or `<provider>.<path>`. Each other check
+applies only to the entry of the selected provider.
 
 An `api_key` entry holds `type`, `key` and an optional `env` object. The `env`
 object holds exactly the routing names of the provider:

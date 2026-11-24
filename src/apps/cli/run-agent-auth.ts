@@ -1,4 +1,4 @@
-import { lstatSync, realpathSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { z } from "zod";
@@ -32,6 +32,7 @@ const PI_OAUTH_REFRESH_WINDOW_MS = 300000;
 
 const ANTHROPIC_PROVIDER = "anthropic";
 const TYPEOF_OBJECT = "object";
+const BYTE_ORDER_MARK = "\uFEFF";
 
 const rawApiKeyEntrySchema = z.strictObject({
   type: z.literal(SecretShape.ApiKey),
@@ -311,6 +312,80 @@ function parseRawEntry(raw: unknown, authPath: string): RawAuthEntry {
       fields: fields("type"),
     },
   );
+}
+
+function validateFileEntry(
+  providerId: string,
+  entry: unknown,
+  absolute: string,
+): void {
+  const entryFields = (field: string): [string, string][] => [
+    ["path", absolute],
+    ["field", field ? `${providerId}.${field}` : providerId],
+  ];
+  if (
+    entry === null ||
+    typeof entry !== TYPEOF_OBJECT ||
+    Array.isArray(entry)
+  ) {
+    throw new Diagnostic(
+      AUTH_ENTRY_INVALID,
+      "run agent: an auth entry is not an object.",
+      { fields: entryFields("") },
+    );
+  }
+  const typeValue = (entry as Record<string, unknown>)["type"];
+  if (typeValue === SecretShape.ApiKey) {
+    parseApiKeyEntry(entry, entryFields);
+  } else if (typeValue === SecretShape.OAuth) {
+    parseOAuthEntry(entry, entryFields);
+  } else {
+    throw new Diagnostic(
+      AUTH_ENTRY_INVALID,
+      "run agent: an auth entry type is unknown.",
+      { fields: entryFields("type") },
+    );
+  }
+}
+
+function withoutByteOrderMark(text: string): string {
+  return text.startsWith(BYTE_ORDER_MARK)
+    ? text.slice(BYTE_ORDER_MARK.length)
+    : text;
+}
+
+export function checkAuthFileContents(authPath: string): void {
+  const absolute = resolve(authPath);
+  const pathFields = [["path", absolute]] as [string, string][];
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(withoutByteOrderMark(readFileSync(absolute, "utf-8")));
+  } catch {
+    throw new Diagnostic(
+      AUTH_FILE_INVALID,
+      "run agent: the --auth file is unreadable or is not valid JSON.",
+      { fields: pathFields },
+    );
+  }
+
+  if (
+    parsed === null ||
+    typeof parsed !== TYPEOF_OBJECT ||
+    Array.isArray(parsed)
+  ) {
+    throw new Diagnostic(
+      AUTH_FILE_INVALID,
+      "run agent: the --auth file root is not a plain object.",
+      { fields: pathFields },
+    );
+  }
+
+  for (const [providerId, entry] of Object.entries(
+    parsed as Record<string, unknown>,
+  )) {
+    validateFileEntry(providerId, entry, absolute);
+  }
 }
 
 export async function readAuthEntry(
