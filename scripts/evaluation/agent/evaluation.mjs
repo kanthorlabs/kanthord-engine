@@ -56,6 +56,24 @@ const USD_FRACTION_DIGITS = 2;
 const CHECK_OUTPUT_LIMIT = 64 * 1024 * 1024;
 const BREACH_CREDENTIAL = "credential";
 const BREACH_AUTH_FILE = "auth_file";
+const BREACH_PROTECTED_PATH = "protected_path";
+const BREACH_SET_CHANGE = "set_change";
+const PROTECTED_PATH_PARTS = ["evaluation/agent", "evaluation/runs", "/check/"];
+const PROTECTED_FILE_NAMES = [
+  "check.sh",
+  "reference.patch",
+  "checks.jsonl",
+  "results.jsonl",
+  "calls.jsonl",
+  "diagnoses.jsonl",
+  "iteration.json",
+  "report.md",
+  "config.json",
+  "session.jsonl",
+  "stderr.txt",
+];
+const PROTECTED_FILE_PREFIX = "judge-";
+const PATH_BOUNDARY_CHARS = "/\t\n\r \"'";
 const PROFILE_SWE = "swe@1";
 const PROFILE_RE = "re@1";
 const SET_DEV = "dev";
@@ -856,6 +874,41 @@ function makeRoot(workBaseDir) {
   return root;
 }
 
+function indexOfFileName(text, name) {
+  let start = 0;
+  while (start < text.length) {
+    const idx = text.indexOf(name, start);
+    if (idx === -1) return -1;
+    if (idx === 0 || PATH_BOUNDARY_CHARS.includes(text[idx - 1])) return idx;
+    start = idx + 1;
+  }
+  return -1;
+}
+
+export function hasProtectedPath(text, exactStrings, fileNames, filePrefix) {
+  for (const s of exactStrings) {
+    if (text.includes(s)) return true;
+  }
+  for (const name of fileNames) {
+    if (indexOfFileName(text, name) !== -1) return true;
+  }
+  const prefixIdx = text.indexOf(filePrefix);
+  if (prefixIdx !== -1) {
+    if (prefixIdx === 0 || PATH_BOUNDARY_CHARS.includes(text[prefixIdx - 1]))
+      return true;
+  }
+  return false;
+}
+
+export function protectedPathStrings(evalSetDir, resultsDir, caseFolder) {
+  return [evalSetDir, resultsDir, caseFolder, ...PROTECTED_PATH_PARTS];
+}
+
+function checkSetChangeBreach(evalSetDir) {
+  const output = gitOutput(evalSetDir, ["status", "--porcelain"]);
+  return output !== null && output.length > 0;
+}
+
 function breachStop(run, breach) {
   appendJsonLine(run.checksPath, breachCheckLine(run, breach));
   return { stop: STOP_BREACH, breach };
@@ -895,6 +948,26 @@ async function guardedAgentCall(run, deps, call) {
   if (count > 0) return credentialStop(run, count);
   if (checkAuthFileBreach(run.authPath, refreshed))
     return breachStop(run, BREACH_AUTH_FILE);
+  if (call.runBreachChecks) {
+    const sessionText = readFileSync(call.sessionPath, "utf8");
+    const resultsDir = dirname(run.resultsPath);
+    const exactStrings = protectedPathStrings(
+      run.evalSetDir,
+      resultsDir,
+      run.caseFolder,
+    );
+    if (
+      hasProtectedPath(
+        sessionText,
+        exactStrings,
+        PROTECTED_FILE_NAMES,
+        PROTECTED_FILE_PREFIX,
+      )
+    )
+      return breachStop(run, BREACH_PROTECTED_PATH);
+    if (checkSetChangeBreach(run.evalSetDir))
+      return breachStop(run, BREACH_SET_CHANGE);
+  }
   const stderrText = readFileSync(call.stderrPath, "latin1");
   if (runActionForExit(exit, stderrText) === ACTION_STOP)
     return { stop: `${call.label} exit ${exit}` };
@@ -998,6 +1071,7 @@ async function runDiagnosis(run, gradingRoot, deps) {
     inputPaths,
     sessionPath,
     stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+    runBreachChecks: false,
   });
   if (called.stop) return called;
   const resultLine = readJsonLines(run.resultsPath).findLast(
@@ -1025,6 +1099,7 @@ async function evaluateInRoots(run, deps, roots) {
     inputPaths: [],
     sessionPath: run.sessionPath,
     stderrPath: join(run.runDir, "stderr.txt"),
+    runBreachChecks: true,
   });
   if (called.stop) return called;
   const gradingRoot = makeRoot(run.workBaseDir);

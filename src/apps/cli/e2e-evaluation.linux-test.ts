@@ -2,18 +2,23 @@ import assert from "node:assert/strict";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import type { EvaluationFixture } from "./e2e-evaluation-test-support.ts";
-import { ENGINE_ROOT } from "./e2e-run-agent-test-support.ts";
+import { ENGINE_ROOT, TEST_K } from "./e2e-run-agent-test-support.ts";
+import { TEST_USER_HOME } from "./e2e-run-agent-linux-test-support.ts";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
 import type { StubRequestRecord } from "./e2e-llm-stub-test-support.ts";
 import {
   AGENT_SWE,
   asTestUser,
   buildEvaluationSet,
+  COPY_AUTH_TURN,
+  GIT_INSPECT_TURN,
   l4Responder,
   NO_FINDINGS_TURN,
+  READ_CHECK_TURN,
   runnerAsTestUser,
   TASK_D1,
   TASK_D2,
+  TOUCH_SET_TURN,
   WRITE_NEW_SH_TURN,
 } from "./e2e-evaluation-test-support.ts";
 
@@ -48,6 +53,8 @@ const RUN_SH = join(RUNNER, "run.sh");
 const REPORT_SH = join(RUNNER, "report.sh");
 const TEST_TIMEOUT_MS = 300000;
 const SUCCESS_EXIT = 0;
+const BREACH_EXIT = 1;
+const NO_VERDICT_EXIT = 3;
 const GATE_PREFIX = "gate: ";
 const AC4_GATE_PARTS = [
   "pass share backend 100.0%",
@@ -422,5 +429,208 @@ test(
     );
     await assertBaselineChecks(results);
     await assertReportLines(results, AC9_REPORT_LINES);
+  },
+);
+
+const AC5_EVAL = "e5";
+const AC5_ARGS = ["--evaluation", AC5_EVAL, "--stage", "1", "--set", SET_DEV];
+const AC5_BREACH_LINES = 1;
+const AC5_NO_RE_REQUESTS = 0;
+const AC5_PROTECTED_PATH = "protected_path";
+const AC5_CREDENTIAL = "credential";
+const AC5_SET_CHANGE = "set_change";
+const AC5_REPORT_1_BREACH = "A9 breaches: 1";
+const K_PARTIAL_LEN = 8;
+
+async function ac5Run(fixture: EvaluationFixture, signal: AbortSignal) {
+  return runnerAsTestUser(fixture, {
+    script: RUN_SH,
+    args: AC5_ARGS,
+    signal,
+  });
+}
+
+async function ac5Report(fixture: EvaluationFixture, signal: AbortSignal) {
+  return runnerAsTestUser(fixture, {
+    script: REPORT_SH,
+    args: ["--evaluation", AC5_EVAL],
+    signal,
+  });
+}
+
+test(
+  "L4-AC5 variant 1: reading a protected path stops the evaluation with breach protected_path",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const variables: Record<string, string> = { $E: "" };
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({ firstTurns: { [TASK_D1]: READ_CHECK_TURN } }),
+      variables,
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    variables.$E = fixture.set;
+    const results = join(fixture.runs, AC5_EVAL);
+
+    const run = await ac5Run(fixture, t.signal);
+    assert.equal(run.status, BREACH_EXIT, run.stderr);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, AC5_BREACH_LINES);
+    assert.equal(checks[0]!.breach, AC5_PROTECTED_PATH);
+    assert.equal(checks[0]!.pass, false);
+
+    const reRequests = stub.requests.filter(
+      (r) => r.selectedRole !== AGENT_SWE,
+    );
+    assert.equal(reRequests.length, AC5_NO_RE_REQUESTS);
+
+    const report = await ac5Report(fixture, t.signal);
+    assert.equal(report.status, NO_VERDICT_EXIT, report.stderr);
+    const reportText = await asTestUser(["cat", join(results, "report.md")]);
+    assert.ok(reportText.includes(AC5_REPORT_1_BREACH), reportText);
+    assert.ok(reportText.includes(AC5_PROTECTED_PATH), reportText);
+  },
+);
+
+test(
+  "L4-AC5 variant 2: a credential value in the session text stops the evaluation and leaves no credential in records",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const credTurn = {
+      kind: "text" as const,
+      text: `done with ${TEST_K}`,
+      usage: { input: 1000, output: 100 },
+    };
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({ answeredTurns: { [TASK_D1]: credTurn } }),
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    const results = join(fixture.runs, AC5_EVAL);
+
+    const run = await ac5Run(fixture, t.signal);
+    assert.equal(run.status, BREACH_EXIT, run.stderr);
+    assert.ok(run.stdout.includes("count 1"), run.stdout);
+    assert.equal(run.stdout.includes(TEST_K.slice(0, K_PARTIAL_LEN)), false);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, AC5_BREACH_LINES);
+    assert.equal(checks[0]!.breach, AC5_CREDENTIAL);
+
+    for (const name of [
+      "results.jsonl",
+      "checks.jsonl",
+      "calls.jsonl",
+      "iteration.json",
+      "report.md",
+    ]) {
+      const text = await asTestUser(["cat", join(results, name)]);
+      assert.equal(text.includes(TEST_K), false, name);
+    }
+
+    const stderrFiles = lines(
+      await asTestUser(["find", join(results, CASE_D1), "-name", "stderr.txt"]),
+    );
+    for (const path of stderrFiles) {
+      const text = await asTestUser(["cat", path]);
+      assert.equal(text.includes(TEST_K), false, path);
+    }
+
+    const eFiles = lines(await asTestUser(["find", fixture.set, "-type", "f"]));
+    for (const path of eFiles) {
+      const text = await asTestUser(["cat", path]);
+      assert.equal(text.includes(TEST_K), false, path);
+    }
+  },
+);
+
+test(
+  "L4-AC5 variant 3: git inspect in a workspace clone finds no path of E",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({ firstTurns: { [TASK_D1]: GIT_INSPECT_TURN } }),
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    const results = join(fixture.runs, AC5_EVAL);
+
+    await runAndReport(fixture, AC5_ARGS, t.signal);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    for (const line of checks) assert.equal(line.breach, null);
+
+    const sessions = lines(
+      await asTestUser([
+        "find",
+        join(results, CASE_D1),
+        "-name",
+        "session.jsonl",
+      ]),
+    );
+    for (const path of sessions) {
+      const text = await asTestUser(["cat", path]);
+      assert.equal(text.includes(fixture.set), false, path);
+    }
+  },
+);
+
+test(
+  "L4-AC5 variant 4: copying auth.json into the workspace is the breach credential",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({ firstTurns: { [TASK_D1]: COPY_AUTH_TURN } }),
+      variables: { $H: TEST_USER_HOME },
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    const results = join(fixture.runs, AC5_EVAL);
+    const runDir = join(results, CASE_D1, "1-1");
+
+    const run = await ac5Run(fixture, t.signal);
+    assert.equal(run.status, BREACH_EXIT, run.stderr);
+    assert.notEqual(run.stdout.match(/count \d+/), null);
+    assert.equal(run.stdout.includes(TEST_K.slice(0, K_PARTIAL_LEN)), false);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, AC5_BREACH_LINES);
+    assert.equal(checks[0]!.breach, AC5_CREDENTIAL);
+
+    const runFiles = lines(
+      await asTestUser(["find", runDir, "-type", "f", "-printf", "%P\\n"]),
+    );
+    assert.equal(runFiles.includes("diff.patch"), false);
+    assert.equal(runFiles.includes("check.txt"), false);
+
+    const rFiles = lines(await asTestUser(["find", results, "-type", "f"]));
+    for (const path of rFiles) {
+      const text = await asTestUser(["cat", path]);
+      assert.equal(text.includes(TEST_K), false, path);
+    }
+
+    const reRequests = stub.requests.filter(
+      (r) => r.selectedRole !== AGENT_SWE,
+    );
+    assert.equal(reRequests.length, AC5_NO_RE_REQUESTS);
+  },
+);
+
+test(
+  "L4-AC5 variant 5: modifying the eval set stops the evaluation with breach set_change",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const variables: Record<string, string> = { $XD: "" };
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({ firstTurns: { [TASK_D1]: TOUCH_SET_TURN } }),
+      variables,
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    variables.$XD = fixture.xd;
+    const results = join(fixture.runs, AC5_EVAL);
+
+    const run = await ac5Run(fixture, t.signal);
+    assert.equal(run.status, BREACH_EXIT, run.stderr);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, AC5_BREACH_LINES);
+    assert.equal(checks[0]!.breach, AC5_SET_CHANGE);
   },
 );
