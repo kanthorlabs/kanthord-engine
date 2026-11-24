@@ -181,6 +181,38 @@ checks run before the session opens.
   credential.
 - The run blocks a tool call whose input holds a known secret.
 
+### Start preconditions
+
+Each profile declares a list of start preconditions. The run checks each one
+before it opens the session, sends a request or writes any file. A failed
+precondition gives `cli.run.agent.start_refused` with a `reason` row that
+starts with the precondition id.
+
+| Id                    | Condition                                                                                                             |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `workspace_directory` | The working directory and each root are directories that exist.                                                       |
+| `git_worktree`        | For each root, `git rev-parse --show-toplevel` exits `0` and prints the real path of the root.                        |
+| `git_clean`           | For each root, `git --no-optional-locks status --porcelain=v1 --untracked-files=normal` exits `0` and prints nothing. |
+
+- `swe@1` checks all three. `re@1` and `env@1` check only `workspace_directory`.
+- `git_worktree` requires the root to be the top level of its worktree. A
+  subdirectory of a worktree fails.
+- `git_clean` checks for uncommitted changes and untracked files. Any output
+  from the command fails the check.
+- Each git command runs with an isolated environment. The environment contains
+  only the names of `childEnvironment` plus `PATH`. It sets
+  `core.hooksPath=/dev/null` and `core.fsmonitor=false`, so the check runs no
+  hook and no fsmonitor command. Filter drivers run as configured.
+- `--no-optional-locks` stops the refresh write of the index. The check changes
+  no file of the workspace.
+- The check differs from a `git status` of the developer. The global ignore
+  file and the global filter drivers are absent. A file that only a global
+  ignore rule covers is thus an uncommitted change.
+- An ignored file is no uncommitted change.
+- Each `git` command has a deadline of 30 seconds. A timeout fails the
+  precondition.
+- The `reason` row holds no path.
+
 ### Directories and environment
 
 - The pi directory is `kanthord/pi` under the KanthorD XDG state directory. The

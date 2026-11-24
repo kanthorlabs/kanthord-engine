@@ -105,6 +105,7 @@ import { singleUse } from "./shared.ts";
 const RUN_AGENT_CREDENTIAL_ID = "run-agent";
 const AGENT_UNKNOWN = "cli.run.agent.agent_unknown";
 const OPEN_FAILED_CODE = "cli.run.agent.open_failed";
+const START_REFUSED_CODE = "cli.run.agent.start_refused";
 const STOPPED_CODE = "cli.run.agent.stopped";
 const NONZERO_CODE = "cli.run.agent.nonzero";
 
@@ -192,10 +193,13 @@ async function openAndRunAgent(
     }
     throw error;
   }
-  assert.ok(
-    agentOpen.kind === AgentOpenKind.Opened,
-    "unexpected agent refused",
-  );
+  if (agentOpen.kind === AgentOpenKind.Refused) {
+    throw new Diagnostic(
+      START_REFUSED_CODE,
+      "run agent: a start precondition is not met.",
+      { fields: [["reason", agentOpen.refusal.reason]] },
+    );
+  }
   const agentRun = agentOpen.run;
   try {
     const turnEnd = await agentRun.send(promptText, { work: null });

@@ -30,6 +30,7 @@ const RUNTIME_MODULES = [
   "src/agent/run-budget.ts",
   "src/agent/run-outcome.ts",
   "src/agent/sensitive-text.ts",
+  "src/agent/start-preconditions.ts",
   "src/agent/tool-table.ts",
 ];
 const SERVICE_CONTRACTS = ["src/scheduler/contract.ts"];

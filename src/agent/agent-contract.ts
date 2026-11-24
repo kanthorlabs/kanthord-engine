@@ -23,12 +23,11 @@ import type {
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
 import { CancellationContext, type Context } from "../kernel/context.ts";
+import { getProfile, type Profile, type ProfileName } from "./catalog.ts";
 import {
-  getProfile,
-  type Profile,
-  type ProfileName,
-  type StartPrecondition,
-} from "./catalog.ts";
+  checkPreconditions,
+  type StartRefusal,
+} from "./start-preconditions.ts";
 import { homeRelativeCwd } from "./hooks/home-relative-cwd.ts";
 import { toolAllowlist } from "./hooks/tool-allowlist.ts";
 import { markerRestore } from "./hooks/marker-restore.ts";
@@ -135,10 +134,7 @@ export const AgentOpenKind = {
   Opened: "opened",
 } as const;
 
-export interface StartRefusal {
-  precondition: StartPrecondition;
-  reason: string;
-}
+export type { StartRefusal } from "./start-preconditions.ts";
 
 export interface AgentRefused {
   kind: typeof AgentOpenKind.Refused;
@@ -477,6 +473,13 @@ export function contractGuards(
 
 async function openSteps(input: AgentInput): Promise<AgentOpen> {
   const profile = validateInput(input);
+  const refusal = await checkPreconditions({
+    preconditions: profile.preconditions,
+    cwd: input.workspace.cwd,
+    roots: input.workspace.roots,
+    inputEnv: input.childEnvironment,
+  });
+  if (refusal !== null) return { kind: AgentOpenKind.Refused, refusal };
   const promptDigest = systemPromptDigest(input.systemPrompt);
   const inputContext: Context = {
     signal: input.signal,
