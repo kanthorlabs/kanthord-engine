@@ -14,6 +14,7 @@ const COMPLETED_STATUS = "completed";
 const TYPEOF_STRING = "string";
 const HTTP_ERROR_KIND = "http_error";
 const TEXT_TURN_KIND = "text";
+const NO_DELAY_MS = 0;
 
 export type StubUsage = { input: number; output: number };
 
@@ -21,6 +22,7 @@ export type StubTextTurn = {
   kind: "text";
   text: string;
   usage?: StubUsage;
+  delayMs?: number;
 };
 
 export type StubToolCall = { name: string; args: Record<string, unknown> };
@@ -43,6 +45,10 @@ export type StubRequestRecord = {
   headers: Record<string, string | string[] | undefined>;
   body: unknown;
 };
+
+export interface LlmStubOptions {
+  fixedStatus?: { status: number; body: string };
+}
 
 export interface LlmStub {
   baseUrl: string;
@@ -158,6 +164,7 @@ export async function llmStub(
   t: TestContext,
   turns: StubTurn[],
   testDir: string,
+  options: LlmStubOptions = {},
 ): Promise<LlmStub> {
   const requests: StubRequestRecord[] = [];
   let callIndex = 0;
@@ -177,6 +184,13 @@ export async function llmStub(
       >;
       requests.push({ headers, body });
 
+      if (options.fixedStatus !== undefined) {
+        const { status, body: fixedBody } = options.fixedStatus;
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(fixedBody);
+        return;
+      }
+
       const turn = turns[callIndex];
       callIndex += 1;
 
@@ -194,13 +208,26 @@ export async function llmStub(
         return;
       }
 
-      res.writeHead(200, { "content-type": "text/event-stream" });
-
       const turnIndex = callIndex - 1;
-      if (turn.kind === TEXT_TURN_KIND) {
-        res.end(textTurnEvents(turn, turnIndex, testDir));
+      const delayMs =
+        turn.kind === TEXT_TURN_KIND
+          ? (turn.delayMs ?? NO_DELAY_MS)
+          : NO_DELAY_MS;
+      const respond = (): void => {
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        if (turn.kind === TEXT_TURN_KIND) {
+          res.end(textTurnEvents(turn, turnIndex, testDir));
+        } else {
+          res.end(toolCallsTurnEvents(turn, turnIndex, testDir));
+        }
+      };
+      if (delayMs > NO_DELAY_MS) {
+        const timer = setTimeout(respond, delayMs);
+        res.on("close", () => {
+          clearTimeout(timer);
+        });
       } else {
-        res.end(toolCallsTurnEvents(turn, turnIndex, testDir));
+        respond();
       }
     });
   });

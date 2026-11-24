@@ -241,7 +241,8 @@ With `--output <path>`, the run appends one JSON line with these fields:
 `tool_calls`, `usage`, `list_price_usd` and `text`.
 
 - `end` is `completed`, `budget_end`, `stopped` or `failed`.
-- `class` is `null` for `completed` and `terminal` for each other end.
+- `class` is `null` for `completed`, `retryable` for a failure that pi retries,
+  and `terminal` for each other end.
 - `failure` is the failure kind for the end `failed`, for example
   `bad_request`, `unauthorized` or `internal`. Else it is `null`.
 - `budget` is `{ "wall_ms", "usd" }`, and `usd` is `null`.
@@ -258,6 +259,27 @@ workspace or the pi directory, and the `--auth` file or the session file, with
 With `--output stdout`, stdout gets the text result: the line
 `<agent> <end>`, one row per field, one empty line and the text.
 
+### Classes
+
+Each end has a class. The class decides the exit code for the end `failed`.
+
+| Class       | Meaning                                                                |
+| ----------- | ---------------------------------------------------------------------- |
+| `retryable` | The same input can succeed later with a new `--session` path.          |
+| `terminal`  | A change of the input, the credential or the environment is necessary. |
+
+A later try also needs a workspace that passes the start preconditions.
+
+- The end `completed` has no class (`null` in the result line).
+- The end `failed` with a provider error is `retryable` when the error is not a
+  context overflow and pi classifies it as retryable, for example a 429 rate
+  limit. All other failures are `terminal`.
+- `run agent` retries nothing by itself. pi retries a retryable error up to 3
+  times inside the session, with a base delay of 2 seconds.
+- The class applies to the error after the last pi retry.
+- The wait of each pi retry counts against the wall budget. A wall budget that
+  ends during a retry gives the end `budget_end` and exit `4`.
+
 ### Exit codes
 
 | Exit | Cause                                                                     |
@@ -266,10 +288,11 @@ With `--output stdout`, stdout gets the text result: the line
 | `1`  | A refusal, a failed open (`cli.run.agent.open_failed`) or a syntax error. |
 | `2`  | The end `stopped`: one SIGINT stops the turn.                             |
 | `4`  | The end `budget_end`: the run reached the wall budget.                    |
-| `5`  | The end `failed`.                                                         |
+| `5`  | The end `failed` with a terminal failure.                                 |
+| `75` | The end `failed` with a retryable failure.                                |
 
 - A refusal writes no result.
 - The end `failed` writes one diagnostic after the result:
-  `cli.run.agent.provider_failed` or `cli.run.agent.internal_error`, with the
-  `reason` row.
+  `cli.run.agent.provider_retryable`, `cli.run.agent.provider_failed` or
+  `cli.run.agent.internal_error`, with the `reason` row.
 - No stderr line holds a credential value.

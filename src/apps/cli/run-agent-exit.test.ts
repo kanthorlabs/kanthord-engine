@@ -134,6 +134,21 @@ test("printPostResultDiagnostic writes provider_failed for terminal failure", ()
   assert.ok(lines.some((l) => l.includes("cli.run.agent.provider_failed")));
 });
 
+test("printPostResultDiagnostic writes provider_retryable for retryable failure", () => {
+  const lines: string[] = [];
+  const original = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk: unknown) => {
+    lines.push(String(chunk));
+    return true;
+  };
+  try {
+    printPostResultDiagnostic(retryableFailure());
+  } finally {
+    process.stderr.write = original;
+  }
+  assert.ok(lines.some((l) => l.includes("cli.run.agent.provider_retryable")));
+});
+
 test("printPostResultDiagnostic writes internal_error for internal failure", () => {
   const lines: string[] = [];
   const original = process.stderr.write.bind(process.stderr);
