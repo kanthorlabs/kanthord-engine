@@ -32,6 +32,7 @@ const PI_OAUTH_REFRESH_WINDOW_MS = 300000;
 
 const ANTHROPIC_PROVIDER = "anthropic";
 const TYPEOF_OBJECT = "object";
+const BYTE_ORDER_MARK = "\uFEFF";
 
 const rawApiKeyEntrySchema = z.strictObject({
   type: z.literal(SecretShape.ApiKey),
@@ -347,17 +348,23 @@ function validateFileEntry(
   }
 }
 
+function withoutByteOrderMark(text: string): string {
+  return text.startsWith(BYTE_ORDER_MARK)
+    ? text.slice(BYTE_ORDER_MARK.length)
+    : text;
+}
+
 export function checkAuthFileContents(authPath: string): void {
   const absolute = resolve(authPath);
   const pathFields = [["path", absolute]] as [string, string][];
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(absolute, "utf-8"));
+    parsed = JSON.parse(withoutByteOrderMark(readFileSync(absolute, "utf-8")));
   } catch {
     throw new Diagnostic(
       AUTH_FILE_INVALID,
-      "run agent: the --auth file is not valid JSON.",
+      "run agent: the --auth file is unreadable or is not valid JSON.",
       { fields: pathFields },
     );
   }

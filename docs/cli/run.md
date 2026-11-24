@@ -98,6 +98,10 @@ file.
 | `cli.run.agent.auth_key_reference`  | The `key` holds `$`.                                                                                                    |
 | `cli.run.agent.credential_expiring` | An `oauth` entry expires before the wall deadline plus 5 minutes.                                                       |
 
+The run applies the entry schema to every entry of the file. A failed schema
+gives the `field` row `<provider>` or `<provider>.<path>`. Each other check
+applies only to the entry of the selected provider.
+
 An `api_key` entry holds `type`, `key` and an optional `env` object. The `env`
 object holds exactly the routing names of the provider:
 
