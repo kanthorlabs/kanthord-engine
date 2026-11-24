@@ -11,26 +11,36 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createConnection } from "node:net";
-import { join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
+import type {
+  StubRequestRecord,
+  StubTurn,
+} from "./e2e-llm-stub-test-support.ts";
 import {
+  authFileText,
   blockTexts,
   buildFixtures,
   digestListing,
   ENGINE_ROOT,
+  requestBody,
   resultLines,
+  roleText,
   sessionMessages,
   spawnCli,
   TEST_K,
   TEST_TIMEOUT_MS,
 } from "./e2e-run-agent-test-support.ts";
+import type { AgentFixtures } from "./e2e-run-agent-test-support.ts";
 import {
   buildWorkspaceAsTestUser,
+  flushNftConnections,
   mkdirAsTestUser,
   nftConnections,
   spawnBinAsTestUser,
+  spawnCliAsTestUser,
   TEST_USER,
   TEST_USER_HOME,
   writeFileAsTestUser,
@@ -206,13 +216,46 @@ const M2_AC2 = "prompt-m2-unique-for-l2-ac2-run2";
 const AC2_S1 = "s1.jsonl";
 const AC2_S2 = "s2.jsonl";
 const AC2_O = "results.jsonl";
+const AC2_COMMAND = "env; cat ~/.aws/credentials";
+const AC2_REQUEST_COUNT = 4;
+const AC2_RUN2_FIRST_REQUEST = 2;
 const TOOL_RESULT_ROLE = "toolResult";
+const SYSTEM_ROLE = "system";
+const USER_ROLE = "user";
 const BASH_TOOL_NAME = "bash";
-const RUN1_RESULT_COUNT = STUB_CALL_COUNT;
-const RUN2_RESULT_COUNT = STUB_CALL_COUNT * 2;
-const NO_ENTRIES = 0;
+const KANTHORD_PREFIX = "KANTHORD_";
+const ENV_LINE = /^([A-Za-z_][A-Za-z0-9_]*)=/;
+const CHILD_ENV_NAMES = [
+  "GIT_CONFIG_NOSYSTEM",
+  "GIT_SSH_COMMAND",
+  "HOME",
+  "LANG",
+  "PATH",
+  "PWD",
+  "SHLVL",
+  "TMPDIR",
+  "_",
+];
+const SINGLE = 1;
+const RUN1_RESULT_COUNT = 1;
+const RUN2_RESULT_COUNT = 2;
+const NO_CONNECTIONS = 0;
+const PI_TOOLS_MANIFEST = join(ENGINE_ROOT, "static", "pi-tools.json");
+const PI_TOOLS_TARGET = `${process.platform}-${process.arch}`;
 
-function hostiletEnv(stub2Url: string): Record<string, string> {
+interface PiToolTarget {
+  license_paths: string[];
+}
+
+interface PiToolEntry {
+  targets: Record<string, PiToolTarget>;
+}
+
+interface PiToolsManifest {
+  tools: Record<string, PiToolEntry>;
+}
+
+function hostileEnvironment(stub2Url: string): Record<string, string> {
   return {
     LANG: "C",
     KANTHORD_WORKER_CONFIG: MARKER_WORKER,
@@ -239,161 +282,155 @@ function hostiletEnv(stub2Url: string): Record<string, string> {
   };
 }
 
-function requestText(record: {
-  headers: Record<string, unknown>;
-  body: unknown;
-}): string {
+function requestText(record: StubRequestRecord): string {
   return JSON.stringify({ headers: record.headers, body: record.body });
 }
 
-function holdsAnyMarker(text: string, markers: readonly string[]): boolean {
-  const lower = text.toLowerCase();
-  return markers.some((m) => lower.includes(m.toLowerCase()));
+function holdsAny(text: string, values: readonly string[]): boolean {
+  return values.some((value) => text.includes(value));
 }
 
 function fileDigest(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
-async function sudoRead(path: string): Promise<string> {
-  const { stdout } = await execFileAsync("sudo", ["cat", path]);
-  return stdout;
+function entryListing(directory: string): string[] {
+  return (readdirSync(directory, { recursive: true }) as string[]).sort();
+}
+
+function piToolFiles(): string[] {
+  const manifest = JSON.parse(
+    readFileSync(PI_TOOLS_MANIFEST, "utf8"),
+  ) as PiToolsManifest;
+  return Object.entries(manifest.tools)
+    .flatMap(([tool, entry]) => [
+      join("bin", tool),
+      ...(entry.targets[PI_TOOLS_TARGET]?.license_paths ?? []).map((license) =>
+        join("bin", "licenses", tool, basename(license)),
+      ),
+    ])
+    .sort();
+}
+
+function fileListing(directory: string): string[] {
+  return readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => relative(directory, join(entry.parentPath, entry.name)))
+    .sort();
+}
+
+function roleCount(record: StubRequestRecord, role: string): number {
+  return (requestBody(record).input ?? []).filter((item) => item.role === role)
+    .length;
+}
+
+function bashOutput(sessionPath: string): string {
+  const results = sessionMessages(sessionPath, TOOL_RESULT_ROLE).filter(
+    (message) => message.toolName === BASH_TOOL_NAME,
+  );
+  assert.equal(results.length, SINGLE);
+  return blockTexts(results[0]!).join("");
+}
+
+function envNames(output: string): string[] {
+  return output
+    .split("\n")
+    .flatMap((line) => ENV_LINE.exec(line)?.[1] ?? [])
+    .sort();
 }
 
 test(
   "L2-AC2: two runs in a hostile environment leave no state and leak nothing",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const bashTurn = {
-      kind: "tool_calls" as const,
-      calls: [
-        {
-          name: BASH_TOOL_NAME,
-          args: { command: "env; cat ~/.aws/credentials" },
-        },
-      ],
+    const bashTurn: StubTurn = {
+      kind: "tool_calls",
+      calls: [{ name: BASH_TOOL_NAME, args: { command: AC2_COMMAND } }],
     };
-    const textTurn1 = { kind: "text" as const, text: "run1-done" };
-    const textTurn2 = { kind: "text" as const, text: "run2-done" };
     const stub = await llmStub(
       t,
-      [bashTurn, textTurn1, bashTurn, textTurn2],
+      [
+        bashTurn,
+        { kind: "text", text: "run1-done" },
+        bashTurn,
+        { kind: "text", text: "run2-done" },
+      ],
       "",
     );
     const stub2 = await llmStub(t, [], "");
+    const stubUrl = new URL(stub.baseUrl);
 
     const fixtures = await buildFixtures(t, stub.baseUrl);
-    mkdirSync(join(fixtures.H, ".aws"), { mode: 0o700, recursive: true });
+    mkdirSync(join(fixtures.H, ".aws"), { mode: 0o700 });
     writeFileSync(join(fixtures.H, ".aws", "credentials"), MARKER_AWS_CREDS, {
       mode: 0o600,
     });
 
-    const hListingBefore = digestListing(fixtures.H);
-    const preConnections = await nftConnections();
-    const authDigestBefore = fileDigest(fixtures.authPath);
-    const authModeBefore = statSync(fixtures.authPath).mode;
-
-    const s1Path = join(fixtures.D, AC2_S1);
-    const s2Path = join(fixtures.D, AC2_S2);
     const piPath = join(fixtures.X, "kanthord", "pi");
+    const hEntries = entryListing(fixtures.H);
+    const hDigests = digestListing(fixtures.H);
+    const authDigest = fileDigest(fixtures.authPath);
+    const authMode = statSync(fixtures.authPath).mode;
+    const piFiles = piToolFiles();
+    const piDigests: string[][] = [];
+    const runs = [
+      { prompt: M1_AC2, session: AC2_S1, results: RUN1_RESULT_COUNT },
+      { prompt: M2_AC2, session: AC2_S2, results: RUN2_RESULT_COUNT },
+    ];
+    const sessions: string[] = [];
 
-    const result1 = await spawnCli(fixtures, {
-      prompt: [M1_AC2],
-      session: s1Path,
-      extraEnv: hostiletEnv(stub2.baseUrl),
-      signal: t.signal,
-    });
-    assert.equal(result1.status, SUCCESS_EXIT, result1.stderr);
+    await flushNftConnections();
 
-    assert.deepEqual(digestListing(fixtures.H), hListingBefore);
-    assert.deepEqual(readdirSync(fixtures.D).sort(), [AC2_O, AC2_S1]);
-    assert.equal(resultLines(fixtures.O).length, RUN1_RESULT_COUNT);
-    const pListingAfterRun1 = digestListing(piPath);
-    assert.equal(readdirSync(fixtures.T).length, NO_ENTRIES);
+    for (const run of runs) {
+      sessions.push(run.session);
+      const result = await spawnCli(fixtures, {
+        prompt: [run.prompt],
+        session: join(fixtures.D, run.session),
+        extraEnv: hostileEnvironment(stub2.baseUrl),
+        signal: t.signal,
+      });
+      assert.equal(result.status, SUCCESS_EXIT, result.stderr);
 
-    const result2 = await spawnCli(fixtures, {
-      prompt: [M2_AC2],
-      session: s2Path,
-      extraEnv: hostiletEnv(stub2.baseUrl),
-      signal: t.signal,
-    });
-    assert.equal(result2.status, SUCCESS_EXIT, result2.stderr);
-
-    assert.deepEqual(digestListing(fixtures.H), hListingBefore);
-    assert.deepEqual(readdirSync(fixtures.D).sort(), [AC2_O, AC2_S1, AC2_S2]);
-    assert.equal(resultLines(fixtures.O).length, RUN2_RESULT_COUNT);
-    assert.deepEqual(digestListing(piPath), pListingAfterRun1);
-    assert.equal(readdirSync(fixtures.T).length, NO_ENTRIES);
-
-    assert.equal(stub2.requests.length, NO_ENTRIES);
-
-    const postConnections = await nftConnections();
-    const preSet = new Set(
-      preConnections.map(({ address, port }) => `${address}:${port}`),
-    );
-    const stubAddr = new URL(stub.baseUrl).hostname;
-    const stubPort = Number(new URL(stub.baseUrl).port);
-    const newConns = postConnections.filter(
-      ({ address, port }) => !preSet.has(`${address}:${port}`),
-    );
-    for (const { address, port } of newConns) {
-      assert.equal(
-        address,
-        stubAddr,
-        `unexpected connection to ${address}:${port}`,
+      assert.deepEqual(entryListing(fixtures.H), hEntries);
+      assert.deepEqual(digestListing(fixtures.H), hDigests);
+      assert.deepEqual(
+        readdirSync(fixtures.D).sort(),
+        [AC2_O, ...sessions].sort(),
       );
-      assert.equal(
-        port,
-        stubPort,
-        `unexpected connection to ${address}:${port}`,
-      );
+      assert.equal(resultLines(fixtures.O).length, run.results);
+      assert.deepEqual(fileListing(piPath), piFiles);
+      piDigests.push(digestListing(piPath));
+      assert.deepEqual(readdirSync(fixtures.T), []);
+      assert.equal(fileDigest(fixtures.authPath), authDigest);
+      assert.equal(statSync(fixtures.authPath).mode, authMode);
+    }
+    assert.deepEqual(piDigests[1], piDigests[0]);
+
+    assert.equal(stub2.connectionCount(), NO_CONNECTIONS);
+    assert.deepEqual(await nftConnections(), [
+      { address: stubUrl.hostname, port: Number(stubUrl.port) },
+    ]);
+
+    assert.equal(stub.requests.length, AC2_REQUEST_COUNT);
+    for (const request of stub.requests) {
+      assert.ok(!holdsAny(requestText(request), AC2_MARKERS));
+      assert.equal(request.headers["authorization"], `Bearer ${TEST_K}`);
     }
 
-    for (const req of stub.requests) {
-      const text = requestText(req);
-      assert.ok(
-        !holdsAnyMarker(text, AC2_MARKERS),
-        `request holds a marker: ${text.slice(0, 200)}`,
-      );
-      assert.ok(
-        String(req.headers["authorization"] ?? "").includes(TEST_K),
-        `request does not carry K: ${String(req.headers["authorization"])}`,
-      );
+    for (const session of sessions) {
+      const sessionPath = join(fixtures.D, session);
+      assert.ok(!holdsAny(readFileSync(sessionPath, "utf8"), AC2_MARKERS));
+      const output = bashOutput(sessionPath);
+      assert.ok(!holdsAny(output, AC2_MARKERS), output);
+      assert.ok(!output.includes(KANTHORD_PREFIX), output);
+      assert.deepEqual(envNames(output), CHILD_ENV_NAMES, output);
     }
 
-    for (const sf of [s1Path, s2Path]) {
-      const sfText = readFileSync(sf, "utf8");
-      assert.ok(
-        !holdsAnyMarker(sfText, AC2_MARKERS),
-        `session file holds a marker: ${sf}`,
-      );
-    }
-
-    const bashResults1 = sessionMessages(s1Path, TOOL_RESULT_ROLE).filter(
-      (m) => m.toolName === BASH_TOOL_NAME,
-    );
-    const bashResults2 = sessionMessages(s2Path, TOOL_RESULT_ROLE).filter(
-      (m) => m.toolName === BASH_TOOL_NAME,
-    );
-    for (const msg of [...bashResults1, ...bashResults2]) {
-      const text = blockTexts(msg).join("");
-      assert.ok(
-        !holdsAnyMarker(text, AC2_MARKERS),
-        `bash result holds a marker: ${text.slice(0, 200)}`,
-      );
-      assert.ok(
-        !text.includes("KANTHORD_"),
-        `bash result holds a KANTHORD_ name: ${text.slice(0, 200)}`,
-      );
-    }
-
-    const req2First = stub.requests[2];
-    assert.ok(req2First !== undefined);
-    const req2Body = requestText(req2First);
-    assert.ok(!req2Body.includes(M1_AC2), "first request of run 2 holds M1");
-
-    assert.equal(fileDigest(fixtures.authPath), authDigestBefore);
-    assert.equal(statSync(fixtures.authPath).mode, authModeBefore);
+    const run2First = stub.requests[AC2_RUN2_FIRST_REQUEST]!;
+    assert.ok(!requestText(run2First).includes(M1_AC2));
+    assert.equal(roleCount(run2First, SYSTEM_ROLE), SINGLE);
+    assert.equal(roleCount(run2First, USER_ROLE), SINGLE);
+    assert.equal(roleText(run2First, USER_ROLE), M2_AC2);
   },
 );
 
@@ -404,28 +441,21 @@ const K5_AC6 = "K5DecoyForL2Ac6PiAgentKey1234567";
 const K6_AC6 = "K6DecoyForL2Ac6StdinKey123456789";
 const T1_AC6 = "T1DecoyForL2Ac6KanthordTokenXyz1";
 const T2_AC6 = "T2DecoyForL2Ac6CliYamlTokenXyz12";
-const AC6_ALL_DECOYS = [K2_AC6, K3_AC6, K4_AC6, K5_AC6, K6_AC6, T1_AC6, T2_AC6];
+const AC6_DECOYS = [K2_AC6, K3_AC6, K4_AC6, K5_AC6, K6_AC6, T1_AC6, T2_AC6];
+const AC6_PROVIDER = "openai-compatible";
+const AC6_AUTH = join(".config", "kanthord", "auth.json");
+const AC6_FIND_SCRIPT = 'find "$1" -mindepth 1 -path "$2" -prune -o -print';
 
-const STUB_MODEL_ID = "stub-1";
-const STUB_PROVIDER = "openai-compatible";
-
-function ac6AuthJson(key: string, baseUrl: string): string {
-  return JSON.stringify({
-    [STUB_PROVIDER]: {
-      type: "api_key",
-      key,
-      env: {
-        OPENAI_COMPATIBLE_BASE_URL: baseUrl,
-        OPENAI_COMPATIBLE_MODELS: JSON.stringify([{ id: STUB_MODEL_ID }]),
-      },
-    },
-  });
-}
-
-function ac6SimpleAuthJson(key: string): string {
-  return JSON.stringify({
-    [STUB_PROVIDER]: { type: "api_key", key, env: {} },
-  });
+async function homeListing(base: string): Promise<string[]> {
+  const { stdout } = await asTestUser([
+    "sh",
+    "-c",
+    AC6_FIND_SCRIPT,
+    "sh",
+    TEST_USER_HOME,
+    base,
+  ]);
+  return stdout.split("\n").filter(Boolean).sort();
 }
 
 test(
@@ -443,138 +473,99 @@ test(
     );
 
     const H = TEST_USER_HOME;
-    const baseDir = join(H, `ac6-test-${Date.now()}`);
-    t.after(async () => {
-      await execFileAsync("sudo", [
-        "-n",
-        "-u",
-        TEST_USER,
-        "rm",
-        "-rf",
-        baseDir,
-      ]);
-      await execFileAsync("sudo", [
-        "-n",
-        "-u",
-        TEST_USER,
-        "rm",
-        "-rf",
-        join(H, ".config"),
-        join(H, ".pi"),
-      ]);
-    });
+    const base = join(H, `l2-ac6-${Date.now()}`);
+    t.after(() =>
+      asTestUser(["rm", "-rf", base, join(H, ".config"), join(H, ".pi")]),
+    );
 
-    await mkdirAsTestUser(join(baseDir, "tmp"));
-    await mkdirAsTestUser(join(baseDir, "x"));
+    const T = join(base, "tmp");
+    const X = join(base, "x");
+    const D2 = join(base, "d2");
+    const H2 = join(base, "h2");
+    const X2 = join(base, "x2");
+    await mkdirAsTestUser(T);
+    await mkdirAsTestUser(X);
 
-    const T = join(baseDir, "tmp");
-    const X = join(baseDir, "x");
-
-    const authJson = ac6AuthJson(TEST_K, stub.baseUrl);
+    const authPath = join(H, AC6_AUTH);
+    await writeFileAsTestUser(authPath, authFileText(TEST_K, stub.baseUrl));
     await writeFileAsTestUser(
-      join(H, ".config", "kanthord", "auth.json"),
-      authJson,
+      join(D2, "auth.json"),
+      authFileText(K2_AC6, stub.baseUrl),
+    );
+    await writeFileAsTestUser(
+      join(H2, AC6_AUTH),
+      authFileText(K3_AC6, stub.baseUrl),
+    );
+    await writeFileAsTestUser(
+      join(X2, "kanthord", "auth.json"),
+      authFileText(K4_AC6, stub.baseUrl),
     );
     await writeFileAsTestUser(
       join(H, ".pi", "agent", "auth.json"),
-      ac6SimpleAuthJson(K5_AC6),
+      authFileText(K5_AC6, stub.baseUrl),
     );
     await writeFileAsTestUser(
       join(H, ".config", "kanthord", "cli.yaml"),
       `token: ${T2_AC6}\n`,
     );
-
-    const piDirAuth = join(baseDir, "pidir");
-    await writeFileAsTestUser(
-      join(piDirAuth, "auth.json"),
-      ac6SimpleAuthJson(K2_AC6),
-    );
-
-    const H2 = join(baseDir, "h2");
-    await writeFileAsTestUser(
-      join(H2, ".config", "kanthord", "auth.json"),
-      ac6SimpleAuthJson(K3_AC6),
-    );
-
-    const X2 = join(baseDir, "x2");
-    await writeFileAsTestUser(
-      join(X2, "kanthord", "auth.json"),
-      ac6SimpleAuthJson(K4_AC6),
-    );
-
-    const stdinPayload = JSON.stringify({
-      provider_id: STUB_PROVIDER,
+    const stdin = JSON.stringify({
+      provider_id: AC6_PROVIDER,
       credential: { type: "api_key", key: K6_AC6 },
     });
 
-    const variants: Array<{ home: string; extraEnv?: Record<string, string> }> =
-      [
-        { home: H },
-        { home: H2 },
-        { home: H, extraEnv: { XDG_CONFIG_HOME: X2 } },
-      ];
+    const variants: Record<string, string>[] = [
+      {},
+      { HOME: H2 },
+      { XDG_CONFIG_HOME: X2 },
+    ];
+    const homeBefore = await homeListing(base);
+    const sessions: string[] = [];
 
-    let reqIndex = 0;
-    for (const { home, extraEnv } of variants) {
-      const variantDir = join(baseDir, `v${reqIndex + 1}`);
-      await mkdirAsTestUser(variantDir);
-      const W = join(variantDir, "w");
+    for (const [index, variant] of variants.entries()) {
+      const W = join(base, `w${index}`);
+      const D = join(base, `d${index}`);
       await buildWorkspaceAsTestUser(W);
-      const D = join(variantDir, "d");
       await mkdirAsTestUser(D);
-      const S = join(D, "s.jsonl");
-      const O = join(D, "results.jsonl");
+      const fixtures: AgentFixtures = {
+        authPath,
+        W,
+        H,
+        X,
+        T,
+        D,
+        S: join(D, "s.jsonl"),
+        O: join(D, "results.jsonl"),
+        TEST: base,
+        K: TEST_K,
+      };
+      sessions.push(fixtures.S);
 
-      const result = await spawnBinAsTestUser({
-        args: [
-          "run",
-          "agent",
-          "swe@1",
-          "--model",
-          `${STUB_PROVIDER}/${STUB_MODEL_ID}:off`,
-          "--workspace",
-          W,
-          "--session",
-          S,
-          "--output",
-          O,
-          "--prompt",
-          "run task",
-        ],
-        env: {
-          HOME: home,
-          TMPDIR: T,
-          XDG_STATE_HOME: X,
-          PI_CODING_AGENT_DIR: piDirAuth,
-          KANTHORD_TOKEN: T1_AC6,
-          LANG: "C",
-          PATH: process.env.PATH ?? "",
-          ...extraEnv,
+      const result = await spawnCliAsTestUser(
+        fixtures,
+        {
+          auth: false,
+          extraEnv: {
+            PI_CODING_AGENT_DIR: D2,
+            KANTHORD_TOKEN: T1_AC6,
+            ...variant,
+          },
+          signal: t.signal,
         },
-        signal: t.signal,
-        stdin: stdinPayload,
-      });
+        stdin,
+      );
       assert.equal(result.status, SUCCESS_EXIT, result.stderr);
-
-      const req = stub.requests[reqIndex];
-      assert.ok(req !== undefined, `no request for variant ${reqIndex + 1}`);
-      assert.ok(
-        String(req.headers["authorization"] ?? "").includes(TEST_K),
-        `variant ${reqIndex + 1}: request does not carry K`,
-      );
-      const reqText = requestText(req);
-      assert.ok(
-        !holdsAnyMarker(reqText, AC6_ALL_DECOYS),
-        `variant ${reqIndex + 1}: request holds a decoy key`,
-      );
-
-      const sfText = await sudoRead(S);
-      assert.ok(
-        !holdsAnyMarker(sfText, AC6_ALL_DECOYS),
-        `variant ${reqIndex + 1}: session file holds a decoy key`,
-      );
-
-      reqIndex += 1;
     }
+
+    assert.equal(stub.requests.length, variants.length);
+    for (const request of stub.requests) {
+      assert.equal(request.headers["authorization"], `Bearer ${TEST_K}`);
+      assert.ok(!holdsAny(requestText(request), AC6_DECOYS));
+    }
+    for (const session of sessions) {
+      const { stdout } = await asTestUser(["cat", session]);
+      assert.notEqual(stdout, EMPTY_OUTPUT);
+      assert.ok(!holdsAny(stdout, AC6_DECOYS));
+    }
+    assert.deepEqual(await homeListing(base), homeBefore);
   },
 );

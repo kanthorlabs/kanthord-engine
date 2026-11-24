@@ -47,6 +47,7 @@ export type StubRequestRecord = {
 export interface LlmStub {
   baseUrl: string;
   requests: StubRequestRecord[];
+  connectionCount: () => number;
 }
 
 function sseEvent(event: object): string {
@@ -160,6 +161,7 @@ export async function llmStub(
 ): Promise<LlmStub> {
   const requests: StubRequestRecord[] = [];
   let callIndex = 0;
+  let connections = 0;
 
   const server = createServer((req, res) => {
     let raw = "";
@@ -203,10 +205,18 @@ export async function llmStub(
     });
   });
 
+  server.on("connection", () => {
+    connections += 1;
+  });
+
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   stopAfter(t, () => {
     server.close();
   });
   const { port } = server.address() as AddressInfo;
-  return { baseUrl: `http://127.0.0.1:${port}/v1`, requests };
+  return {
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    requests,
+    connectionCount: () => connections,
+  };
 }
