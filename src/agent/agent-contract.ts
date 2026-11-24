@@ -9,8 +9,6 @@ import {
   getSupportedThinkingLevels,
   type Model,
 } from "@earendil-works/pi-ai";
-import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
-import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
 import type {
   AgentSessionRuntime,
   InlineExtension,
@@ -56,7 +54,7 @@ import {
   addMessageTotals,
   BudgetLimit,
   buildTurnEnd,
-  FailureClass,
+  providerFailureClass,
   RunEnd,
   type RunFailure,
   type RunTotals,
@@ -214,12 +212,9 @@ function failureOf(
   model: Model<Api>,
 ): RunFailure | null {
   if (!last || last.stopReason !== PROVIDER_ERROR) return null;
-  const retryable =
-    !isContextOverflow(last, model.contextWindow) &&
-    isRetryableAssistantError(last);
   return {
     kind: providerFailureOf(last.errorMessage ?? ""),
-    class: retryable ? FailureClass.Retryable : FailureClass.Terminal,
+    class: providerFailureClass(last, model.contextWindow),
     reason: last.errorMessage ?? "",
   };
 }

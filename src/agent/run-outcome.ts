@@ -1,4 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
+import { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
+import { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
 import {
   type ProviderFailure,
   providerFailureOf,
@@ -72,6 +74,18 @@ export interface TurnEndInput {
   text: string | null;
   totals: RunTotals;
   warnings: readonly SecretWarning[];
+}
+
+export function providerFailureClass(
+  last: AssistantMessage,
+  contextWindow: number,
+): FailureClass {
+  if (
+    !isContextOverflow(last, contextWindow) &&
+    isRetryableAssistantError(last)
+  )
+    return FailureClass.Retryable;
+  return FailureClass.Terminal;
 }
 
 export function zeroTotals(): RunTotals {

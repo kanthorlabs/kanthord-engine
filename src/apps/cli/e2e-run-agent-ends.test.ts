@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -13,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { ExitCode } from "./constants.ts";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
+import { RunExitCode } from "./run-agent-exit.ts";
 import {
   type AgentFixtures,
   assertRefused,
@@ -23,16 +25,32 @@ import {
   porcelainStatus,
   resultLines,
   spawnCli,
+  TEST_K,
   TEST_TIMEOUT_MS,
 } from "./e2e-run-agent-test-support.ts";
 
 const START_REFUSED_CODE = "cli.run.agent.start_refused";
+const PROVIDER_RETRYABLE_CODE = "cli.run.agent.provider_retryable";
+const PROVIDER_FAILED_CODE = "cli.run.agent.provider_failed";
 const RE_PROFILE = "re@1";
 const OK_TEXT = "ok";
 const GIT_CLEAN = "git_clean";
 const GIT_WORKTREE = "git_worktree";
 const REASON_ROW = "reason:";
 const NO_REQUESTS = 0;
+const BUDGET_5S = "5s";
+const BUDGET_END = "budget_end";
+const END_FAILED = "failed";
+const CLASS_TERMINAL = "terminal";
+const CLASS_RETRYABLE = "retryable";
+const FAILURE_RATE_LIMITED = "rate_limited";
+const FAILURE_UNAUTHORIZED = "unauthorized";
+const BUDGET_REACHED_WALL = "wall";
+const ONE_LINE = 1;
+const AC10_RETRY_REQUESTS = 4;
+const AC10_SINGLE_REQUEST = 1;
+const DURATION_BUDGET_MIN_MS = 5000;
+const DURATION_BUDGET_MAX_MS = 30000;
 
 function assertStartRefused(
   result: CliResult,
@@ -232,5 +250,115 @@ test(
     assert.equal(existsSync(M10), false);
     assert.equal(existsSync(M11), false);
     assert.deepEqual(digestListing(fixtures.W), listingBefore);
+  },
+);
+
+test(
+  "L2-AC10: wall budget end exits 4 with terminal class",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(
+      t,
+      [{ kind: "text", text: OK_TEXT, delayMs: 30000 }],
+      "",
+    );
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCli(fixtures, {
+      budget: [BUDGET_5S],
+      signal: t.signal,
+    });
+
+    assert.equal(result.status, RunExitCode.BudgetEnd, result.stderr);
+    assert.ok(existsSync(fixtures.S));
+    assert.deepEqual(readdirSync(fixtures.T), []);
+    assert.ok(!result.stderr.includes(TEST_K));
+    const lines = resultLines(fixtures.O);
+    assert.equal(lines.length, ONE_LINE);
+    const r = lines[0]!;
+    assert.equal(r["end"], BUDGET_END);
+    assert.equal(r["budget_reached"], BUDGET_REACHED_WALL);
+    assert.equal(r["class"], CLASS_TERMINAL);
+    const duration = r["duration_ms"] as number;
+    assert.ok(
+      duration >= DURATION_BUDGET_MIN_MS && duration < DURATION_BUDGET_MAX_MS,
+      `duration_ms ${duration}`,
+    );
+    assert.ok(!readFileSync(fixtures.O, "utf8").includes(TEST_K));
+  },
+);
+
+test(
+  "L2-AC10: 429 rate limit exits 75 with retryable class",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [], "", {
+      fixedStatus: {
+        status: 429,
+        body: JSON.stringify({ error: { message: "Too Many Requests" } }),
+      },
+    });
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCli(fixtures, { signal: t.signal });
+
+    assert.equal(result.status, RunExitCode.Retryable, result.stderr);
+    assert.equal(stub.requests.length, AC10_RETRY_REQUESTS);
+    assert.ok(existsSync(fixtures.S));
+    assert.deepEqual(readdirSync(fixtures.T), []);
+    const lines = resultLines(fixtures.O);
+    assert.equal(lines.length, ONE_LINE);
+    const r = lines[0]!;
+    assert.equal(r["end"], END_FAILED);
+    assert.equal(r["class"], CLASS_RETRYABLE);
+    assert.equal(r["failure"], FAILURE_RATE_LIMITED);
+    assert.ok(
+      result.stderr
+        .split("\n")
+        .some((l) => l.startsWith(PROVIDER_RETRYABLE_CODE)),
+      result.stderr,
+    );
+    assert.ok(!result.stderr.includes(TEST_K));
+    assert.ok(!readFileSync(fixtures.O, "utf8").includes(TEST_K));
+  },
+);
+
+test(
+  "L2-AC10: 401 unauthorized exits 5 with terminal class",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(
+      t,
+      [
+        {
+          kind: "http_error",
+          status: 401,
+          body: JSON.stringify({
+            error: { message: `Unauthorized: ${TEST_K}` },
+          }),
+        },
+      ],
+      "",
+    );
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCli(fixtures, { signal: t.signal });
+
+    assert.equal(result.status, RunExitCode.Failed, result.stderr);
+    assert.equal(stub.requests.length, AC10_SINGLE_REQUEST);
+    assert.ok(existsSync(fixtures.S));
+    assert.deepEqual(readdirSync(fixtures.T), []);
+    const lines = resultLines(fixtures.O);
+    assert.equal(lines.length, ONE_LINE);
+    const r = lines[0]!;
+    assert.equal(r["class"], CLASS_TERMINAL);
+    assert.equal(r["failure"], FAILURE_UNAUTHORIZED);
+    assert.ok(
+      result.stderr.split("\n").some((l) => l.startsWith(PROVIDER_FAILED_CODE)),
+      result.stderr,
+    );
+    assert.ok(!result.stderr.includes(TEST_K));
+    assert.ok(!readFileSync(fixtures.O, "utf8").includes(TEST_K));
+    assert.ok(!readFileSync(fixtures.S, "utf8").includes(TEST_K));
   },
 );

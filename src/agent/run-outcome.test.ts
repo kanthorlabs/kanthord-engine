@@ -8,14 +8,18 @@ import {
   buildTurnEnd,
   FailureClass,
   InternalFailure,
+  providerFailureClass,
   RunEnd,
   zeroTotals,
 } from "./run-outcome.ts";
 
 const RESPONSE_TEXT = "done";
 const UNAUTHORIZED_REASON = "401 Unauthorized";
+const RATE_LIMITED_REASON = "429 Too Many Requests";
+const OVERFLOW_REASON = "prompt is too long: 1000 tokens > 100 maximum";
 const UNKNOWN_FAILURE_REASON = "fetch failed";
 const INTERNAL_FAILURE_REASON = "unexpected error";
+const CONTEXT_WINDOW = 200000;
 
 function assistantMessage(params: {
   toolCallCount?: number;
@@ -24,6 +28,8 @@ function assistantMessage(params: {
   cacheRead?: number;
   cacheWrite?: number;
   costTotal?: number;
+  stopReason?: AssistantMessage["stopReason"];
+  errorMessage?: string;
 }): AssistantMessage {
   const {
     toolCallCount = 0,
@@ -32,6 +38,8 @@ function assistantMessage(params: {
     cacheRead = 0,
     cacheWrite = 0,
     costTotal = 0,
+    stopReason = "stop",
+    errorMessage,
   } = params;
   const content: AssistantMessage["content"] = Array.from(
     { length: toolCallCount },
@@ -62,7 +70,8 @@ function assistantMessage(params: {
         total: costTotal,
       },
     },
-    stopReason: "stop",
+    stopReason,
+    errorMessage,
     timestamp: 0,
   };
 }
@@ -237,4 +246,37 @@ test("addMessageTotals accumulates across multiple messages", () => {
     base.usage.output + msg1Output + msg2Output,
   );
   assert.equal(totals.listPriceUsd, base.listPriceUsd + msg1Cost + msg2Cost);
+});
+
+test("L3-U5: providerFailureClass returns retryable for a rate-limited error", () => {
+  const msg = assistantMessage({
+    stopReason: "error",
+    errorMessage: RATE_LIMITED_REASON,
+  });
+  assert.equal(
+    providerFailureClass(msg, CONTEXT_WINDOW),
+    FailureClass.Retryable,
+  );
+});
+
+test("L3-U5: providerFailureClass returns terminal for an unauthorized error", () => {
+  const msg = assistantMessage({
+    stopReason: "error",
+    errorMessage: UNAUTHORIZED_REASON,
+  });
+  assert.equal(
+    providerFailureClass(msg, CONTEXT_WINDOW),
+    FailureClass.Terminal,
+  );
+});
+
+test("L3-U5: providerFailureClass returns terminal for a context overflow", () => {
+  const msg = assistantMessage({
+    stopReason: "error",
+    errorMessage: OVERFLOW_REASON,
+  });
+  assert.equal(
+    providerFailureClass(msg, CONTEXT_WINDOW),
+    FailureClass.Terminal,
+  );
 });
