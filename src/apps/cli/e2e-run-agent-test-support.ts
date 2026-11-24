@@ -303,6 +303,7 @@ export interface RunOptions {
   systemPrompt?: string[];
   budget?: string[];
   auth?: string;
+  noAuth?: boolean;
   cwd?: string;
   extraEnv?: Record<string, string | undefined>;
   signal: AbortSignal;
@@ -330,7 +331,7 @@ export function runAgentArguments(
   const model = options.model ?? DEFAULT_MODEL;
   const workspace = options.workspace ?? fixtures.W;
   const session = options.session ?? fixtures.S;
-  const auth = options.auth ?? fixtures.authPath;
+  const auth = options.noAuth ? null : (options.auth ?? fixtures.authPath);
   const prompts = options.prompt ?? ["run task"];
   const systemPrompts = options.systemPrompt ?? [];
 
@@ -344,9 +345,9 @@ export function runAgentArguments(
     workspace,
     "--session",
     session,
-    "--auth",
-    auth,
   ];
+
+  if (auth !== null) args.push("--auth", auth);
 
   for (const p of prompts) {
     args.push("--prompt", p);

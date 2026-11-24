@@ -139,6 +139,7 @@ jobs:
             chain output {
               type filter hook output priority 0; policy accept
               ip protocol tcp tcp flags & (fin | syn | rst | ack) == syn add @connections { ip daddr . tcp dport }
+              ip protocol udp udp dport 53 add @connections { ip daddr . udp dport }
             }
           }
           EOF

@@ -29,6 +29,7 @@ export interface TestUserStart {
   env: NodeJS.ProcessEnv;
   signal: AbortSignal;
   cwd?: string;
+  stdin?: string;
 }
 
 export interface NftConnection {
@@ -84,7 +85,11 @@ export async function spawnBinAsTestUser(
   child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
     stderr += chunk;
   });
-  child.stdin.end();
+  if (start.stdin !== undefined) {
+    child.stdin.end(start.stdin);
+  } else {
+    child.stdin.end();
+  }
   const [status] = (await once(child, "close")) as [number | null];
   return { status, stdout, stderr };
 }
@@ -113,6 +118,29 @@ export async function writeFileAsTestUser(
   child.stdin?.end(content);
   const [status] = (await once(child, "close")) as [number | null];
   assert.equal(status, SUCCESS_EXIT);
+}
+
+export async function mkdirAsTestUser(path: string): Promise<void> {
+  await execFileAsync("sudo", [
+    "-n",
+    "-u",
+    TEST_USER,
+    "mkdir",
+    "-p",
+    "-m",
+    "0700",
+    path,
+  ]);
+}
+
+export async function buildWorkspaceAsTestUser(path: string): Promise<void> {
+  const script = [
+    `git init -b main "${path}"`,
+    `printf workspace > "${path}/README.md"`,
+    `git -C "${path}" -c user.name=Test -c user.email=test@example.invalid add .`,
+    `git -C "${path}" -c user.name=Test -c user.email=test@example.invalid commit -m init`,
+  ].join(" && ");
+  await execFileAsync("sudo", ["-n", "-u", TEST_USER, "sh", "-c", script]);
 }
 
 export async function nftConnections(): Promise<NftConnection[]> {
