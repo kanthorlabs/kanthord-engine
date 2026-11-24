@@ -418,6 +418,7 @@ async function runAgent(
   let outputFd: number | null = null;
   const controller = new AbortController();
   const stopHandlers = stopOnSignal(controller);
+  let exitCode: number = RunExitCode.Stopped;
 
   try {
     R = mkdtempSync(join(tmpdir(), "kanthord-run-"));
@@ -528,6 +529,7 @@ async function runAgent(
     }
 
     if (!stopHandlers.forcedWithoutResult) {
+      exitCode = agentExitCode(turnEnd.end, turnEnd.failure);
       emitRunResult(
         {
           monotonicStart,
@@ -553,6 +555,7 @@ async function runAgent(
     }
   } finally {
     await cleanupResources(stopHandlers, R, outputFd);
+    stopHandlers.exitWithinBoundAfterForcedStop(exitCode);
   }
 }
 

@@ -56,6 +56,7 @@ const POLL_MS = 10;
 const NO_CALLS = 0;
 const WALL_MS = 500;
 const SINGLE = 1;
+const PAIR = 2;
 const USD_LIMIT = 0.000001;
 const MSG_UNAUTHORIZED = "Unauthorized";
 const TOOL_RESULT_ROLE = "toolResult";
@@ -628,4 +629,104 @@ test("L3-U6 first limit: a provider error that comes after the limit ends budget
   assert.equal(result.end, RunEnd.BudgetEnd);
   assert.equal(result.budgetReached, BudgetLimit.Wall);
   assert.equal(result.failure, null);
+});
+
+function failAtAbort(): FauxResponseStep {
+  return (_context, options) =>
+    new Promise((_resolve, reject) => {
+      options?.signal?.addEventListener("abort", () =>
+        reject(new Error(MSG_UNAUTHORIZED)),
+      );
+    });
+}
+
+async function untilCalls(
+  scripted: ReturnType<typeof scriptedProvider>,
+  count: number,
+): Promise<void> {
+  while (scripted.calls.length < count)
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+}
+
+test("a provider error that answers the abort of the input signal ends stopped with no failure", async (t) => {
+  const controller = new AbortController();
+  const { run, scripted } = await openAndRun(t, {
+    script: [failAtAbort()],
+    signal: controller.signal,
+  });
+  const sending = run.send("hello", { work: null });
+  await untilCalls(scripted, SINGLE);
+  controller.abort();
+  const result = await sending;
+  assert.equal(result.end, RunEnd.Stopped);
+  assert.equal(result.failure, null);
+  assert.equal(scripted.calls.length, SINGLE);
+  await run.close();
+});
+
+test("a provider error with no abort ends failed, and a send after the abort of the input signal ends stopped with no failure", async (t) => {
+  const controller = new AbortController();
+  const { run } = await openAndRun(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: MSG_UNAUTHORIZED,
+      }),
+    ],
+    signal: controller.signal,
+  });
+  const firstResult = await run.send("hello", { work: null });
+  assert.equal(firstResult.end, RunEnd.Failed);
+  controller.abort();
+  const secondResult = await run.send("again", { work: null });
+  assert.equal(secondResult.end, RunEnd.Stopped);
+  assert.equal(secondResult.failure, null);
+  await run.close();
+});
+
+test("regression: after a failed send, a provider error that answers the abort of the input signal in the next send ends stopped", async (t) => {
+  const controller = new AbortController();
+  const { run, scripted } = await openAndRun(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: MSG_UNAUTHORIZED,
+      }),
+      failAtAbort(),
+    ],
+    signal: controller.signal,
+  });
+  const firstResult = await run.send("hello", { work: null });
+  assert.equal(firstResult.end, RunEnd.Failed);
+  const sending = run.send("again", { work: null });
+  await untilCalls(scripted, PAIR);
+  controller.abort();
+  const secondResult = await sending;
+  assert.equal(secondResult.end, RunEnd.Stopped);
+  assert.equal(secondResult.failure, null);
+  await run.close();
+});
+
+test("regression: after a failed send, a provider error that answers the wall limit in the next send ends budget_end", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: MSG_UNAUTHORIZED,
+      }),
+      failAtAbort(),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const firstResult = await run.send("hello", { work: null });
+  assert.equal(firstResult.end, RunEnd.Failed);
+  const secondResult = await run.send("again", { work: null });
+  assert.equal(secondResult.end, RunEnd.BudgetEnd);
+  assert.equal(secondResult.budgetReached, BudgetLimit.Wall);
+  assert.equal(secondResult.failure, null);
+  await run.close();
 });

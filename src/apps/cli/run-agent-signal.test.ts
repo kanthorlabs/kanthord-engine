@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mock, test } from "node:test";
-import { stopOnSignal } from "./run-agent-signal.ts";
+import { ExitCode } from "./constants.ts";
+import { FORCED_EXIT_BOUND_MS, stopOnSignal } from "./run-agent-signal.ts";
 
 const SHUTDOWN_LIMIT_MS = 10000;
 const ONE_MS = 1;
@@ -196,4 +198,96 @@ test("stopOnSignal a signal after the time limit makes no second forced stop", (
   } finally {
     mock.timers.reset();
   }
+});
+
+const EXIT_CODE = 7;
+const NO_CALLS = 0;
+const ONE_CALL = 1;
+const CHILD_LIMIT_MS = 30000;
+
+test("after a forced stop by the second signal, the exit bound calls process.exit once at FORCED_EXIT_BOUND_MS", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const exit = mock.method(process, "exit", () => {});
+  try {
+    const handlers = stopOnSignal(new AbortController());
+    handlers.setForceStop(() => {});
+    process.emit("SIGINT" as NodeJS.Signals);
+    process.emit("SIGINT" as NodeJS.Signals);
+    handlers.release();
+    handlers.exitWithinBoundAfterForcedStop(EXIT_CODE);
+    mock.timers.tick(FORCED_EXIT_BOUND_MS - ONE_MS);
+    assert.equal(exit.mock.callCount(), NO_CALLS);
+    mock.timers.tick(ONE_MS);
+    assert.equal(exit.mock.callCount(), ONE_CALL);
+  } finally {
+    exit.mock.restore();
+    mock.timers.reset();
+  }
+});
+
+test("after the time limit forced stop, the exit bound calls process.exit once at FORCED_EXIT_BOUND_MS", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const exit = mock.method(process, "exit", () => {});
+  try {
+    const handlers = stopOnSignal(new AbortController());
+    handlers.setForceStop(() => {});
+    process.emit("SIGINT" as NodeJS.Signals);
+    mock.timers.tick(SHUTDOWN_LIMIT_MS);
+    handlers.release();
+    handlers.exitWithinBoundAfterForcedStop(EXIT_CODE);
+    mock.timers.tick(FORCED_EXIT_BOUND_MS);
+    assert.equal(exit.mock.callCount(), ONE_CALL);
+  } finally {
+    exit.mock.restore();
+    mock.timers.reset();
+  }
+});
+
+test("with no forced stop, the exit bound makes no process.exit call, also after one signal", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  const exit = mock.method(process, "exit", () => {});
+  try {
+    const handlers = stopOnSignal(new AbortController());
+    handlers.setForceStop(() => {});
+    process.emit("SIGTERM" as NodeJS.Signals);
+    handlers.ignoreSignals();
+    handlers.release();
+    handlers.exitWithinBoundAfterForcedStop(EXIT_CODE);
+    mock.timers.tick(SHUTDOWN_LIMIT_MS + FORCED_EXIT_BOUND_MS);
+    assert.equal(exit.mock.callCount(), NO_CALLS);
+  } finally {
+    exit.mock.restore();
+    mock.timers.reset();
+  }
+});
+
+function forcedStopChild(openHandle: boolean): number | null {
+  const module = new URL("./run-agent-signal.ts", import.meta.url).href;
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `
+    const { stopOnSignal } = await import(${JSON.stringify(module)});
+    const handlers = stopOnSignal(new AbortController());
+    handlers.setForceStop(() => {});
+    process.emit("SIGINT");
+    process.emit("SIGINT");
+    if (${JSON.stringify(openHandle)}) setInterval(() => {}, ${CHILD_LIMIT_MS});
+    handlers.release();
+    handlers.exitWithinBoundAfterForcedStop(${EXIT_CODE});
+  `,
+    ],
+    { encoding: "utf8", timeout: CHILD_LIMIT_MS },
+  );
+  return result.status;
+}
+
+test("after a forced stop, a process with an open handle exits with the given exit code", () => {
+  assert.equal(forcedStopChild(true), EXIT_CODE);
+});
+
+test("after a forced stop, the exit bound does not hold a process with no open handle, and the process keeps its own exit code", () => {
+  assert.equal(forcedStopChild(false), ExitCode.Success);
 });

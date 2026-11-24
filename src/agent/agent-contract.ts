@@ -251,6 +251,8 @@ function buildRun(ctx: RunContext): AgentRun {
   let totals: RunTotals = zeroTotals();
   let budgetReached: BudgetLimit | null = null;
   let failedBeforeLimit = false;
+  let failedBeforeStop = false;
+  let assistantBeforeSend: AssistantMessage | undefined;
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
@@ -268,11 +270,15 @@ function buildRun(ctx: RunContext): AgentRun {
     return (await originalFinishTurn?.(turn, signal)) ?? undefined;
   };
 
+  function failedInSend(): boolean {
+    const last = lastAssistantOf(session.messages);
+    return last !== assistantBeforeSend && failureOf(last, model) !== null;
+  }
+
   function reach(limit: BudgetLimit): void {
     if (budgetReached !== null) return;
     budgetReached = limit;
-    failedBeforeLimit =
-      failureOf(lastAssistantOf(session.messages), model) !== null;
+    failedBeforeLimit = failedInSend();
     if (sending) void session.abort();
   }
 
@@ -285,6 +291,7 @@ function buildRun(ctx: RunContext): AgentRun {
 
   const unsubscribeSignal = addAbortListener(inputSignal, () => {
     if (!sending) return;
+    failedBeforeStop = failedInSend();
     void session.abort();
   });
 
@@ -318,7 +325,11 @@ function buildRun(ctx: RunContext): AgentRun {
     if (extensionFailure.reason !== null)
       return internalEnd(extensionFailure.reason);
     const failure = failureOf(lastAssistantOf(session.messages), model);
-    if (failure !== null && (budgetReached === null || failedBeforeLimit)) {
+    if (
+      failure !== null &&
+      (budgetReached === null || failedBeforeLimit) &&
+      (!inputSignal.aborted || failedBeforeStop)
+    ) {
       return {
         end: RunEnd.Failed,
         budgetReached: null,
@@ -359,6 +370,8 @@ function buildRun(ctx: RunContext): AgentRun {
       sending = true;
       endAfterTurnFlag = false;
       failedBeforeLimit = false;
+      failedBeforeStop = false;
+      assistantBeforeSend = lastAssistantOf(session.messages);
       extensionFailure.reason = null;
 
       try {

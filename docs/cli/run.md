@@ -336,9 +336,11 @@ result. No `cli.run.agent.open_failed` line and no
    `stopped` and exits `2`.
 3. When the abort takes more than 10 seconds, the run makes a forced stop. It
    writes the result with the end `stopped` and the totals so far, and exits
-   `2`. The session file then can lack the aborted entry.
+   `2`. The session file then can lack the aborted entry. The run then exits
+   within 1 second, even when a pi handle stays open.
 4. A second signal during the wait makes the forced stop at once. The run
-   exits `2` and writes no result.
+   exits `2` and writes no result. The run then exits within 1 second, even
+   when a pi handle stays open.
 
 The run ignores a signal while it removes the run directory and writes the
 result, so the result line is whole. The run kills each tool child process and
