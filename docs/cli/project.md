@@ -33,9 +33,10 @@ options used by those synopses; the resource sections define their inputs,
 results, and effects without repeating the command syntax.
 
 All commands on this page belong under `project`. The [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface)
-declares three global commands, seven service groups and the shared component
+declares four global commands, seven service groups and the shared component
 groups `llm`, `repository` and `storage`. The CLI also registers the `agent`
-group, which the command surface does not list, and does not register `intake`.
+group and the `run` global group, which the command surface does not list, and
+does not register `intake`.
 
 ## Common calling convention
 

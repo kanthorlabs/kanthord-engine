@@ -236,6 +236,9 @@ const noInlineObjectTypeFiles = [
   "src/apps/cli/run-agent-model.ts",
   "src/apps/cli/run-agent-input.ts",
   "src/apps/cli/run-agent-options.ts",
+  "src/apps/cli/run-agent.ts",
+  "src/apps/cli/run-agent-exit.ts",
+  "src/apps/cli/run-agent-signal.ts",
 ];
 
 export const kanthordPlugin = {
@@ -541,7 +544,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "agent" },
                     fileInternalPath:
-                      "{pi,pi-tools,environment,agent-contract}.ts",
+                      "{pi,pi-tools,environment,agent-contract,known-secrets}.ts",
                   }),
                 },
                 {
@@ -554,7 +557,7 @@ export default tseslint.config(
             },
             {
               from: element("apps-cli", {
-                fileInternalPath: "{*.test.ts,tasks-test-support.ts}",
+                fileInternalPath: "{*.test.ts,*-test-support.ts}",
               }),
               allow: [
                 {

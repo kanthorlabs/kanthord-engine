@@ -14,22 +14,22 @@ flag names, syntax, defaults, validation, and synopsis markers. Link directly
 to its flag-name headings instead of repeating those definitions. Shared
 non-flag conventions and commands outside these groups live in `other.md`.
 
-| Command group                   | Owning document                                   | Scope                                                                                                   |
-| ------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| `project`                       | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                            |
-| `llm`                           | [LLM](llm.md)                                     | LLM credential records, metadata revisions and OAuth login sessions.                                    |
-| `repository`                    | [Repository](repository.md)                       | Repository credential records and metadata revisions.                                                   |
-| `storage`                       | [Storage](storage.md)                             | Storage credential records and metadata revisions.                                                      |
-| `mission`                       | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                          |
-| `scheduler`                     | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                    |
-| `intake`                        | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.    |
-| `agent`                         | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                    |
-| `worker`                        | [Worker Service](worker.md)                       | Workers, registrations, and execution hosting.                                                          |
-| `workbench`                     | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                  |
-| `tracking`                      | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                          |
-| `footprint`                     | [Footprint Service](footprint.md)                 | Storage statistics, cleanup candidates, human-confirmed cleanups and alerts.                            |
-| `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
-| `config`, `serve`, `auth`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
+| Command group                          | Owning document                                   | Scope                                                                                                                     |
+| -------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `project`                              | [Project Service](project.md)                     | Projects, permitted resources, bindings, policy, and worker binding entries.                                              |
+| `llm`                                  | [LLM](llm.md)                                     | LLM credential records, metadata revisions and OAuth login sessions.                                                      |
+| `repository`                           | [Repository](repository.md)                       | Repository credential records and metadata revisions.                                                                     |
+| `storage`                              | [Storage](storage.md)                             | Storage credential records and metadata revisions.                                                                        |
+| `mission`                              | [Mission Service](mission.md)                     | Mission graph, criterion, evidence, assessments, outcomes, and human controls.                                            |
+| `scheduler`                            | [Scheduler Service](scheduler.md)                 | Work pull, executions, claims, deadlines, and scheduling inspection.                                                      |
+| `intake`                               | [Intake Service](intake.md)                       | Inbounds, inbound events, acquisition through a webhook or a poll, and outbound platform operations.                      |
+| `agent`                                | [Agent](agent.md)                                 | Agent catalog, agent enablement and agent providers.                                                                      |
+| `worker`                               | [Worker Service](worker.md)                       | Workers, registrations, and execution hosting.                                                                            |
+| `workbench`                            | [Workbench Service](workbench.md)                 | Human-driven agent sessions; API only.                                                                                    |
+| `tracking`                             | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                                            |
+| `footprint`                            | [Footprint Service](footprint.md)                 | Storage statistics, cleanup candidates, human-confirmed cleanups and alerts.                                              |
+| `gateway`                              | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                                       |
+| `config`, `serve`, `auth`, `run`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, local agent runs, client options, and input/output rules. |
 
 The Project inventory has 14 implemented leaves. The LLM inventory has 14 implemented leaves.
 The Repository inventory has 11 implemented leaves and the Storage inventory has 10.
@@ -68,10 +68,10 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 ## Ownership rules
 
-- Keep the three global command names, seven service groups and three shared
+- Keep the four global command names, seven service groups and three shared
   component groups listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
-  The CLI also registers the `agent` component group, which the command surface
-  does not list yet, and does not register `intake`.
+  The CLI also registers the `agent` component group and the `run` global group,
+  which the command surface does not list yet, and does not register `intake`.
   Application names are operands of `serve`, not additional top-level commands.
 - A remote command calls the operation of the service or shared component that
   owns its effect. Gateway authenticates and routes the request; it does not

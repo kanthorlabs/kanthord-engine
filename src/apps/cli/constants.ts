@@ -16,6 +16,7 @@ export const CommandName = {
   Scheduler: "scheduler",
   Tracking: "tracking",
   Footprint: "footprint",
+  Run: "run",
 } as const;
 export const SERVER_APPLICATION = "server";
 export const SLOT_APPLICATION = "slot";

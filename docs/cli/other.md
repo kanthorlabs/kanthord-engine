@@ -52,8 +52,8 @@ owning pages in the [index](./README.md).
 
 ### Closed root names and option scope
 
-**Implemented and target requirement:** the four global root names are
-`config`, `upgrade`, `serve`, and `auth`. The four component root names are `llm`, `repository`,
+**Implemented and target requirement:** the five global root names are
+`config`, `upgrade`, `serve`, `auth`, and `run`. The four component root names are `llm`, `repository`,
 `storage`, and `agent`. The six service root names are `project`, `mission`,
 `scheduler`, `worker`, `tracking`, and `gateway`. These are disjoint, closed sets.
 `server` and the application form of `worker` are operands of `serve`, never new
@@ -179,6 +179,9 @@ the instance configuration; see [serve worker](#serve-worker).
 **Implemented:** `runCLI` uses exit `0` for success and `1` for handled failures.
 A `serve worker` process that another process supersedes exits `3` with
 `worker.instance.superseded`.
+`run agent` uses exit `0` for a completed run, `2` for a stopped run (signal),
+`4` for a budget-end run, `5` for a terminal failure, and `75` for a retryable
+failure. A refusal or validation failure exits `1`.
 Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
 failure writes a diagnostic to stderr. Line 1 of a diagnostic is
 `<code>: <message>`, with the code at the start of the line. The message holds
@@ -1152,7 +1155,7 @@ The [`--help`](./common-flags.md#--help) reference defines the implemented
 parser option and its no-work behavior. Command-specific forms are:
 
 - `kanthord -h` or `kanthord --help`: print root help to stdout and exit `0`.
-  List exactly the three global names, four component groups and six service
+  List exactly the four global names, four component groups and six service
   groups. There is no
   top-level `help` command; `kanthord help` fails with `error: unknown command 'help'`.
 - `kanthord -V` or `kanthord --version`: print the package version to stdout
