@@ -10,34 +10,32 @@ Start with [the CLI specification index](./README.md) and
 
 ## Try it
 
-The script `scripts/play-run-agent.mjs` sets up a private play directory and writes `run.sh`, which runs one agent session:
+The script `scripts/play-run-agent.mjs` sets up a private play directory, starts the agent and prints the result:
 
 ```sh
-pnpm run play:agent -- [--repo <path>] [--model <provider>/<model>:<level>] [--auth <path>] [--budget <duration>] [--no-refresh]
+pnpm run play:agent -- [--repo <path>] [--model <provider>/<model>:<level>] [--auth <path>] [--budget <duration>] [--no-refresh] [--no-build] [--refresh-only] ["<prompt>"]
 ```
 
-| Option         | Default                           | Effect                                                |
-| -------------- | --------------------------------- | ----------------------------------------------------- |
-| `--repo`       | none                              | Clone this git repository. With no value, use sample. |
-| `--model`      | `anthropic/claude-haiku-5-5:high` | The model of each run.                                |
-| `--auth`       | `~/.pi/agent/auth.json`           | The `--auth` file of each run.                        |
-| `--budget`     | `15m`                             | The wall budget of each run.                          |
-| `--no-refresh` | refresh on                        | Skip the pi token refresh before each run.            |
+| Option           | Default                              | Effect                                                               |
+| ---------------- | ------------------------------------ | -------------------------------------------------------------------- |
+| `--repo`         | none                                 | Clone this git repository. With no value, use the sample.            |
+| `--model`        | `anthropic/claude-sonnet-5-5:medium` | The model of each run.                                               |
+| `--auth`         | `~/.config/kanthord/auth.json`       | The `--auth` file of each run.                                       |
+| `--budget`       | `15m`                                | The wall budget of each run.                                         |
+| `--no-refresh`   | refresh on                           | Skip the pi token refresh before each run.                           |
+| `--no-build`     | build check on                       | Skip the build check.                                                |
+| `--refresh-only` | run on                               | Refresh and prepare the play directory; print its path and exit `0`. |
+| `"<prompt>"`     | use `prompt.md`                      | Prompt text or a path. With no value, use `prompt.md`.               |
 
-Run `pnpm run build` first. The script exits `1` when `dist/main.js` is absent.
+The play directory is `<state directory>/play/<YYYYMMDD>` with mode `0700`. The script uses the local date, so the same directory is reused on the same day. It holds `workspace/`, `prompt.md`, `sessions/` and `run.sh`.
 
-The play directory is `<state directory>/play/<UTC time>` with mode `0700`. It holds `workspace/`, `prompt.md` and `run.sh`. The script resolves a relative `--auth` path against the current directory. The script and `run.sh` pass the `--auth` path to `kanthord` and never read the file.
+On first use, the script creates the workspace (sample or `--repo` clone) and writes `prompt.md`. On a reuse of the same day, the script keeps `workspace/` and `prompt.md` unchanged and adds a new session file.
 
-The script prints the play directory and the path of `run.sh`. Run `run.sh` to start the agent. Pass a prompt text as the argument to override `prompt.md`:
+The script verifies that `dist/main.js` is present and not older than `src/`. When either condition fails, it runs `pnpm run build` first. Use `--no-build` to skip this check.
 
-```sh
-<play-dir>/run.sh
-<play-dir>/run.sh "Fix the failing test."
-```
+Unless `--no-refresh` is given, the script calls `ModelRuntime.create` and `getAuth` from `@earendil-works/pi-coding-agent` to refresh an `oauth` entry. The result is discarded. On failure, the script prints one fixed error line to stderr and exits `1`. Each run writes a new session file in `sessions/` and appends a result line to `result.jsonl`.
 
-Unless `--no-refresh` was given, `run.sh` first runs `pi auth print-bearer-token --provider <provider> --min-expiry 20m > /dev/null`. This command refreshes an `oauth` entry of the pi `auth.json` and discards the token. Each run writes a new session file in `sessions/` and the result line to `result.jsonl`.
-
-`run.sh` prints the exit code, the `end`, `class` and `text` fields of the result and the workspace status.
+The script prints the play directory, the path of `run.sh`, and after the run: the exit code, the `end`, `class` and `text` fields of the result and the workspace status.
 
 ## `run agent`
 
