@@ -298,6 +298,8 @@ async function openAndRunAgent(
     throw error;
   }
   if (signal.aborted) {
+    if (agentOpen.kind === AgentOpenKind.Opened)
+      await agentOpen.run.close().catch(() => {});
     throw stoppedBySignalExit();
   }
   if (agentOpen.kind === AgentOpenKind.Refused) {
@@ -318,11 +320,10 @@ async function openAndRunAgent(
 }
 
 async function cleanupResources(
-  stopHandlers: StopHandlers | null,
+  stopHandlers: StopHandlers,
   R: string | null,
   outputFd: number | null,
 ): Promise<void> {
-  stopHandlers?.release();
   if (R !== null) {
     try {
       rmSync(R, { recursive: true, force: true });
@@ -333,6 +334,7 @@ async function cleanupResources(
       closeSync(outputFd);
     } catch {}
   }
+  stopHandlers.release();
 }
 
 async function runAgent(
@@ -414,7 +416,8 @@ async function runAgent(
 
   let R: string | null = null;
   let outputFd: number | null = null;
-  let stopHandlers: StopHandlers | null = null;
+  const controller = new AbortController();
+  const stopHandlers = stopOnSignal(controller);
 
   try {
     R = mkdtempSync(join(tmpdir(), "kanthord-run-"));
@@ -426,8 +429,6 @@ async function runAgent(
       outputFd = openOutputFile(outputTarget.path);
     }
     withoutAmbientCredentials(process.env, rHome, rTmp);
-    const controller = new AbortController();
-    stopHandlers = stopOnSignal(controller);
     const { signal } = controller;
 
     runPiToolInstall(() => installPiTools({ directory: piDirRaw }));
@@ -514,10 +515,10 @@ async function runAgent(
       signal,
       promptText,
       onAgentOpened: (agentRun) =>
-        stopHandlers!.setForceStop(() => agentRun.forceStop()),
+        stopHandlers.setForceStop(() => agentRun.forceStop()),
     });
 
-    stopHandlers.release();
+    stopHandlers.ignoreSignals();
 
     if (R !== null) {
       try {

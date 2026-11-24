@@ -322,22 +322,24 @@ A later try also needs a workspace that passes the start preconditions.
 
 ### Shutdown
 
-SIGINT and SIGTERM stop the run.
+SIGINT and SIGTERM have the same effect.
 
-**Before the agent opens** (before the session opens and the first request is
-sent): the first signal gives exit `2` and writes no result. No open-failed
-diagnostic appears.
+**A signal before the run sends the message.** The run exits `2` and writes no
+result. No `cli.run.agent.open_failed` line and no
+`cli.run.agent.start_refused` line appears.
 
-**During the run** (after the agent opens):
+**A signal during the turn.**
 
-1. First signal: the run aborts the current turn. It waits up to 10 seconds
-   for the agent to finish the abort.
-2. If the agent finishes within 10 seconds: the run writes the result with the
-   end `stopped` and exits `2`.
-3. If the 10-second limit passes: the run forces a stop, writes the result
-   with the end `stopped` and exits `2`.
-4. Second signal before the run exits: the run forces a stop immediately and
-   exits `2` with no result.
+1. The first signal aborts the turn. The run waits at most 10 seconds for the
+   abort.
+2. When the abort ends in that time, the run writes the result with the end
+   `stopped` and exits `2`.
+3. When the abort takes more than 10 seconds, the run makes a forced stop. It
+   writes the result with the end `stopped` and the totals so far, and exits
+   `2`. The session file then can lack the aborted entry.
+4. A second signal during the wait makes the forced stop at once. The run
+   exits `2` and writes no result.
 
-The run removes the resource directory and kills all tool children before it
-exits. A second signal gives no result and no diagnostic.
+The run ignores a signal while it removes the run directory and writes the
+result, so the result line is whole. The run kills each tool child process and
+removes the run directory before each of these exits.

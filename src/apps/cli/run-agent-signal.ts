@@ -4,6 +4,7 @@ const SHUTDOWN_LIMIT_MS = 10000;
 
 export interface StopHandlers {
   release(): void;
+  ignoreSignals(): void;
   setForceStop(fn: () => void): void;
   readonly forcedWithoutResult: boolean;
 }
@@ -11,6 +12,7 @@ export interface StopHandlers {
 export function stopOnSignal(controller: AbortController): StopHandlers {
   let forceStopFn: (() => void) | null = null;
   let shutdownStarted = false;
+  let ignoring = false;
   let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
   let _forcedWithoutResult = false;
 
@@ -28,12 +30,13 @@ export function stopOnSignal(controller: AbortController): StopHandlers {
 
   const doForceStop = (noResult: boolean): void => {
     clearShutdownTimer();
-    removeHandlers();
+    ignoring = true;
     if (noResult) _forcedWithoutResult = true;
     forceStopFn?.();
   };
 
   const onSignal = (): void => {
+    if (ignoring) return;
     if (shutdownStarted) {
       doForceStop(true);
       return;
@@ -50,6 +53,10 @@ export function stopOnSignal(controller: AbortController): StopHandlers {
     release(): void {
       clearShutdownTimer();
       removeHandlers();
+    },
+    ignoreSignals(): void {
+      clearShutdownTimer();
+      ignoring = true;
     },
     setForceStop(fn: () => void): void {
       forceStopFn = fn;
