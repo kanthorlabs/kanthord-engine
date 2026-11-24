@@ -15,6 +15,7 @@ import {
   checkAuthEntry,
   checkAuthExpiry,
   checkAuthFile,
+  checkAuthFileContents,
   defaultAuthPath,
   readAuthEntry,
 } from "./run-agent-auth.ts";
@@ -227,6 +228,120 @@ describe("readAuthEntry", () => {
     await assertRejectedDiagnostic(
       readAuthEntry(ANTHROPIC_PROVIDER, path),
       AUTH_ENTRY_MISSING,
+    );
+  });
+});
+
+describe("checkAuthFileContents", () => {
+  it("passes a valid single-entry file", () => {
+    const path = writeAuthJson(base, `contents-valid-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-key-value" },
+    });
+    assert.doesNotThrow(() => checkAuthFileContents(path));
+  });
+
+  it("passes a valid multi-provider file", () => {
+    const path = writeAuthJson(base, `contents-multi-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-key-a" },
+      openai: { type: "api_key", key: "fixture-key-b" },
+    });
+    assert.doesNotThrow(() => checkAuthFileContents(path));
+  });
+
+  it("refuses a non-object JSON root (array)", () => {
+    const path = join(base, `contents-array-${Date.now()}.json`);
+    writeFileSync(path, JSON.stringify([]), { mode: 0o600 });
+    const error = assertDiagnostic(
+      () => checkAuthFileContents(path),
+      AUTH_FILE_INVALID,
+    );
+    assert.ok(error.fields.some(([k]) => k === FIELD_PATH));
+    assert.ok(!error.fields.some(([k]) => k === FIELD_FIELD));
+  });
+
+  it("refuses a non-object JSON root (string)", () => {
+    const path = join(base, `contents-string-${Date.now()}.json`);
+    writeFileSync(path, JSON.stringify("not-an-object"), { mode: 0o600 });
+    assertDiagnostic(() => checkAuthFileContents(path), AUTH_FILE_INVALID);
+  });
+
+  it("refuses a file that holds no valid JSON", () => {
+    const path = join(base, `contents-badjson-${Date.now()}.json`);
+    writeFileSync(path, "not-json", { mode: 0o600 });
+    assertDiagnostic(() => checkAuthFileContents(path), AUTH_FILE_INVALID);
+  });
+
+  it("refuses when another provider entry has an invalid oauth expires", () => {
+    const path = writeAuthJson(base, `contents-badfar-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-key-value" },
+      "other-provider": {
+        type: "oauth",
+        access: "fixture-access",
+        refresh: "fixture-refresh",
+        expires: "not-a-number",
+      },
+    });
+    const error = assertDiagnostic(
+      () => checkAuthFileContents(path),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      error.fields.some(
+        ([k, v]) => k === FIELD_FIELD && String(v).startsWith("other-provider"),
+      ),
+    );
+    assert.ok(!error.fields.some(([, v]) => String(v).includes("fixture")));
+  });
+
+  it("refuses when another provider entry is not an object", () => {
+    const path = writeAuthJson(base, `contents-badtype-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-key-value" },
+      "bad-provider": "not-an-object",
+    });
+    const error = assertDiagnostic(
+      () => checkAuthFileContents(path),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      error.fields.some(
+        ([k, v]) => k === FIELD_FIELD && String(v).startsWith("bad-provider"),
+      ),
+    );
+  });
+
+  it("refuses when another provider entry has an unknown type", () => {
+    const path = writeAuthJson(base, `contents-unktype-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-key-value" },
+      "unknown-provider": { type: "unknown", key: "fixture-key" },
+    });
+    const error = assertDiagnostic(
+      () => checkAuthFileContents(path),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      error.fields.some(
+        ([k, v]) =>
+          k === FIELD_FIELD && String(v).startsWith("unknown-provider"),
+      ),
+    );
+  });
+
+  it("no credential value appears in any refusal field", () => {
+    const path = writeAuthJson(base, `contents-nosecret-${Date.now()}.json`, {
+      anthropic: { type: "api_key", key: "fixture-secret-key" },
+      "bad-provider": {
+        type: "oauth",
+        access: "fixture-secret-access",
+        refresh: "fixture-secret-refresh",
+        expires: "not-a-number",
+      },
+    });
+    const error = assertDiagnostic(
+      () => checkAuthFileContents(path),
+      AUTH_ENTRY_INVALID,
+    );
+    assert.ok(
+      !error.fields.some(([, v]) => String(v).includes("fixture-secret")),
     );
   });
 });

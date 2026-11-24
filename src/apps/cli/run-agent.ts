@@ -54,6 +54,7 @@ import {
   checkAuthEntry,
   checkAuthExpiry,
   checkAuthFile,
+  checkAuthFileContents,
   defaultAuthPath,
   piProviderIdOf,
   readAuthEntry,
@@ -290,6 +291,7 @@ async function runAgent(
   }
 
   checkAuthFile(authPath, workspaceRealPath);
+  checkAuthFileContents(authPath);
   const piProviderIdValue = piProviderIdOf(parsedModel.provider);
   const rawEntry = await readAuthEntry(piProviderIdValue, authPath);
   const checkedAuthEntry = checkAuthEntry(
