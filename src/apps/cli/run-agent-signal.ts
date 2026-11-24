@@ -7,9 +7,8 @@ export interface StopHandlers {
   release(): void;
   ignoreSignals(): void;
   setForceStop(fn: () => void): void;
-  scheduleBoundedExit(exitCode: number): void;
+  exitWithinBoundAfterForcedStop(exitCode: number): void;
   readonly forcedWithoutResult: boolean;
-  readonly wasForceStopped: boolean;
 }
 
 export function stopOnSignal(controller: AbortController): StopHandlers {
@@ -18,7 +17,7 @@ export function stopOnSignal(controller: AbortController): StopHandlers {
   let ignoring = false;
   let shutdownTimer: ReturnType<typeof setTimeout> | null = null;
   let _forcedWithoutResult = false;
-  let _wasForceStopped = false;
+  let forceStopped = false;
 
   const clearShutdownTimer = (): void => {
     if (shutdownTimer !== null) {
@@ -35,7 +34,7 @@ export function stopOnSignal(controller: AbortController): StopHandlers {
   const doForceStop = (noResult: boolean): void => {
     clearShutdownTimer();
     ignoring = true;
-    _wasForceStopped = true;
+    forceStopped = true;
     if (noResult) _forcedWithoutResult = true;
     forceStopFn?.();
   };
@@ -66,14 +65,12 @@ export function stopOnSignal(controller: AbortController): StopHandlers {
     setForceStop(fn: () => void): void {
       forceStopFn = fn;
     },
-    scheduleBoundedExit(exitCode: number): void {
+    exitWithinBoundAfterForcedStop(exitCode: number): void {
+      if (!forceStopped) return;
       setTimeout(() => process.exit(exitCode), FORCED_EXIT_BOUND_MS).unref();
     },
     get forcedWithoutResult(): boolean {
       return _forcedWithoutResult;
-    },
-    get wasForceStopped(): boolean {
-      return _wasForceStopped;
     },
   };
 }

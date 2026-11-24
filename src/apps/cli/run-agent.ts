@@ -337,12 +337,6 @@ async function cleanupResources(
   stopHandlers.release();
 }
 
-function applyForcedExitBound(stopHandlers: StopHandlers): void {
-  if (stopHandlers.wasForceStopped) {
-    stopHandlers.scheduleBoundedExit(RunExitCode.Stopped);
-  }
-}
-
 async function runAgent(
   profileName: string | undefined,
   options: RunAgentOptions,
@@ -424,6 +418,7 @@ async function runAgent(
   let outputFd: number | null = null;
   const controller = new AbortController();
   const stopHandlers = stopOnSignal(controller);
+  let exitCode: number = RunExitCode.Stopped;
 
   try {
     R = mkdtempSync(join(tmpdir(), "kanthord-run-"));
@@ -525,7 +520,6 @@ async function runAgent(
     });
 
     stopHandlers.ignoreSignals();
-    applyForcedExitBound(stopHandlers);
 
     if (R !== null) {
       try {
@@ -535,6 +529,7 @@ async function runAgent(
     }
 
     if (!stopHandlers.forcedWithoutResult) {
+      exitCode = agentExitCode(turnEnd.end, turnEnd.failure);
       emitRunResult(
         {
           monotonicStart,
@@ -560,6 +555,7 @@ async function runAgent(
     }
   } finally {
     await cleanupResources(stopHandlers, R, outputFd);
+    stopHandlers.exitWithinBoundAfterForcedStop(exitCode);
   }
 }
 
