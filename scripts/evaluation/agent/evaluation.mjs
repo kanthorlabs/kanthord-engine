@@ -127,12 +127,9 @@ const CLASS_ATTRIBUTE_RE =
 const CLASS_HELPER_RE = /\b(?:cn|clsx)\s*\(/g;
 const QUOTES = ['"', "'", "`"];
 const TEMPLATE_EXPRESSION = "${";
-const RESULT_KEYS = [
-  "provider",
-  "model",
-  "reasoning_effort",
-  "system_prompt_digest",
-];
+const SWE_GLOBAL_KEYS = ["provider", "model", "reasoning_effort"];
+const KIND_KEYS = ["system_prompt_digest"];
+const RESULT_KEYS = [...SWE_GLOBAL_KEYS, ...KIND_KEYS];
 const CASE_KEYS = ["input_digest", "budget"];
 const CASE_REQUIRED = ["kind", "commit", "wall", "usd", "allowed"];
 const CONFIG_REQUIRED = [
@@ -1290,7 +1287,7 @@ function firstDifference(lines, key) {
   return { key, lines: [lines[0].number, other.number] };
 }
 
-export function checkResultKeys(resultLines) {
+export function checkResultKeys(resultLines, kindOf = new Map()) {
   const numbered = resultLines.map((line, index) => ({
     line,
     number: index + 1,
@@ -1298,7 +1295,7 @@ export function checkResultKeys(resultLines) {
   const version = firstDifference(numbered, "engine_version");
   if (version) return version;
   const swe = numbered.filter((entry) => entry.line.agent === PROFILE_SWE);
-  for (const key of RESULT_KEYS) {
+  for (const key of SWE_GLOBAL_KEYS) {
     const difference = firstDifference(swe, key);
     if (difference) return difference;
   }
@@ -1307,6 +1304,15 @@ export function checkResultKeys(resultLines) {
   );
   for (const lines of byCase.values()) {
     for (const key of CASE_KEYS) {
+      const difference = firstDifference(lines, key);
+      if (difference) return difference;
+    }
+  }
+  const byKind = Map.groupBy(swe, (entry) =>
+    kindOf.get(caseOfSession(String(entry.line.session))),
+  );
+  for (const lines of byKind.values()) {
+    for (const key of KIND_KEYS) {
       const difference = firstDifference(lines, key);
       if (difference) return difference;
     }
@@ -1586,7 +1592,8 @@ export async function reportEvaluation(start) {
   const cases = readCases(evalSetDir, iteration.set);
   if (cases.error) return cases;
   const results = readJsonLines(join(resultsDir, "results.jsonl"));
-  const difference = checkResultKeys(results);
+  const kindOf = new Map(cases.cases.map((c) => [c.id, c.kind]));
+  const difference = checkResultKeys(results, kindOf);
   if (difference) {
     const [first, second] = difference.lines;
     return {

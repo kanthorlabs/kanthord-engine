@@ -1070,6 +1070,37 @@ test("L4-U11: the report accepts two cases with two budgets", () => {
   assert.equal(checkResultKeys([sweLine(), other]), null);
 });
 
+test("L4-U11: accepts swe@1 lines of two kinds with different system_prompt_digest", () => {
+  const kindOf = new Map([
+    ["c1", "backend"],
+    ["c2", "frontend"],
+  ]);
+  const c2Line = sweLine({
+    session: "/r/c2/1-1/session.jsonl",
+    input_digest: "j",
+    budget: { wall_ms: 2, usd: null },
+    system_prompt_digest: "e",
+  });
+  assert.equal(checkResultKeys([sweLine(), c2Line], kindOf), null);
+});
+
+test("L4-U11: refuses swe@1 lines of one kind with different system_prompt_digest", () => {
+  const kindOf = new Map([
+    ["c1", "backend"],
+    ["c2", "backend"],
+  ]);
+  const c2Line = sweLine({
+    session: "/r/c2/1-1/session.jsonl",
+    input_digest: "j",
+    budget: { wall_ms: 2, usd: null },
+    system_prompt_digest: "e",
+  });
+  assert.deepEqual(checkResultKeys([sweLine(), c2Line], kindOf), {
+    key: "system_prompt_digest",
+    lines: [1, 2],
+  });
+});
+
 test("L4-U11: report.sh refuses a results file that breaks a key and writes no report", async (t) => {
   const run = await runHeldOut(t, "e");
   rmSync(join(run.results, "report.md"));
