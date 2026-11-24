@@ -60,7 +60,11 @@ import {
   readAuthEntry,
   userHome,
 } from "./run-agent-auth.ts";
-import { budgetResultFields, parseBudget } from "./run-agent-budget.ts";
+import {
+  budgetResultFields,
+  checkBudgetUnpriced,
+  parseBudget,
+} from "./run-agent-budget.ts";
 import { budgetDigestField, inputDigest } from "./run-agent-digest.ts";
 import {
   toolChildEnvironment,
@@ -362,13 +366,17 @@ async function runAgent(
       reasoning_effort: resolvedModel.reasoning_effort as ReasoningLevel,
     };
     const modelObj = resolveModel(runtime, resolvedConfig);
+    checkBudgetUnpriced(parsedBudget.usd, modelObj.cost);
     const systemPromptText = composeSystemPrompt(
       profilePrompt(profile as ProfileName),
       systemPromptParts.map((text) => ({ heading: null, text })),
     );
     const knownSecrets: KnownSecrets = async () =>
       checkedAuthEntry.credentialValues;
-    const budget: RunBudget = { deadline: wallDeadlineMs, usd: null };
+    const budget: RunBudget = {
+      deadline: wallDeadlineMs,
+      usd: parsedBudget.usd,
+    };
     const modelSelection: ModelSelection = {
       runtime,
       model: modelObj,

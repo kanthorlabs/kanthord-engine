@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import type { TestContext } from "node:test";
 import {
+  type Api,
+  type AssistantMessageEventStream,
+  calculateCost,
+  createAssistantMessageEventStream,
   createFauxCore,
   createProvider,
   envApiKeyAuth,
+  type FauxModelDefinition,
   type FauxResponseStep,
   getCurrentTools,
   getSystemMessageText,
+  type Model,
   type Context as ModelContext,
   type SimpleStreamOptions,
   type StreamFunction,
@@ -20,12 +26,31 @@ import type {
 import type { Transaction } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/test-support.ts";
 
+const STREAM_DONE = "done";
+const STREAM_ERROR = "error";
+
+function withListPrice(
+  model: Model<Api>,
+  source: AssistantMessageEventStream,
+): AssistantMessageEventStream {
+  const priced = createAssistantMessageEventStream();
+  void (async () => {
+    for await (const event of source) {
+      if (event.type === STREAM_DONE) calculateCost(model, event.message.usage);
+      if (event.type === STREAM_ERROR) calculateCost(model, event.error.usage);
+      priced.push(event);
+    }
+    priced.end();
+  })();
+  return priced;
+}
+
 export function scriptedProvider(
   script: FauxResponseStep[],
   options: {
     providerId: string;
     modelIdentifier: string;
-    models?: { id: string; reasoning: boolean }[];
+    models?: FauxModelDefinition[];
   } = { providerId: "anthropic", modelIdentifier: "claude-sonnet-4-5" },
 ) {
   assert.ok(options.providerId);
@@ -42,6 +67,9 @@ export function scriptedProvider(
       { id: options.modelIdentifier, reasoning: false },
     ],
   });
+  const hasListPrice =
+    options.models?.some((definition) => definition.cost !== undefined) ??
+    false;
   const record =
     (
       stream: StreamFunction<string, SimpleStreamOptions>,
@@ -59,7 +87,8 @@ export function scriptedProvider(
         messages: structuredClone(context.messages),
         apiKey: streamOptions?.apiKey,
       });
-      return stream(model, context, streamOptions);
+      const response = stream(model, context, streamOptions);
+      return hasListPrice ? withListPrice(model, response) : response;
     };
   const provider = createProvider({
     id: options.providerId,

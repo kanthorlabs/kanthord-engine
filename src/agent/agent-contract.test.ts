@@ -56,6 +56,8 @@ const POLL_MS = 10;
 const NO_CALLS = 0;
 const WALL_MS = 500;
 const SINGLE = 1;
+const USD_LIMIT = 0.000001;
+const MSG_UNAUTHORIZED = "Unauthorized";
 const TOOL_RESULT_ROLE = "toolResult";
 
 const COMMIT_IDENTITY = [
@@ -72,6 +74,7 @@ interface InputOptions {
   knownSecrets?: KnownSecrets;
   consumerTools?: ToolDefinition[];
   thinkingLevel?: ThinkingLevel;
+  listPrice?: boolean;
 }
 
 async function commitAll(cwd: string, message: string): Promise<void> {
@@ -96,7 +99,6 @@ async function makeInput(
   await commitAll(cwd, "init");
 
   const pi = await loadPi();
-  const scripted = scriptedProvider(options.script ?? []);
   const credentials = new InMemoryCredentialStore();
   if (options.credential !== false)
     await credentials.modify(PROVIDER_ID, async () => ({
@@ -109,6 +111,17 @@ async function makeInput(
     allowModelNetwork: false,
     refreshOnCreate: false,
     signal: new AbortController().signal,
+  });
+  const catalogModel = runtime.getModel(PROVIDER_ID, MODEL_ID);
+  assert.ok(catalogModel, `catalog model ${MODEL_ID} not found`);
+  const scripted = scriptedProvider(options.script ?? [], {
+    providerId: PROVIDER_ID,
+    modelIdentifier: MODEL_ID,
+    models: [
+      options.listPrice === true
+        ? { id: MODEL_ID, reasoning: false, cost: catalogModel.cost }
+        : { id: MODEL_ID, reasoning: false },
+    ],
   });
   runtime.registerNativeProvider(scripted.provider);
   const model = runtime.getModel(PROVIDER_ID, MODEL_ID)!;
@@ -464,4 +477,120 @@ test("the wall timer aborts the session at the deadline, and the end is budget_e
   assert.equal(result.budgetReached, BudgetLimit.Wall);
   const after = await run.send("again", { work: null });
   assert.equal(after.end, RunEnd.BudgetEnd);
+});
+
+test("L3-U6 first limit: wall fires first with a usd budget set, budget_reached is wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: 1000 };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+});
+
+test("L3-U6: wall budget ends during a pi retry wait and the end is budget_end with wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "Too Many Requests",
+      }),
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+});
+
+test("L3-U6: a list price of a catalog model that reaches the usd limit ends the run with budget_end and usd, before the next request", async (t) => {
+  const { agentInput, scripted } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage(fauxToolCall("bash", { command: "true" }), {
+        stopReason: "toolUse",
+      }),
+      fauxAssistantMessage("done"),
+    ],
+    listPrice: true,
+  });
+  agentInput.budget = { deadline: null, usd: USD_LIMIT };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Usd);
+  assert.ok(result.totals.listPriceUsd >= USD_LIMIT);
+  assert.equal(result.totals.modelCalls, SINGLE);
+  assert.equal(scripted.calls.length, SINGLE);
+  const after = await run.send("again", { work: null });
+  assert.equal(after.end, RunEnd.BudgetEnd);
+  assert.equal(after.budgetReached, BudgetLimit.Usd);
+  assert.equal(scripted.calls.length, SINGLE);
+});
+
+test("L3-U6 first limit: a provider error that comes before the limit ends failed, also when the limit fires at that message", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: MSG_UNAUTHORIZED,
+      }),
+    ],
+    listPrice: true,
+  });
+  agentInput.budget = { deadline: null, usd: USD_LIMIT };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.ok(result.totals.listPriceUsd >= USD_LIMIT);
+  assert.equal(result.end, RunEnd.Failed);
+  assert.equal(result.budgetReached, null);
+});
+
+test("L3-U6 first limit: a provider error that comes after the limit ends budget_end", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((_resolve, reject) => {
+          options?.signal?.addEventListener("abort", () =>
+            reject(new Error(MSG_UNAUTHORIZED)),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+  assert.equal(result.failure, null);
 });

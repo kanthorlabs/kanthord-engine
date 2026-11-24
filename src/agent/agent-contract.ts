@@ -49,7 +49,7 @@ import {
   RUNTIME_SETUP_DEADLINE_MS,
   withDeadline,
 } from "./agent-session.ts";
-import { type RunBudget, WallTimer } from "./run-budget.ts";
+import { type RunBudget, UsdTracker, WallTimer } from "./run-budget.ts";
 import {
   addMessageTotals,
   BudgetLimit,
@@ -225,6 +225,7 @@ interface RunContext {
   pins: ReturnType<typeof pinnedLayers>;
   processes: ToolProcesses;
   timer: WallTimer;
+  usdTracker: UsdTracker;
   model: Model<Api>;
   promptDigest: string;
   inputSignal: AbortSignal;
@@ -239,6 +240,7 @@ function buildRun(ctx: RunContext): AgentRun {
     pins,
     processes,
     timer,
+    usdTracker,
     model,
     promptDigest,
     inputSignal,
@@ -248,6 +250,7 @@ function buildRun(ctx: RunContext): AgentRun {
   const session = runtime.session;
   let totals: RunTotals = zeroTotals();
   let budgetReached: BudgetLimit | null = null;
+  let failedBeforeLimit = false;
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
@@ -260,14 +263,23 @@ function buildRun(ctx: RunContext): AgentRun {
 
   const originalFinishTurn = session.agent.finishTurn;
   session.agent.finishTurn = async (turn, signal) => {
-    if (endAfterTurnFlag) return { action: "end" };
+    if (endAfterTurnFlag || budgetReached !== null) return { action: "end" };
     return (await originalFinishTurn?.(turn, signal)) ?? undefined;
   };
+
+  function reach(limit: BudgetLimit): void {
+    if (budgetReached !== null) return;
+    budgetReached = limit;
+    failedBeforeLimit =
+      failureOf(lastAssistantOf(session.messages), model) !== null;
+    if (sending) void session.abort();
+  }
 
   const unsubscribeMessage = session.subscribe((event) => {
     if (event.type !== MESSAGE_END) return;
     if (event.message.role !== ASSISTANT_ROLE) return;
     totals = addMessageTotals(totals, event.message);
+    usdTracker.check(totals.listPriceUsd, () => reach(BudgetLimit.Usd));
   });
 
   const unsubscribeSignal = addAbortListener(inputSignal, () => {
@@ -275,11 +287,7 @@ function buildRun(ctx: RunContext): AgentRun {
     void session.abort();
   });
 
-  timer.start(() => {
-    if (budgetReached !== null) return;
-    budgetReached = BudgetLimit.Wall;
-    if (sending) void session.abort();
-  });
+  timer.start(() => reach(BudgetLimit.Wall));
 
   function release(): void {
     closed = true;
@@ -309,7 +317,7 @@ function buildRun(ctx: RunContext): AgentRun {
     if (extensionFailure.reason !== null)
       return internalEnd(extensionFailure.reason);
     const failure = failureOf(lastAssistantOf(session.messages), model);
-    if (failure !== null) {
+    if (failure !== null && (budgetReached === null || failedBeforeLimit)) {
       return {
         end: RunEnd.Failed,
         budgetReached: null,
@@ -349,6 +357,7 @@ function buildRun(ctx: RunContext): AgentRun {
       assert.ok(!sending, "send called while a send is in progress");
       sending = true;
       endAfterTurnFlag = false;
+      failedBeforeLimit = false;
       extensionFailure.reason = null;
 
       try {
@@ -516,6 +525,7 @@ async function openSteps(input: AgentInput): Promise<AgentOpen> {
     pins,
     processes,
     timer: new WallTimer(input.budget.deadline),
+    usdTracker: new UsdTracker(input.budget.usd),
     model: input.model.model,
     promptDigest,
     inputSignal: input.signal,
