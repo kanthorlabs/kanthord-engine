@@ -44,11 +44,16 @@ export type StubTurn = StubTextTurn | StubToolCallTurn | StubHttpErrorTurn;
 export type StubRequestRecord = {
   headers: Record<string, string | string[] | undefined>;
   body: unknown;
+  selectedRole?: string;
+  selectedTask?: string;
 };
 
 export interface LlmStubOptions {
   fixedStatus?: { status: number; body: string };
-  responder?: (body: unknown) => StubTurn | undefined;
+  responder?: (
+    body: unknown,
+  ) =>
+    (StubTurn & { selectedRole?: string; selectedTask?: string }) | undefined;
 }
 
 export interface LlmStub {
@@ -201,12 +206,22 @@ export async function llmStub(
       const currentRequestIndex = requestIndex;
       requestIndex += 1;
 
-      let turn: StubTurn | undefined;
+      let turn:
+        | (StubTurn & { selectedRole?: string; selectedTask?: string })
+        | undefined;
       if (options.responder !== undefined) {
         turn = options.responder(body);
       } else {
         turn = turns[callIndex];
         callIndex += 1;
+      }
+
+      if (turn !== undefined) {
+        const last = requests[requests.length - 1];
+        if (last !== undefined) {
+          last.selectedRole = turn.selectedRole;
+          last.selectedTask = turn.selectedTask;
+        }
       }
 
       if (turn === undefined) {

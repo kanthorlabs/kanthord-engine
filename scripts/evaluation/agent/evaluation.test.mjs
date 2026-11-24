@@ -43,6 +43,7 @@ import {
   gradeRun,
   highestTierCost,
   modelBlend,
+  parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
   readModelPrices,
@@ -52,11 +53,13 @@ import {
   reportEvaluation,
   runActionForExit,
   runAgentArgs,
+  runAgentArgsJudge,
   runPlan,
   scaleUsdCents,
   startRun,
   validateCase,
   validateConfig,
+  writeTranscript,
 } from "./evaluation.mjs";
 
 const ENGINE_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -1202,14 +1205,6 @@ test("L4-U13: a call refuses each option that breaks its rule", async (t) => {
   assert.equal(existsSync(fixture.runs), false);
 });
 
-test("L4-U13: run.sh --set dev is refused and names --set", async (t) => {
-  const fixture = makeFixture(t);
-  const argv = ["--evaluation", "e", "--stage", "1", "--set", "dev"];
-  const plan = await startRun(fixture.start(argv));
-  assert.match(plan.error, /--set/);
-  assert.equal(existsSync(fixture.runs), false);
-});
-
 test("L4-U13: a call refuses a dirty engine tree and writes no call line", async (t) => {
   const fixture = makeFixture(t);
   writeFileSync(join(fixture.engineRoot, "new.txt"), "x");
@@ -1641,4 +1636,392 @@ test("a failed setup.sh stops the evaluation before the run and leaves no worksp
   assert.equal(run.value, 1);
   assert.equal(run.agent.calls.length, 0);
   assert.deepEqual(workRoots(run), []);
+});
+
+const RUNNER_DIR = fileURLToPath(new URL(".", import.meta.url));
+
+function reLine(change = {}) {
+  return {
+    agent: "re@1",
+    engine_version: "1",
+    provider: "a",
+    model: "m",
+    reasoning_effort: "off",
+    system_prompt_digest: "d",
+    input_digest: "i",
+    budget: { wall_ms: 1, usd: null },
+    session: "/r/d1/1-1/judge-1.jsonl",
+    ...change,
+  };
+}
+
+function makeDevFixture(t, overrides = {}) {
+  const root = tempDir(t);
+  const engineRoot = join(root, "engine");
+  makeRepo(engineRoot, { "a.txt": "a" });
+  const set = join(root, "xd", "kanthord", "evaluation", "agent");
+  makeCase(join(set, "cases", "dev"), "d1", overrides.d1);
+  rmSync(join(set, "cases", "dev", "d1-repo"), { recursive: true });
+  writeFile(join(set, ".gitignore"), "config.json\n");
+  writeFile(join(set, "binding", "backend.md"), "# Binding\n\nbackend\n");
+  makeRepo(set, {});
+  const config = { ...VALID_CONFIG, ...overrides.config };
+  writeFile(join(set, "config.json"), JSON.stringify(config));
+  const authPath = apiKeyAuth(root);
+  const start = (argv) => ({
+    argv,
+    env: {
+      XDG_DATA_HOME: join(root, "xd"),
+      XDG_STATE_HOME: join(root, "xs"),
+    },
+    execArgv: [],
+    engineRoot,
+    authPath,
+    readPrices: async () => FAKE_PRICES,
+  });
+  const runs = join(root, "xs", "kanthord", "evaluation", "runs");
+  return { root, engineRoot, set, authPath, start, runs };
+}
+
+function devArgs(id) {
+  return ["--evaluation", id, "--stage", "1", "--set", "dev"];
+}
+
+function fakeDevAgent(options = {}) {
+  const calls = [];
+  const runAgent = (args, stderrPath) => {
+    calls.push(args);
+    writeFileSync(stderrPath, options.stderr ?? "");
+    const isJudge = args.includes("re@1");
+    if (isJudge) {
+      writeFileSync(option(args, "--session"), "{}\n");
+      const diagText = options.diagText ?? '{"findings":[]}';
+      appendFileSync(
+        option(args, "--output"),
+        `${JSON.stringify({
+          agent: "re@1",
+          engine_version: "1",
+          provider: "openai-compatible",
+          model: "stub-1",
+          reasoning_effort: "off",
+          system_prompt_digest: "d",
+          input_digest: "i",
+          budget: { wall_ms: 900000, usd: null },
+          workspace: option(args, "--workspace"),
+          session: option(args, "--session"),
+          end: options.diagEnd ?? "completed",
+          duration_ms: 10,
+          model_calls: 1,
+          tool_calls: 0,
+          usage: { input: 100, output: 50, cache_read: 0, cache_write: 0 },
+          list_price_usd: 0,
+          text: diagText,
+        })}\n`,
+      );
+    } else {
+      const workspace = option(args, "--workspace");
+      writeFileSync(option(args, "--session"), "{}\n");
+      writeFileSync(join(workspace, "ok.txt"), "ok");
+      appendFileSync(
+        option(args, "--output"),
+        `${JSON.stringify(resultLine(args, "completed"))}\n`,
+      );
+    }
+    return 0;
+  };
+  return { calls, deps: { refresh: async () => {}, runAgent } };
+}
+
+async function runDev(t, id, agentOptions, overrides = {}) {
+  const fixture = makeDevFixture(t, overrides);
+  const plan = await startRun(fixture.start(devArgs(id)));
+  assert.equal(plan.error, undefined, JSON.stringify(plan));
+  const agent = fakeDevAgent(agentOptions);
+  const output = await captured(() => runPlan(plan, agent.deps));
+  const results = join(fixture.runs, id);
+  return {
+    ...fixture,
+    ...output,
+    agent,
+    results,
+    checks: jsonLines(join(results, "checks.jsonl")),
+    diagnoses: jsonLines(join(results, "diagnoses.jsonl")),
+    runDir: join(results, "d1", "1-1"),
+  };
+}
+
+test("L4-U6: parseDiagnosis returns valid findings for a correct output", () => {
+  const text =
+    '{"findings":[{"aspect":"A5","evidence":"no test run","severity":"medium"}]}';
+  const result = parseDiagnosis(text, "completed");
+  assert.equal(result.valid, true);
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0].aspect, "A5");
+});
+
+test("L4-U6: parseDiagnosis returns valid with an empty findings array", () => {
+  assert.deepEqual(parseDiagnosis('{"findings":[]}', "completed"), {
+    valid: true,
+    findings: [],
+  });
+});
+
+test("L4-U6: parseDiagnosis is invalid when end is not completed", () => {
+  const text = '{"findings":[]}';
+  assert.equal(parseDiagnosis(text, "budget_end").valid, false);
+  assert.equal(parseDiagnosis(text, null).valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when text is not a string", () => {
+  assert.equal(parseDiagnosis(null, "completed").valid, false);
+  assert.equal(parseDiagnosis(undefined, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when text holds more than one JSON object", () => {
+  const text = '{"findings":[]} {"findings":[]}';
+  assert.equal(parseDiagnosis(text, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when text holds no JSON object", () => {
+  assert.equal(parseDiagnosis("no json here", "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when the object has extra keys", () => {
+  const text = '{"findings":[],"extra":1}';
+  assert.equal(parseDiagnosis(text, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when a finding has an unknown aspect", () => {
+  const text =
+    '{"findings":[{"aspect":"A99","evidence":"e","severity":"high"}]}';
+  assert.equal(parseDiagnosis(text, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when a finding has an unknown severity", () => {
+  const text =
+    '{"findings":[{"aspect":"A1","evidence":"e","severity":"critical"}]}';
+  assert.equal(parseDiagnosis(text, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis is invalid when evidence is empty or over 500 chars", () => {
+  const over500 = "x".repeat(501);
+  assert.equal(
+    parseDiagnosis(
+      `{"findings":[{"aspect":"A1","evidence":"${over500}","severity":"high"}]}`,
+      "completed",
+    ).valid,
+    false,
+  );
+  assert.equal(
+    parseDiagnosis(
+      '{"findings":[{"aspect":"A1","evidence":"","severity":"high"}]}',
+      "completed",
+    ).valid,
+    false,
+  );
+});
+
+test("L4-U6: parseDiagnosis is invalid when findings exceed 20 entries", () => {
+  const finding = { aspect: "A1", evidence: "e", severity: "low" };
+  const findings = Array.from({ length: 21 }, () => finding);
+  const text = JSON.stringify({ findings });
+  assert.equal(parseDiagnosis(text, "completed").valid, false);
+});
+
+test("L4-U6: parseDiagnosis accepts all 9 aspects and all 3 severities", () => {
+  for (const aspect of ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"]) {
+    for (const severity of ["high", "medium", "low"]) {
+      const text = `{"findings":[{"aspect":"${aspect}","evidence":"e","severity":"${severity}"}]}`;
+      assert.equal(
+        parseDiagnosis(text, "completed").valid,
+        true,
+        `${aspect} ${severity}`,
+      );
+    }
+  }
+});
+
+test("L4-U19: writeTranscript writes empty file when session is absent", (t) => {
+  const root = tempDir(t);
+  const transcript = join(root, "transcript.md");
+  writeTranscript(join(root, "session.jsonl"), transcript);
+  assert.equal(readFileSync(transcript, "utf8"), "");
+});
+
+test("L4-U19: writeTranscript writes one section per message entry", (t) => {
+  const root = tempDir(t);
+  const session = join(root, "session.jsonl");
+  const transcript = join(root, "transcript.md");
+  const entries = [
+    {
+      type: "message",
+      id: "msg-1",
+      parentId: null,
+      timestamp: 0,
+      message: { role: "user", content: "hello" },
+    },
+    {
+      type: "message",
+      id: "msg-2",
+      parentId: "msg-1",
+      timestamp: 1,
+      message: { role: "assistant", content: "hi" },
+    },
+  ];
+  writeFileSync(
+    session,
+    entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+  );
+  writeTranscript(session, transcript);
+  const text = readFileSync(transcript, "utf8");
+  assert.match(text, /^## msg-1$/m);
+  assert.match(text, /^Role: user$/m);
+  assert.match(text, /^## msg-2$/m);
+  assert.match(text, /^Role: assistant$/m);
+  assert.match(text, /hello/);
+  assert.match(text, /hi/);
+});
+
+test("L4-U19: writeTranscript skips non-message entries", (t) => {
+  const root = tempDir(t);
+  const session = join(root, "session.jsonl");
+  const transcript = join(root, "transcript.md");
+  const entries = [
+    { type: "tool_call", id: "tc-1", something: "x" },
+    {
+      type: "message",
+      id: "msg-1",
+      parentId: null,
+      timestamp: 0,
+      message: { role: "user", content: "task" },
+    },
+  ];
+  writeFileSync(
+    session,
+    entries.map((e) => JSON.stringify(e)).join("\n") + "\n",
+  );
+  writeTranscript(session, transcript);
+  const text = readFileSync(transcript, "utf8");
+  assert.equal(text.includes("tc-1"), false);
+  assert.match(text, /^## msg-1$/m);
+});
+
+test("L4-U19: writeTranscript truncates toolResult content at 4000 chars", (t) => {
+  const root = tempDir(t);
+  const session = join(root, "session.jsonl");
+  const transcript = join(root, "transcript.md");
+  const longText = "x".repeat(5000);
+  const entry = {
+    type: "message",
+    id: "msg-1",
+    parentId: null,
+    timestamp: 0,
+    message: {
+      role: "toolResult",
+      content: [{ type: "text", text: longText }],
+    },
+  };
+  writeFileSync(session, `${JSON.stringify(entry)}\n`);
+  writeTranscript(session, transcript);
+  const text = readFileSync(transcript, "utf8");
+  const section = text.split("## msg-1")[1] ?? "";
+  assert.ok(section.includes("x".repeat(4000)), "truncated to 4000");
+  assert.ok(!section.includes("x".repeat(4001)), "no content past 4000");
+});
+
+test("L4-U11: re@1 lines with equal keys pass checkResultKeys", () => {
+  const second = reLine({ session: "/r/d1/2-1/judge-1.jsonl" });
+  assert.equal(checkResultKeys([sweLine(), reLine(), second]), null);
+});
+
+test("L4-U11: re@1 lines with a differing key fail and name the two lines", () => {
+  const lines = [sweLine(), reLine(), reLine({ model: "other" })];
+  const result = checkResultKeys(lines);
+  assert.equal(result?.key, "model");
+  assert.deepEqual(result?.lines, [2, 3]);
+});
+
+test("L4-U12: runAgentArgsJudge builds correct args with no price ratio", () => {
+  const run = {
+    config: {
+      judge_model: "openai-compatible/stub-1:off",
+      judge_usd: "0.1usd",
+    },
+    judgeRatio: { run: null, base: BASE_BLEND },
+    resultsPath: "/r/results.jsonl",
+  };
+  const args = runAgentArgsJudge(run, "/w/j", "/r/d1/1-1/judge-1.jsonl");
+  assert.deepEqual(args, [
+    "run",
+    "agent",
+    "re@1",
+    "--model",
+    "openai-compatible/stub-1:off",
+    "--budget",
+    "15m",
+    "--system-prompt",
+    join(RUNNER_DIR, "judge.md"),
+    "--workspace",
+    "/w/j",
+    "--session",
+    "/r/d1/1-1/judge-1.jsonl",
+    "--output",
+    "/r/results.jsonl",
+    "--prompt",
+    join(RUNNER_DIR, "judge-task.md"),
+  ]);
+});
+
+test("L4-U12: runAgentArgsJudge adds a scaled cost budget when ratio is set", () => {
+  const run = {
+    config: {
+      judge_model: "anthropic/claude-haiku-5-5:high",
+      judge_usd: "0.1usd",
+    },
+    judgeRatio: { run: HAIKU_BLEND, base: BASE_BLEND },
+    resultsPath: "/r/results.jsonl",
+  };
+  const args = runAgentArgsJudge(run, "/w/j", "/r/judge-1.jsonl");
+  const budgetIdx = args.lastIndexOf("--budget");
+  assert.ok(budgetIdx !== -1);
+  assert.ok(args[budgetIdx + 1] !== "15m");
+});
+
+test("L4-U9: judge_usd cap reserve gate: cap gate stops diagnosis when sum plus reserve exceeds cap", async (t) => {
+  const CAP_EXIT = 4;
+  const run = await runDev(
+    t,
+    "e",
+    {},
+    {
+      d1: { json: { usd: "0.05usd" } },
+      config: { judge_usd: "0.5usd", cap_usd: 0.1 },
+    },
+  );
+  assert.equal(run.value, CAP_EXIT);
+  assert.equal(run.agent.calls.length, 1);
+  assert.equal(run.diagnoses.length, 0);
+});
+
+test("L4-U12: a dev run writes judge-1.jsonl for the first diagnosis attempt", async (t) => {
+  const run = await runDev(t, "e", {});
+  assert.equal(run.value, 0);
+  assert.ok(run.diagnoses.length >= 1, "at least one diagnosis");
+  const judgeSession = join(run.runDir, "judge-1.jsonl");
+  assert.ok(existsSync(judgeSession), "judge-1.jsonl absent");
+});
+
+test("L4-U12: runAgentArgsJudge uses the given session path for each attempt", () => {
+  const run = {
+    config: {
+      judge_model: "openai-compatible/stub-1:off",
+      judge_usd: "0.1usd",
+    },
+    judgeRatio: { run: null, base: BASE_BLEND },
+    resultsPath: "/r/results.jsonl",
+  };
+  const args1 = runAgentArgsJudge(run, "/w/j", "/r/d1/1-1/judge-1.jsonl");
+  assert.equal(option(args1, "--session"), "/r/d1/1-1/judge-1.jsonl");
+  const args2 = runAgentArgsJudge(run, "/w/j", "/r/d1/1-1/judge-2.jsonl");
+  assert.equal(option(args2, "--session"), "/r/d1/1-1/judge-2.jsonl");
 });

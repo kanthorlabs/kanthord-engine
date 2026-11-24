@@ -57,6 +57,7 @@ const CHECK_OUTPUT_LIMIT = 64 * 1024 * 1024;
 const BREACH_CREDENTIAL = "credential";
 const BREACH_AUTH_FILE = "auth_file";
 const PROFILE_SWE = "swe@1";
+const PROFILE_RE = "re@1";
 const SET_DEV = "dev";
 const SET_HELD_OUT = "held-out";
 const SET_VALUES = [SET_DEV, SET_HELD_OUT];
@@ -84,6 +85,26 @@ const STOP_CAP = "cap";
 const NONE_TEXT = "none";
 const WORKSPACE_NAME = "w";
 const GRADING_NAME = "g";
+const JUDGE_DIR = "j";
+const JUDGE_WALL = "15m";
+const DIAGNOSES_FILE = "diagnoses.jsonl";
+const VERDICT_COMPLETE = "complete";
+const DIAGNOSIS_ASPECTS = [
+  "A1",
+  "A2",
+  "A3",
+  "A4",
+  "A5",
+  "A6",
+  "A7",
+  "A8",
+  "A9",
+];
+const DIAGNOSIS_SEVERITIES = ["high", "medium", "low"];
+const MAX_FINDINGS = 20;
+const EVIDENCE_MAX = 500;
+const TRANSCRIPT_TOOL_RESULT_LIMIT = 4000;
+const TRANSCRIPT_ENTRY_TYPE = "message";
 const MODE_CONVENTIONS = "conventions";
 const MODE_FAIL_TO_PASS = "fail_to_pass";
 const MODE_PASS_TO_PASS = "pass_to_pass";
@@ -530,6 +551,129 @@ export function checkProxyEnv(env, execArgv) {
   return execArgv.some(isUseEnvProxy);
 }
 
+function messageText(message) {
+  const { role, content } = message;
+  if (role === "toolResult") {
+    const text = (Array.isArray(content) ? content : [])
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+    return text.slice(0, TRANSCRIPT_TOOL_RESULT_LIMIT);
+  }
+  if (typeof content === "string") return content;
+  if (Array.isArray(content))
+    return content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("");
+  return "";
+}
+
+export function writeTranscript(sessionPath, transcriptPath) {
+  const lines = [];
+  if (!existsSync(sessionPath)) {
+    writeFileSync(transcriptPath, "", { mode: FILE_MODE });
+    return;
+  }
+  for (const raw of readFileSync(sessionPath, "utf8")
+    .split("\n")
+    .filter(Boolean)) {
+    let entry;
+    try {
+      entry = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+    if (entry.type !== TRANSCRIPT_ENTRY_TYPE) continue;
+    const { id, message } = entry;
+    if (!message) continue;
+    lines.push(
+      `## ${id}`,
+      "",
+      `Role: ${message.role}`,
+      "",
+      messageText(message),
+      "",
+    );
+  }
+  writeFileSync(transcriptPath, lines.join("\n"), { mode: FILE_MODE });
+}
+
+function extractJsonObjects(text) {
+  const objects = [];
+  let depth = 0;
+  let start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) {
+        objects.push(text.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return objects;
+}
+
+export function parseDiagnosis(text, end) {
+  if (end !== END_COMPLETED) return { valid: false, findings: [] };
+  if (typeof text !== "string") return { valid: false, findings: [] };
+  const objects = extractJsonObjects(text);
+  if (objects.length !== 1) return { valid: false, findings: [] };
+  let parsed;
+  try {
+    parsed = JSON.parse(objects[0]);
+  } catch {
+    return { valid: false, findings: [] };
+  }
+  if (!isObject(parsed)) return { valid: false, findings: [] };
+  if (Object.keys(parsed).length !== 1 || !Array.isArray(parsed.findings))
+    return { valid: false, findings: [] };
+  if (parsed.findings.length > MAX_FINDINGS)
+    return { valid: false, findings: [] };
+  for (const finding of parsed.findings) {
+    if (!isObject(finding)) return { valid: false, findings: [] };
+    if (Object.keys(finding).length !== 3)
+      return { valid: false, findings: [] };
+    if (!DIAGNOSIS_ASPECTS.includes(finding.aspect))
+      return { valid: false, findings: [] };
+    if (
+      typeof finding.evidence !== "string" ||
+      finding.evidence.length < 1 ||
+      finding.evidence.length > EVIDENCE_MAX
+    )
+      return { valid: false, findings: [] };
+    if (!DIAGNOSIS_SEVERITIES.includes(finding.severity))
+      return { valid: false, findings: [] };
+  }
+  return { valid: true, findings: parsed.findings };
+}
+
+export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
+  const runnerDir = dirname(SCRIPT_PATH);
+  const args = ["run", "agent", PROFILE_RE, "--model", run.config.judge_model];
+  args.push("--budget", JUDGE_WALL);
+  if (run.judgeRatio.run !== null) {
+    const cents = parseUsdCents(run.config.judge_usd);
+    const scaled = scaleUsdCents(
+      cents,
+      run.judgeRatio.run,
+      run.judgeRatio.base,
+    );
+    args.push("--budget", budgetText(scaled));
+  }
+  args.push("--system-prompt", join(runnerDir, "judge.md"));
+  args.push("--workspace", judgeWorkspace);
+  args.push("--session", judgeSessionPath);
+  args.push("--output", run.resultsPath);
+  args.push("--prompt", join(runnerDir, "judge-task.md"));
+  return args;
+}
+
 function readJsonLines(path) {
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8")
@@ -764,6 +908,23 @@ async function refreshForRun(run, deps) {
   }
 }
 
+async function refreshForJudge(run, deps) {
+  const provider = parseModelSelection(run.config.judge_model).provider;
+  const validity = parseWallMs(JUDGE_WALL) + REFRESH_MARGIN_MS;
+  try {
+    await deps.refresh(run.authPath, provider, validity);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nextJudgeAttempt(runDir) {
+  let n = 1;
+  while (existsSync(join(runDir, `judge-${n}.jsonl`))) n++;
+  return n;
+}
+
 function resultEnd(run) {
   const line = readJsonLines(run.resultsPath).findLast(
     (entry) => entry.session === run.sessionPath,
@@ -807,6 +968,70 @@ function gradeWorkspace(run, session, roots) {
   return { stop: null };
 }
 
+async function runDiagnosis(run, judgeRoot, deps) {
+  const judgeWorkspace = join(judgeRoot, JUDGE_DIR);
+  mkdirSync(judgeWorkspace, { recursive: true, mode: DIRECTORY_MODE });
+  writeTranscript(run.sessionPath, join(judgeWorkspace, "transcript.md"));
+  for (const name of ["diff.patch", "check.txt"]) {
+    const src = join(run.runDir, name);
+    if (existsSync(src)) copyFileSync(src, join(judgeWorkspace, name));
+  }
+  const checkLine = readJsonLines(run.checksPath).findLast(
+    (line) => line.case === run.caseId && line.repeat === run.repeat,
+  );
+  writeFileSync(
+    join(judgeWorkspace, "check.json"),
+    `${JSON.stringify(checkLine ?? {})}\n`,
+    { mode: FILE_MODE },
+  );
+  copyFileSync(
+    join(run.caseFolder, "task.md"),
+    join(judgeWorkspace, "task.md"),
+  );
+  if (run.stage === BINDING_STAGE) {
+    const binding = join(run.evalSetDir, "binding", `${run.caseJson.kind}.md`);
+    copyFileSync(binding, join(judgeWorkspace, `${run.caseJson.kind}.md`));
+  }
+  const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
+  const judgeReserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
+  if (!checkStartGate(sum, judgeReserve, run.config.cap_usd))
+    return { stop: STOP_CAP };
+  const attemptN = nextJudgeAttempt(run.runDir);
+  const judgeSessionPath = join(run.runDir, `judge-${attemptN}.jsonl`);
+  const judgeStderrPath = join(run.runDir, `judge-${attemptN}-stderr.txt`);
+  if (!(await refreshForJudge(run, deps)))
+    return { stop: "the credential refresh failed" };
+  const refreshed = captureAuthState(run.authPath);
+  if (refreshedAuthBreach(refreshed, run.authStart))
+    return breachStop(run, BREACH_AUTH_FILE);
+  for (const value of extractCredentialValues(run.authPath))
+    run.credValues.add(value);
+  const exit = deps.runAgent(
+    runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath),
+    judgeStderrPath,
+  );
+  const count = countCredentialInFile(judgeSessionPath, run.credValues);
+  if (count > 0) return credentialStop(run, count);
+  if (checkAuthFileBreach(run.authPath, refreshed))
+    return breachStop(run, BREACH_AUTH_FILE);
+  const stderrText = readFileSync(judgeStderrPath, "latin1");
+  if (runActionForExit(exit, stderrText) === ACTION_STOP)
+    return { stop: `judge exit ${exit}` };
+  const resultLine = readJsonLines(run.resultsPath).findLast(
+    (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
+  );
+  const { valid, findings } = parseDiagnosis(
+    resultLine?.text ?? null,
+    resultLine?.end ?? END_ABSENT,
+  );
+  appendJsonLine(run.diagnosesPath, {
+    session: judgeSessionPath,
+    valid,
+    findings,
+  });
+  return { stop: null };
+}
+
 async function evaluateInRoots(run, deps, roots) {
   const workspace = join(roots[0], WORKSPACE_NAME);
   const bundle = join(run.caseFolder, "repo.bundle");
@@ -831,7 +1056,14 @@ async function evaluateInRoots(run, deps, roots) {
   const stderrText = readFileSync(stderrPath, "latin1");
   if (runActionForExit(exit, stderrText) === ACTION_STOP)
     return { stop: `run agent exit ${exit}` };
-  return gradeWorkspace(run, { workspace, savedConfig }, roots);
+  const gradeResult = gradeWorkspace(run, { workspace, savedConfig }, roots);
+  if (gradeResult.stop) return gradeResult;
+  if (run.set === SET_DEV) {
+    const judgeRoot = makeRoot(run.workBaseDir);
+    roots.push(judgeRoot);
+    return runDiagnosis(run, judgeRoot, deps);
+  }
+  return gradeResult;
 }
 
 export async function evaluateRun(run, deps) {
@@ -867,7 +1099,11 @@ async function readConfiguration(evalSetDir, readPrices) {
   const prices = await readPrices();
   const priceError = basePriceError(prices, config);
   if (priceError) return { error: `${path}: ${priceError}` };
-  return { config, ratio: priceRatio(prices, config) };
+  return {
+    config,
+    ratio: priceRatio(prices, config),
+    judgeRatio: priceRatio(prices, { ...config, model: config.judge_model }),
+  };
 }
 
 function heldOutEvaluations(resultsBaseDir, stage) {
@@ -903,7 +1139,6 @@ function parseRunOptions(argv) {
     return { error: "--stage is 1 or 2" };
   if (!SET_VALUES.includes(values.set))
     return { error: "--set is dev or held-out" };
-  if (values.set === SET_DEV) return { error: "--set dev is not available" };
   return {
     evalId: values.evaluation,
     stage: Number(values.stage),
@@ -1001,10 +1236,12 @@ export async function startRun(start) {
   return plan;
 }
 
-function baseCostSum(resultsPath, r) {
+function baseCostSum(resultsPath, sweR, judgeR) {
   let sum = 0;
-  for (const line of readJsonLines(resultsPath))
+  for (const line of readJsonLines(resultsPath)) {
+    const r = line.agent === PROFILE_RE ? (judgeR ?? null) : (sweR ?? null);
     sum += computeBaseCost(line.list_price_usd ?? 0, r);
+  }
   return sum;
 }
 
@@ -1019,6 +1256,7 @@ function planRun(plan, entry, repeat) {
     sessionPath: join(runDir, "session.jsonl"),
     resultsPath: join(plan.resultsDir, "results.jsonl"),
     checksPath: join(plan.resultsDir, "checks.jsonl"),
+    diagnosesPath: join(plan.resultsDir, DIAGNOSES_FILE),
     workBaseDir: plan.workBaseDir,
     evalSetDir: plan.evalSetDir,
     authPath: plan.authPath,
@@ -1026,6 +1264,7 @@ function planRun(plan, entry, repeat) {
     credValues: plan.credValues,
     config: plan.config,
     ratio: plan.ratio,
+    judgeRatio: plan.judgeRatio,
     stage: plan.stage,
     set: plan.set,
   };
@@ -1050,7 +1289,7 @@ function pendingRuns(plan) {
 async function runPending(plan, deps) {
   plan.credValues = new Set(extractCredentialValues(plan.authPath));
   for (const run of pendingRuns(plan)) {
-    const sum = baseCostSum(run.resultsPath, plan.ratio.r);
+    const sum = baseCostSum(run.resultsPath, plan.ratio.r, plan.judgeRatio.r);
     const reserve = parseUsdCents(run.caseJson.usd) / CENTS_PER_DOLLAR;
     if (!checkStartGate(sum, reserve, plan.config.cap_usd))
       return { stop: STOP_CAP };
@@ -1101,6 +1340,11 @@ export function checkResultKeys(resultLines) {
       if (difference) return difference;
     }
   }
+  const re = numbered.filter((entry) => entry.line.agent === PROFILE_RE);
+  for (const key of RESULT_KEYS) {
+    const difference = firstDifference(re, key);
+    if (difference) return difference;
+  }
   return null;
 }
 
@@ -1122,6 +1366,29 @@ function shareText(part, whole) {
   return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
+function goodOnAspect(diagnoses, aspect, check) {
+  const runDir = dirname(check.session);
+  const diag = diagnoses.findLast((d) => dirname(d.session) === runDir);
+  if (!diag || !diag.valid) return false;
+  return !diag.findings.some(
+    (f) =>
+      f.aspect === aspect && (f.severity === "high" || f.severity === "medium"),
+  );
+}
+
+function findingsForAspect(diagnoses, aspect, severity) {
+  return diagnoses.reduce(
+    (count, d) =>
+      count +
+      (d.valid
+        ? d.findings.filter(
+            (f) => f.aspect === aspect && f.severity === severity,
+          ).length
+        : 0),
+    0,
+  );
+}
+
 function goalLines(report, joined) {
   const { checks } = report;
   const costs = joined.map((line) =>
@@ -1137,6 +1404,20 @@ function goalLines(report, joined) {
   for (const aspect of ["a1", "a2", "a3", "a4"]) {
     const good = checks.filter((line) => line[aspect]).length;
     lines.push(`${aspect.toUpperCase()} good runs: ${good}`);
+  }
+  if (report.iteration.set === SET_DEV) {
+    const diagnoses = report.diagnoses ?? [];
+    const invalid = diagnoses.filter((d) => !d.valid).length;
+    for (const aspect of ["A5", "A6", "A7"]) {
+      const good = checks.filter((c) =>
+        goodOnAspect(diagnoses, aspect, c),
+      ).length;
+      const counts = DIAGNOSIS_SEVERITIES.map(
+        (sev) => `${findingsForAspect(diagnoses, aspect, sev)} ${sev}`,
+      ).join(", ");
+      lines.push(`${aspect} good runs: ${good}, findings: ${counts}`);
+    }
+    lines.push(`invalid diagnoses: ${invalid}`);
   }
   lines.push(
     `A8: base cost median ${numberText(median(costs))}, base cost sum ${numberText(costs.reduce((a, b) => a + b, 0))}, duration_ms median ${medianOf("duration_ms")}, model_calls median ${medianOf("model_calls")}, tool_calls median ${medianOf("tool_calls")}`,
@@ -1167,25 +1448,73 @@ function gateLines(report) {
   return { verdict: gate.verdict, lines: ["## Gate", "", `gate: ${line}`, ""] };
 }
 
-function costLines(report) {
-  const swe = report.results.filter((line) => line.agent === PROFILE_SWE);
-  const costs = swe.map((line) =>
-    computeBaseCost(line.list_price_usd ?? 0, report.r),
+function agentCostBlock(results, r, label) {
+  const lines = results.filter((line) => line.agent === label);
+  const costs = lines.map((line) =>
+    computeBaseCost(line.list_price_usd ?? 0, r),
   );
   const sum = (values) => values.reduce((a, b) => a + b, 0);
-  const usage = (key) => sum(swe.map((line) => line.usage?.[key] ?? 0));
+  const usage = (key) => sum(lines.map((line) => line.usage?.[key] ?? 0));
   const inputSide = usage("input") + usage("cache_read") + usage("cache_write");
+  return [
+    `${label}: list price ${numberText(sum(lines.map((line) => line.list_price_usd ?? 0)))}, r ${numberText(r)}, base cost ${numberText(sum(costs))}`,
+    `${label}: base cost of one run: mean ${numberText(costs.length ? sum(costs) / costs.length : null)}, maximum ${numberText(costs.length ? Math.max(...costs) : null)}`,
+    `${label}: cache-read share ${shareText(usage("cache_read"), inputSide)}, output ratio ${shareText(usage("output"), inputSide)}`,
+  ];
+}
+
+function costLines(report) {
   const planned = report.cases.length * report.iteration.repeats;
+  const diagnoses = report.diagnoses ?? [];
+  const unstartedDiag =
+    report.iteration.set === SET_DEV ? planned - diagnoses.length : null;
   return [
     "## Cost",
     "",
-    `swe@1: list price ${numberText(sum(swe.map((line) => line.list_price_usd ?? 0)))}, r ${numberText(report.r)}, base cost ${numberText(sum(costs))}`,
-    `swe@1: base cost of one run: mean ${numberText(costs.length ? sum(costs) / costs.length : null)}, maximum ${numberText(costs.length ? Math.max(...costs) : null)}`,
-    `swe@1: cache-read share ${shareText(usage("cache_read"), inputSide)}, output ratio ${shareText(usage("output"), inputSide)}`,
+    ...agentCostBlock(report.results, report.r, PROFILE_SWE),
+    ...agentCostBlock(report.results, report.judgeR ?? null, PROFILE_RE),
     `cap_usd of each call: ${report.calls.map((line) => line.cap_usd).join(", ") || NONE_TEXT}`,
-    `unstarted runs: ${planned - report.checks.length}`,
+    `unstarted runs: ${planned - report.checks.length}${unstartedDiag !== null ? `, unstarted diagnoses: ${unstartedDiag}` : ""}`,
     "",
   ];
+}
+
+function devCaseLines(report) {
+  const { checks, cases, iteration } = report;
+  const diagnoses = report.diagnoses ?? [];
+  const lines = ["## Dev cases", ""];
+  for (const c of cases) {
+    const caseChecks = checks.filter((line) => line.case === c.id);
+    const passes = caseChecks.filter((line) => line.pass).length;
+    const good = (key) => caseChecks.filter((line) => line[key]).length;
+    const goodDiag = (aspect) =>
+      caseChecks.filter((c) => goodOnAspect(diagnoses, aspect, c)).length;
+    lines.push(
+      `case ${c.id}: passes ${passes}, A1 ${good("a1")}, A2 ${good("a2")}, A3 ${good("a3")}, A4 ${good("a4")}, A5 ${goodDiag("A5")}, A6 ${goodDiag("A6")}, A7 ${goodDiag("A7")}`,
+    );
+  }
+  const planned = cases.length * iteration.repeats;
+  const ceiling = cases.filter((c) => {
+    const cc = checks.filter((line) => line.case === c.id);
+    return cc.length > 0 && cc.every((line) => line.pass);
+  }).length;
+  const floor = cases.filter((c) => {
+    const cc = checks.filter((line) => line.case === c.id);
+    return cc.length > 0 && cc.every((line) => !line.pass);
+  }).length;
+  lines.push(
+    "",
+    `set-difficulty: ${ceiling} ceiling, ${floor} floor of ${cases.length}`,
+    "",
+  );
+  const plannedDiagnoses = planned;
+  const doneDiagnoses = diagnoses.length;
+  const doneChecks = checks.length;
+  const verdict =
+    doneChecks >= planned && doneDiagnoses >= plannedDiagnoses
+      ? VERDICT_COMPLETE
+      : VERDICT_NONE;
+  return { lines, verdict };
 }
 
 export function buildReport(report) {
@@ -1207,6 +1536,12 @@ export function buildReport(report) {
     verdict = gate.verdict;
     lines.push(...gate.lines);
   }
+  if (iteration.set === SET_DEV) {
+    const dev = devCaseLines(report);
+    verdict = dev.verdict;
+    lines.push(...dev.lines);
+    lines.push(`verdict ${verdict}`, "");
+  }
   lines.push(...costLines(report));
   return { text: lines.join("\n"), verdict };
 }
@@ -1217,15 +1552,21 @@ function writeReport(evaluation) {
   const earlier = heldOutEvaluations(resultsBaseDir, iteration.stage).filter(
     (entry) => entry.id !== evalId && entry.startedMs < startedMs,
   ).length;
+  const diagnosesFile = join(resultsDir, DIAGNOSES_FILE);
+  const diagnoses = existsSync(diagnosesFile)
+    ? readJsonLines(diagnosesFile)
+    : [];
   const report = buildReport({
     evalId,
     iteration,
     cases: evaluation.cases,
     r: evaluation.ratio.r,
+    judgeR: evaluation.judgeRatio?.r ?? null,
     earlier,
     checks: readJsonLines(join(resultsDir, "checks.jsonl")),
     results: readJsonLines(join(resultsDir, "results.jsonl")),
     calls: readJsonLines(join(resultsDir, "calls.jsonl")),
+    diagnoses,
   });
   writeFileSync(join(resultsDir, "report.md"), report.text, {
     mode: FILE_MODE,
@@ -1277,6 +1618,7 @@ export async function reportEvaluation(start) {
     iteration,
     cases: cases.cases,
     ratio: read.ratio,
+    judgeRatio: read.judgeRatio,
   });
   return { verdict };
 }

@@ -46,17 +46,28 @@ const SWE_ROLE = "Your role is `swe@1`";
 const RE_ROLE = "Your role is `re@1`";
 const WRITE_TASKS = ["task d1", "task h1"];
 const TURN_USAGE = { input: 1000, output: 100 };
-const DONE_TURN: StubTurn = { kind: "text", text: "done", usage: TURN_USAGE };
-const WRITE_TURN: StubTurn = {
+const DONE_TURN: StubTurn & { selectedRole: string; selectedTask: string } = {
+  kind: "text",
+  text: "done",
+  usage: TURN_USAGE,
+  selectedRole: "swe@1",
+  selectedTask: "done",
+};
+const WRITE_TURN: StubTurn & { selectedRole: string; selectedTask: string } = {
   kind: "tool_calls",
   calls: [{ name: "write", args: { path: "ok.txt", content: "ok" } }],
   usage: TURN_USAGE,
+  selectedRole: "swe@1",
+  selectedTask: "write ok.txt",
 };
-const FINDINGS_TURN: StubTurn = {
-  kind: "text",
-  text: '{"findings":[{"aspect":"A5","evidence":"session.jsonl: no test run","severity":"medium"}]}',
-  usage: TURN_USAGE,
-};
+const FINDINGS_TURN: StubTurn & { selectedRole: string; selectedTask: string } =
+  {
+    kind: "text",
+    text: '{"findings":[{"aspect":"A5","evidence":"session.jsonl: no test run","severity":"medium"}]}',
+    usage: TURN_USAGE,
+    selectedRole: "re@1",
+    selectedTask: "diagnose",
+  };
 
 const CASE_SCRIPT = `
 set -e
@@ -103,19 +114,82 @@ function roleText(input: RequestItem[], role: string): string {
     .join("");
 }
 
-function sweTurn(input: RequestItem[]): StubTurn {
+function sweTurn(
+  input: RequestItem[],
+): StubTurn & { selectedRole: string; selectedTask: string } {
   const task = roleText(input, ROLE_USER);
   const answered = input.some((item) => item.type === TOOL_OUTPUT_TYPE);
   const writes = WRITE_TASKS.some((text) => task.includes(text));
   return writes && !answered ? WRITE_TURN : DONE_TURN;
 }
 
-export function l4Responder(): (body: unknown) => StubTurn | undefined {
+export function l4Responder(): (
+  body: unknown,
+) => (StubTurn & { selectedRole?: string; selectedTask?: string }) | undefined {
   return (body) => {
     const input = (body as RequestBody).input ?? [];
     const system = roleText(input, ROLE_SYSTEM);
     if (system.includes(SWE_ROLE)) return sweTurn(input);
     if (system.includes(RE_ROLE)) return FINDINGS_TURN;
+    return undefined;
+  };
+}
+
+const WRITE_NEW_SH_TURN: StubTurn & {
+  selectedRole: string;
+  selectedTask: string;
+} = {
+  kind: "tool_calls",
+  calls: [
+    { name: "write", args: { path: "test/new.sh", content: "exit 0\n" } },
+  ],
+  usage: TURN_USAGE,
+  selectedRole: "swe@1",
+  selectedTask: "write test/new.sh",
+};
+
+function sweTurnAC2(
+  input: RequestItem[],
+): StubTurn & { selectedRole: string; selectedTask: string } {
+  const task = roleText(input, ROLE_USER);
+  const answered = input.some((item) => item.type === TOOL_OUTPUT_TYPE);
+  if (task.includes("task d2") && !answered) return WRITE_NEW_SH_TURN;
+  if (WRITE_TASKS.some((text) => task.includes(text)) && !answered)
+    return WRITE_TURN;
+  return DONE_TURN;
+}
+
+export function l4ResponderAC2(): (
+  body: unknown,
+) => (StubTurn & { selectedRole?: string; selectedTask?: string }) | undefined {
+  return (body) => {
+    const input = (body as RequestBody).input ?? [];
+    const system = roleText(input, ROLE_SYSTEM);
+    if (system.includes(SWE_ROLE)) return sweTurnAC2(input);
+    if (system.includes(RE_ROLE)) return FINDINGS_TURN;
+    return undefined;
+  };
+}
+
+const INVALID_FINDINGS_TURN: StubTurn & {
+  selectedRole: string;
+  selectedTask: string;
+} = {
+  kind: "text",
+  text: "no findings",
+  usage: TURN_USAGE,
+  selectedRole: "re@1",
+  selectedTask: "diagnose",
+};
+
+export function l4ResponderAC9(): (
+  body: unknown,
+) => (StubTurn & { selectedRole?: string; selectedTask?: string }) | undefined {
+  return (body) => {
+    const input = (body as RequestBody).input ?? [];
+    const system = roleText(input, ROLE_SYSTEM);
+    if (system.includes(SWE_ROLE)) return sweTurn(input);
+    if (system.includes(RE_ROLE)) return INVALID_FINDINGS_TURN;
     return undefined;
   };
 }
