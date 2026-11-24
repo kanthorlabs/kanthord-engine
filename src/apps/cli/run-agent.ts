@@ -60,7 +60,11 @@ import {
   readAuthEntry,
   userHome,
 } from "./run-agent-auth.ts";
-import { budgetResultFields, parseBudget } from "./run-agent-budget.ts";
+import {
+  budgetResultFields,
+  checkBudgetUnpriced,
+  parseBudget,
+} from "./run-agent-budget.ts";
 import { budgetDigestField, inputDigest } from "./run-agent-digest.ts";
 import {
   toolChildEnvironment,
@@ -108,29 +112,6 @@ const OPEN_FAILED_CODE = "cli.run.agent.open_failed";
 const START_REFUSED_CODE = "cli.run.agent.start_refused";
 const STOPPED_CODE = "cli.run.agent.stopped";
 const NONZERO_CODE = "cli.run.agent.nonzero";
-const BUDGET_UNPRICED = "cli.run.agent.budget_unpriced";
-const OPTION_BUDGET = "--budget";
-const FREE_COST = 0;
-
-function checkBudgetUnpriced(
-  usd: number | null,
-  modelObj: ReturnType<typeof resolveModel>,
-): void {
-  if (usd === null) return;
-  const { cost } = modelObj;
-  if (
-    cost.input === FREE_COST &&
-    cost.output === FREE_COST &&
-    cost.cacheRead === FREE_COST &&
-    cost.cacheWrite === FREE_COST
-  ) {
-    throw new Diagnostic(
-      BUDGET_UNPRICED,
-      "run agent: the resolved model has no price; a cost budget cannot be used.",
-      { fields: [["option", OPTION_BUDGET]] },
-    );
-  }
-}
 
 function collect(value: string, previous: string[]): string[] {
   return [...previous, value];
@@ -337,6 +318,9 @@ async function runAgent(
     const rTmp = join(R, "tmp");
     mkdirSync(rHome);
     mkdirSync(rTmp);
+    if (outputTarget.kind === OutputKind.Path) {
+      outputFd = openOutputFile(outputTarget.path);
+    }
     withoutAmbientCredentials(process.env, rHome, rTmp);
     const controller = new AbortController();
     releaseSignal = stopOnSignal(controller);
@@ -382,10 +366,7 @@ async function runAgent(
       reasoning_effort: resolvedModel.reasoning_effort as ReasoningLevel,
     };
     const modelObj = resolveModel(runtime, resolvedConfig);
-    checkBudgetUnpriced(parsedBudget.usd, modelObj);
-    if (outputTarget.kind === OutputKind.Path) {
-      outputFd = openOutputFile(outputTarget.path);
-    }
+    checkBudgetUnpriced(parsedBudget.usd, modelObj.cost);
     const systemPromptText = composeSystemPrompt(
       profilePrompt(profile as ProfileName),
       systemPromptParts.map((text) => ({ heading: null, text })),

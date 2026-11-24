@@ -1,6 +1,8 @@
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { Diagnostic } from "../../kernel/errors.ts";
 
 const OPTION_INVALID = "cli.run.agent.option_invalid";
+const BUDGET_UNPRICED = "cli.run.agent.budget_unpriced";
 const OPTION_BUDGET = "--budget";
 
 const DURATION_PATTERN = /^([1-9][0-9]*)(s|m|h)$/;
@@ -81,4 +83,23 @@ export function budgetResultFields(
   const display =
     usdRaw === undefined ? wallDisplay : `${wallDisplay}, ${usdRaw}`;
   return { wall_ms: parsed.wallMs, usd: parsed.usd, display };
+}
+
+export function checkBudgetUnpriced(
+  usd: number | null,
+  cost: Model<Api>["cost"],
+): void {
+  if (usd === null) return;
+  if (
+    cost.input === ZERO_USD &&
+    cost.output === ZERO_USD &&
+    cost.cacheRead === ZERO_USD &&
+    cost.cacheWrite === ZERO_USD
+  ) {
+    throw new Diagnostic(
+      BUDGET_UNPRICED,
+      "run agent: the resolved model has no price; a cost budget cannot be used.",
+      { fields: [["option", OPTION_BUDGET]] },
+    );
+  }
 }

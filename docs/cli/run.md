@@ -131,6 +131,10 @@ The `--budget` option gives one wall budget, one cost budget, or both.
 The first limit the run reaches ends the current turn with the end `budget_end`
 and exit `4`. The result field `budget_reached` is `wall` or `usd`.
 
+- The run compares the cost with the cost budget after each assistant message.
+  One model call can thus pass the cost budget. The run sends no model request
+  after a limit.
+- A provider error that comes before a limit keeps the end `failed`.
 - With no cost budget, the run has no cost limit.
 - The run refuses a cost budget when the resolved model has no price, with
   `cli.run.agent.budget_unpriced`, `option: --budget`. An `openai-compatible`

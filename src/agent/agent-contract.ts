@@ -250,6 +250,7 @@ function buildRun(ctx: RunContext): AgentRun {
   const session = runtime.session;
   let totals: RunTotals = zeroTotals();
   let budgetReached: BudgetLimit | null = null;
+  let failedBeforeLimit = false;
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
@@ -262,19 +263,23 @@ function buildRun(ctx: RunContext): AgentRun {
 
   const originalFinishTurn = session.agent.finishTurn;
   session.agent.finishTurn = async (turn, signal) => {
-    if (endAfterTurnFlag) return { action: "end" };
+    if (endAfterTurnFlag || budgetReached !== null) return { action: "end" };
     return (await originalFinishTurn?.(turn, signal)) ?? undefined;
   };
+
+  function reach(limit: BudgetLimit): void {
+    if (budgetReached !== null) return;
+    budgetReached = limit;
+    failedBeforeLimit =
+      failureOf(lastAssistantOf(session.messages), model) !== null;
+    if (sending) void session.abort();
+  }
 
   const unsubscribeMessage = session.subscribe((event) => {
     if (event.type !== MESSAGE_END) return;
     if (event.message.role !== ASSISTANT_ROLE) return;
     totals = addMessageTotals(totals, event.message);
-    usdTracker.check(totals.listPriceUsd, () => {
-      if (budgetReached !== null) return;
-      budgetReached = BudgetLimit.Usd;
-      if (sending) void session.abort();
-    });
+    usdTracker.check(totals.listPriceUsd, () => reach(BudgetLimit.Usd));
   });
 
   const unsubscribeSignal = addAbortListener(inputSignal, () => {
@@ -282,11 +287,7 @@ function buildRun(ctx: RunContext): AgentRun {
     void session.abort();
   });
 
-  timer.start(() => {
-    if (budgetReached !== null) return;
-    budgetReached = BudgetLimit.Wall;
-    if (sending) void session.abort();
-  });
+  timer.start(() => reach(BudgetLimit.Wall));
 
   function release(): void {
     closed = true;
@@ -315,17 +316,8 @@ function buildRun(ctx: RunContext): AgentRun {
   function loopEnd(): TurnEnd {
     if (extensionFailure.reason !== null)
       return internalEnd(extensionFailure.reason);
-    if (budgetReached !== null)
-      return buildTurnEnd({
-        budgetReached,
-        stopped: false,
-        failure: null,
-        text: currentText(),
-        totals,
-        warnings: redaction.takeWarnings(),
-      });
     const failure = failureOf(lastAssistantOf(session.messages), model);
-    if (failure !== null) {
+    if (failure !== null && (budgetReached === null || failedBeforeLimit)) {
       return {
         end: RunEnd.Failed,
         budgetReached: null,
@@ -365,6 +357,7 @@ function buildRun(ctx: RunContext): AgentRun {
       assert.ok(!sending, "send called while a send is in progress");
       sending = true;
       endAfterTurnFlag = false;
+      failedBeforeLimit = false;
       extensionFailure.reason = null;
 
       try {

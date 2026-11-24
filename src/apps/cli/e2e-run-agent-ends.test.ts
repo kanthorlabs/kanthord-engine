@@ -18,6 +18,7 @@ import { RunExitCode } from "./run-agent-exit.ts";
 import {
   type AgentFixtures,
   assertRefused,
+  assertRow,
   buildFixtures,
   type CliResult,
   commitAll,
@@ -38,7 +39,7 @@ const OK_TEXT = "ok";
 const GIT_CLEAN = "git_clean";
 const GIT_WORKTREE = "git_worktree";
 const REASON_ROW = "reason:";
-const OPTION_ROW = "option:";
+const OPTION_NAME = "option";
 const OPTION_BUDGET = "--budget";
 const NO_REQUESTS = 0;
 const BUDGET_5S = "5s";
@@ -339,17 +340,11 @@ test(
     });
 
     assertRefused(result, BUDGET_UNPRICED_CODE);
-    const optionRow = result.stderr
-      .split("\n")
-      .find(
-        (line) =>
-          line.startsWith(OPTION_ROW) &&
-          line.slice(OPTION_ROW.length).trim() === OPTION_BUDGET,
-      );
-    assert.ok(optionRow !== undefined, result.stderr);
+    assertRow(result.stderr, OPTION_NAME, OPTION_BUDGET);
+    assert.ok(!result.stderr.includes(TEST_K));
     assert.equal(stub.requests.length, NO_REQUESTS);
     assert.equal(existsSync(fixtures.S), false);
-    assert.equal(existsSync(fixtures.O), false);
+    assert.deepEqual(resultLines(fixtures.O), []);
     assert.deepEqual(readdirSync(fixtures.T), []);
   },
 );
