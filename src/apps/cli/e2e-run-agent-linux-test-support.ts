@@ -23,7 +23,7 @@ const NFT_SET = "connections";
 const SUCCESS_EXIT = 0;
 const WRITE_SCRIPT =
   'umask 077 && mkdir -p "$(dirname "$1")" && cat > "$1" && chmod 0600 "$1"';
-const DIRECTORY_SCRIPT = 'umask 077 && mkdir -p "$1"';
+const DIRECTORY_SCRIPT = 'umask 077 && mkdir -p "$1" && chmod 0700 "$1"';
 const WORKSPACE_SCRIPT = [
   'umask 077 && git init -q -b main "$1"',
   'printf workspace > "$1/README.md"',

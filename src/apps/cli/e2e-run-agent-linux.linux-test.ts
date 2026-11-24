@@ -52,6 +52,7 @@ const DNS_HOST = "192.0.2.53";
 const DNS_PORT = 53;
 const STUB_TEXT = "ok";
 const SUCCESS_EXIT = 0;
+const GROUP_OTHER_WRITE = 0o022;
 const EMPTY_OUTPUT = "";
 const STUB_CALL_COUNT = 1;
 const LOOPBACK = "127.0.0.1";
@@ -539,6 +540,11 @@ test(
         K: TEST_K,
       };
       sessions.push(fixtures.S);
+      const { stdout: dMode } = await asTestUser(["stat", "-c", "%a", D]);
+      assert.ok(
+        !(parseInt(dMode.trim(), 8) & GROUP_OTHER_WRITE),
+        `fixture ${D} must have mode 0700`,
+      );
 
       const result = await spawnCliAsTestUser(
         fixtures,
