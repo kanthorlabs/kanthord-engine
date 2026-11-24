@@ -48,6 +48,7 @@ export type StubRequestRecord = {
 
 export interface LlmStubOptions {
   fixedStatus?: { status: number; body: string };
+  responder?: (body: unknown) => StubTurn | undefined;
 }
 
 export interface LlmStub {
@@ -169,6 +170,7 @@ export async function llmStub(
 ): Promise<LlmStub> {
   const requests: StubRequestRecord[] = [];
   let callIndex = 0;
+  let requestIndex = 0;
   let connections = 0;
   let closedRequests = 0;
 
@@ -196,8 +198,16 @@ export async function llmStub(
         return;
       }
 
-      const turn = turns[callIndex];
-      callIndex += 1;
+      const currentRequestIndex = requestIndex;
+      requestIndex += 1;
+
+      let turn: StubTurn | undefined;
+      if (options.responder !== undefined) {
+        turn = options.responder(body);
+      } else {
+        turn = turns[callIndex];
+        callIndex += 1;
+      }
 
       if (turn === undefined) {
         res.writeHead(500, { "content-type": "application/json" });
@@ -213,7 +223,7 @@ export async function llmStub(
         return;
       }
 
-      const turnIndex = callIndex - 1;
+      const turnIndex = currentRequestIndex;
       const delayMs =
         turn.kind === TEXT_TURN_KIND
           ? (turn.delayMs ?? NO_DELAY_MS)
