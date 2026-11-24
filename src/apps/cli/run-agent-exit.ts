@@ -9,7 +9,6 @@ import type { RunFailure, SecretWarning } from "../../agent/agent-contract.ts";
 import { ExitCode } from "./constants.ts";
 
 const OPEN_FAILED = "cli.run.agent.open_failed";
-const START_REFUSED = "cli.run.agent.start_refused";
 const PROVIDER_RETRYABLE = "cli.run.agent.provider_retryable";
 const PROVIDER_FAILED = "cli.run.agent.provider_failed";
 const INTERNAL_ERROR = "cli.run.agent.internal_error";
@@ -47,15 +46,6 @@ export function agentClassValue(
 
 function reasonField(reason: string): [string, string][] {
   return [["reason", reason.replace(/[\r\n]+/g, " ")]];
-}
-
-export function printStartRefused(reason: string): void {
-  const diag = new Diagnostic(
-    START_REFUSED,
-    "run agent: a start precondition is not met.",
-    { fields: reasonField(reason) },
-  );
-  process.stderr.write(`${diagnostic(diag)}\n${diagnosticRows(diag)}`);
 }
 
 export function printOpenFailed(error: AgentOpenError): void {

@@ -203,9 +203,15 @@ starts with the precondition id.
   only the names of `childEnvironment` plus `PATH`. It sets
   `core.hooksPath=/dev/null` and `core.fsmonitor=false`, so the check runs no
   hook and no fsmonitor command. Filter drivers run as configured.
-- The `git_clean` output on a clean workspace differs from `git status` for a
-  developer: the isolated environment and `--no-optional-locks` suppress hooks,
-  fsmonitor and index refresh writes.
+- `--no-optional-locks` stops the refresh write of the index. The check changes
+  no file of the workspace.
+- The check differs from a `git status` of the developer. The global ignore
+  file and the global filter drivers are absent. A file that only a global
+  ignore rule covers is thus an uncommitted change.
+- An ignored file is no uncommitted change.
+- Each `git` command has a deadline of 30 seconds. A timeout fails the
+  precondition.
+- The `reason` row holds no path.
 
 ### Directories and environment
 

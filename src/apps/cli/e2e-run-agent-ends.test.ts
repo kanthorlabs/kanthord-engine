@@ -14,11 +14,14 @@ import { test } from "node:test";
 import { ExitCode } from "./constants.ts";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
 import {
+  type AgentFixtures,
   assertRefused,
   buildFixtures,
+  type CliResult,
   commitAll,
   digestListing,
   porcelainStatus,
+  resultLines,
   spawnCli,
   TEST_TIMEOUT_MS,
 } from "./e2e-run-agent-test-support.ts";
@@ -26,8 +29,29 @@ import {
 const START_REFUSED_CODE = "cli.run.agent.start_refused";
 const RE_PROFILE = "re@1";
 const OK_TEXT = "ok";
+const GIT_CLEAN = "git_clean";
+const GIT_WORKTREE = "git_worktree";
+const REASON_ROW = "reason:";
 const NO_REQUESTS = 0;
-const EMPTY_DIR = 0;
+
+function assertStartRefused(
+  result: CliResult,
+  fixtures: AgentFixtures,
+  precondition: string,
+): void {
+  assertRefused(result, START_REFUSED_CODE);
+  const row = result.stderr
+    .split("\n")
+    .find((line) => line.startsWith(REASON_ROW));
+  assert.ok(row !== undefined, result.stderr);
+  assert.ok(
+    row.slice(REASON_ROW.length).trim().startsWith(`${precondition}:`),
+    row,
+  );
+  assert.deepEqual(resultLines(fixtures.O), []);
+  assert.equal(existsSync(fixtures.S), false);
+  assert.deepEqual(readdirSync(fixtures.T), []);
+}
 
 test(
   "L2-AC12 variant 1: an uncommitted tracked change refuses the start and changes nothing",
@@ -41,16 +65,10 @@ test(
 
     const result = await spawnCli(fixtures, { signal: t.signal });
 
-    assertRefused(result, START_REFUSED_CODE);
-    assert.ok(result.stderr.includes("git_clean:"));
+    assertStartRefused(result, fixtures, GIT_CLEAN);
     assert.equal(stub.requests.length, NO_REQUESTS);
-    assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(digestListing(fixtures.W), listingBefore);
     assert.equal(await porcelainStatus(fixtures.W), statusBefore);
-    assert.equal(
-      existsSync(fixtures.T) ? readdirSync(fixtures.T).length : EMPTY_DIR,
-      EMPTY_DIR,
-    );
   },
 );
 
@@ -60,24 +78,18 @@ test(
   async (t) => {
     const stub = await llmStub(t, [{ kind: "text", text: OK_TEXT }], "");
     const fixtures = await buildFixtures(t, stub.baseUrl);
-    mkdirSync(join(fixtures.W, "..", "emptyW"), { recursive: true });
-    const emptyW = join(fixtures.W, "..", "emptyW");
-    const listingBefore = existsSync(emptyW) ? digestListing(emptyW) : [];
+    const emptyW = join(fixtures.TEST, "emptyW");
+    mkdirSync(emptyW);
+    const listingBefore = digestListing(emptyW);
 
     const result = await spawnCli(fixtures, {
       workspace: emptyW,
       signal: t.signal,
     });
 
-    assertRefused(result, START_REFUSED_CODE);
-    assert.ok(result.stderr.includes("git_worktree:"));
+    assertStartRefused(result, fixtures, GIT_WORKTREE);
     assert.equal(stub.requests.length, NO_REQUESTS);
-    assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(digestListing(emptyW), listingBefore);
-    assert.equal(
-      existsSync(fixtures.T) ? readdirSync(fixtures.T).length : EMPTY_DIR,
-      EMPTY_DIR,
-    );
   },
 );
 
@@ -92,10 +104,8 @@ test(
 
     const result = await spawnCli(fixtures, { signal: t.signal });
 
-    assertRefused(result, START_REFUSED_CODE);
-    assert.ok(result.stderr.includes("git_clean:"));
+    assertStartRefused(result, fixtures, GIT_CLEAN);
     assert.equal(stub.requests.length, NO_REQUESTS);
-    assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(digestListing(fixtures.W), listingBefore);
   },
 );
@@ -115,10 +125,8 @@ test(
       signal: t.signal,
     });
 
-    assertRefused(result, START_REFUSED_CODE);
-    assert.ok(result.stderr.includes("git_worktree:"));
+    assertStartRefused(result, fixtures, GIT_WORKTREE);
     assert.equal(stub.requests.length, NO_REQUESTS);
-    assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(digestListing(emptyDir), listingBefore);
   },
 );
@@ -131,6 +139,7 @@ test(
     const fixtures = await buildFixtures(t, stub.baseUrl);
     const srcDir = join(fixtures.W, "src");
     mkdirSync(srcDir);
+    writeFileSync(join(srcDir, "main.txt"), "source");
     await commitAll(fixtures.W, "add src");
     const listingBefore = digestListing(fixtures.W);
 
@@ -139,10 +148,8 @@ test(
       signal: t.signal,
     });
 
-    assertRefused(result, START_REFUSED_CODE);
-    assert.ok(result.stderr.includes("git_worktree:"));
+    assertStartRefused(result, fixtures, GIT_WORKTREE);
     assert.equal(stub.requests.length, NO_REQUESTS);
-    assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(digestListing(fixtures.W), listingBefore);
   },
 );
@@ -162,7 +169,8 @@ test(
       signal: t.signal,
     });
 
-    assert.equal(result.status, ExitCode.Success);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.deepEqual(readdirSync(fixtures.T), []);
   },
 );
 
@@ -179,7 +187,8 @@ test(
       signal: t.signal,
     });
 
-    assert.equal(result.status, ExitCode.Success);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.deepEqual(readdirSync(fixtures.T), []);
   },
 );
 
@@ -218,7 +227,8 @@ test(
     const listingBefore = digestListing(fixtures.W);
     const result = await spawnCli(fixtures, { signal: t.signal });
 
-    assert.equal(result.status, ExitCode.Success);
+    assert.equal(result.status, ExitCode.Success, result.stderr);
+    assert.deepEqual(readdirSync(fixtures.T), []);
     assert.equal(existsSync(M10), false);
     assert.equal(existsSync(M11), false);
     assert.deepEqual(digestListing(fixtures.W), listingBefore);

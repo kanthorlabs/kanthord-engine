@@ -473,7 +473,7 @@ export function contractGuards(
 
 async function openSteps(input: AgentInput): Promise<AgentOpen> {
   const profile = validateInput(input);
-  const refusal = checkPreconditions({
+  const refusal = await checkPreconditions({
     preconditions: profile.preconditions,
     cwd: input.workspace.cwd,
     roots: input.workspace.roots,

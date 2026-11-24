@@ -1,5 +1,6 @@
+import { execFile } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { promisify } from "node:util";
 import { isolatedGitEnvironment } from "../kernel/git-environment.ts";
 import { childEnvironment } from "./environment.ts";
 import { RUNTIME_SETUP_DEADLINE_MS } from "./agent-session.ts";
@@ -22,8 +23,8 @@ const REASON_WORKSPACE_DIRECTORY =
   "the working directory or a root is no directory";
 const REASON_GIT_WORKTREE = "a root is not the top level of a git worktree";
 const REASON_GIT_CLEAN = "a root holds an uncommitted change";
-const GIT_STATUS_SUCCESS = 0;
 const EMPTY_OUTPUT = "";
+const execFileAsync = promisify(execFile);
 
 function refusal(precondition: StartPrecondition, text: string): StartRefusal {
   return { precondition, reason: `${precondition}: ${text}` };
@@ -53,11 +54,28 @@ function checkWorkspaceDirectory(
   return null;
 }
 
-function checkGitWorktree(
+async function gitOutput(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+  timeoutMs: number,
+): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync("git", args, {
+      env,
+      timeout: timeoutMs,
+      encoding: "utf8",
+    });
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
+async function checkGitWorktree(
   roots: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
-): StartRefusal | null {
+): Promise<StartRefusal | null> {
   for (const root of roots) {
     let realRoot: string;
     try {
@@ -65,29 +83,25 @@ function checkGitWorktree(
     } catch {
       return refusal(SP.GitWorktree, REASON_GIT_WORKTREE);
     }
-    const result = spawnSync(
-      "git",
+    const output = await gitOutput(
       ["-C", root, "rev-parse", "--show-toplevel"],
-      { env, timeout: timeoutMs, encoding: "utf8" },
+      env,
+      timeoutMs,
     );
-    if (result.status !== GIT_STATUS_SUCCESS || result.error !== undefined) {
-      return refusal(SP.GitWorktree, REASON_GIT_WORKTREE);
-    }
-    if ((result.stdout as string).trim() !== realRoot) {
+    if (output?.trim() !== realRoot) {
       return refusal(SP.GitWorktree, REASON_GIT_WORKTREE);
     }
   }
   return null;
 }
 
-function checkGitClean(
+async function checkGitClean(
   roots: readonly string[],
   env: NodeJS.ProcessEnv,
   timeoutMs: number,
-): StartRefusal | null {
+): Promise<StartRefusal | null> {
   for (const root of roots) {
-    const result = spawnSync(
-      "git",
+    const output = await gitOutput(
       [
         "-C",
         root,
@@ -96,21 +110,19 @@ function checkGitClean(
         "--porcelain=v1",
         "--untracked-files=normal",
       ],
-      { env, timeout: timeoutMs, encoding: "utf8" },
+      env,
+      timeoutMs,
     );
-    if (result.status !== GIT_STATUS_SUCCESS || result.error !== undefined) {
-      return refusal(SP.GitClean, REASON_GIT_CLEAN);
-    }
-    if ((result.stdout as string).trim() !== EMPTY_OUTPUT) {
+    if (output?.trim() !== EMPTY_OUTPUT) {
       return refusal(SP.GitClean, REASON_GIT_CLEAN);
     }
   }
   return null;
 }
 
-export function checkPreconditions(
+export async function checkPreconditions(
   input: PreconditionInput,
-): StartRefusal | null {
+): Promise<StartRefusal | null> {
   const timeoutMs = input.timeoutMs ?? RUNTIME_SETUP_DEADLINE_MS;
   const env = gitEnv(input.inputEnv);
   for (const precondition of input.preconditions) {
@@ -118,9 +130,9 @@ export function checkPreconditions(
     if (precondition === SP.WorkspaceDirectory) {
       failure = checkWorkspaceDirectory(input.cwd, input.roots);
     } else if (precondition === SP.GitWorktree) {
-      failure = checkGitWorktree(input.roots, env, timeoutMs);
+      failure = await checkGitWorktree(input.roots, env, timeoutMs);
     } else if (precondition === SP.GitClean) {
-      failure = checkGitClean(input.roots, env, timeoutMs);
+      failure = await checkGitClean(input.roots, env, timeoutMs);
     }
     if (failure !== null) return failure;
   }

@@ -58,6 +58,13 @@ const WALL_MS = 500;
 const SINGLE = 1;
 const TOOL_RESULT_ROLE = "toolResult";
 
+const COMMIT_IDENTITY = [
+  "-c",
+  "user.name=Test",
+  "-c",
+  "user.email=test@example.invalid",
+];
+
 interface InputOptions {
   script?: FauxResponseStep[];
   credential?: boolean;
@@ -65,6 +72,12 @@ interface InputOptions {
   knownSecrets?: KnownSecrets;
   consumerTools?: ToolDefinition[];
   thinkingLevel?: ThinkingLevel;
+}
+
+async function commitAll(cwd: string, message: string): Promise<void> {
+  const git = simpleGit(cwd);
+  await git.add(".");
+  await git.raw([...COMMIT_IDENTITY, "commit", "--quiet", "-m", message]);
 }
 
 async function makeInput(
@@ -80,18 +93,7 @@ async function makeInput(
   mkdirSync(cwd, { recursive: true });
   await simpleGit(cwd).raw(["init", "--quiet", "-b", "main"]);
   writeFileSync(join(cwd, ".gitkeep"), "");
-  const git = simpleGit(cwd);
-  await git.add(".");
-  await git.raw([
-    "-c",
-    "user.name=Test",
-    "-c",
-    "user.email=test@example.invalid",
-    "commit",
-    "--quiet",
-    "-m",
-    "init",
-  ]);
+  await commitAll(cwd, "init");
 
   const pi = await loadPi();
   const scripted = scriptedProvider(options.script ?? []);
@@ -124,7 +126,7 @@ async function makeInput(
     budget: { deadline: null, usd: null },
     session: { kind: SessionKind.Memory },
     knownSecrets: options.knownSecrets ?? NO_SECRETS,
-    childEnvironment: { PATH: process.env["PATH"] ?? "" },
+    childEnvironment: {},
     hostHome: home,
     consumerTools: options.consumerTools ?? [],
     signal: options.signal ?? new AbortController().signal,
@@ -241,18 +243,7 @@ test("TurnEnd.text holds K zero times when K is in a tool result that the model 
     knownSecrets: WITH_SECRET,
   });
   writeFileSync(join(agentInput.workspace.cwd, "key.txt"), `key=${K}\n`);
-  const keyGit = simpleGit(agentInput.workspace.cwd);
-  await keyGit.add("key.txt");
-  await keyGit.raw([
-    "-c",
-    "user.name=Test",
-    "-c",
-    "user.email=test@example.invalid",
-    "commit",
-    "--quiet",
-    "-m",
-    "add key",
-  ]);
+  await commitAll(agentInput.workspace.cwd, "add key");
   const opened = await openAgent(agentInput);
   assert.equal(opened.kind, AgentOpenKind.Opened);
   const { run } = opened as AgentOpened;

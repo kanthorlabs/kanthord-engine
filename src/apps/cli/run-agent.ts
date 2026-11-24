@@ -73,7 +73,6 @@ import {
   printOpenFailed,
   printPostResultDiagnostic,
   printSecretWarnings,
-  printStartRefused,
   RunExitCode,
 } from "./run-agent-exit.ts";
 import { type AgentModelForm, resolveAgentModel } from "./run-agent-model.ts";
@@ -195,8 +194,11 @@ async function openAndRunAgent(
     throw error;
   }
   if (agentOpen.kind === AgentOpenKind.Refused) {
-    printStartRefused(agentOpen.refusal.reason);
-    throw new CommanderError(1, START_REFUSED_CODE, agentOpen.refusal.reason);
+    throw new Diagnostic(
+      START_REFUSED_CODE,
+      "run agent: a start precondition is not met.",
+      { fields: [["reason", agentOpen.refusal.reason]] },
+    );
   }
   const agentRun = agentOpen.run;
   try {
