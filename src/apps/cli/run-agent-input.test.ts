@@ -14,6 +14,8 @@ import { Diagnostic } from "../../kernel/errors.ts";
 import {
   buildPromptText,
   looksLikePath,
+  partTexts,
+  promptTextPathNotice,
   resolveInputValue,
 } from "./run-agent-input.ts";
 import type { AuthDevIno, InputContext } from "./run-agent-input.ts";
@@ -272,5 +274,24 @@ describe("buildPromptText", () => {
     const MULTILINE = "line1\nline2";
     const result = buildPromptText(["line1\nline2\n"]);
     assert.equal(result, MULTILINE);
+  });
+});
+
+describe("partTexts", () => {
+  it("removes final line breaks and drops a part with no text", () => {
+    assert.deepEqual(partTexts(["one\n", "\r\n", "two\r\n\n"]), ["one", "two"]);
+  });
+});
+
+describe("promptTextPathNotice", () => {
+  it("gives one JSON line with the option and the index, and no value", () => {
+    const NOTICE_INDEX = 3;
+    const NOTICE_OPTION = "--prompt";
+    const line = promptTextPathNotice(NOTICE_OPTION, NOTICE_INDEX);
+    assert.ok(!line.includes("\n"));
+    const notice = JSON.parse(line) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(notice), ["code", "msg", "option", "index"]);
+    assert.equal(notice["option"], NOTICE_OPTION);
+    assert.equal(notice["index"], NOTICE_INDEX);
   });
 });

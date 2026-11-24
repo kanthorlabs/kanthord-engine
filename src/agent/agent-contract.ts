@@ -85,6 +85,9 @@ export type {
   KnownSecrets,
   SecretWarning,
 } from "./redaction.ts";
+export { getProfile } from "./catalog.ts";
+export type { ProfileName } from "./catalog.ts";
+export { composeSystemPrompt, profilePrompt } from "./prompt-chain.ts";
 
 export interface ModelSelection {
   runtime: ModelRuntime;

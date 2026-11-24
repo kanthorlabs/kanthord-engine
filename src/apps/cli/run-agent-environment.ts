@@ -66,6 +66,27 @@ export const PROXY_NAMES: readonly string[] = [
   "no_proxy",
 ];
 
+const SHELL_NAMES: readonly string[] = ["PATH", "LANG"];
+const FIXED_GIT_ENV = {
+  GIT_CONFIG_NOSYSTEM: "1",
+  GIT_SSH_COMMAND:
+    "ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityFile=none",
+} as const;
+
+export function toolChildEnvironment(
+  shellEnv: NodeJS.ProcessEnv,
+  home: string,
+  tmpdir: string,
+): Record<string, string> {
+  const shell = Object.fromEntries(
+    SHELL_NAMES.flatMap((name) => {
+      const value = shellEnv[name];
+      return value === undefined ? [] : [[name, value]];
+    }),
+  );
+  return { ...shell, TMPDIR: tmpdir, HOME: home, ...FIXED_GIT_ENV };
+}
+
 export function withoutAmbientCredentials(
   env: NodeJS.ProcessEnv,
   home: string,

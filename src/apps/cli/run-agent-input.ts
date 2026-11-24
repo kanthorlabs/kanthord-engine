@@ -6,7 +6,9 @@ import { readTextFile } from "./shared.ts";
 const AUTH_PLACE = "cli.run.agent.auth_place";
 const PROMPT_PLACE = "cli.run.agent.prompt_place";
 const PROMPT_MISSING = "cli.run.agent.prompt_missing";
-export const PROMPT_TEXT_PATH = "cli.run.agent.prompt_text_path";
+const PROMPT_TEXT_PATH = "cli.run.agent.prompt_text_path";
+const PROMPT_TEXT_PATH_MESSAGE =
+  "a value that looks like a path names no file; the run uses it as text";
 
 const PATH_MAX_BYTES = 4096;
 const TRAILING_LINEBREAKS = /(\r\n|\n)+$/;
@@ -130,10 +132,23 @@ export function resolveInputValue(
   return { text, notice: false };
 }
 
-export function buildPromptText(rawParts: string[]): string {
-  const parts = rawParts
+export function promptTextPathNotice(option: string, index: number): string {
+  return JSON.stringify({
+    code: PROMPT_TEXT_PATH,
+    msg: PROMPT_TEXT_PATH_MESSAGE,
+    option,
+    index,
+  });
+}
+
+export function partTexts(rawParts: readonly string[]): string[] {
+  return rawParts
     .map((p) => p.replace(TRAILING_LINEBREAKS, ""))
     .filter((p) => p.length);
+}
+
+export function buildPromptText(rawParts: readonly string[]): string {
+  const parts = partTexts(rawParts);
 
   if (!parts.length)
     throw new Diagnostic(

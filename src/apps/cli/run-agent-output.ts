@@ -15,7 +15,7 @@ const LABEL_WIDTH = 11;
 const MS_PER_SECOND = 1000;
 const PRICE_DECIMALS = 6;
 
-const OutputKind = { Stdout: "stdout", Path: "path" } as const;
+export const OutputKind = { Stdout: "stdout", Path: "path" } as const;
 
 interface StdoutOutputTarget {
   kind: typeof OutputKind.Stdout;

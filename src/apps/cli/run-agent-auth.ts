@@ -435,14 +435,21 @@ export function piProviderIdOf(provider: string): string {
 
 const AUTH_CONFIG_SUBPATH = join(".config", "kanthord", "auth.json");
 
-export function defaultAuthPath(): string {
+export function userHome(): string | null {
   try {
-    return join(userInfo().homedir, AUTH_CONFIG_SUBPATH);
+    return userInfo().homedir;
   } catch {
+    return null;
+  }
+}
+
+export function defaultAuthPath(): string {
+  const home = userHome();
+  if (home === null)
     throw new Diagnostic(
       AUTH_FILE_INVALID,
       "run agent: the user database gives no home directory.",
       {},
     );
-  }
+  return join(home, AUTH_CONFIG_SUBPATH);
 }

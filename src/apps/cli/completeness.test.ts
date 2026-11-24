@@ -36,6 +36,7 @@ const PAGE_INVENTORIES = {
   other: "## Command inventory",
   tracking: "## Command inventory and operation mapping",
   footprint: "## Command inventory and operation mapping",
+  run: "## Command inventory",
 };
 const SYNOPSIS_PREFIX = /Synopsis after `kanthord ([^`]+)`/;
 const EXEMPT_LEAVES = new Map([
@@ -123,14 +124,15 @@ const TOP_LEVEL_NAMES = new Set([
   "repository",
   "storage",
   "agent",
+  "run",
 ]);
 const OTHER_PAGE = "other";
 const NO_ITEMS = 0;
-const DOCUMENTED_COUNT = 238;
+const DOCUMENTED_COUNT = 239;
 const TOP_LEVEL_DEPTH = 1;
 const INTAKE_GROUP = "intake";
 const TRACKING_GROUP = "tracking";
-const IMPLEMENTED_COUNT = 233;
+const IMPLEMENTED_COUNT = 234;
 const OPERATION_COUNT = 275;
 const INTAKE_CREDENTIAL_LEAVES = [
   "intake credential archive",
@@ -174,6 +176,7 @@ const PAGE_COUNTS = {
   other: 9,
   tracking: 12,
   footprint: 11,
+  run: 1,
 };
 type Documented = { path: string; operations: string[] };
 

@@ -200,3 +200,5 @@ export async function connectModel(
   const runtime = await createModelRuntime(pi, input);
   return { runtime, model: resolveModel(runtime, input.configuration) };
 }
+
+export { frozenStore } from "./refresh-watch.ts";
