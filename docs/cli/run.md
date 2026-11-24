@@ -263,17 +263,22 @@ With `--output stdout`, stdout gets the text result: the line
 
 Each end has a class. The class decides the exit code for the end `failed`.
 
-| Class       | Meaning                                                       |
-| ----------- | ------------------------------------------------------------- |
-| `retryable` | The same input can succeed later with a new `--session` path. |
-| `terminal`  | The end repeats with the same input.                          |
+| Class       | Meaning                                                                |
+| ----------- | ---------------------------------------------------------------------- |
+| `retryable` | The same input can succeed later with a new `--session` path.          |
+| `terminal`  | A change of the input, the credential or the environment is necessary. |
+
+A later try also needs a workspace that passes the start preconditions.
 
 - The end `completed` has no class (`null` in the result line).
 - The end `failed` with a provider error is `retryable` when the error is not a
   context overflow and pi classifies it as retryable, for example a 429 rate
   limit. All other failures are `terminal`.
-- pi retries a retryable error up to 3 times inside the session before the run
-  ends. Exit `75` reflects the class after the last retry.
+- `run agent` retries nothing by itself. pi retries a retryable error up to 3
+  times inside the session, with a base delay of 2 seconds.
+- The class applies to the error after the last pi retry.
+- The wait of each pi retry counts against the wall budget. A wall budget that
+  ends during a retry gives the end `budget_end` and exit `4`.
 
 ### Exit codes
 

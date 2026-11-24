@@ -208,14 +208,12 @@ export async function llmStub(
         return;
       }
 
-      res.on("error", () => {});
       const turnIndex = callIndex - 1;
       const delayMs =
         turn.kind === TEXT_TURN_KIND
           ? (turn.delayMs ?? NO_DELAY_MS)
           : NO_DELAY_MS;
       const respond = (): void => {
-        if (res.writableEnded) return;
         res.writeHead(200, { "content-type": "text/event-stream" });
         if (turn.kind === TEXT_TURN_KIND) {
           res.end(textTurnEvents(turn, turnIndex, testDir));
@@ -224,7 +222,10 @@ export async function llmStub(
         }
       };
       if (delayMs > NO_DELAY_MS) {
-        setTimeout(respond, delayMs);
+        const timer = setTimeout(respond, delayMs);
+        res.on("close", () => {
+          clearTimeout(timer);
+        });
       } else {
         respond();
       }

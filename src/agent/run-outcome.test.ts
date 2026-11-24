@@ -16,7 +16,8 @@ import {
 const RESPONSE_TEXT = "done";
 const UNAUTHORIZED_REASON = "401 Unauthorized";
 const RATE_LIMITED_REASON = "429 Too Many Requests";
-const OVERFLOW_REASON = "prompt is too long: 1000 tokens > 100 maximum";
+const OVERFLOW_REASON =
+  "500 Internal Server Error: prompt is too long: 1000 tokens > 100 maximum";
 const UNKNOWN_FAILURE_REASON = "fetch failed";
 const INTERNAL_FAILURE_REASON = "unexpected error";
 const CONTEXT_WINDOW = 200000;
