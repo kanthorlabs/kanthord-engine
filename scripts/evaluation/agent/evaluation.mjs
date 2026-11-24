@@ -57,6 +57,7 @@ const CHECK_OUTPUT_LIMIT = 64 * 1024 * 1024;
 const BREACH_CREDENTIAL = "credential";
 const BREACH_AUTH_FILE = "auth_file";
 const PROFILE_SWE = "swe@1";
+const PROFILE_RE = "re@1";
 const SET_DEV = "dev";
 const SET_HELD_OUT = "held-out";
 const SET_VALUES = [SET_DEV, SET_HELD_OUT];
@@ -84,6 +85,31 @@ const STOP_CAP = "cap";
 const NONE_TEXT = "none";
 const WORKSPACE_NAME = "w";
 const GRADING_NAME = "g";
+const JUDGE_DIR = "j";
+const JUDGE_WALL = "15m";
+const DIAGNOSES_FILE = "diagnoses.jsonl";
+const VERDICT_COMPLETE = "complete";
+const DIAGNOSIS_ASPECTS = [
+  "A1",
+  "A2",
+  "A3",
+  "A4",
+  "A5",
+  "A6",
+  "A7",
+  "A8",
+  "A9",
+];
+const DIAGNOSIS_SEVERITIES = ["high", "medium", "low"];
+const MAX_FINDINGS = 20;
+const EVIDENCE_MAX = 500;
+const TRANSCRIPT_TOOL_RESULT_LIMIT = 4000;
+const TRANSCRIPT_ENTRY_TYPE = "message";
+const TOOL_RESULT_ROLE = "toolResult";
+const TEXT_PART = "text";
+const TOOL_CALL_PART = "toolCall";
+const SEVERITIES_NOT_GOOD = ["high", "medium"];
+const DIAGNOSED_ASPECTS = ["A5", "A6", "A7"];
 const MODE_CONVENTIONS = "conventions";
 const MODE_FAIL_TO_PASS = "fail_to_pass";
 const MODE_PASS_TO_PASS = "pass_to_pass";
@@ -101,12 +127,9 @@ const CLASS_ATTRIBUTE_RE =
 const CLASS_HELPER_RE = /\b(?:cn|clsx)\s*\(/g;
 const QUOTES = ['"', "'", "`"];
 const TEMPLATE_EXPRESSION = "${";
-const RESULT_KEYS = [
-  "provider",
-  "model",
-  "reasoning_effort",
-  "system_prompt_digest",
-];
+const SWE_GLOBAL_KEYS = ["provider", "model", "reasoning_effort"];
+const KIND_KEYS = ["system_prompt_digest"];
+const RESULT_KEYS = [...SWE_GLOBAL_KEYS, ...KIND_KEYS];
 const CASE_KEYS = ["input_digest", "budget"];
 const CASE_REQUIRED = ["kind", "commit", "wall", "usd", "allowed"];
 const CONFIG_REQUIRED = [
@@ -530,6 +553,96 @@ export function checkProxyEnv(env, execArgv) {
   return execArgv.some(isUseEnvProxy);
 }
 
+function partText(part) {
+  if (part.type === TEXT_PART) return part.text;
+  if (part.type === TOOL_CALL_PART)
+    return `Tool call ${part.name}: ${JSON.stringify(part.arguments)}`;
+  return null;
+}
+
+function messageText(message) {
+  const { role, content } = message;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const texts = content.map(partText).filter((text) => text !== null);
+  if (role === TOOL_RESULT_ROLE)
+    return texts.join("").slice(0, TRANSCRIPT_TOOL_RESULT_LIMIT);
+  return texts.join("\n");
+}
+
+function transcriptSection(raw) {
+  let entry;
+  try {
+    entry = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (entry?.type !== TRANSCRIPT_ENTRY_TYPE || !isObject(entry.message))
+    return [];
+  const { id, message } = entry;
+  return [
+    `## ${id}`,
+    "",
+    `Role: ${message.role}`,
+    "",
+    messageText(message),
+    "",
+  ];
+}
+
+export function writeTranscript(sessionPath, transcriptPath) {
+  const text = existsSync(sessionPath) ? readFileSync(sessionPath, "utf8") : "";
+  const lines = text.split("\n").filter(Boolean).flatMap(transcriptSection);
+  writeFileSync(transcriptPath, lines.join("\n"), { mode: FILE_MODE });
+}
+
+function findingValid(finding) {
+  if (!isObject(finding) || Object.keys(finding).length !== 3) return false;
+  const { aspect, evidence, severity } = finding;
+  if (!DIAGNOSIS_ASPECTS.includes(aspect)) return false;
+  if (typeof evidence !== "string") return false;
+  if (evidence.length < 1 || evidence.length > EVIDENCE_MAX) return false;
+  return DIAGNOSIS_SEVERITIES.includes(severity);
+}
+
+export function parseDiagnosis(text, end) {
+  const invalid = { valid: false, findings: [] };
+  if (end !== END_COMPLETED || typeof text !== "string") return invalid;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return invalid;
+  }
+  if (!isObject(parsed) || Object.keys(parsed).length !== 1) return invalid;
+  const { findings } = parsed;
+  if (!Array.isArray(findings) || findings.length > MAX_FINDINGS)
+    return invalid;
+  if (!findings.every(findingValid)) return invalid;
+  return { valid: true, findings };
+}
+
+export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
+  const runnerDir = dirname(SCRIPT_PATH);
+  const args = ["run", "agent", PROFILE_RE, "--model", run.config.judge_model];
+  args.push("--budget", JUDGE_WALL);
+  if (run.judgeRatio.run !== null) {
+    const cents = parseUsdCents(run.config.judge_usd);
+    const scaled = scaleUsdCents(
+      cents,
+      run.judgeRatio.run,
+      run.judgeRatio.base,
+    );
+    args.push("--budget", budgetText(scaled));
+  }
+  args.push("--system-prompt", join(runnerDir, "judge.md"));
+  args.push("--workspace", judgeWorkspace);
+  args.push("--session", judgeSessionPath);
+  args.push("--output", run.resultsPath);
+  args.push("--prompt", join(runnerDir, "judge-task.md"));
+  return args;
+}
+
 function readJsonLines(path) {
   if (!existsSync(path)) return [];
   return readFileSync(path, "utf8")
@@ -753,15 +866,49 @@ function credentialStop(run, count) {
   return breachStop(run, BREACH_CREDENTIAL);
 }
 
-async function refreshForRun(run, deps) {
-  const provider = parseModelSelection(run.config.model).provider;
-  const validity = parseWallMs(run.caseJson.wall) + REFRESH_MARGIN_MS;
+async function refreshForCall(run, deps, call) {
+  const provider = parseModelSelection(call.model).provider;
+  const validity = parseWallMs(call.wall) + REFRESH_MARGIN_MS;
   try {
     await deps.refresh(run.authPath, provider, validity);
     return true;
   } catch {
     return false;
   }
+}
+
+async function guardedAgentCall(run, deps, call) {
+  if (!(await refreshForCall(run, deps, call)))
+    return { stop: "the credential refresh failed" };
+  const refreshed = captureAuthState(run.authPath);
+  if (refreshedAuthBreach(refreshed, run.authStart))
+    return breachStop(run, BREACH_AUTH_FILE);
+  for (const value of extractCredentialValues(run.authPath))
+    run.credValues.add(value);
+  let inputCount = 0;
+  for (const path of call.inputPaths)
+    inputCount += countCredentialInFile(path, run.credValues);
+  if (inputCount > 0) return credentialStop(run, inputCount);
+  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
+  const exit = deps.runAgent(call.args, call.stderrPath);
+  const count = countCredentialInFile(call.sessionPath, run.credValues);
+  if (count > 0) return credentialStop(run, count);
+  if (checkAuthFileBreach(run.authPath, refreshed))
+    return breachStop(run, BREACH_AUTH_FILE);
+  const stderrText = readFileSync(call.stderrPath, "latin1");
+  if (runActionForExit(exit, stderrText) === ACTION_STOP)
+    return { stop: `${call.label} exit ${exit}` };
+  return { stop: null };
+}
+
+function nextJudgeAttempt(runDir) {
+  let n = 1;
+  while (
+    existsSync(join(runDir, `judge-${n}.jsonl`)) ||
+    existsSync(join(runDir, `judge-${n}-stderr.txt`))
+  )
+    n++;
+  return n;
 }
 
 function resultEnd(run) {
@@ -771,9 +918,7 @@ function resultEnd(run) {
   return line?.end ?? END_ABSENT;
 }
 
-function gradeDiff(run, roots) {
-  const gradingRoot = makeRoot(run.workBaseDir);
-  roots.push(gradingRoot);
+function gradeDiff(run, gradingRoot) {
   return gradeRun({
     caseFolder: run.caseFolder,
     caseJson: run.caseJson,
@@ -783,14 +928,14 @@ function gradeDiff(run, roots) {
   });
 }
 
-function gradeWorkspace(run, session, roots) {
+function gradeWorkspace(run, session) {
   const diffPath = join(run.runDir, "diff.patch");
   const diffOptions = { savedConfig: session.savedConfig, diffPath };
   let aspects = { a1: false, a2: false, a3: false, a4: false };
   if (diffSteps(session.workspace, run.caseJson.commit, diffOptions)) {
     const diffCount = removeRunFilesOnCredential(run.runDir, run.credValues);
     if (diffCount > 0) return credentialStop(run, diffCount);
-    const graded = gradeDiff(run, roots);
+    const graded = gradeDiff(run, session.gradingRoot);
     if (graded.stop) return graded;
     const checkCount = removeRunFilesOnCredential(run.runDir, run.credValues);
     if (checkCount > 0) return credentialStop(run, checkCount);
@@ -807,6 +952,64 @@ function gradeWorkspace(run, session, roots) {
   return { stop: null };
 }
 
+function writeJudgeWorkspace(run, judgeWorkspace) {
+  mkdirSync(judgeWorkspace, { mode: DIRECTORY_MODE });
+  writeTranscript(run.sessionPath, join(judgeWorkspace, "transcript.md"));
+  for (const name of ["diff.patch", "check.txt"]) {
+    const source = join(run.runDir, name);
+    if (existsSync(source)) copyFileSync(source, join(judgeWorkspace, name));
+  }
+  const checkLine = readJsonLines(run.checksPath).findLast(
+    (line) => line.session === run.sessionPath,
+  );
+  writeFileSync(
+    join(judgeWorkspace, "check.json"),
+    `${JSON.stringify(checkLine)}\n`,
+    { mode: FILE_MODE },
+  );
+  copyFileSync(
+    join(run.caseFolder, "task.md"),
+    join(judgeWorkspace, "task.md"),
+  );
+  if (run.stage === BINDING_STAGE) {
+    const name = `${run.caseJson.kind}.md`;
+    copyFileSync(
+      join(run.evalSetDir, "binding", name),
+      join(judgeWorkspace, name),
+    );
+  }
+  return readdirSync(judgeWorkspace).map((name) => join(judgeWorkspace, name));
+}
+
+async function runDiagnosis(run, gradingRoot, deps) {
+  const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
+  const reserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
+  if (!checkStartGate(sum, reserve, run.config.cap_usd))
+    return { stop: STOP_CAP };
+  const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
+  const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
+  const attempt = nextJudgeAttempt(run.runDir);
+  const sessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
+  const called = await guardedAgentCall(run, deps, {
+    label: "judge",
+    model: run.config.judge_model,
+    wall: JUDGE_WALL,
+    args: runAgentArgsJudge(run, judgeWorkspace, sessionPath),
+    inputPaths,
+    sessionPath,
+    stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+  });
+  if (called.stop) return called;
+  const resultLine = readJsonLines(run.resultsPath).findLast(
+    (line) => line.agent === PROFILE_RE && line.session === sessionPath,
+  );
+  appendJsonLine(run.diagnosesPath, {
+    session: sessionPath,
+    ...parseDiagnosis(resultLine?.text, resultLine?.end),
+  });
+  return { stop: null };
+}
+
 async function evaluateInRoots(run, deps, roots) {
   const workspace = join(roots[0], WORKSPACE_NAME);
   const bundle = join(run.caseFolder, "repo.bundle");
@@ -814,24 +1017,21 @@ async function evaluateInRoots(run, deps, roots) {
   if (savedConfig === null) return { stop: "the workspace clone failed" };
   if (!runSetup(run.caseFolder, workspace))
     return { stop: "setup.sh failed in the workspace" };
-  if (!(await refreshForRun(run, deps)))
-    return { stop: "the credential refresh failed" };
-  const refreshed = captureAuthState(run.authPath);
-  if (refreshedAuthBreach(refreshed, run.authStart))
-    return breachStop(run, BREACH_AUTH_FILE);
-  for (const value of extractCredentialValues(run.authPath))
-    run.credValues.add(value);
-  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const stderrPath = join(run.runDir, "stderr.txt");
-  const exit = deps.runAgent(runAgentArgs(run, workspace), stderrPath);
-  const count = countCredentialInFile(run.sessionPath, run.credValues);
-  if (count > 0) return credentialStop(run, count);
-  if (checkAuthFileBreach(run.authPath, refreshed))
-    return breachStop(run, BREACH_AUTH_FILE);
-  const stderrText = readFileSync(stderrPath, "latin1");
-  if (runActionForExit(exit, stderrText) === ACTION_STOP)
-    return { stop: `run agent exit ${exit}` };
-  return gradeWorkspace(run, { workspace, savedConfig }, roots);
+  const called = await guardedAgentCall(run, deps, {
+    label: "run agent",
+    model: run.config.model,
+    wall: run.caseJson.wall,
+    args: runAgentArgs(run, workspace),
+    inputPaths: [],
+    sessionPath: run.sessionPath,
+    stderrPath: join(run.runDir, "stderr.txt"),
+  });
+  if (called.stop) return called;
+  const gradingRoot = makeRoot(run.workBaseDir);
+  roots.push(gradingRoot);
+  const graded = gradeWorkspace(run, { workspace, savedConfig, gradingRoot });
+  if (graded.stop || run.set !== SET_DEV) return graded;
+  return runDiagnosis(run, gradingRoot, deps);
 }
 
 export async function evaluateRun(run, deps) {
@@ -867,7 +1067,11 @@ async function readConfiguration(evalSetDir, readPrices) {
   const prices = await readPrices();
   const priceError = basePriceError(prices, config);
   if (priceError) return { error: `${path}: ${priceError}` };
-  return { config, ratio: priceRatio(prices, config) };
+  return {
+    config,
+    ratio: priceRatio(prices, config),
+    judgeRatio: priceRatio(prices, { ...config, model: config.judge_model }),
+  };
 }
 
 function heldOutEvaluations(resultsBaseDir, stage) {
@@ -903,7 +1107,6 @@ function parseRunOptions(argv) {
     return { error: "--stage is 1 or 2" };
   if (!SET_VALUES.includes(values.set))
     return { error: "--set is dev or held-out" };
-  if (values.set === SET_DEV) return { error: "--set dev is not available" };
   return {
     evalId: values.evaluation,
     stage: Number(values.stage),
@@ -1001,10 +1204,12 @@ export async function startRun(start) {
   return plan;
 }
 
-function baseCostSum(resultsPath, r) {
+function baseCostSum(resultsPath, sweR, judgeR) {
   let sum = 0;
-  for (const line of readJsonLines(resultsPath))
+  for (const line of readJsonLines(resultsPath)) {
+    const r = line.agent === PROFILE_RE ? judgeR : sweR;
     sum += computeBaseCost(line.list_price_usd ?? 0, r);
+  }
   return sum;
 }
 
@@ -1019,6 +1224,7 @@ function planRun(plan, entry, repeat) {
     sessionPath: join(runDir, "session.jsonl"),
     resultsPath: join(plan.resultsDir, "results.jsonl"),
     checksPath: join(plan.resultsDir, "checks.jsonl"),
+    diagnosesPath: join(plan.resultsDir, DIAGNOSES_FILE),
     workBaseDir: plan.workBaseDir,
     evalSetDir: plan.evalSetDir,
     authPath: plan.authPath,
@@ -1026,6 +1232,7 @@ function planRun(plan, entry, repeat) {
     credValues: plan.credValues,
     config: plan.config,
     ratio: plan.ratio,
+    judgeRatio: plan.judgeRatio,
     stage: plan.stage,
     set: plan.set,
   };
@@ -1050,7 +1257,7 @@ function pendingRuns(plan) {
 async function runPending(plan, deps) {
   plan.credValues = new Set(extractCredentialValues(plan.authPath));
   for (const run of pendingRuns(plan)) {
-    const sum = baseCostSum(run.resultsPath, plan.ratio.r);
+    const sum = baseCostSum(run.resultsPath, plan.ratio.r, plan.judgeRatio.r);
     const reserve = parseUsdCents(run.caseJson.usd) / CENTS_PER_DOLLAR;
     if (!checkStartGate(sum, reserve, plan.config.cap_usd))
       return { stop: STOP_CAP };
@@ -1080,7 +1287,7 @@ function firstDifference(lines, key) {
   return { key, lines: [lines[0].number, other.number] };
 }
 
-export function checkResultKeys(resultLines) {
+export function checkResultKeys(resultLines, kindOf = new Map()) {
   const numbered = resultLines.map((line, index) => ({
     line,
     number: index + 1,
@@ -1088,7 +1295,7 @@ export function checkResultKeys(resultLines) {
   const version = firstDifference(numbered, "engine_version");
   if (version) return version;
   const swe = numbered.filter((entry) => entry.line.agent === PROFILE_SWE);
-  for (const key of RESULT_KEYS) {
+  for (const key of SWE_GLOBAL_KEYS) {
     const difference = firstDifference(swe, key);
     if (difference) return difference;
   }
@@ -1100,6 +1307,20 @@ export function checkResultKeys(resultLines) {
       const difference = firstDifference(lines, key);
       if (difference) return difference;
     }
+  }
+  const byKind = Map.groupBy(swe, (entry) =>
+    kindOf.get(caseOfSession(String(entry.line.session))),
+  );
+  for (const lines of byKind.values()) {
+    for (const key of KIND_KEYS) {
+      const difference = firstDifference(lines, key);
+      if (difference) return difference;
+    }
+  }
+  const re = numbered.filter((entry) => entry.line.agent === PROFILE_RE);
+  for (const key of RESULT_KEYS) {
+    const difference = firstDifference(re, key);
+    if (difference) return difference;
   }
   return null;
 }
@@ -1122,6 +1343,56 @@ function shareText(part, whole) {
   return `${((part / whole) * 100).toFixed(1)}%`;
 }
 
+function lastCheckLines(checks) {
+  const byRun = new Map();
+  for (const line of checks) byRun.set(`${line.case}:${line.repeat}`, line);
+  return [...byRun.values()];
+}
+
+function diagnosisOf(diagnoses, check) {
+  const runDir = dirname(check.session);
+  return diagnoses.findLast((line) => dirname(line.session) === runDir);
+}
+
+function goodOnAspect(diagnosis, aspect) {
+  if (!diagnosis?.valid) return false;
+  return !diagnosis.findings.some(
+    (finding) =>
+      finding.aspect === aspect &&
+      SEVERITIES_NOT_GOOD.includes(finding.severity),
+  );
+}
+
+function goodRuns(report, checks, aspect) {
+  return checks.filter((check) =>
+    goodOnAspect(diagnosisOf(report.diagnoses, check), aspect),
+  ).length;
+}
+
+function findingCounts(diagnoses, aspect) {
+  const findings = diagnoses
+    .flatMap((line) => line.findings)
+    .filter((finding) => finding.aspect === aspect);
+  return DIAGNOSIS_SEVERITIES.map((severity) => {
+    const count = findings.filter((f) => f.severity === severity).length;
+    return `${count} ${severity}`;
+  }).join(", ");
+}
+
+function diagnosisLines(report) {
+  const lines = [];
+  for (const aspect of DIAGNOSIS_ASPECTS) {
+    const counts = findingCounts(report.diagnoses, aspect);
+    const good = DIAGNOSED_ASPECTS.includes(aspect)
+      ? ` good runs: ${goodRuns(report, report.checks, aspect)},`
+      : "";
+    lines.push(`${aspect}${good} findings: ${counts}`);
+  }
+  const invalid = report.diagnoses.filter((line) => !line.valid).length;
+  lines.push(`invalid diagnoses: ${invalid}`);
+  return lines;
+}
+
 function goalLines(report, joined) {
   const { checks } = report;
   const costs = joined.map((line) =>
@@ -1138,6 +1409,7 @@ function goalLines(report, joined) {
     const good = checks.filter((line) => line[aspect]).length;
     lines.push(`${aspect.toUpperCase()} good runs: ${good}`);
   }
+  if (report.iteration.set === SET_DEV) lines.push(...diagnosisLines(report));
   lines.push(
     `A8: base cost median ${numberText(median(costs))}, base cost sum ${numberText(costs.reduce((a, b) => a + b, 0))}, duration_ms median ${medianOf("duration_ms")}, model_calls median ${medianOf("model_calls")}, tool_calls median ${medianOf("tool_calls")}`,
     `A9 breaches: ${breaches.length}${names ? ` (${names})` : ""}`,
@@ -1167,28 +1439,78 @@ function gateLines(report) {
   return { verdict: gate.verdict, lines: ["## Gate", "", `gate: ${line}`, ""] };
 }
 
-function costLines(report) {
-  const swe = report.results.filter((line) => line.agent === PROFILE_SWE);
-  const costs = swe.map((line) =>
-    computeBaseCost(line.list_price_usd ?? 0, report.r),
+function agentCostBlock(results, r, label) {
+  const lines = results.filter((line) => line.agent === label);
+  const costs = lines.map((line) =>
+    computeBaseCost(line.list_price_usd ?? 0, r),
   );
   const sum = (values) => values.reduce((a, b) => a + b, 0);
-  const usage = (key) => sum(swe.map((line) => line.usage?.[key] ?? 0));
+  const usage = (key) => sum(lines.map((line) => line.usage?.[key] ?? 0));
   const inputSide = usage("input") + usage("cache_read") + usage("cache_write");
+  return [
+    `${label}: list price ${numberText(sum(lines.map((line) => line.list_price_usd ?? 0)))}, r ${numberText(r)}, base cost ${numberText(sum(costs))}`,
+    `${label}: base cost of one run: mean ${numberText(costs.length ? sum(costs) / costs.length : null)}, maximum ${numberText(costs.length ? Math.max(...costs) : null)}`,
+    `${label}: cache-read share ${shareText(usage("cache_read"), inputSide)}, output ratio ${shareText(usage("output"), inputSide)}`,
+  ];
+}
+
+function costLines(report) {
   const planned = report.cases.length * report.iteration.repeats;
+  const unstartedDiagnoses =
+    report.iteration.set === SET_DEV
+      ? `, unstarted diagnoses: ${planned - report.diagnoses.length}`
+      : "";
   return [
     "## Cost",
     "",
-    `swe@1: list price ${numberText(sum(swe.map((line) => line.list_price_usd ?? 0)))}, r ${numberText(report.r)}, base cost ${numberText(sum(costs))}`,
-    `swe@1: base cost of one run: mean ${numberText(costs.length ? sum(costs) / costs.length : null)}, maximum ${numberText(costs.length ? Math.max(...costs) : null)}`,
-    `swe@1: cache-read share ${shareText(usage("cache_read"), inputSide)}, output ratio ${shareText(usage("output"), inputSide)}`,
+    ...agentCostBlock(report.results, report.r, PROFILE_SWE),
+    ...agentCostBlock(report.results, report.judgeR, PROFILE_RE),
     `cap_usd of each call: ${report.calls.map((line) => line.cap_usd).join(", ") || NONE_TEXT}`,
-    `unstarted runs: ${planned - report.checks.length}`,
+    `unstarted runs: ${planned - report.checks.length}${unstartedDiagnoses}`,
     "",
   ];
 }
 
-export function buildReport(report) {
+function devLines(report) {
+  const { checks, cases, iteration } = report;
+  const lines = ["## Dev cases", ""];
+  const full = [];
+  for (const entry of cases) {
+    const own = checks.filter((line) => line.case === entry.id);
+    const good = (key) => own.filter((line) => line[key]).length;
+    const diagnosed = DIAGNOSED_ASPECTS.map(
+      (aspect) => `${aspect} ${goodRuns(report, own, aspect)}`,
+    ).join(", ");
+    lines.push(
+      `case ${entry.id}: passes ${good("pass")}, A1 ${good("a1")}, A2 ${good("a2")}, A3 ${good("a3")}, A4 ${good("a4")}, ${diagnosed}`,
+    );
+    if (own.length === iteration.repeats) full.push(good("pass"));
+  }
+  const ceiling = full.filter((passes) => passes === iteration.repeats).length;
+  const floor = full.filter((passes) => passes === 0).length;
+  const planned = cases.length * iteration.repeats;
+  const complete =
+    checks.length === planned && report.diagnoses.length === planned;
+  const verdict = complete ? VERDICT_COMPLETE : VERDICT_NONE;
+  lines.push(
+    "",
+    `set-difficulty: ${ceiling} ceiling, ${floor} floor of ${cases.length}`,
+    `verdict ${verdict}`,
+    "",
+  );
+  return { lines, verdict };
+}
+
+function runRecords(report) {
+  const checks = lastCheckLines(report.checks);
+  const diagnoses = checks
+    .map((check) => diagnosisOf(report.diagnoses ?? [], check))
+    .filter((line) => line !== undefined);
+  return { ...report, checks, diagnoses, judgeR: report.judgeR ?? null };
+}
+
+export function buildReport(input) {
+  const report = runRecords(input);
   const { iteration } = report;
   const sessions = new Set(report.checks.map((line) => line.session));
   const joined = report.results.filter((line) => sessions.has(line.session));
@@ -1207,6 +1529,11 @@ export function buildReport(report) {
     verdict = gate.verdict;
     lines.push(...gate.lines);
   }
+  if (iteration.set === SET_DEV) {
+    const dev = devLines(report);
+    verdict = dev.verdict;
+    lines.push(...dev.lines);
+  }
   lines.push(...costLines(report));
   return { text: lines.join("\n"), verdict };
 }
@@ -1222,10 +1549,12 @@ function writeReport(evaluation) {
     iteration,
     cases: evaluation.cases,
     r: evaluation.ratio.r,
+    judgeR: evaluation.judgeRatio.r,
     earlier,
     checks: readJsonLines(join(resultsDir, "checks.jsonl")),
     results: readJsonLines(join(resultsDir, "results.jsonl")),
     calls: readJsonLines(join(resultsDir, "calls.jsonl")),
+    diagnoses: readJsonLines(join(resultsDir, DIAGNOSES_FILE)),
   });
   writeFileSync(join(resultsDir, "report.md"), report.text, {
     mode: FILE_MODE,
@@ -1263,7 +1592,8 @@ export async function reportEvaluation(start) {
   const cases = readCases(evalSetDir, iteration.set);
   if (cases.error) return cases;
   const results = readJsonLines(join(resultsDir, "results.jsonl"));
-  const difference = checkResultKeys(results);
+  const kindOf = new Map(cases.cases.map((c) => [c.id, c.kind]));
+  const difference = checkResultKeys(results, kindOf);
   if (difference) {
     const [first, second] = difference.lines;
     return {
@@ -1277,6 +1607,7 @@ export async function reportEvaluation(start) {
     iteration,
     cases: cases.cases,
     ratio: read.ratio,
+    judgeRatio: read.judgeRatio,
   });
   return { verdict };
 }

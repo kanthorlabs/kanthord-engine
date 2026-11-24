@@ -9,7 +9,10 @@ import {
   TEST_USER_HOME,
   writeFileAsTestUser,
 } from "./e2e-run-agent-linux-test-support.ts";
-import type { StubTurn } from "./e2e-llm-stub-test-support.ts";
+import type {
+  StubSelectedTurn,
+  StubTurn,
+} from "./e2e-llm-stub-test-support.ts";
 import { authFileText, TEST_K } from "./e2e-run-agent-test-support.ts";
 import type {
   CliResult,
@@ -39,12 +42,22 @@ interface FixtureCase {
   kind: string;
 }
 
+export interface L4ResponderChange {
+  firstTurns?: Record<string, StubTurn>;
+  reTurn?: StubTurn;
+}
+
+export const AGENT_SWE = "swe@1";
+const AGENT_RE = "re@1";
+export const TASK_D1 = "task d1";
+export const TASK_D2 = "task d2";
+const TASK_H1 = "task h1";
+const TASK_TEXTS = [TASK_D1, TASK_D2, TASK_H1];
 const ROLE_SYSTEM = "system";
 const ROLE_USER = "user";
 const TOOL_OUTPUT_TYPE = "function_call_output";
 const SWE_ROLE = "Your role is `swe@1`";
 const RE_ROLE = "Your role is `re@1`";
-const WRITE_TASKS = ["task d1", "task h1"];
 const TURN_USAGE = { input: 1000, output: 100 };
 const DONE_TURN: StubTurn = { kind: "text", text: "done", usage: TURN_USAGE };
 const WRITE_TURN: StubTurn = {
@@ -55,6 +68,22 @@ const WRITE_TURN: StubTurn = {
 const FINDINGS_TURN: StubTurn = {
   kind: "text",
   text: '{"findings":[{"aspect":"A5","evidence":"session.jsonl: no test run","severity":"medium"}]}',
+  usage: TURN_USAGE,
+};
+const FIRST_TURNS: Record<string, StubTurn> = {
+  [TASK_D1]: WRITE_TURN,
+  [TASK_H1]: WRITE_TURN,
+};
+export const WRITE_NEW_SH_TURN: StubTurn = {
+  kind: "tool_calls",
+  calls: [
+    { name: "write", args: { path: "test/new.sh", content: "exit 0\n" } },
+  ],
+  usage: TURN_USAGE,
+};
+export const NO_FINDINGS_TURN: StubTurn = {
+  kind: "text",
+  text: "no findings",
   usage: TURN_USAGE,
 };
 
@@ -103,19 +132,28 @@ function roleText(input: RequestItem[], role: string): string {
     .join("");
 }
 
-function sweTurn(input: RequestItem[]): StubTurn {
-  const task = roleText(input, ROLE_USER);
+function sweTurn(
+  input: RequestItem[],
+  firstTurns: Record<string, StubTurn>,
+): StubSelectedTurn {
+  const user = roleText(input, ROLE_USER);
+  const task = TASK_TEXTS.find((text) => user.includes(text));
+  if (task === undefined) return { ...DONE_TURN, selectedRole: AGENT_SWE };
   const answered = input.some((item) => item.type === TOOL_OUTPUT_TYPE);
-  const writes = WRITE_TASKS.some((text) => task.includes(text));
-  return writes && !answered ? WRITE_TURN : DONE_TURN;
+  const turn = answered ? DONE_TURN : (firstTurns[task] ?? DONE_TURN);
+  return { ...turn, selectedRole: AGENT_SWE, selectedTask: task };
 }
 
-export function l4Responder(): (body: unknown) => StubTurn | undefined {
+export function l4Responder(
+  change: L4ResponderChange = {},
+): (body: unknown) => StubSelectedTurn | undefined {
+  const firstTurns = { ...FIRST_TURNS, ...change.firstTurns };
+  const reTurn = change.reTurn ?? FINDINGS_TURN;
   return (body) => {
     const input = (body as RequestBody).input ?? [];
     const system = roleText(input, ROLE_SYSTEM);
-    if (system.includes(SWE_ROLE)) return sweTurn(input);
-    if (system.includes(RE_ROLE)) return FINDINGS_TURN;
+    if (system.includes(SWE_ROLE)) return sweTurn(input, firstTurns);
+    if (system.includes(RE_ROLE)) return { ...reTurn, selectedRole: AGENT_RE };
     return undefined;
   };
 }

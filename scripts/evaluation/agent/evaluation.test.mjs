@@ -43,6 +43,7 @@ import {
   gradeRun,
   highestTierCost,
   modelBlend,
+  parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
   readModelPrices,
@@ -52,11 +53,13 @@ import {
   reportEvaluation,
   runActionForExit,
   runAgentArgs,
+  runAgentArgsJudge,
   runPlan,
   scaleUsdCents,
   startRun,
   validateCase,
   validateConfig,
+  writeTranscript,
 } from "./evaluation.mjs";
 
 const ENGINE_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -1067,6 +1070,37 @@ test("L4-U11: the report accepts two cases with two budgets", () => {
   assert.equal(checkResultKeys([sweLine(), other]), null);
 });
 
+test("L4-U11: accepts swe@1 lines of two kinds with different system_prompt_digest", () => {
+  const kindOf = new Map([
+    ["c1", "backend"],
+    ["c2", "frontend"],
+  ]);
+  const c2Line = sweLine({
+    session: "/r/c2/1-1/session.jsonl",
+    input_digest: "j",
+    budget: { wall_ms: 2, usd: null },
+    system_prompt_digest: "e",
+  });
+  assert.equal(checkResultKeys([sweLine(), c2Line], kindOf), null);
+});
+
+test("L4-U11: refuses swe@1 lines of one kind with different system_prompt_digest", () => {
+  const kindOf = new Map([
+    ["c1", "backend"],
+    ["c2", "backend"],
+  ]);
+  const c2Line = sweLine({
+    session: "/r/c2/1-1/session.jsonl",
+    input_digest: "j",
+    budget: { wall_ms: 2, usd: null },
+    system_prompt_digest: "e",
+  });
+  assert.deepEqual(checkResultKeys([sweLine(), c2Line], kindOf), {
+    key: "system_prompt_digest",
+    lines: [1, 2],
+  });
+});
+
 test("L4-U11: report.sh refuses a results file that breaks a key and writes no report", async (t) => {
   const run = await runHeldOut(t, "e");
   rmSync(join(run.results, "report.md"));
@@ -1199,14 +1233,6 @@ test("L4-U13: a call refuses each option that breaks its rule", async (t) => {
     const plan = await startRun(fixture.start(argv));
     assert.equal(typeof plan.error, "string", argv.join(" "));
   }
-  assert.equal(existsSync(fixture.runs), false);
-});
-
-test("L4-U13: run.sh --set dev is refused and names --set", async (t) => {
-  const fixture = makeFixture(t);
-  const argv = ["--evaluation", "e", "--stage", "1", "--set", "dev"];
-  const plan = await startRun(fixture.start(argv));
-  assert.match(plan.error, /--set/);
   assert.equal(existsSync(fixture.runs), false);
 });
 
@@ -1641,4 +1667,842 @@ test("a failed setup.sh stops the evaluation before the run and leaves no worksp
   assert.equal(run.value, 1);
   assert.equal(run.agent.calls.length, 0);
   assert.deepEqual(workRoots(run), []);
+});
+
+const RUNNER_DIR = fileURLToPath(new URL(".", import.meta.url));
+const SECOND_KEY = "ZyXwVuTsRqPoNmLkJiHgFeDcBaZyXwVuTsRqPoNm";
+const JUDGE_VALIDITY_MS = 25 * 60000;
+const FINDING = { aspect: "A5", evidence: "check.txt: x", severity: "medium" };
+
+function reLine(change = {}) {
+  return {
+    agent: "re@1",
+    engine_version: "1",
+    provider: "a",
+    model: "m",
+    reasoning_effort: "off",
+    system_prompt_digest: "d",
+    input_digest: "i",
+    budget: { wall_ms: 1, usd: null },
+    session: "/r/d1/1-1/judge-1.jsonl",
+    ...change,
+  };
+}
+
+function makeDevFixture(t, overrides = {}) {
+  const root = tempDir(t);
+  const engineRoot = join(root, "engine");
+  makeRepo(engineRoot, { "a.txt": "a" });
+  const set = join(root, "xd", "kanthord", "evaluation", "agent");
+  const d1 = makeCase(join(set, "cases", "dev"), "d1", overrides.d1);
+  rmSync(join(set, "cases", "dev", "d1-repo"), { recursive: true });
+  if (overrides.task) writeFile(join(d1.folder, "task.md"), overrides.task);
+  writeFile(join(set, ".gitignore"), "config.json\n");
+  writeFile(join(set, "binding", "backend.md"), "# Binding\n\nbackend\n");
+  makeRepo(set, {});
+  const config = { ...VALID_CONFIG, ...overrides.config };
+  writeFile(join(set, "config.json"), JSON.stringify(config));
+  const authPath = apiKeyAuth(root);
+  const start = (argv) => ({
+    argv,
+    env: {
+      XDG_DATA_HOME: join(root, "xd"),
+      XDG_STATE_HOME: join(root, "xs"),
+    },
+    execArgv: [],
+    engineRoot,
+    authPath,
+    readPrices: async () => FAKE_PRICES,
+  });
+  const runs = join(root, "xs", "kanthord", "evaluation", "runs");
+  return { root, engineRoot, set, authPath, start, runs };
+}
+
+function devArgs(id, stage = "1") {
+  return ["--evaluation", id, "--stage", stage, "--set", "dev"];
+}
+
+function judgeLine(args, change) {
+  return {
+    ...resultLine(args, "completed"),
+    agent: "re@1",
+    budget: { wall_ms: 900000, usd: null },
+    text: '{"findings":[]}',
+    ...change,
+  };
+}
+
+function fakeDevAgent(options = {}) {
+  const calls = [];
+  const runAgent = (args, stderrPath) => {
+    calls.push(args);
+    writeFileSync(stderrPath, "");
+    const session = option(args, "--session");
+    const output = option(args, "--output");
+    if (args[2] === "swe@1") {
+      writeFileSync(session, options.session ?? "{}\n");
+      writeFileSync(join(option(args, "--workspace"), "ok.txt"), "ok");
+      if (options.sweWork) options.sweWork(dirname(session));
+      const line = resultLine(args, "completed");
+      appendFileSync(output, `${JSON.stringify(line)}\n`);
+      return 0;
+    }
+    if (options.judgeWork) options.judgeWork(args);
+    writeFileSync(session, options.judgeSession ?? "{}\n");
+    const line = judgeLine(args, options.judgeLine);
+    appendFileSync(output, `${JSON.stringify(line)}\n`);
+    return options.judgeExit ?? 0;
+  };
+  return { calls, deps: { refresh: async () => {}, runAgent } };
+}
+
+async function runDev(t, agentOptions, overrides = {}) {
+  const fixture = makeDevFixture(t, overrides);
+  const plan = await startRun(fixture.start(devArgs("e", overrides.stage)));
+  assert.equal(plan.error, undefined);
+  const agent = fakeDevAgent(agentOptions);
+  if (overrides.refresh) agent.deps.refresh = overrides.refresh(fixture);
+  const output = await captured(() => runPlan(plan, agent.deps));
+  const results = join(fixture.runs, "e");
+  return {
+    ...fixture,
+    ...output,
+    agent,
+    results,
+    checks: jsonLines(join(results, "checks.jsonl")),
+    diagnoses: jsonLines(join(results, "diagnoses.jsonl")),
+    runDir: join(results, "d1", "1-1"),
+  };
+}
+
+function diagnosisText(findings) {
+  return JSON.stringify({ findings });
+}
+
+function checkLine(caseId, repeat, change = {}) {
+  return {
+    case: caseId,
+    repeat,
+    session: `/r/${caseId}/${repeat}-1/session.jsonl`,
+    a1: true,
+    a2: true,
+    a3: true,
+    a4: true,
+    pass: true,
+    breach: null,
+    ...change,
+  };
+}
+
+function diagnosisLine(caseId, repeat, findings, change = {}) {
+  return {
+    session: `/r/${caseId}/${repeat}-1/judge-1.jsonl`,
+    valid: true,
+    findings,
+    ...change,
+  };
+}
+
+function devReport(cases, checks, diagnoses) {
+  return buildReport({
+    evalId: "e",
+    iteration: { stage: 1, set: "dev", set_commit: "c", repeats: 2 },
+    cases: cases.map((id) => ({ id, kind: "backend" })),
+    r: null,
+    judgeR: null,
+    earlier: 0,
+    checks,
+    results: [],
+    calls: [{ cap_usd: 15 }],
+    diagnoses,
+  });
+}
+
+test("L4-U6: the parse accepts one JSON object with each aspect and each severity", () => {
+  for (const aspect of ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"]) {
+    for (const severity of ["high", "medium", "low"]) {
+      const findings = [{ aspect, evidence: "e", severity }];
+      assert.deepEqual(
+        parseDiagnosis(diagnosisText(findings), "completed"),
+        { valid: true, findings },
+        `${aspect} ${severity}`,
+      );
+    }
+  }
+  assert.deepEqual(parseDiagnosis('{"findings":[]}', "completed"), {
+    valid: true,
+    findings: [],
+  });
+});
+
+test("L4-U6: the parse refuses a run that does not end completed", () => {
+  const text = diagnosisText([FINDING]);
+  for (const end of ["budget_end", "failed", undefined])
+    assert.deepEqual(parseDiagnosis(text, end), { valid: false, findings: [] });
+});
+
+test("L4-U6: the parse refuses a text that is not exactly one JSON object", () => {
+  const one = diagnosisText([FINDING]);
+  const texts = [
+    undefined,
+    "no findings",
+    `${one} ${one}`,
+    `The findings: ${one}`,
+    `\`\`\`json\n${one}\n\`\`\``,
+    "[]",
+    '{"findings":{}}',
+  ];
+  for (const text of texts)
+    assert.equal(parseDiagnosis(text, "completed").valid, false, text);
+});
+
+test("L4-U6: the parse refuses an absent or added field", () => {
+  const texts = [
+    "{}",
+    '{"findings":[],"extra":1}',
+    diagnosisText([{ aspect: "A5", evidence: "e" }]),
+    diagnosisText([{ aspect: "A5", severity: "low" }]),
+    diagnosisText([{ evidence: "e", severity: "low" }]),
+    diagnosisText([{ ...FINDING, extra: 1 }]),
+    diagnosisText(["A5"]),
+  ];
+  for (const text of texts)
+    assert.equal(parseDiagnosis(text, "completed").valid, false, text);
+});
+
+test("L4-U6: the parse refuses an aspect and a severity outside their lists", () => {
+  for (const change of [
+    { aspect: "A0" },
+    { aspect: "A10" },
+    { aspect: "a5" },
+    { severity: "critical" },
+    { severity: "" },
+  ]) {
+    const text = diagnosisText([{ ...FINDING, ...change }]);
+    assert.equal(parseDiagnosis(text, "completed").valid, false, text);
+  }
+});
+
+test("L4-U6: the evidence has 1 to 500 characters", () => {
+  const valid = (evidence) =>
+    parseDiagnosis(diagnosisText([{ ...FINDING, evidence }]), "completed")
+      .valid;
+  assert.equal(valid(""), false);
+  assert.equal(valid("x"), true);
+  assert.equal(valid("x".repeat(500)), true);
+  assert.equal(valid("x".repeat(501)), false);
+  assert.equal(valid(1), false);
+});
+
+test("L4-U6: the parse accepts 20 findings and refuses 21", () => {
+  const text = (length) => diagnosisText(Array.from({ length }, () => FINDING));
+  assert.equal(parseDiagnosis(text(20), "completed").valid, true);
+  assert.equal(parseDiagnosis(text(21), "completed").valid, false);
+});
+
+test("L4-U6: an evidence that quotes a brace is valid", () => {
+  const findings = [{ ...FINDING, evidence: "diff.patch: function a() {" }];
+  assert.deepEqual(parseDiagnosis(diagnosisText(findings), "completed"), {
+    valid: true,
+    findings,
+  });
+});
+
+test("L4-U6: a run is good on A5, A6 and A7 with a valid diagnosis and no high or medium finding", () => {
+  const report = devReport(
+    ["c1"],
+    [checkLine("c1", 1), checkLine("c1", 2)],
+    [
+      diagnosisLine("c1", 1, [
+        { aspect: "A5", evidence: "evidence-one", severity: "medium" },
+        { aspect: "A9", evidence: "evidence-two", severity: "high" },
+      ]),
+      diagnosisLine("c1", 2, [
+        { aspect: "A5", evidence: "evidence-three", severity: "low" },
+        { aspect: "A6", evidence: "evidence-four", severity: "high" },
+      ]),
+    ],
+  );
+  assert.match(
+    report.text,
+    /^A5 good runs: 1, findings: 0 high, 1 medium, 1 low$/m,
+  );
+  assert.match(
+    report.text,
+    /^A6 good runs: 1, findings: 1 high, 0 medium, 0 low$/m,
+  );
+  assert.match(
+    report.text,
+    /^A7 good runs: 2, findings: 0 high, 0 medium, 0 low$/m,
+  );
+  assert.match(report.text, /^A9 findings: 1 high, 0 medium, 0 low$/m);
+  assert.match(
+    report.text,
+    /^case c1: passes 2, A1 2, A2 2, A3 2, A4 2, A5 1, A6 1, A7 2$/m,
+  );
+  assert.match(report.text, /^invalid diagnoses: 0$/m);
+  assert.equal(report.text.includes("evidence-"), false);
+});
+
+test("L4-U6: a run with an invalid diagnosis is good on no diagnosed aspect", () => {
+  const report = devReport(
+    ["c1"],
+    [checkLine("c1", 1), checkLine("c1", 2)],
+    [diagnosisLine("c1", 1, []), diagnosisLine("c1", 2, [], { valid: false })],
+  );
+  assert.match(report.text, /^invalid diagnoses: 1$/m);
+  for (const aspect of ["A5", "A6", "A7"])
+    assert.match(
+      report.text,
+      new RegExp(
+        `^${aspect} good runs: 1, findings: 0 high, 0 medium, 0 low$`,
+        "m",
+      ),
+    );
+  assert.equal(report.verdict, "complete");
+});
+
+test("L4-U11: the set-difficulty line counts each ceiling case and each floor case", () => {
+  const fail = { a1: false, pass: false };
+  const report = devReport(
+    ["c1", "c2", "c3", "c4", "c5"],
+    [
+      checkLine("c1", 1),
+      checkLine("c1", 2),
+      checkLine("c2", 1, fail),
+      checkLine("c2", 2, fail),
+      checkLine("c3", 1),
+      checkLine("c3", 2, fail),
+      checkLine("c4", 1),
+      checkLine("c5", 1, fail),
+    ],
+    [],
+  );
+  assert.match(report.text, /^set-difficulty: 1 ceiling, 1 floor of 5$/m);
+  assert.equal(report.verdict, "no verdict");
+  assert.match(report.text, /^unstarted runs: 2, unstarted diagnoses: 10$/m);
+});
+
+test("L4-U11: a dev evaluation is complete when each planned run and each planned diagnosis has a line", () => {
+  const checks = [checkLine("c1", 1), checkLine("c1", 2)];
+  const diagnoses = [diagnosisLine("c1", 1, []), diagnosisLine("c1", 2, [])];
+  const complete = devReport(["c1"], checks, diagnoses);
+  assert.equal(complete.verdict, "complete");
+  assert.match(complete.text, /^verdict complete$/m);
+  assert.match(complete.text, /^unstarted runs: 0, unstarted diagnoses: 0$/m);
+  const noDiagnosis = devReport(["c1"], checks, diagnoses.slice(0, 1));
+  assert.equal(noDiagnosis.verdict, "no verdict");
+  assert.match(
+    noDiagnosis.text,
+    /^unstarted runs: 0, unstarted diagnoses: 1$/m,
+  );
+  const noRun = devReport(["c1"], checks.slice(0, 1), diagnoses.slice(0, 1));
+  assert.equal(noRun.verdict, "no verdict");
+});
+
+test("L4-U11: the report accepts re@1 lines with equal keys", () => {
+  const second = reLine({ session: "/r/d1/2-1/judge-1.jsonl" });
+  assert.equal(checkResultKeys([sweLine(), reLine(), second]), null);
+});
+
+test("L4-U11: the report refuses each break of a key of the re@1 lines and names the two lines", () => {
+  for (const key of [
+    "provider",
+    "model",
+    "reasoning_effort",
+    "system_prompt_digest",
+  ]) {
+    const lines = [sweLine(), reLine(), reLine({ [key]: "other" })];
+    assert.deepEqual(checkResultKeys(lines), { key, lines: [2, 3] });
+  }
+});
+
+test("L4-U12: the diagnosis of a run is the last line of its run directory", () => {
+  const first = diagnosisLine("c1", 1, [], { valid: false });
+  const second = diagnosisLine("c1", 1, [FINDING], {
+    session: "/r/c1/1-1/judge-2.jsonl",
+  });
+  const report = devReport(
+    ["c1"],
+    [checkLine("c1", 1), checkLine("c1", 2)],
+    [first, second, diagnosisLine("c1", 2, [])],
+  );
+  assert.match(report.text, /^invalid diagnoses: 0$/m);
+  assert.match(
+    report.text,
+    /^A5 good runs: 1, findings: 0 high, 1 medium, 0 low$/m,
+  );
+  assert.equal(report.verdict, "complete");
+});
+
+test("L4-U12: the last check line of a run counts", () => {
+  const breach = { a1: false, a2: false, a3: false, a4: false, pass: false };
+  const report = devReport(
+    ["c1"],
+    [
+      checkLine("c1", 1),
+      checkLine("c1", 2),
+      checkLine("c1", 2, { ...breach, breach: "credential" }),
+    ],
+    [diagnosisLine("c1", 1, [])],
+  );
+  assert.match(report.text, /^passes: 1 of 2 planned runs$/m);
+  assert.match(report.text, /^A9 breaches: 1 \(credential\)$/m);
+  assert.match(report.text, /^unstarted runs: 0, unstarted diagnoses: 1$/m);
+  assert.equal(report.verdict, "no verdict");
+});
+
+test("L4-U12: the diagnosis call has the options of the diagnosis command and no cost budget for a model with no price", () => {
+  const run = {
+    config: {
+      judge_model: "openai-compatible/stub-1:off",
+      judge_usd: "0.1usd",
+    },
+    judgeRatio: { run: null, base: BASE_BLEND },
+    resultsPath: "/r/results.jsonl",
+  };
+  const args = runAgentArgsJudge(run, "/w/j", "/r/d1/1-1/judge-1.jsonl");
+  assert.deepEqual(args, [
+    "run",
+    "agent",
+    "re@1",
+    "--model",
+    "openai-compatible/stub-1:off",
+    "--budget",
+    "15m",
+    "--system-prompt",
+    join(RUNNER_DIR, "judge.md"),
+    "--workspace",
+    "/w/j",
+    "--session",
+    "/r/d1/1-1/judge-1.jsonl",
+    "--output",
+    "/r/results.jsonl",
+    "--prompt",
+    join(RUNNER_DIR, "judge-task.md"),
+  ]);
+});
+
+test("L4-U9: a diagnosis run of a model with a price gets the scaled judge_usd", () => {
+  const run = {
+    config: {
+      judge_model: "anthropic/claude-haiku-5-5:high",
+      judge_usd: "0.1usd",
+    },
+    judgeRatio: { run: HAIKU_BLEND, base: BASE_BLEND },
+    resultsPath: "/r/results.jsonl",
+  };
+  const args = runAgentArgsJudge(run, "/w/j", "/r/judge-1.jsonl");
+  assert.deepEqual(args.slice(5, 9), [
+    "--budget",
+    "15m",
+    "--budget",
+    "0.22usd",
+  ]);
+});
+
+test("L4-U9: a judge_usd reserve equal to cap_usd starts the diagnosis", async (t) => {
+  const run = await runDev(
+    t,
+    {},
+    {
+      d1: { json: { usd: "0.1usd" } },
+      config: { judge_usd: "0.5usd", cap_usd: 0.5 },
+    },
+  );
+  assert.equal(run.value, 0);
+  assert.equal(run.diagnoses.length, 2);
+});
+
+test("L4-U9: a judge_usd reserve one cent above cap_usd stops the call with exit 4 before the diagnosis", async (t) => {
+  const run = await runDev(
+    t,
+    {},
+    {
+      d1: { json: { usd: "0.1usd" } },
+      config: { judge_usd: "0.51usd", cap_usd: 0.5 },
+    },
+  );
+  assert.equal(run.value, 4);
+  assert.equal(run.agent.calls.length, 1);
+  assert.equal(run.checks.length, 1);
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U9: the base cost of a re@1 line uses the ratio of the judge model", async (t) => {
+  const run = await runDev(
+    t,
+    { judgeLine: { list_price_usd: 2 } },
+    {
+      d1: { json: { usd: "0.01usd" } },
+      config: {
+        judge_model: "anthropic/claude-haiku-5-5:high",
+        judge_usd: "0.01usd",
+        cap_usd: 0.5,
+      },
+    },
+  );
+  assert.equal(run.value, 4);
+  assert.equal(run.agent.calls.length, 2);
+  const text = readFileSync(join(run.results, "report.md"), "utf8");
+  assert.match(text, /^re@1: list price 2, r 2\.13964, base cost 0\.934737$/m);
+  assert.match(text, /^swe@1: list price 0, r none, base cost 0$/m);
+});
+
+test("a dev evaluation diagnoses each run in the judge workspace of the grading root", async (t) => {
+  const seen = [];
+  const judgeWork = (args) => {
+    const workspace = option(args, "--workspace");
+    seen.push({
+      workspace,
+      siblings: readdirSync(dirname(workspace)).sort(),
+      files: readdirSync(workspace).sort(),
+      check: JSON.parse(readFileSync(join(workspace, "check.json"), "utf8")),
+      task: readFileSync(join(workspace, "task.md"), "utf8"),
+    });
+  };
+  const run = await runDev(t, {
+    judgeWork,
+    judgeLine: { text: diagnosisText([FINDING]) },
+  });
+  assert.equal(run.value, 0);
+  assert.deepEqual(
+    run.agent.calls.map((args) => args[2]),
+    ["swe@1", "re@1", "swe@1", "re@1"],
+  );
+  assert.equal(seen.length, 2);
+  assert.notEqual(seen[0].workspace, seen[1].workspace);
+  assert.deepEqual(seen[0].siblings, ["g", "j"]);
+  assert.deepEqual(seen[0].files, [
+    "check.json",
+    "check.txt",
+    "diff.patch",
+    "task.md",
+    "transcript.md",
+  ]);
+  assert.deepEqual(seen[0].check, run.checks[0]);
+  assert.equal(seen[0].task, "task d1\n");
+  assert.deepEqual(run.diagnoses, [
+    {
+      session: join(run.runDir, "judge-1.jsonl"),
+      valid: true,
+      findings: [FINDING],
+    },
+    {
+      session: join(run.results, "d1", "2-1", "judge-1.jsonl"),
+      valid: true,
+      findings: [FINDING],
+    },
+  ]);
+  assert.deepEqual(readdirSync(run.runDir).sort(), [
+    "check.txt",
+    "diff.patch",
+    "judge-1-stderr.txt",
+    "judge-1.jsonl",
+    "session.jsonl",
+    "stderr.txt",
+  ]);
+  assert.deepEqual(workRoots(run), []);
+  const report = await reportEvaluation(run.start(["--evaluation", "e"]));
+  assert.equal(report.verdict, "complete");
+});
+
+test("a stage 2 diagnosis gets the kind prompt of the case kind in the judge workspace", async (t) => {
+  const seen = [];
+  const judgeWork = (args) => {
+    const workspace = option(args, "--workspace");
+    seen.push(readFileSync(join(workspace, "backend.md"), "utf8"));
+  };
+  const run = await runDev(t, { judgeWork }, { stage: "2" });
+  assert.equal(run.value, 0);
+  assert.deepEqual(seen, ["# Binding\n\nbackend\n", "# Binding\n\nbackend\n"]);
+  assert.equal(
+    option(run.agent.calls[0], "--system-prompt"),
+    join(run.set, "binding", "backend.md"),
+  );
+});
+
+test("L4-U12: a diagnosis run that ends budget_end with exit 5 gives an invalid diagnosis and changes no pass", async (t) => {
+  const run = await runDev(t, {
+    judgeExit: 5,
+    judgeLine: { end: "budget_end" },
+  });
+  assert.equal(run.value, 0);
+  assert.deepEqual(
+    run.diagnoses.map((line) => [line.valid, line.findings]),
+    [
+      [false, []],
+      [false, []],
+    ],
+  );
+  assert.deepEqual(
+    run.checks.map((line) => line.pass),
+    [true, true],
+  );
+});
+
+test("L4-U12: an exit 1 of a diagnosis run stops the evaluation with no diagnosis line", async (t) => {
+  const run = await runDev(t, { judgeExit: 1 });
+  assert.equal(run.value, 1);
+  assert.equal(run.agent.calls.length, 2);
+  assert.equal(run.checks.length, 1);
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U12: a diagnosis takes the next free attempt number", async (t) => {
+  const sweWork = (runDir) => {
+    writeFileSync(join(runDir, "judge-1.jsonl"), "{}\n");
+    writeFileSync(join(runDir, "judge-2-stderr.txt"), "");
+  };
+  const run = await runDev(t, { sweWork });
+  assert.equal(run.value, 0);
+  assert.equal(run.diagnoses[0].session, join(run.runDir, "judge-3.jsonl"));
+  assert.equal(existsSync(join(run.runDir, "judge-3-stderr.txt")), true);
+});
+
+test("L4-U5: a credential value in the diagnosis session file stops the evaluation with the count only", async (t) => {
+  const run = await runDev(t, { judgeSession: `{"text":"${KEY}"}\n` });
+  assert.equal(run.value, 1);
+  assert.equal(run.agent.calls.length, 2);
+  assert.match(run.stdout, /count 1\n/);
+  assert.equal(`${run.stdout}${run.stderr}`.includes(KEY.slice(0, 8)), false);
+  assert.deepEqual(
+    run.checks.map((line) => [line.repeat, line.pass, line.breach]),
+    [
+      [1, true, null],
+      [1, false, "credential"],
+    ],
+  );
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+  const text = readFileSync(join(run.results, "report.md"), "utf8");
+  assert.equal(text.includes(KEY), false);
+  assert.match(text, /^A9 breaches: 1 \(credential\)$/m);
+  assert.match(text, /^passes: 0 of 2 planned runs$/m);
+});
+
+test("L4-U5: a credential value in a file of the judge workspace stops the evaluation before the diagnosis call", async (t) => {
+  const run = await runDev(t, {}, { task: `task d1 ${KEY}\n` });
+  assert.equal(run.value, 1);
+  assert.deepEqual(
+    run.agent.calls.map((args) => args[2]),
+    ["swe@1"],
+  );
+  assert.match(run.stdout, /count 1\n/);
+  assert.equal(run.stdout.includes(KEY.slice(0, 8)), false);
+  assert.equal(run.checks.at(-1).breach, "credential");
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U5: the diagnosis run counts the credential values that the runner reads after its refresh", async (t) => {
+  const refresh = (fixture) => async (authPath, provider) => {
+    if (provider !== "anthropic") return;
+    const entry = { type: "api_key", key: SECOND_KEY };
+    writeFileSync(fixture.authPath, JSON.stringify({ anthropic: entry }));
+  };
+  const run = await runDev(
+    t,
+    { judgeSession: `{"text":"${SECOND_KEY}"}\n` },
+    { refresh, config: { judge_model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 1);
+  assert.match(run.stdout, /count 1\n/);
+  assert.equal(run.checks.at(-1).breach, "credential");
+});
+
+test("L4-U5: the breach credential of a diagnosis run comes before the breach auth_file", async (t) => {
+  let authPath;
+  const run = await runDev(
+    t,
+    {
+      judgeSession: `{"text":"${KEY}"}\n`,
+      judgeWork: () => writeFileSync(authPath, '{"changed":true}'),
+    },
+    {
+      refresh: (fixture) => {
+        authPath = fixture.authPath;
+        return async () => {};
+      },
+    },
+  );
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.at(-1).breach, "credential");
+});
+
+test("L4-U14: a diagnosis run that changes auth.json stops the evaluation with the breach auth_file", async (t) => {
+  let authPath;
+  const run = await runDev(
+    t,
+    { judgeWork: () => writeFileSync(authPath, '{"changed":true}') },
+    {
+      refresh: (fixture) => {
+        authPath = fixture.authPath;
+        return async () => {};
+      },
+    },
+  );
+  assert.equal(run.value, 1);
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    [null, "auth_file"],
+  );
+  assert.equal(run.diagnoses.length, 0);
+});
+
+test("L4-U14: a diagnosis run that adds an entry to the configuration directory stops with the breach auth_file", async (t) => {
+  let authPath;
+  const run = await runDev(
+    t,
+    {
+      judgeWork: () =>
+        writeFileSync(join(dirname(authPath), "models.json"), "{}"),
+    },
+    {
+      refresh: (fixture) => {
+        authPath = fixture.authPath;
+        return async () => {};
+      },
+    },
+  );
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.at(-1).breach, "auth_file");
+});
+
+test("L4-U14: a refresh before the diagnosis that changes the mode of auth.json is the breach auth_file", async (t) => {
+  const refresh = (fixture) => async (authPath, provider) => {
+    if (provider === "anthropic") chmodSync(fixture.authPath, 0o644);
+  };
+  const run = await runDev(
+    t,
+    {},
+    { refresh, config: { judge_model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 1);
+  assert.deepEqual(
+    run.agent.calls.map((args) => args[2]),
+    ["swe@1"],
+  );
+  assert.equal(run.checks.at(-1).breach, "auth_file");
+});
+
+test("L4-U15: the refresh of a diagnosis run uses the provider of judge_model and the wall budget 15m", async (t) => {
+  const seen = [];
+  const refresh =
+    () =>
+    async (...args) => {
+      seen.push(args);
+    };
+  const run = await runDev(
+    t,
+    {},
+    { refresh, config: { judge_model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 0);
+  assert.deepEqual(seen.slice(0, 2), [
+    [run.authPath, "openai-compatible", 40 * 60000],
+    [run.authPath, "anthropic", JUDGE_VALIDITY_MS],
+  ]);
+  assert.equal(seen.length, 4);
+});
+
+test("L4-U15: a failed refresh stops the evaluation before the diagnosis call with no error text of pi", async (t) => {
+  const refresh = () => async (authPath, provider) => {
+    if (provider === "anthropic")
+      throw new Error("pi-error-text response body");
+  };
+  const run = await runDev(
+    t,
+    {},
+    { refresh, config: { judge_model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 1);
+  assert.deepEqual(
+    run.agent.calls.map((args) => args[2]),
+    ["swe@1"],
+  );
+  assert.equal(`${run.stdout}${run.stderr}`.includes("pi-error-text"), false);
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+});
+
+function sessionEntry(id, message) {
+  return JSON.stringify({ type: "message", id, parentId: null, message });
+}
+
+function transcriptOf(t, lines) {
+  const root = tempDir(t);
+  const session = join(root, "session.jsonl");
+  const transcript = join(root, "transcript.md");
+  if (lines !== null) writeFileSync(session, `${lines.join("\n")}\n`);
+  writeTranscript(session, transcript);
+  return readFileSync(transcript, "utf8");
+}
+
+test("L4-U19: the transcript holds the id, the role and the text of each entry", (t) => {
+  const text = transcriptOf(t, [
+    JSON.stringify({ type: "session", id: "head" }),
+    sessionEntry("e1", { role: "user", content: "task text" }),
+    sessionEntry("e2", {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "hidden" },
+        { type: "text", text: "I run the tests." },
+        {
+          type: "toolCall",
+          id: "c",
+          name: "bash",
+          arguments: { command: "npm test" },
+        },
+      ],
+    }),
+    sessionEntry("e3", {
+      role: "toolResult",
+      content: [{ type: "text", text: "1 passed" }],
+    }),
+    JSON.stringify({ type: "model_change", id: "e4" }),
+    "not json",
+  ]);
+  assert.equal(
+    text,
+    [
+      "## e1",
+      "",
+      "Role: user",
+      "",
+      "task text",
+      "",
+      "## e2",
+      "",
+      "Role: assistant",
+      "",
+      "I run the tests.",
+      'Tool call bash: {"command":"npm test"}',
+      "",
+      "## e3",
+      "",
+      "Role: toolResult",
+      "",
+      "1 passed",
+      "",
+    ].join("\n"),
+  );
+});
+
+test("L4-U19: the transcript cuts each tool result to 4,000 characters", (t) => {
+  const long = { type: "text", text: `${"x".repeat(4000)}yy` };
+  const text = transcriptOf(t, [
+    sessionEntry("e1", { role: "toolResult", content: [long] }),
+    sessionEntry("e2", { role: "assistant", content: [long] }),
+  ]);
+  const [, result, answer] = text.split(/^## e\d$/m);
+  assert.equal(result.includes("x".repeat(4000)), true);
+  assert.equal(result.includes("y"), false);
+  assert.equal(answer.includes("yy"), true);
+});
+
+test("L4-U19: an absent session file gives an empty transcript", (t) => {
+  assert.equal(transcriptOf(t, null), "");
 });
