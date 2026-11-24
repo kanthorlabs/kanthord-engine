@@ -337,6 +337,12 @@ async function cleanupResources(
   stopHandlers.release();
 }
 
+function applyForcedExitBound(stopHandlers: StopHandlers): void {
+  if (stopHandlers.wasForceStopped) {
+    stopHandlers.scheduleBoundedExit(RunExitCode.Stopped);
+  }
+}
+
 async function runAgent(
   profileName: string | undefined,
   options: RunAgentOptions,
@@ -519,6 +525,7 @@ async function runAgent(
     });
 
     stopHandlers.ignoreSignals();
+    applyForcedExitBound(stopHandlers);
 
     if (R !== null) {
       try {

@@ -629,3 +629,53 @@ test("L3-U6 first limit: a provider error that comes after the limit ends budget
   assert.equal(result.budgetReached, BudgetLimit.Wall);
   assert.equal(result.failure, null);
 });
+
+test("S8: when the input signal aborts before a provider error, the end is stopped", async (t) => {
+  const controller = new AbortController();
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(
+              fauxAssistantMessage("", {
+                stopReason: "error",
+                errorMessage: MSG_UNAUTHORIZED,
+              }),
+            ),
+          );
+        }),
+    ],
+    signal: controller.signal,
+  });
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const sending = run.send("hello", { work: null });
+  controller.abort();
+  const result = await sending;
+  assert.equal(result.end, RunEnd.Stopped);
+  assert.equal(result.failure, null);
+  await run.close();
+});
+
+test("S8: when a provider error comes before the input signal abort, the end is failed", async (t) => {
+  const controller = new AbortController();
+  const { run } = await openAndRun(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: MSG_UNAUTHORIZED,
+      }),
+    ],
+    signal: controller.signal,
+  });
+  const firstResult = await run.send("hello", { work: null });
+  assert.equal(firstResult.end, RunEnd.Failed);
+  controller.abort();
+  const secondResult = await run.send("again", { work: null });
+  assert.equal(secondResult.end, RunEnd.Stopped);
+  assert.equal(secondResult.failure, null);
+  await run.close();
+});

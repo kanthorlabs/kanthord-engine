@@ -251,6 +251,7 @@ function buildRun(ctx: RunContext): AgentRun {
   let totals: RunTotals = zeroTotals();
   let budgetReached: BudgetLimit | null = null;
   let failedBeforeLimit = false;
+  let failedBeforeStop = false;
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
@@ -285,6 +286,8 @@ function buildRun(ctx: RunContext): AgentRun {
 
   const unsubscribeSignal = addAbortListener(inputSignal, () => {
     if (!sending) return;
+    failedBeforeStop =
+      failureOf(lastAssistantOf(session.messages), model) !== null;
     void session.abort();
   });
 
@@ -318,7 +321,11 @@ function buildRun(ctx: RunContext): AgentRun {
     if (extensionFailure.reason !== null)
       return internalEnd(extensionFailure.reason);
     const failure = failureOf(lastAssistantOf(session.messages), model);
-    if (failure !== null && (budgetReached === null || failedBeforeLimit)) {
+    if (
+      failure !== null &&
+      (budgetReached === null || failedBeforeLimit) &&
+      (!inputSignal.aborted || failedBeforeStop)
+    ) {
       return {
         end: RunEnd.Failed,
         budgetReached: null,
@@ -359,6 +366,7 @@ function buildRun(ctx: RunContext): AgentRun {
       sending = true;
       endAfterTurnFlag = false;
       failedBeforeLimit = false;
+      failedBeforeStop = false;
       extensionFailure.reason = null;
 
       try {

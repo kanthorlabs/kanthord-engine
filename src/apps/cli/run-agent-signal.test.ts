@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { mock, test } from "node:test";
-import { stopOnSignal } from "./run-agent-signal.ts";
+import { FORCED_EXIT_BOUND_MS, stopOnSignal } from "./run-agent-signal.ts";
 
 const SHUTDOWN_LIMIT_MS = 10000;
 const ONE_MS = 1;
@@ -192,6 +192,81 @@ test("stopOnSignal a signal after the time limit makes no second forced stop", (
     process.emit("SIGTERM" as NodeJS.Signals);
     assert.equal(forceCalls, ONE_FORCED_STOP);
     assert.ok(!handlers.forcedWithoutResult);
+    handlers.release();
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+const EXIT_CODE_STOPPED = 2;
+const NO_CALLS = 0;
+const ONE_CALL = 1;
+
+test("S7: scheduleBoundedExit calls process.exit with the given code after FORCED_EXIT_BOUND_MS", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const mockExit = mock.method(process, "exit", () => {});
+    try {
+      const controller = new AbortController();
+      const handlers = stopOnSignal(controller);
+      handlers.setForceStop(() => {});
+      process.emit("SIGINT" as NodeJS.Signals);
+      process.emit("SIGINT" as NodeJS.Signals);
+      handlers.scheduleBoundedExit(EXIT_CODE_STOPPED);
+      mock.timers.tick(FORCED_EXIT_BOUND_MS - ONE_MS);
+      assert.equal(mockExit.mock.callCount(), NO_CALLS);
+      mock.timers.tick(ONE_MS);
+      assert.equal(mockExit.mock.callCount(), ONE_CALL);
+      assert.equal(mockExit.mock.calls[0]?.arguments[0], EXIT_CODE_STOPPED);
+      handlers.release();
+    } finally {
+      mockExit.mock.restore();
+    }
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("S7: scheduleBoundedExit is not called on a normal end and process.exit is not called", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const mockExit = mock.method(process, "exit", () => {});
+    try {
+      const controller = new AbortController();
+      const handlers = stopOnSignal(controller);
+      handlers.release();
+      mock.timers.tick(FORCED_EXIT_BOUND_MS);
+      assert.equal(mockExit.mock.callCount(), NO_CALLS);
+    } finally {
+      mockExit.mock.restore();
+    }
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("S7: wasForceStopped is false before any signal and true after a forced stop", () => {
+  const controller = new AbortController();
+  const handlers = stopOnSignal(controller);
+  assert.ok(!handlers.wasForceStopped);
+  handlers.setForceStop(() => {});
+  process.emit("SIGINT" as NodeJS.Signals);
+  assert.ok(!handlers.wasForceStopped);
+  process.emit("SIGINT" as NodeJS.Signals);
+  assert.ok(handlers.wasForceStopped);
+  handlers.release();
+});
+
+test("S7: wasForceStopped is true after the time limit forced stop", () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const controller = new AbortController();
+    const handlers = stopOnSignal(controller);
+    assert.ok(!handlers.wasForceStopped);
+    handlers.setForceStop(() => {});
+    process.emit("SIGINT" as NodeJS.Signals);
+    mock.timers.tick(SHUTDOWN_LIMIT_MS);
+    assert.ok(handlers.wasForceStopped);
     handlers.release();
   } finally {
     mock.timers.reset();
