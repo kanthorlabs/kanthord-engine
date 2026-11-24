@@ -8,6 +8,37 @@ Start with [the CLI specification index](./README.md) and
 
 1. `kanthord run agent <agent-name> [--model <value>] [--workspace <path>] [--session <path>] [--prompt <value>]... [--system-prompt <value>]... [--auth <path>] [--budget <value>]... [--output <path|stdout>]` — implemented; local agent run, no route.
 
+## Try it
+
+The script `scripts/play-run-agent.mjs` sets up a private play directory and writes `run.sh`, which runs one agent session:
+
+```sh
+pnpm run play:agent -- [--repo <path>] [--model <provider>/<model>:<level>] [--auth <path>] [--budget <duration>] [--no-refresh]
+```
+
+| Option         | Default                           | Effect                                                |
+| -------------- | --------------------------------- | ----------------------------------------------------- |
+| `--repo`       | none                              | Clone this git repository. With no value, use sample. |
+| `--model`      | `anthropic/claude-haiku-5-5:high` | The model of each run.                                |
+| `--auth`       | `~/.pi/agent/auth.json`           | The `--auth` file of each run.                        |
+| `--budget`     | `15m`                             | The wall budget of each run.                          |
+| `--no-refresh` | refresh on                        | Skip the pi token refresh before each run.            |
+
+Run `pnpm run build` first. The script exits `1` when `dist/main.js` is absent.
+
+The play directory is `<state directory>/play/<UTC time>` with mode `0700`. It holds `workspace/`, `prompt.md` and `run.sh`. The script resolves a relative `--auth` path against the current directory. The script and `run.sh` pass the `--auth` path to `kanthord` and never read the file.
+
+The script prints the play directory and the path of `run.sh`. Run `run.sh` to start the agent. Pass a prompt text as the argument to override `prompt.md`:
+
+```sh
+<play-dir>/run.sh
+<play-dir>/run.sh "Fix the failing test."
+```
+
+Unless `--no-refresh` was given, `run.sh` first runs `pi auth print-bearer-token --provider <provider> --min-expiry 20m > /dev/null`. This command refreshes an `oauth` entry of the pi `auth.json` and discards the token. Each run writes a new session file in `sessions/` and the result line to `result.jsonl`.
+
+`run.sh` prints the exit code, the `end`, `class` and `text` fields of the result and the workspace status.
+
 ## `run agent`
 
 **Implemented:** `run agent` runs one agent profile on one workspace for one
