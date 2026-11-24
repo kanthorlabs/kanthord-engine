@@ -16,8 +16,8 @@ import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
 import type { StubRequestRecord } from "./e2e-llm-stub-test-support.ts";
 
-const ENGINE_ROOT = new URL("../../../", import.meta.url).pathname;
-const BIN_PATH = join(ENGINE_ROOT, "bin", "kanthord.mjs");
+export const ENGINE_ROOT = new URL("../../../", import.meta.url).pathname;
+export const BIN_PATH = join(ENGINE_ROOT, "bin", "kanthord.mjs");
 const DIST_MAIN = join(ENGINE_ROOT, "dist", "main.js");
 
 const COMMIT_IDENTITY = [
@@ -322,10 +322,10 @@ export function resetFixturesAuth(
   chmodSync(fixtures.authPath, 0o600);
 }
 
-export async function spawnCli(
+export function runAgentArguments(
   fixtures: AgentFixtures,
   options: RunOptions,
-): Promise<CliResult> {
+): string[] {
   const profile = options.profile ?? DEFAULT_PROFILE;
   const model = options.model ?? DEFAULT_MODEL;
   const workspace = options.workspace ?? fixtures.W;
@@ -335,7 +335,6 @@ export async function spawnCli(
   const systemPrompts = options.systemPrompt ?? [];
 
   const args: string[] = [
-    BIN_PATH,
     "run",
     "agent",
     profile,
@@ -362,13 +361,28 @@ export async function spawnCli(
   if (options.output !== false)
     args.push("--output", options.output ?? fixtures.O);
 
-  const env: NodeJS.ProcessEnv = {
+  return args;
+}
+
+export function cliEnvironment(
+  fixtures: AgentFixtures,
+  options: RunOptions,
+): NodeJS.ProcessEnv {
+  return {
     HOME: fixtures.H,
     TMPDIR: fixtures.T,
     XDG_STATE_HOME: fixtures.X,
     PATH: process.env.PATH ?? "",
     ...options.extraEnv,
   };
+}
+
+export async function spawnCli(
+  fixtures: AgentFixtures,
+  options: RunOptions,
+): Promise<CliResult> {
+  const args = [BIN_PATH, ...runAgentArguments(fixtures, options)];
+  const env = cliEnvironment(fixtures, options);
 
   const child = spawn(process.execPath, args, {
     env,
