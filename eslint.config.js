@@ -544,7 +544,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "agent" },
                     fileInternalPath:
-                      "{pi,pi-tools,environment,agent-contract,known-secrets}.ts",
+                      "{pi,pi-tools,environment,agent-contract}.ts",
                   }),
                 },
                 {

@@ -23,9 +23,11 @@ export type StubTextTurn = {
   usage?: StubUsage;
 };
 
+export type StubToolCall = { name: string; args: Record<string, unknown> };
+
 export type StubToolCallTurn = {
   kind: "tool_calls";
-  calls: { name: string; args: Record<string, unknown> }[];
+  calls: StubToolCall[];
   usage?: StubUsage;
 };
 
@@ -76,7 +78,7 @@ function textTurnEvents(
 ): string {
   const responseId = `${RESPONSE_ID_PREFIX}${index}`;
   const itemId = `${ITEM_ID_PREFIX}${index}`;
-  const text = turn.text.replace("$TEST", testDir);
+  const text = turn.text.replaceAll("$TEST", testDir);
   const item = {
     type: MESSAGE_TYPE,
     id: itemId,
@@ -121,7 +123,7 @@ function toolCallsTurnEvents(
     for (const [k, v] of Object.entries(args)) {
       resolvedArgs[k] =
         typeof v === TYPEOF_STRING
-          ? (v as string).replace("$TEST", testDir)
+          ? (v as string).replaceAll("$TEST", testDir)
           : v;
     }
     const argsText = JSON.stringify(resolvedArgs);

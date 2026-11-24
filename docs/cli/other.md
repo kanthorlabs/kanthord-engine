@@ -180,8 +180,8 @@ the instance configuration; see [serve worker](#serve-worker).
 A `serve worker` process that another process supersedes exits `3` with
 `worker.instance.superseded`.
 `run agent` uses exit `0` for a completed run, `2` for a stopped run (signal),
-`4` for a budget-end run, `5` for a terminal failure, and `75` for a retryable
-failure. A refusal or validation failure exits `1`.
+`4` for a budget-end run and `5` for a failed run. A refusal exits `1`. See
+[run.md](run.md#exit-codes).
 Commander help exits `0`; parsing failures exit nonzero. A caught CLI or domain
 failure writes a diagnostic to stderr. Line 1 of a diagnostic is
 `<code>: <message>`, with the code at the start of the line. The message holds

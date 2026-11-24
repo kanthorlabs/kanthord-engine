@@ -6,6 +6,7 @@ import ts from "typescript";
 import {
   AMBIENT_CREDENTIAL_NAMES,
   PROXY_NAMES,
+  toolChildEnvironment,
   withoutAmbientCredentials,
 } from "./run-agent-environment.ts";
 
@@ -20,6 +21,15 @@ const EIGHT_PROXY_NAMES = [
   "NO_PROXY",
   "no_proxy",
 ];
+const CHILD_NAMES = [
+  "GIT_CONFIG_NOSYSTEM",
+  "GIT_SSH_COMMAND",
+  "HOME",
+  "LANG",
+  "PATH",
+  "TMPDIR",
+];
+const SHELL_SSH_COMMAND = "ssh -i /old/key";
 const AGENT_HOME = "/run/agent/home";
 const AGENT_TMP = "/run/agent/tmp";
 const AWS_CONFIG_PATH = "/run/agent/home/.aws/config";
@@ -137,5 +147,38 @@ describe("withoutAmbientCredentials", () => {
     withoutAmbientCredentials(env, "/run/agent/home", "/run/agent/tmp");
     assert.equal(env["PATH"], PATH_VALUE);
     assert.equal(env["LANG"], LANG_VALUE);
+  });
+});
+
+describe("toolChildEnvironment", () => {
+  it("gives only the shell names, the run directories and the fixed git names", () => {
+    const env = toolChildEnvironment(
+      {
+        PATH: PATH_VALUE,
+        LANG: LANG_VALUE,
+        HOME: "/old",
+        TMPDIR: "/old/tmp",
+        USER: "someone",
+        AWS_CONFIG_FILE: AWS_CONFIG_PATH,
+        GIT_SSH_COMMAND: SHELL_SSH_COMMAND,
+      },
+      AGENT_HOME,
+      AGENT_TMP,
+    );
+    assert.deepEqual(Object.keys(env).sort(), CHILD_NAMES);
+    assert.equal(env["PATH"], PATH_VALUE);
+    assert.equal(env["LANG"], LANG_VALUE);
+    assert.equal(env["HOME"], AGENT_HOME);
+    assert.equal(env["TMPDIR"], AGENT_TMP);
+    assert.notEqual(env["GIT_SSH_COMMAND"], SHELL_SSH_COMMAND);
+  });
+
+  it("omits a shell name that the shell does not set", () => {
+    const env = toolChildEnvironment(
+      { PATH: PATH_VALUE },
+      AGENT_HOME,
+      AGENT_TMP,
+    );
+    assert.ok(!Object.hasOwn(env, "LANG"));
   });
 });

@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { simpleGit } from "simple-git";
 import { temporary } from "../../kernel/test-support.ts";
+import type { StubRequestRecord } from "./e2e-llm-stub-test-support.ts";
 
 const ENGINE_ROOT = new URL("../../../", import.meta.url).pathname;
 const BIN_PATH = join(ENGINE_ROOT, "bin", "kanthord.mjs");
@@ -26,6 +35,9 @@ const DEFAULT_PROFILE = "swe@1";
 export const TEST_K = "AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlMn";
 
 export const TEST_TIMEOUT_MS = 120000;
+
+const REFUSAL_EXIT = 1;
+const EMPTY_OUTPUT = "";
 
 export interface AgentFixtures {
   authPath: string;
@@ -72,24 +84,183 @@ function writeAuthFile(
   writeFileSync(authPath, JSON.stringify(entry), { mode: 0o600 });
 }
 
+export async function commitAll(W: string, message: string): Promise<void> {
+  const git = simpleGit(W);
+  await git.add(".");
+  await git.raw([...COMMIT_IDENTITY, "commit", "-m", message]);
+}
+
 async function buildWorkspace(root: string): Promise<string> {
   const W = join(root, "w");
   mkdirSync(W);
-  const git = simpleGit(W);
-  await git.raw(["init", "-b", "main"]);
+  await simpleGit(W).raw(["init", "-b", "main"]);
   writeFileSync(join(W, "README.md"), "workspace");
-  await git.add("README.md");
-  await git.raw([...COMMIT_IDENTITY, "commit", "-m", "init"]);
+  await commitAll(W, "init");
   return W;
+}
+
+export async function addWorktree(W: string, path: string): Promise<void> {
+  await simpleGit(W).raw(["worktree", "add", "--detach", path]);
+}
+
+export async function porcelainStatus(W: string): Promise<string> {
+  return (await simpleGit(W).raw(["status", "--porcelain"])).trimEnd();
+}
+
+export function digestListing(directory: string): string[] {
+  return readdirSync(directory, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort()
+    .map(
+      (path) =>
+        `${createHash("sha256").update(readFileSync(path)).digest("hex")} ${path}`,
+    );
+}
+
+export interface SessionContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  arguments?: Record<string, unknown>;
+}
+
+export interface SessionMessage {
+  role: string;
+  content: SessionContentBlock[] | string;
+  toolName?: string;
+  isError?: boolean;
+  stopReason?: string;
+  errorMessage?: string;
+}
+
+export interface SessionEntry {
+  type: string;
+  cwd?: string;
+  message?: SessionMessage;
+}
+
+export function sessionEntries(path: string): SessionEntry[] {
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as SessionEntry);
+}
+
+export function sessionMessages(path: string, role: string): SessionMessage[] {
+  return sessionEntries(path).flatMap((entry) =>
+    entry.message?.role === role ? [entry.message] : [],
+  );
+}
+
+export function blockTexts(message: SessionMessage): string[] {
+  if (!Array.isArray(message.content)) return [message.content];
+  return message.content.flatMap((block) =>
+    block.text === undefined ? [] : [block.text],
+  );
+}
+
+export function resultLines(path: string): Record<string, unknown>[] {
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+function isJsonLine(line: string): boolean {
+  return line.startsWith("{");
+}
+
+export function jsonLines(
+  stderr: string,
+  code: string,
+): Record<string, unknown>[] {
+  return stderr
+    .split("\n")
+    .filter(isJsonLine)
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((line) => line["code"] === code);
+}
+
+export function assertRefused(result: CliResult, code: string): void {
+  assert.equal(result.status, REFUSAL_EXIT);
+  assert.equal(result.stdout, EMPTY_OUTPUT);
+  const first = result.stderr
+    .split("\n")
+    .find((line) => line.length && !isJsonLine(line));
+  assert.ok(first !== undefined);
+  assert.ok(first.startsWith(`${code}:`), first);
+}
+
+export function assertRow(stderr: string, name: string, value: string): void {
+  assert.ok(
+    stderr
+      .split("\n")
+      .some(
+        (line) =>
+          line.startsWith(`${name}:`) &&
+          line.slice(name.length + 1).trim() === value,
+      ),
+    stderr,
+  );
+}
+
+export interface RequestItem {
+  role?: string;
+  type?: string;
+  content?: RequestContentPart[] | string;
+  output?: string;
+}
+
+export interface RequestContentPart {
+  text?: string;
+}
+
+export interface RequestTool {
+  name: string;
+}
+
+export interface RequestBody {
+  model?: string;
+  input?: RequestItem[];
+  tools?: RequestTool[];
+  reasoning?: Record<string, unknown>;
+}
+
+export function requestBody(
+  record: StubRequestRecord | undefined,
+): RequestBody {
+  assert.ok(record !== undefined);
+  return record.body as RequestBody;
+}
+
+export function roleText(
+  record: StubRequestRecord | undefined,
+  role: string,
+): string {
+  const item = (requestBody(record).input ?? []).find(
+    (entry) => entry.role === role,
+  );
+  assert.ok(item !== undefined);
+  const { content } = item;
+  assert.ok(content !== undefined);
+  if (!Array.isArray(content)) return content;
+  return content.map((part) => part.text ?? "").join("");
+}
+
+export function toolNames(record: StubRequestRecord | undefined): string[] {
+  return (requestBody(record).tools ?? []).map((tool) => tool.name).sort();
+}
+
+export interface FixtureOptions {
+  models?: string;
+  key?: string;
 }
 
 export async function buildFixtures(
   t: TestContext,
   stubBaseUrl: string,
-  options: {
-    models?: string;
-    key?: string;
-  } = {},
+  options: FixtureOptions = {},
 ): Promise<AgentFixtures> {
   requireDist();
 
@@ -140,10 +311,11 @@ export interface RunOptions {
 export function resetFixturesAuth(
   fixtures: AgentFixtures,
   stubBaseUrl: string,
+  key: string = fixtures.K,
 ): void {
   writeAuthFile(
     fixtures.authPath,
-    fixtures.K,
+    key,
     stubBaseUrl,
     JSON.stringify([{ id: STUB_MODEL_ID }]),
   );
@@ -187,13 +359,8 @@ export async function spawnCli(
     args.push("--budget", b);
   }
 
-  if (options.output === false) {
-    void 0;
-  } else if (options.output !== undefined) {
-    args.push("--output", options.output);
-  } else {
-    args.push("--output", fixtures.O);
-  }
+  if (options.output !== false)
+    args.push("--output", options.output ?? fixtures.O);
 
   const env: NodeJS.ProcessEnv = {
     HOME: fixtures.H,

@@ -9,30 +9,30 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { simpleGit } from "simple-git";
 import { ExitCode } from "./constants.ts";
 import { llmStub, type StubTurn } from "./e2e-llm-stub-test-support.ts";
 import {
+  assertRefused,
+  assertRow,
+  blockTexts,
   buildFixtures,
+  commitAll,
   resetFixturesAuth,
+  sessionMessages,
   spawnCli,
   TEST_TIMEOUT_MS,
 } from "./e2e-run-agent-test-support.ts";
 
-const REFUSAL_EXIT = 1;
 const AUTH_KEY_COMMAND_CODE = "cli.run.agent.auth_key_command";
 const AUTH_IN_PI_DIR_CODE = "cli.run.agent.auth_in_pi_directory";
-const M6_TEXT = "marker text m6 unique confined ac14";
+const PI_AUTH_FILE = "auth.json";
+const M6_TEXT = "marker-text-m6-unique-confined-ac14";
+const M6_PATTERN = "marker-text-m6-unique-confined-ac1[4]";
 const F_CONTENT_AC14 = "content of file F for ac14 test";
 const M8_TEXT = "agents md marker m8 unique";
-const GREP_SEARCH_AC14 = "search-outside-workspace-ac14";
-
-const COMMIT_IDENTITY = [
-  "-c",
-  "user.name=Test",
-  "-c",
-  "user.email=test@example.invalid",
-];
+const TOOL_RESULT_ROLE = "toolResult";
+const BLOCKED_CALLS = 4;
+const ALL_CALLS = 5;
 
 test(
   "L2-AC5: a refused auth file starts nothing and runs no shell code",
@@ -42,28 +42,21 @@ test(
   async (t) => {
     const stub = await llmStub(t, [], "");
     const fixtures = await buildFixtures(t, stub.baseUrl);
-
     const markerPath = join(fixtures.TEST, "marker-ac5.txt");
-    const badKey = `!touch ${markerPath}`;
-    const badFixtures = await buildFixtures(t, stub.baseUrl, { key: badKey });
+    resetFixturesAuth(fixtures, stub.baseUrl, `!touch ${markerPath}`);
 
-    const result = await spawnCli(badFixtures, {
+    const result = await spawnCli(fixtures, {
       prompt: ["run task"],
       signal: t.signal,
     });
 
-    assert.equal(result.status, REFUSAL_EXIT);
-    const firstDiagLine = result.stderr
-      .split("\n")
-      .find((l) => !l.startsWith("{"));
-    assert.ok(firstDiagLine !== undefined);
-    assert.ok(firstDiagLine.startsWith(AUTH_KEY_COMMAND_CODE));
-    assert.ok(result.stderr.includes("key"));
+    assertRefused(result, AUTH_KEY_COMMAND_CODE);
+    assertRow(result.stderr, "field", "key");
     assert.equal(existsSync(markerPath), false);
     assert.deepEqual(stub.requests, []);
-    assert.equal(existsSync(badFixtures.S), false);
-    assert.equal(existsSync(badFixtures.O), false);
-    assert.deepEqual(readdirSync(badFixtures.T), []);
+    assert.equal(existsSync(fixtures.S), false);
+    assert.equal(existsSync(fixtures.O), false);
+    assert.deepEqual(readdirSync(fixtures.T), []);
   },
 );
 
@@ -78,7 +71,7 @@ test(
 
     const P = join(fixtures.X, "kanthord", "pi");
     mkdirSync(P, { recursive: true, mode: 0o700 });
-    const piAuthFile = join(P, "auth.json");
+    const piAuthFile = join(P, PI_AUTH_FILE);
     writeFileSync(piAuthFile, JSON.stringify({ fake: "entry" }), {
       mode: 0o600,
     });
@@ -88,13 +81,9 @@ test(
       signal: t.signal,
     });
 
-    assert.equal(result.status, REFUSAL_EXIT);
-    const firstDiagLine = result.stderr
-      .split("\n")
-      .find((l) => !l.startsWith("{"));
-    assert.ok(firstDiagLine !== undefined);
-    assert.ok(firstDiagLine.startsWith(AUTH_IN_PI_DIR_CODE));
-    assert.ok(result.stderr.includes(piAuthFile));
+    assertRefused(result, AUTH_IN_PI_DIR_CODE);
+    assertRow(result.stderr, "path", piAuthFile);
+    assert.deepEqual(readdirSync(P), [PI_AUTH_FILE]);
     assert.deepEqual(stub.requests, []);
     assert.equal(existsSync(fixtures.S), false);
     assert.deepEqual(readdirSync(fixtures.T), []);
@@ -107,7 +96,7 @@ test(
     timeout: TEST_TIMEOUT_MS,
   },
   async (t) => {
-    const stub = await llmStub(t, [{ kind: "text", text: "done-ac7v2" }], "");
+    const stub = await llmStub(t, [{ kind: "text", text: "ok" }], "");
     const fixtures = await buildFixtures(t, stub.baseUrl);
 
     const M7Path = join(fixtures.TEST, "m7-marker.txt");
@@ -124,10 +113,7 @@ writeFileSync(${JSON.stringify(M9Path)}, "loaded");
     mkdirSync(extDirW, { recursive: true });
     writeFileSync(join(extDirW, "x.ts"), extContentW);
     writeFileSync(join(fixtures.W, "AGENTS.md"), M8_TEXT);
-
-    const git = simpleGit(fixtures.W);
-    await git.add(".");
-    await git.raw([...COMMIT_IDENTITY, "commit", "-m", "add extensions"]);
+    await commitAll(fixtures.W, "add extensions");
 
     const P = join(fixtures.X, "kanthord", "pi");
     const piExtDir = join(P, "extensions");
@@ -143,6 +129,7 @@ writeFileSync(${JSON.stringify(M9Path)}, "loaded");
     assert.equal(existsSync(M7Path), false);
     assert.equal(existsSync(M9Path), false);
 
+    assert.ok(stub.requests.length);
     for (const req of stub.requests) {
       assert.ok(!JSON.stringify(req.body).includes(M8_TEXT));
     }
@@ -159,25 +146,22 @@ test(
     const stubPlaceholder = await llmStub(t, [], "");
     const fixtures = await buildFixtures(t, stubPlaceholder.baseUrl);
 
-    const mp = join(fixtures.TEST, "m6marker.txt");
-    writeFileSync(mp, M6_TEXT, { mode: 0o600 });
+    const markerPath = join(fixtures.TEST, "m6marker.txt");
+    writeFileSync(markerPath, M6_TEXT, { mode: 0o600 });
     writeFileSync(join(fixtures.W, "f.txt"), F_CONTENT_AC14);
-    symlinkSync(mp, join(fixtures.W, "l.txt"));
-
-    const git = simpleGit(fixtures.W);
-    await git.add(".");
-    await git.raw([...COMMIT_IDENTITY, "commit", "-m", "add F and L"]);
+    symlinkSync(markerPath, join(fixtures.W, "l.txt"));
+    await commitAll(fixtures.W, "add F and L");
 
     const turns: StubTurn[] = [
       {
         kind: "tool_calls",
         calls: [
-          { name: "read", args: { path: mp } },
+          { name: "read", args: { path: markerPath } },
+          { name: "grep", args: { pattern: M6_PATTERN, path: fixtures.TEST } },
           {
-            name: "grep",
-            args: { pattern: GREP_SEARCH_AC14, path: fixtures.TEST },
+            name: "read",
+            args: { path: join("..", "test", "m6marker.txt") },
           },
-          { name: "read", args: { path: join("..", "m6marker.txt") } },
           { name: "read", args: { path: "l.txt" } },
           { name: "read", args: { path: "f.txt" } },
         ],
@@ -196,10 +180,20 @@ test(
 
     assert.equal(result.status, ExitCode.Success);
 
+    const toolResults = sessionMessages(fixtures.S, TOOL_RESULT_ROLE);
+    assert.equal(toolResults.length, ALL_CALLS);
+    assert.deepEqual(
+      toolResults.map((message) => message.isError),
+      [true, true, true, true, false],
+    );
+    assert.ok(
+      blockTexts(toolResults[BLOCKED_CALLS]!).join("").includes(F_CONTENT_AC14),
+    );
+
+    assert.ok(stub.requests.length);
     for (const req of stub.requests) {
       assert.ok(!JSON.stringify(req.body).includes(M6_TEXT));
     }
-
     assert.ok(!readFileSync(fixtures.S, "utf8").includes(M6_TEXT));
     assert.ok(!readFileSync(fixtures.O, "utf8").includes(M6_TEXT));
     assert.deepEqual(readdirSync(fixtures.T), []);
