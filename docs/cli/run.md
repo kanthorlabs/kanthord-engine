@@ -62,7 +62,7 @@ file and reports one result.
 | `--prompt <text\|path>`              | Required and repeatable. Each value is one prompt part, in order.                                              |
 | `--system-prompt <text\|path>`       | Optional and repeatable. Each value is one context part after the profile prompt. It never replaces that text. |
 | `--model <provider>/<model>:<level>` | Required. The provider, the model id and the reasoning level. No default exists.                               |
-| `--budget <duration>`                | Optional. One wall budget: a positive integer with `s`, `m` or `h`. Default `2h`.                              |
+| `--budget <duration\|Nusd>`          | Optional and repeatable: one wall budget, one cost budget, or both. Default wall budget `2h`.                  |
 | `--workspace <path>`                 | Optional. The working directory of the session. Default: the current directory.                                |
 | `--session <path>`                   | Required. The path of the new session file.                                                                    |
 | `--auth <path>`                      | Optional. A file in the pi `auth.json` format. Default: `.config/kanthord/auth.json` in the OS user home.      |
@@ -74,8 +74,6 @@ file and reports one result.
 - The run refuses `--token` with `cli.run.agent.token` before each other check.
 - The run refuses `NODE_USE_ENV_PROXY`, and `--use-env-proxy` in `NODE_OPTIONS`
   or in the Node arguments, with `cli.run.agent.env_proxy`.
-- The run refuses a `usd` budget value with `cli.run.agent.option_invalid`,
-  `option: --budget`.
 - The run refuses an unknown profile name with `cli.run.agent.agent_unknown`.
 
 ### Text or path
@@ -119,6 +117,27 @@ only an exact match.
 - `cli.run.agent.level_unsupported`: the model does not support the level.
 
 The levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh` and `max`.
+
+### Budget
+
+The `--budget` option gives one wall budget, one cost budget, or both.
+
+- **Wall budget.** A positive integer with `s`, `m` or `h`, for example `30m`
+  or `1h`. Default `2h`.
+- **Cost budget.** A positive decimal with at most 6 fraction digits and the
+  suffix `usd`, for example `5usd` or `0.25usd`. The cost is the list price:
+  the sum of `usage.cost.total` of each assistant message of the run.
+
+The first limit the run reaches ends the current turn with the end `budget_end`
+and exit `4`. The result field `budget_reached` is `wall` or `usd`.
+
+- With no cost budget, the run has no cost limit.
+- The run refuses a cost budget when the resolved model has no price, with
+  `cli.run.agent.budget_unpriced`, `option: --budget`. An `openai-compatible`
+  model has no price.
+- The run refuses a zero value, a value of no kind and a second value of one
+  kind with `cli.run.agent.option_invalid`, `option: --budget`.
+- The wait of each pi retry counts against the wall budget.
 
 ### The `--auth` file
 
@@ -245,7 +264,7 @@ With `--output <path>`, the run appends one JSON line with these fields:
   and `terminal` for each other end.
 - `failure` is the failure kind for the end `failed`, for example
   `bad_request`, `unauthorized` or `internal`. Else it is `null`.
-- `budget` is `{ "wall_ms", "usd" }`, and `usd` is `null`.
+- `budget` is `{ "wall_ms", "usd" }`, and `usd` is the cost budget or `null`.
 - `input_digest` covers the prompt part texts, the context part texts, the
   model selection and the budget. It holds no path.
 - `text` is the last assistant text. A known secret shows as the redaction
@@ -277,8 +296,8 @@ A later try also needs a workspace that passes the start preconditions.
 - `run agent` retries nothing by itself. pi retries a retryable error up to 3
   times inside the session, with a base delay of 2 seconds.
 - The class applies to the error after the last pi retry.
-- The wait of each pi retry counts against the wall budget. A wall budget that
-  ends during a retry gives the end `budget_end` and exit `4`.
+- The wait of each pi retry counts against the wall budget. The first budget
+  limit (wall or usd) that fires during a retry gives `budget_end` and exit `4`.
 
 ### Exit codes
 
@@ -287,7 +306,7 @@ A later try also needs a workspace that passes the start preconditions.
 | `0`  | The end `completed`.                                                      |
 | `1`  | A refusal, a failed open (`cli.run.agent.open_failed`) or a syntax error. |
 | `2`  | The end `stopped`: one SIGINT stops the turn.                             |
-| `4`  | The end `budget_end`: the run reached the wall budget.                    |
+| `4`  | The end `budget_end`: the first budget limit (wall or usd) fired.         |
 | `5`  | The end `failed` with a terminal failure.                                 |
 | `75` | The end `failed` with a retryable failure.                                |
 

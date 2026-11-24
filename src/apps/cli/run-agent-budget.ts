@@ -4,17 +4,25 @@ const OPTION_INVALID = "cli.run.agent.option_invalid";
 const OPTION_BUDGET = "--budget";
 
 const DURATION_PATTERN = /^([1-9][0-9]*)(s|m|h)$/;
-const USD_PATTERN = /^[0-9]+(\.[0-9]+)?usd$/;
+const USD_PATTERN = /^[0-9]+(\.[0-9]{1,6})?usd$/;
 const UNIT_MS: Readonly<Record<string, number>> = {
   s: 1000,
   m: 60000,
   h: 3600000,
 };
 const DEFAULT_WALL_MS = 7200000;
+const USD_SUFFIX_LEN = 3;
+const ZERO_USD = 0;
 
 export interface ParsedBudget {
   wallMs: number;
-  usdText: string | null;
+  usd: number | null;
+}
+
+export interface BudgetResultFields {
+  wall_ms: number;
+  usd: number | null;
+  display: string;
 }
 
 function parseDuration(value: string): number | null {
@@ -35,14 +43,19 @@ function optionInvalid(): never {
 
 export function parseBudget(values: readonly string[]): ParsedBudget {
   let wallMs: number | null = null;
-  const usdText = null;
+  let usd: number | null = null;
   for (const value of values) {
     if (USD_PATTERN.test(value)) {
-      throw new Diagnostic(
-        OPTION_INVALID,
-        "run agent: a cost budget is not supported in this version.",
-        { fields: [["option", OPTION_BUDGET]] },
-      );
+      if (usd !== null)
+        throw new Diagnostic(
+          OPTION_INVALID,
+          "run agent: --budget may not give the usd form more than once.",
+          { fields: [["option", OPTION_BUDGET]] },
+        );
+      const amount = Number(value.slice(0, -USD_SUFFIX_LEN));
+      if (amount === ZERO_USD) optionInvalid();
+      usd = amount;
+      continue;
     }
     const ms = parseDuration(value);
     if (ms === null) optionInvalid();
@@ -54,21 +67,18 @@ export function parseBudget(values: readonly string[]): ParsedBudget {
       );
     wallMs = ms;
   }
-  return { wallMs: wallMs ?? DEFAULT_WALL_MS, usdText };
+  return { wallMs: wallMs ?? DEFAULT_WALL_MS, usd };
 }
 
 export function budgetResultFields(
   parsed: ParsedBudget,
   rawValues: readonly string[],
-): {
-  wall_ms: number;
-  usd: null;
-  display: string;
-} {
-  const isDefault =
-    !rawValues.length || !rawValues.some((v) => DURATION_PATTERN.test(v));
-  const display = isDefault
-    ? "2h wall (default)"
-    : `${rawValues.find((v) => DURATION_PATTERN.test(v))!} wall`;
-  return { wall_ms: parsed.wallMs, usd: null, display };
+): BudgetResultFields {
+  const wallRaw = rawValues.find((v) => DURATION_PATTERN.test(v));
+  const usdRaw = rawValues.find((v) => USD_PATTERN.test(v));
+  const wallDisplay =
+    wallRaw === undefined ? "2h wall (default)" : `${wallRaw} wall`;
+  const display =
+    usdRaw === undefined ? wallDisplay : `${wallDisplay}, ${usdRaw}`;
+  return { wall_ms: parsed.wallMs, usd: parsed.usd, display };
 }

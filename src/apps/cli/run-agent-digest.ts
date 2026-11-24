@@ -29,9 +29,6 @@ export function inputDigest(input: DigestInput): string {
 export function budgetDigestField(parsed: ParsedBudget): BudgetDigestField {
   return {
     wall_ms: parsed.wallMs,
-    usd:
-      parsed.usdText !== null
-        ? Number(parsed.usdText.replace("usd", ""))
-        : null,
+    usd: parsed.usd,
   };
 }

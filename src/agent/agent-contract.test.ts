@@ -465,3 +465,49 @@ test("the wall timer aborts the session at the deadline, and the end is budget_e
   const after = await run.send("again", { work: null });
   assert.equal(after.end, RunEnd.BudgetEnd);
 });
+
+test("L3-U6 first limit: wall fires first with a usd budget set, budget_reached is wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: 1000 };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+});
+
+test("L3-U6: wall budget ends during a pi retry wait and the end is budget_end with wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      fauxAssistantMessage("", {
+        stopReason: "error",
+        errorMessage: "Too Many Requests",
+      }),
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+});

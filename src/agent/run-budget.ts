@@ -51,3 +51,25 @@ export class WallTimer {
     return Math.max(0, this.deadline - Date.now());
   }
 }
+
+export class UsdTracker {
+  private readonly limit: number | null;
+  private reached: BudgetLimit | null = null;
+
+  constructor(limit: number | null) {
+    this.limit = limit;
+  }
+
+  check(listPriceUsd: number, onReached: () => void): void {
+    if (this.limit === null) return;
+    if (this.reached !== null) return;
+    if (listPriceUsd >= this.limit) {
+      this.reached = BudgetLimit.Usd;
+      onReached();
+    }
+  }
+
+  budgetReached(): BudgetLimit | null {
+    return this.reached;
+  }
+}

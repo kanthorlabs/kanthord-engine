@@ -49,7 +49,7 @@ import {
   RUNTIME_SETUP_DEADLINE_MS,
   withDeadline,
 } from "./agent-session.ts";
-import { type RunBudget, WallTimer } from "./run-budget.ts";
+import { type RunBudget, UsdTracker, WallTimer } from "./run-budget.ts";
 import {
   addMessageTotals,
   BudgetLimit,
@@ -225,6 +225,7 @@ interface RunContext {
   pins: ReturnType<typeof pinnedLayers>;
   processes: ToolProcesses;
   timer: WallTimer;
+  usdTracker: UsdTracker;
   model: Model<Api>;
   promptDigest: string;
   inputSignal: AbortSignal;
@@ -239,6 +240,7 @@ function buildRun(ctx: RunContext): AgentRun {
     pins,
     processes,
     timer,
+    usdTracker,
     model,
     promptDigest,
     inputSignal,
@@ -268,6 +270,11 @@ function buildRun(ctx: RunContext): AgentRun {
     if (event.type !== MESSAGE_END) return;
     if (event.message.role !== ASSISTANT_ROLE) return;
     totals = addMessageTotals(totals, event.message);
+    usdTracker.check(totals.listPriceUsd, () => {
+      if (budgetReached !== null) return;
+      budgetReached = BudgetLimit.Usd;
+      if (sending) void session.abort();
+    });
   });
 
   const unsubscribeSignal = addAbortListener(inputSignal, () => {
@@ -308,6 +315,15 @@ function buildRun(ctx: RunContext): AgentRun {
   function loopEnd(): TurnEnd {
     if (extensionFailure.reason !== null)
       return internalEnd(extensionFailure.reason);
+    if (budgetReached !== null)
+      return buildTurnEnd({
+        budgetReached,
+        stopped: false,
+        failure: null,
+        text: currentText(),
+        totals,
+        warnings: redaction.takeWarnings(),
+      });
     const failure = failureOf(lastAssistantOf(session.messages), model);
     if (failure !== null) {
       return {
@@ -516,6 +532,7 @@ async function openSteps(input: AgentInput): Promise<AgentOpen> {
     pins,
     processes,
     timer: new WallTimer(input.budget.deadline),
+    usdTracker: new UsdTracker(input.budget.usd),
     model: input.model.model,
     promptDigest,
     inputSignal: input.signal,

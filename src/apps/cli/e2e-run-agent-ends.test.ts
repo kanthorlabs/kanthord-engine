@@ -30,6 +30,7 @@ import {
 } from "./e2e-run-agent-test-support.ts";
 
 const START_REFUSED_CODE = "cli.run.agent.start_refused";
+const BUDGET_UNPRICED_CODE = "cli.run.agent.budget_unpriced";
 const PROVIDER_RETRYABLE_CODE = "cli.run.agent.provider_retryable";
 const PROVIDER_FAILED_CODE = "cli.run.agent.provider_failed";
 const RE_PROFILE = "re@1";
@@ -37,6 +38,8 @@ const OK_TEXT = "ok";
 const GIT_CLEAN = "git_clean";
 const GIT_WORKTREE = "git_worktree";
 const REASON_ROW = "reason:";
+const OPTION_ROW = "option:";
+const OPTION_BUDGET = "--budget";
 const NO_REQUESTS = 0;
 const BUDGET_5S = "5s";
 const BUDGET_END = "budget_end";
@@ -320,6 +323,34 @@ test(
     );
     assert.ok(!result.stderr.includes(TEST_K));
     assert.ok(!readFileSync(fixtures.O, "utf8").includes(TEST_K));
+  },
+);
+
+test(
+  "L2-AC15: a cost budget on a model with no price starts nothing",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [{ kind: "text", text: OK_TEXT }], "");
+    const fixtures = await buildFixtures(t, stub.baseUrl);
+
+    const result = await spawnCli(fixtures, {
+      budget: ["1usd"],
+      signal: t.signal,
+    });
+
+    assertRefused(result, BUDGET_UNPRICED_CODE);
+    const optionRow = result.stderr
+      .split("\n")
+      .find(
+        (line) =>
+          line.startsWith(OPTION_ROW) &&
+          line.slice(OPTION_ROW.length).trim() === OPTION_BUDGET,
+      );
+    assert.ok(optionRow !== undefined, result.stderr);
+    assert.equal(stub.requests.length, NO_REQUESTS);
+    assert.equal(existsSync(fixtures.S), false);
+    assert.equal(existsSync(fixtures.O), false);
+    assert.deepEqual(readdirSync(fixtures.T), []);
   },
 );
 
