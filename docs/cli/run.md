@@ -10,34 +10,43 @@ Start with [the CLI specification index](./README.md) and
 
 ## Try it
 
-The script `scripts/play-run-agent.mjs` sets up a private play directory and writes `run.sh`, which runs one agent session:
+The script `scripts/play-run-agent.mjs` sets up a private play directory, starts the agent and prints the result:
 
 ```sh
-pnpm run play:agent -- [--repo <path>] [--model <provider>/<model>:<level>] [--auth <path>] [--budget <duration>] [--no-refresh]
+pnpm run play:agent -- [--repo <path>] [--model <provider>/<model>:<level>] [--auth <path>] [--budget <duration>] [--no-refresh] [--no-build] [--refresh-only] ["<prompt>"]
 ```
 
-| Option         | Default                           | Effect                                                |
-| -------------- | --------------------------------- | ----------------------------------------------------- |
-| `--repo`       | none                              | Clone this git repository. With no value, use sample. |
-| `--model`      | `anthropic/claude-haiku-5-5:high` | The model of each run.                                |
-| `--auth`       | `~/.pi/agent/auth.json`           | The `--auth` file of each run.                        |
-| `--budget`     | `15m`                             | The wall budget of each run.                          |
-| `--no-refresh` | refresh on                        | Skip the pi token refresh before each run.            |
+| Option           | Default                              | Effect                                                                  |
+| ---------------- | ------------------------------------ | ----------------------------------------------------------------------- |
+| `--repo`         | none                                 | Clone this git repository. With no value, use the sample.               |
+| `--model`        | `anthropic/claude-sonnet-5-5:medium` | The model of each run.                                                  |
+| `--auth`         | `~/.config/kanthord/auth.json`       | The `--auth` file of each run.                                          |
+| `--budget`       | `15m`                                | The wall budget of each run.                                            |
+| `--no-refresh`   | refresh on                           | Skip the pi token refresh before each run.                              |
+| `--no-build`     | build check on                       | Skip the build check.                                                   |
+| `--refresh-only` | run on                               | Refresh and prepare the play directory; print its path and exit `0`.    |
+| `"<prompt>"`     | use `prompt.md`                      | Prompt text or a path, as one argument. With no value, use `prompt.md`. |
 
-Run `pnpm run build` first. The script exits `1` when `dist/main.js` is absent.
+The play directory is `<state directory>/play/<YYYYMMDD>` with mode `0700`. The script uses the local date, so the same directory is reused on the same day. It holds `workspace/`, `prompt.md`, `sessions/`, `result.jsonl` and `run.sh`.
 
-The play directory is `<state directory>/play/<UTC time>` with mode `0700`. It holds `workspace/`, `prompt.md` and `run.sh`. The script resolves a relative `--auth` path against the current directory. The script and `run.sh` pass the `--auth` path to `kanthord` and never read the file.
+The script refuses a play directory that is a symbolic link, that another user owns or whose mode is not `0700`. It refuses a `play` parent directory that is a symbolic link or that another user owns.
 
-The script prints the play directory and the path of `run.sh`. Run `run.sh` to start the agent. Pass a prompt text as the argument to override `prompt.md`:
+When `workspace/` is absent, the script creates the workspace (sample or `--repo` clone) and writes `prompt.md`. On a reuse of the same day, the script keeps `workspace/` and `prompt.md` unchanged and adds a new session file. Start one call at a time for one play directory.
 
-```sh
-<play-dir>/run.sh
-<play-dir>/run.sh "Fix the failing test."
-```
+The script refuses a prompt in more than one argument. A relative prompt path resolves against the play directory.
 
-Unless `--no-refresh` was given, `run.sh` first runs `pi auth print-bearer-token --provider <provider> --min-expiry 20m > /dev/null`. This command refreshes an `oauth` entry of the pi `auth.json` and discards the token. Each run writes a new session file in `sessions/` and the result line to `result.jsonl`.
+The script verifies that `dist/main.js` is present and not older than each `.ts` file of `src/`. When either condition fails, it runs `pnpm run build` first, with the build output on stderr. Use `--no-build` to skip this check.
 
-`run.sh` prints the exit code, the `end`, `class` and `text` fields of the result and the workspace status.
+Unless `--no-refresh` is given, the script calls `ModelRuntime.create` and `getAuth` from `@earendil-works/pi-coding-agent` to refresh an `oauth` entry. The entry type comes from `listCredentials` of pi, which resolves no key. An `api_key` entry or an absent entry gets no refresh, so the script runs no `!` command and resolves no `$` reference of a key. The refresh requires a token validity of the budget plus 10 minutes. The result is discarded. Before the refresh, the script refuses these conditions with one fixed line on stderr and exit `1`:
+
+- `NODE_USE_ENV_PROXY` is set, or `--use-env-proxy` is in `NODE_OPTIONS` or in the Node arguments.
+- The `--auth` file is absent, is no regular file, has another owner or has a group or other mode bit.
+
+On a failed refresh, the script prints one fixed error line to stderr and exits `1`. The `play:agent` script sets `ulimit -c 0` before it starts Node, and `run.sh` sets it again.
+
+Each run writes a new session file in `sessions/` and appends a result line to `result.jsonl`.
+
+The script prints the play directory, the path of `run.sh`, and after the run: the exit code, the `end`, `class` and `text` fields of the new result line and the workspace status. A run with no new result line prints no result field.
 
 ## `run agent`
 
