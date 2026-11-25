@@ -4,7 +4,7 @@ import { once } from "node:events";
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TestContext } from "node:test";
+import { after, type TestContext } from "node:test";
 import pino from "pino";
 import {
   PI_TOOLS_MANIFEST,
@@ -132,6 +132,12 @@ export const UNSET_GIT_ENVIRONMENT = {
   GIT_CONFIG_COUNT: undefined,
   GIT_ATTR_NOSYSTEM: undefined,
 } as const;
+
+export function isolateHome(): void {
+  const home = temporaryDirectory();
+  process.env.HOME = home;
+  after(() => rmSync(home, { recursive: true, force: true }));
+}
 
 export function overrideEnvironment(
   t: TestContext,
