@@ -398,6 +398,16 @@ test("an agent open that throws after the prepare gives the base head tree back 
           tasks: h.revision.tasks,
         }),
       "execution.rework_assessment.get": async () => complete(null),
+      "execution.review_round.get": async () =>
+        complete({
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+          earlier_report: null,
+        }),
       "execution.evidence.list": async () =>
         complete({ items: [], next_cursor: null }),
     },
@@ -476,6 +486,16 @@ test("an implement execution opens its agent with the pinned verification comman
           tasks: [],
         }),
       "execution.rework_assessment.get": async () => complete(null),
+      "execution.review_round.get": async () =>
+        complete({
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+          earlier_report: null,
+        }),
       "execution.evidence.list": async () =>
         complete({ items: [], next_cursor: null }),
       "evidence.submit": async () => complete({ evidence: {} }),
