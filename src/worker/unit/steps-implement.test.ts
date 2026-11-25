@@ -594,6 +594,41 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(report, `## ${other.id} other\n\nother final`);
   });
 
+  test("reproduction: K185 H1a an execution that skips the done task 1 submits a coder report with no section of task 1", async (t) => {
+    const first = task("first", "true");
+    const second = task("second", "true");
+    const h = await fixture(
+      t,
+      [first, second],
+      [
+        writeFile("one"),
+        fauxAssistantMessage("first final"),
+        writeFile("two"),
+        fauxAssistantMessage("second final"),
+      ],
+    );
+    const earlier = recordEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    assert.equal(
+      reportTextOf(earlier),
+      `## ${first.id} first\n\nfirst final\n\n## ${second.id} second\n\nsecond final`,
+    );
+    const revised = {
+      ...second,
+      content: { ...second.content, criterion: "revised" },
+    };
+    const next = await nextExecution(
+      t,
+      { ...h, revision: { ...h.revision, tasks: [first, revised] } },
+      [writeFile("three"), fauxAssistantMessage("second again")],
+    );
+    const later = recordEvidence(next);
+    recordReleases(next);
+    await runStepsImplement(next);
+    assert.equal(reportTextOf(later), `## ${second.id} second\n\nsecond again`);
+  });
+
   test("a budget end stores no coder report", async (t) => {
     const h = await fixture(
       t,
