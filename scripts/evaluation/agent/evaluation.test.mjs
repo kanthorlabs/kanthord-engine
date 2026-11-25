@@ -4573,6 +4573,25 @@ test("L4-U22: after a check.sh call that starts a background sleep, the backgrou
   assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
 });
 
+test("L4-U22: a script whose background process ended does not stop the grading", (t) => {
+  const root = tempDir(t);
+  const entry = makeCase(root, "c1", {
+    check: "true &\nexit 0\n",
+    setup: "true &\nexit 0\n",
+  });
+  writeFileSync(join(root, "diff.patch"), "");
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const graded = gradeRun({
+      caseFolder: entry.folder,
+      caseJson: entry.json,
+      gradingDir: join(root, `g${attempt}`),
+      diffPath: join(root, "diff.patch"),
+      checkTxtPath: join(root, `check${attempt}.txt`),
+    });
+    assert.equal(graded.stop, undefined);
+  }
+});
+
 test("L4-U22: a setup.sh that sleeps stops the evaluation with the stop exit code", async (t) => {
   const fixture = makeFixture(t, { h1: { setup: "sleep 30\n" } });
   const plan = await startRun(fixture.start(heldOut("stop-setup")));
@@ -4581,6 +4600,20 @@ test("L4-U22: a setup.sh that sleeps stops the evaluation with the stop exit cod
   const agent = fakeAgent();
   const output = await captured(() => runPlan(plan, agent.deps));
   assert.equal(output.value, 1);
+});
+
+test("L4-U22: a check.sh that sleeps in a run fails its mode within the limit", async (t) => {
+  const fixture = makeFixture(t, {
+    h1: { check: 'case "$2" in\n  *) sleep 30;;\nesac\n' },
+  });
+  const plan = await startRun(fixture.start(heldOut("limit-check")));
+  plan.limitMs = 200;
+  const agent = fakeAgent();
+  const start = Date.now();
+  await captured(() => runPlan(plan, agent.deps));
+  assert.ok(Date.now() - start < 10000);
+  const checks = jsonLines(join(fixture.runs, "limit-check", "checks.jsonl"));
+  assert.equal(checks[0].a2, false);
 });
 
 test("L4-U22: validate with a hanging check.sh fails within the limit", async (t) => {

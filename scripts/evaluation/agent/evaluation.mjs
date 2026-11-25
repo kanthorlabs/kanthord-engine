@@ -6,6 +6,7 @@ import {
   constants,
   copyFileSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +14,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -203,6 +205,7 @@ const RE_COMPARE_KEYS = ["provider", "model", "reasoning_effort"];
 const NOISE_FLOOR = 2;
 const REFERENCE_TRIES = 3;
 const SCRIPT_LIMIT_MS = 10 * 60000;
+const EMPTY_GROUP_CODES = ["ESRCH", "EPERM"];
 const GITLINK_MODE = "160000";
 const STAGED_DIFF_ARGS = [
   "diff",
@@ -857,19 +860,19 @@ function gitOutput(cwd, args) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
-function runCaseScript(fd, args, { cwd, limitMs }) {
+function runCaseScript(output, args, { cwd, limitMs }) {
   const result = spawnSync("sh", args, {
     cwd,
     detached: true,
     timeout: limitMs,
     killSignal: "SIGKILL",
-    stdio: ["ignore", fd, fd],
+    stdio: ["ignore", output, output],
   });
   if (result.pid > 0) {
     try {
       process.kill(-result.pid, "SIGKILL");
     } catch (e) {
-      if (e.code !== "ESRCH") throw e;
+      if (!EMPTY_GROUP_CODES.includes(e.code)) throw e;
     }
   }
   return result;
@@ -965,41 +968,40 @@ function appendCheckText(checkTxtPath, part) {
   appendFileSync(checkTxtPath, `${header}${part.text}\n`, { mode: FILE_MODE });
 }
 
+function readStart(fd, limit) {
+  const buffer = Buffer.alloc(Math.min(fstatSync(fd).size, limit));
+  const size = readSync(fd, buffer, 0, buffer.length, 0);
+  return buffer.toString("utf8", 0, size);
+}
+
 function runCheckMode(grade, mode) {
   const limitMs = grade.limitMs ?? SCRIPT_LIMIT_MS;
   const outPath = `${grade.checkTxtPath}.${mode}.tmp`;
-  const fd = openSync(outPath, "w");
+  const fd = openSync(outPath, "w+", FILE_MODE);
   let result;
+  let text;
   try {
     result = runCaseScript(
       fd,
       [join(grade.caseFolder, "check", "check.sh"), grade.gradingDir, mode],
       { cwd: grade.gradingDir, limitMs },
     );
-  } finally {
-    closeSync(fd);
-  }
-  const timedOut = result.error?.code === "ETIMEDOUT";
-  const exit = timedOut ? "timeout" : (result.status ?? EXIT_STOP);
-  const text = readFileSync(outPath, "utf8");
-  rmSync(outPath, { force: true });
-  appendCheckText(grade.checkTxtPath, { mode, exit, text });
-  return !timedOut && exit === EXIT_OK;
-}
-
-function runSetup(caseFolder, cwd, limitMs) {
-  const outPath = join(cwd, ".kanthord-setup-output");
-  const fd = openSync(outPath, "w");
-  let result;
-  try {
-    result = runCaseScript(fd, [join(caseFolder, "setup.sh")], {
-      cwd,
-      limitMs: limitMs ?? SCRIPT_LIMIT_MS,
-    });
+    text = readStart(fd, CHECK_OUTPUT_LIMIT);
   } finally {
     closeSync(fd);
     rmSync(outPath, { force: true });
   }
+  const timedOut = result.error?.code === "ETIMEDOUT";
+  const exit = timedOut ? "timeout" : (result.status ?? EXIT_STOP);
+  appendCheckText(grade.checkTxtPath, { mode, exit, text });
+  return exit === EXIT_OK;
+}
+
+function runSetup(caseFolder, cwd, limitMs) {
+  const result = runCaseScript("ignore", [join(caseFolder, "setup.sh")], {
+    cwd,
+    limitMs: limitMs ?? SCRIPT_LIMIT_MS,
+  });
   return result.status === EXIT_OK;
 }
 
