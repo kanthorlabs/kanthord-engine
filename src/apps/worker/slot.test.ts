@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import {
+  type ChildProcessWithoutNullStreams,
+  spawn,
+  spawnSync,
+} from "node:child_process";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -17,6 +21,8 @@ import {
 } from "./frames.ts";
 import { BindingEntryState } from "../../worker/contract.ts";
 import { SlotControl } from "./thread-data.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { sandboxProbe } from "./slot.ts";
 
 const SHELL = "/bin/sh";
 const NO_OUTPUT = "";
@@ -35,6 +41,23 @@ const MAIN_SLOT_TIMEOUT_MS = 120000;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const MODE_BITS = 0o777;
 const SLOT_FAILURE = 1;
+const EXIT_SUCCESS = 0;
+const NO_MISSING = 0;
+const FIRST_CALL = 1;
+const SECOND_CALL = 2;
+const PASSING_PROBE = "null";
+const SANDBOX_UNAVAILABLE = "worker.slot.sandbox_unavailable";
+const WRAP_FAILURE = "wrap rejected for the test";
+const DISPOSE_REJECTION = "dispose rejected for the test";
+const PROBE_DETAIL = "probe detail from the test";
+const SLOW_PROBE_MS = 2000;
+const FRAME_DEADLINE_BELOW_PROBE_MS = 600;
+const SLOW_PROBE_SOURCE = `async () => {
+  process.stderr.write("probe started\\n");
+  await new Promise((resolve) => setTimeout(resolve, ${LONG_DEADLINE_MS}));
+  return null;
+}`;
+const STDERR_TAIL_BYTES = 4096;
 const THREAD_STOPPED = 0;
 const CLIENT_SECRET = "slot-secret";
 const IGNORING_SECRET = "ignore-stop";
@@ -128,6 +151,7 @@ function slot(
   deadlines: Deadlines,
   env?: NodeJS.ProcessEnv,
   prelude = "",
+  probe = `async () => ${PASSING_PROBE}`,
 ): SlotProcess {
   const options = {
     initDeadlineMs: LONG_DEADLINE_MS,
@@ -140,6 +164,7 @@ const { Worker } = await import("node:worker_threads");
 const { runSlot } = await import(${JSON.stringify(SLOT_URL)});
 await runSlot({
   ...${JSON.stringify(options)},
+  probe: ${probe},
   start: (data, env) => new Worker(${JSON.stringify(THREAD_SOURCE)}, { eval: true, execArgv: [], workerData: data, transferList: data.entries.map((entry) => entry.port), env, stdout: true, stderr: true }),
 });
 `;
@@ -281,11 +306,15 @@ test(
   "kanthord serve slot exits 1 with worker.slot.channel_closed at the end of stdin",
   { timeout: MAIN_SLOT_TIMEOUT_MS },
   async (t) => {
-    const instance = spawnSlot(t, [
-      "--input-type=module",
-      "-e",
-      `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
-    ]);
+    const instance = spawnSlot(
+      t,
+      [
+        "--input-type=module",
+        "-e",
+        `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
+      ],
+      { ...hostEnvironment(), TMPDIR: temporary(t) },
+    );
     instance.child.stdin.end();
     const exit = await instance.exited;
     assert.equal(exit.code, SLOT_FAILURE);
@@ -341,4 +370,150 @@ test("serve slot applies a bindings frame and opens a port for the new entry onl
     portFrames(exit.stdout).map(({ client_id }) => client_id),
     [CLIENT_ID, SECOND_CLIENT_ID],
   );
+});
+
+const REQUIRED_COMMANDS: Partial<Record<NodeJS.Platform, string[]>> = {
+  darwin: ["rg"],
+  linux: ["bwrap", "socat", "rg"],
+};
+
+function hostSupportsSandbox(): string | null {
+  const required = REQUIRED_COMMANDS[process.platform];
+  if (!required) return `the platform ${process.platform} has no sandbox`;
+  const missing = required.filter(
+    (name) =>
+      spawnSync(SHELL, ["-c", `command -v ${name}`]).status !== EXIT_SUCCESS,
+  );
+  return missing.length === NO_MISSING
+    ? null
+    : `the host lacks ${missing.join(", ")}`;
+}
+
+test("serve slot exits 1 with worker.slot.sandbox_unavailable and the detail, and starts no thread", async (t) => {
+  const instance = slot(
+    t,
+    {},
+    undefined,
+    "",
+    `async () => ${JSON.stringify(PROBE_DETAIL)}`,
+  );
+  instance.send(init());
+  const exit = await instance.exited;
+  assert.equal(exit.code, SLOT_FAILURE);
+  assert.match(exit.stderr, new RegExp(SANDBOX_UNAVAILABLE));
+  assert.ok(exit.stderr.includes(PROBE_DETAIL), exit.stderr);
+  assert.ok(!exit.stderr.includes(CONSOLE_LINE));
+  assert.equal(exit.stdout, NO_OUTPUT);
+});
+
+test("serve slot reads the init frame after a passing probe and counts the init deadline from the probe end", async (t) => {
+  const probe = `async () => { await new Promise((resolve) => setTimeout(resolve, ${SLOW_PROBE_MS})); return null; }`;
+  const running = slot(
+    t,
+    { initDeadlineMs: SHORT_DEADLINE_MS },
+    undefined,
+    "",
+    probe,
+  );
+  running.send(init());
+  await running.firstFrame();
+  running.send({ kind: FrameKind.Control, control: SlotControl.Stop });
+  const stopped = await running.exited;
+  assert.equal(stopped.code, THREAD_STOPPED);
+  assert.equal(stopped.stderr.includes("worker.slot."), false);
+
+  const absent = slot(
+    t,
+    { initDeadlineMs: SHORT_DEADLINE_MS },
+    undefined,
+    "",
+    probe,
+  );
+  const started = performance.now();
+  const exit = await absent.exited;
+  const elapsed = performance.now() - started;
+  assert.equal(exit.code, SLOT_FAILURE);
+  assert.match(exit.stderr, /worker\.slot\.init_absent/);
+  assert.ok(elapsed >= SLOW_PROBE_MS + SHORT_DEADLINE_MS, String(elapsed));
+
+  const framesAfterProbe = slot(
+    t,
+    {
+      initDeadlineMs: SHORT_DEADLINE_MS,
+      frameDeadlineMs: FRAME_DEADLINE_BELOW_PROBE_MS,
+    },
+    undefined,
+    "",
+    probe,
+  );
+  const quiet = await framesAfterProbe.exited;
+  assert.equal(quiet.code, SLOT_FAILURE);
+  assert.match(quiet.stderr, /worker\.slot\.init_absent/);
+  assert.doesNotMatch(quiet.stderr, /worker\.slot\.channel_closed/);
+});
+
+test("the default probe answers null on a host that starts the sandbox", async (t) => {
+  const unsupported = hostSupportsSandbox();
+  if (unsupported) return t.skip(unsupported);
+  const detail = await sandboxProbe({
+    ...hostEnvironment(),
+    TMPDIR: temporary(t),
+  });
+  assert.equal(detail, null);
+});
+
+test("the default probe answers the rejection message of the wrap", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async () => {
+    throw new Error(WRAP_FAILURE);
+  });
+  t.mock.method(bashSandbox, "dispose", async () => {});
+  assert.equal(await sandboxProbe(hostEnvironment()), WRAP_FAILURE);
+});
+
+test("the default probe answers the exit code and the end of standard error of a failed command", async (t) => {
+  const noise = "x".repeat(STDERR_TAIL_BYTES);
+  t.mock.method(
+    bashSandbox,
+    "wrap",
+    async () => `printf '${noise}' >&2; echo tail-mark >&2; exit 3`,
+  );
+  t.mock.method(bashSandbox, "dispose", async () => {});
+  const detail = await sandboxProbe(hostEnvironment());
+  assert.ok(detail !== null);
+  assert.ok(detail.startsWith("exit 3: "), detail);
+  assert.ok(detail.endsWith("tail-mark"), detail);
+  assert.ok(detail.length <= STDERR_TAIL_BYTES + "exit 3: ".length);
+});
+
+test("the default probe disposes the sandbox once after the probe, also when the probe fails", async (t) => {
+  const dispose = t.mock.method(bashSandbox, "dispose", async () => {});
+  const wrap = t.mock.method(bashSandbox, "wrap", async () => "true");
+  assert.equal(await sandboxProbe(hostEnvironment()), null);
+  assert.equal(dispose.mock.callCount(), FIRST_CALL);
+  wrap.mock.mockImplementation(async () => {
+    throw new Error(WRAP_FAILURE);
+  });
+  assert.notEqual(await sandboxProbe(hostEnvironment()), null);
+  assert.equal(dispose.mock.callCount(), SECOND_CALL);
+});
+
+test("a dispose failure after a passing probe becomes the probe detail", async (t) => {
+  t.mock.method(bashSandbox, "wrap", async () => "true");
+  t.mock.method(bashSandbox, "dispose", async () => {
+    throw new Error(DISPOSE_REJECTION);
+  });
+  assert.equal(await sandboxProbe(hostEnvironment()), DISPOSE_REJECTION);
+});
+
+test("SIGTERM during a slow probe stops the session with the stop code, reads no frame and starts no thread", async (t) => {
+  const instance = slot(t, {}, undefined, "", SLOW_PROBE_SOURCE);
+  instance.send(init());
+  while (!instance.stderr.includes("probe started"))
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  instance.child.kill("SIGTERM");
+  const exit = await instance.exited;
+  assert.equal(exit.code, THREAD_STOPPED);
+  assert.equal(exit.stdout, NO_OUTPUT);
+  assert.ok(!exit.stderr.includes(CONSOLE_LINE));
+  assert.equal(exit.stderr.includes("worker.slot."), false);
 });
