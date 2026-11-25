@@ -48,6 +48,7 @@ const FIRST_ROUND = {
   findings: [],
   unblock_reason: null,
   earlier_verdicts: [],
+  earlier_report: null,
 };
 
 test("B3 review bundle places all supporting assets in the evidence directory outside the checkouts and removes partial object failures", async (t) => {
@@ -734,6 +735,7 @@ async function roundEvaluation(
           findings: [],
           unblock_reason: null,
           earlier_verdicts: [],
+          earlier_report: null,
         }
       : {
           round: 2,
@@ -743,6 +745,7 @@ async function roundEvaluation(
           findings: [],
           unblock_reason: null,
           earlier_verdicts: [],
+          earlier_report: null,
         };
   const prepared = await prepareEvaluation(
     {

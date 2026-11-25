@@ -442,6 +442,7 @@ async function openExecution(
     cleared: null as string | null,
     unblockReason: null as string | null,
     earlierVerdicts: [] as EarlierVerdict[],
+    earlierReport: null as string | null,
     unchangedTurns: 0,
     refreshed: null as RefreshResult | null,
     lastVerification: null as VerificationFacts,

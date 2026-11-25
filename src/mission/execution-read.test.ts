@@ -6,12 +6,14 @@ import { testHumanIdentity } from "../kernel/test-identity.ts";
 import {
   AssessmentResult,
   AssetKind,
+  CODER_REPORT_SUBJECT,
   FindingAction,
   FindingStatus,
   MissionErrorCode,
   NodeState,
   StartPoint,
 } from "./contract.ts";
+import { ulid } from "ulid";
 import { canonicalJSON } from "../kernel/json.ts";
 import {
   closeAttempt,
@@ -359,6 +361,7 @@ test("the review round answers its number, its review base and the open findings
     findings: [],
     unblock_reason: null,
     earlier_verdicts: [],
+    earlier_report: null,
   });
   await h.submit({
     ...h.notMet,
@@ -523,4 +526,85 @@ test("the review round of a later attempt returns the unblock reason and the ear
     ["B1", "S1"],
   );
   assert.equal(round.round, FIRST_ATTEMPT);
+});
+
+const EARLIER_REPORT_TIME = 1_000;
+const LATER_REPORT_TIME = 2_000;
+const NEWEST_REPORT_TIME = 3_000;
+const ATTEMPT_ONE_REPORT = "attempt 1 report";
+const ATTEMPT_TWO_LAST = "attempt 2 last";
+
+function insertCoderReport(
+  h: Awaited<ReturnType<typeof reviewHarness>>,
+  text: string,
+  attempt: number,
+  time: number,
+) {
+  h.store.transaction((tx) => {
+    const evidenceId = `evidence_${ulid(time)}`;
+    insertEvidence(
+      tx,
+      {
+        id: evidenceId,
+        node_id: h.node_id,
+        attempt,
+        subject: CODER_REPORT_SUBJECT,
+        requirement_key: null,
+        end_state: null,
+        verification: null,
+        provenance: canonicalJSON(h.executionActor),
+        created_at: time,
+      },
+      [
+        {
+          id: createIdentity("evidence_asset"),
+          evidence_id: evidenceId,
+          kind: AssetKind.Produced,
+          content: canonicalJSON({
+            media_type: "text/markdown",
+            data: Buffer.from(text).toString("base64"),
+          }),
+          published_at: null,
+          expired_at: null,
+        },
+      ],
+    );
+  });
+}
+
+function openSecondAttempt(h: Awaited<ReturnType<typeof reviewHarness>>) {
+  h.store.transaction((tx) => {
+    closeAttempt(tx, h.node_id, FIRST_ATTEMPT, LATER_TIME);
+    openAttempt(
+      tx,
+      h.node_id,
+      FIRST_REVISION,
+      h.executionActor,
+      LATER_TIME,
+      StartPoint.NodeBranch,
+      null,
+    );
+  });
+  h.claim.attempt = SECOND_ATTEMPT;
+  h.evaluate();
+}
+
+test("the review round of attempt 2 answers the newest coder report of attempt 2 over the report of attempt 1", async (t) => {
+  const h = await reviewHarness(t, IDENTITY);
+  insertCoderReport(h, ATTEMPT_ONE_REPORT, FIRST_ATTEMPT, EARLIER_REPORT_TIME);
+  openSecondAttempt(h);
+  insertCoderReport(h, "attempt 2 first", SECOND_ATTEMPT, LATER_REPORT_TIME);
+  insertCoderReport(h, ATTEMPT_TWO_LAST, SECOND_ATTEMPT, NEWEST_REPORT_TIME);
+  const round = await h.reviewRound();
+  assert.equal(round.earlier_report, ATTEMPT_TWO_LAST);
+});
+
+test("the review round of attempt 2 answers the report of attempt 1, and a node with no report answers null", async (t) => {
+  const bare = await reviewHarness(t, IDENTITY);
+  assert.equal((await bare.reviewRound()).earlier_report, null);
+  const h = await reviewHarness(t, IDENTITY);
+  insertCoderReport(h, ATTEMPT_ONE_REPORT, FIRST_ATTEMPT, EARLIER_REPORT_TIME);
+  openSecondAttempt(h);
+  const round = await h.reviewRound();
+  assert.equal(round.earlier_report, ATTEMPT_ONE_REPORT);
 });

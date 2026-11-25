@@ -152,6 +152,7 @@ function reworkAssessment(h: Harness, result: string) {
         findings: [],
         unblock_reason: null,
         earlier_verdicts: [],
+        earlier_report: null,
       }),
   } as unknown as MethodClients["mission"];
   h.run.clients.worker = {
@@ -709,6 +710,16 @@ suite("steps implement verdict", { concurrency: SUITE_CONCURRENCY }, () => {
     h.run.clients.mission = {
       ...h.run.clients.mission,
       "execution.rework_assessment.get": async () => completed(null),
+      "execution.review_round.get": async () =>
+        completed({
+          round: 1,
+          final: false,
+          review_base: null,
+          findings: [],
+          unblock_reason: null,
+          earlier_verdicts: [],
+          earlier_report: null,
+        }),
     } as unknown as MethodClients["mission"];
     h.run.clients.worker = {
       ...h.run.clients.worker,

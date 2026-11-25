@@ -264,6 +264,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
           findings: [],
           unblock_reason: null,
           earlier_verdicts: [],
+          earlier_report: null,
         }),
       "execution.pinnedRevision.get": async () =>
         complete({
