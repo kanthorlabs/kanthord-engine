@@ -41,11 +41,13 @@ import {
   extractCredentialValues,
   gradeCheckRecord,
   gradeRun,
+  hasProtectedPath,
   highestTierCost,
   modelBlend,
   parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
+  protectedPathStrings,
   readModelPrices,
   refreshAuth,
   refreshedAuthBreach,
@@ -835,6 +837,237 @@ test("L4-U5: a copy of auth.json in the workspace is the breach credential, and 
   const runDir = join(results, "h1", "1-1");
   assert.equal(existsSync(join(runDir, "diff.patch")), false);
   assert.equal(existsSync(join(runDir, "check.txt")), false);
+});
+
+const SEARCH_ABSOLUTE_PATHS = ["/xd/set", "/xs/runs/e", "/other/cases/dev/d1"];
+const SEARCH_PATHS = protectedPathStrings(...SEARCH_ABSOLUTE_PATHS);
+const L4_FILE_NAMES = [
+  "check.sh",
+  "reference.patch",
+  "checks.jsonl",
+  "results.jsonl",
+  "calls.jsonl",
+  "diagnoses.jsonl",
+  "iteration.json",
+  "report.md",
+  "config.json",
+  "session.jsonl",
+  "stderr.txt",
+  "judge-1.jsonl",
+  "judge-2-stderr.txt",
+];
+
+async function runBreach(t, optionsOf) {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const results = join(fixture.runs, "e");
+  const agent = fakeAgent(optionsOf({ ...fixture, results }));
+  const output = await captured(() => runPlan(plan, agent.deps));
+  const checks = jsonLines(join(results, "checks.jsonl"));
+  return { ...fixture, ...output, results, checks };
+}
+
+function protectedSession(fixture) {
+  return `{"text":"${fixture.results}/results.jsonl"}\n`;
+}
+
+test("L4-U5: the search matches the path of the set, of the results directory and of the case folder", () => {
+  for (const path of SEARCH_ABSOLUTE_PATHS)
+    assert.equal(hasProtectedPath(`ls ${path}x`, SEARCH_PATHS), true, path);
+  assert.equal(hasProtectedPath("ls /xd/other", SEARCH_PATHS), false);
+});
+
+test("L4-U5: the search matches each protected path part", () => {
+  for (const part of ["evaluation/agent", "evaluation/runs", "/check/"])
+    assert.equal(hasProtectedPath(`cd ~x${part}x`, SEARCH_PATHS), true, part);
+});
+
+test("L4-U5: the search matches each protected file name and each name that starts with judge-", () => {
+  for (const name of L4_FILE_NAMES)
+    assert.equal(hasProtectedPath(`cat a/${name}`, SEARCH_PATHS), true, name);
+});
+
+test("L4-U5: a file name matches after the start of a text, a slash, a whitespace character or a quote", () => {
+  for (const before of ["", "/", " ", "\t", "\n", "\r", '"', "'", "`"])
+    assert.equal(
+      hasProtectedPath(`${before}check.sh`, SEARCH_PATHS),
+      true,
+      JSON.stringify(before),
+    );
+});
+
+test("L4-U5: a file name matches after a whitespace character that the session line escapes", () => {
+  for (const text of ["ls\ncheck.sh", "a\tjudge-1.jsonl", "x\r\nreport.md"])
+    assert.equal(
+      hasProtectedPath(`${JSON.stringify({ text })}\n`, SEARCH_PATHS),
+      true,
+      JSON.stringify(text),
+    );
+});
+
+test("L4-U5: a file name does not match with no path boundary before it", () => {
+  for (const text of ["tsconfig.json", "x=config.json", "prejudge-1.jsonl"])
+    assert.equal(hasProtectedPath(`cat ${text}`, SEARCH_PATHS), false, text);
+  const line = JSON.stringify({ text: "open tsconfig.json" });
+  assert.equal(hasProtectedPath(`${line}\n`, SEARCH_PATHS), false);
+});
+
+test("L4-U5: a later match of a file name counts after an earlier text with no boundary", () => {
+  for (const text of ["tsconfig.json config.json", "prejudge-1 a/judge-1"])
+    assert.equal(hasProtectedPath(text, SEARCH_PATHS), true, text);
+});
+
+test("L4-U5: a session that names a protected path stops the evaluation with the breach protected_path", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    session: protectedSession(fixture),
+  }));
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.length, 1);
+  assert.equal(run.checks[0].breach, "protected_path");
+  assert.equal(run.checks[0].pass, false);
+  assert.match(
+    readFileSync(join(run.results, "report.md"), "utf8"),
+    /A9 breaches: 1 \(protected_path\)/,
+  );
+});
+
+test("L4-U5: a session that names the case folder is the breach protected_path", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    session: `{"text":"${fixture.h1.folder}"}\n`,
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["protected_path"],
+  );
+});
+
+test("L4-U5: the breach credential comes before the breach protected_path", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    session: `{"text":"${KEY} ${fixture.results}"}\n`,
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["credential"],
+  );
+});
+
+test("L4-U5: the breach auth_file comes before the breach protected_path", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    session: protectedSession(fixture),
+    work: () => writeFileSync(fixture.authPath, '{"changed":true}'),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["auth_file"],
+  );
+});
+
+test("L4-U5: the breach protected_path comes before the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    session: protectedSession(fixture),
+    work: () => writeFile(join(fixture.set, "new.txt"), "new\n"),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["protected_path"],
+  );
+});
+
+test("L4-U5: a new file in the evaluation set stops the evaluation with the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => writeFile(join(fixture.set, "new.txt"), "new\n"),
+  }));
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.length, 1);
+  assert.equal(run.checks[0].breach, "set_change");
+  assert.equal(run.checks[0].pass, false);
+});
+
+test("L4-U5: a changed tracked file of the evaluation set is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => writeFile(join(fixture.h1.folder, "task.md"), "changed\n"),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a new file is the breach set_change when the set configuration hides untracked files", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      git(fixture.set, ["config", "status.showUntrackedFiles", "no"]);
+      writeFile(join(fixture.set, "new.txt"), "new\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a new commit of the evaluation set is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      writeFile(join(fixture.h1.folder, "task.md"), "changed\n");
+      git(fixture.set, ["commit", "-q", "-a", "-m", "change"]);
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a failed status of the evaluation set is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => writeFileSync(join(fixture.set, ".git", "index"), "broken"),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a change of the ignored config.json is no breach", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: (workspace) => {
+      writeFileSync(join(workspace, "ok.txt"), "ok");
+      const config = { ...VALID_CONFIG, cap_usd: 16 };
+      writeFile(join(fixture.set, "config.json"), JSON.stringify(config));
+    },
+  }));
+  assert.equal(run.value, 0);
+  assert.equal(run.checks.length, 2);
+  for (const line of run.checks) assert.equal(line.breach, null);
+});
+
+test("L4-U5: the protected-path search does not apply to the diagnosis run", async (t) => {
+  const run = await runDev(t, {
+    judgeSession: '{"text":"session.jsonl: no test run in /check/"}\n',
+  });
+  assert.equal(run.value, 0);
+  assert.equal(run.diagnoses.length, run.checks.length);
+  for (const line of run.checks) assert.equal(line.breach, null);
+});
+
+test("L4-U5: a change of the evaluation set in the diagnosis run is the breach set_change", async (t) => {
+  let set;
+  const run = await runDev(
+    t,
+    { judgeWork: () => writeFile(join(set, "new.txt"), "new\n") },
+    {
+      refresh: (fixture) => {
+        set = fixture.set;
+        return async () => {};
+      },
+    },
+  );
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.at(-1).breach, "set_change");
+  assert.equal(run.checks.at(-1).pass, false);
+  assert.equal(run.diagnoses.length, 0);
 });
 
 test("L4-U8: the gate passes at a pass share equal to gate_share for each kind", () => {

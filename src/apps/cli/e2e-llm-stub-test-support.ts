@@ -56,6 +56,7 @@ export type StubRequestRecord = StubSelection & {
 export interface LlmStubOptions {
   fixedStatus?: { status: number; body: string };
   responder?: (body: unknown) => StubSelectedTurn | undefined;
+  variables?: Record<string, string>;
 }
 
 export interface LlmStub {
@@ -87,14 +88,26 @@ function completedEvent(
   return { type: "response.completed", response };
 }
 
+function applyVariables(
+  s: string,
+  testDir: string,
+  variables: Record<string, string>,
+): string {
+  let result = s.replaceAll("$TEST", testDir);
+  for (const [k, v] of Object.entries(variables))
+    result = result.replaceAll(k, v);
+  return result;
+}
+
 function textTurnEvents(
   turn: StubTextTurn,
   index: number,
   testDir: string,
+  variables: Record<string, string>,
 ): string {
   const responseId = `${RESPONSE_ID_PREFIX}${index}`;
   const itemId = `${ITEM_ID_PREFIX}${index}`;
-  const text = turn.text.replaceAll("$TEST", testDir);
+  const text = applyVariables(turn.text, testDir, variables);
   const item = {
     type: MESSAGE_TYPE,
     id: itemId,
@@ -127,6 +140,7 @@ function toolCallsTurnEvents(
   turn: StubToolCallTurn,
   index: number,
   testDir: string,
+  variables: Record<string, string>,
 ): string {
   const responseId = `${RESPONSE_ID_PREFIX}${index}`;
   const eventParts: string[] = [
@@ -139,7 +153,7 @@ function toolCallsTurnEvents(
     for (const [k, v] of Object.entries(args)) {
       resolvedArgs[k] =
         typeof v === TYPEOF_STRING
-          ? (v as string).replaceAll("$TEST", testDir)
+          ? applyVariables(v as string, testDir, variables)
           : v;
     }
     const argsText = JSON.stringify(resolvedArgs);
@@ -241,12 +255,13 @@ export async function llmStub(
         turn.kind === TEXT_TURN_KIND
           ? (turn.delayMs ?? NO_DELAY_MS)
           : NO_DELAY_MS;
+      const vars = options.variables ?? {};
       const respond = (): void => {
         res.writeHead(200, { "content-type": "text/event-stream" });
         if (turn.kind === TEXT_TURN_KIND) {
-          res.end(textTurnEvents(turn, turnIndex, testDir));
+          res.end(textTurnEvents(turn, turnIndex, testDir, vars));
         } else {
-          res.end(toolCallsTurnEvents(turn, turnIndex, testDir));
+          res.end(toolCallsTurnEvents(turn, turnIndex, testDir, vars));
         }
       };
       if (delayMs > NO_DELAY_MS) {
