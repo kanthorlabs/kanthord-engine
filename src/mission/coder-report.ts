@@ -9,11 +9,27 @@ import { listEvidence, readAssets } from "./record-store.ts";
 
 const PAGE_SIZE = 50;
 const NO_CURSOR = null;
+const ANY_ATTEMPT = null;
 
 export function coderReportOf(
   tx: Transaction,
   nodeId: string,
   attempt: number,
+): string | null {
+  return newestCoderReport(tx, nodeId, attempt);
+}
+
+export function newestCoderReportOfNode(
+  tx: Transaction,
+  nodeId: string,
+): string | null {
+  return newestCoderReport(tx, nodeId, ANY_ATTEMPT);
+}
+
+function newestCoderReport(
+  tx: Transaction,
+  nodeId: string,
+  attempt: number | null,
 ): string | null {
   let after: string | null = NO_CURSOR;
   for (;;) {

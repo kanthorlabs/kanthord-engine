@@ -27,7 +27,11 @@ const REPOSITORIES = [
   { binding_id: "binding_web", name: "web" },
 ];
 
-const NO_UNBLOCK = { unblockReason: null, earlierVerdicts: [] };
+const NO_UNBLOCK = {
+  unblockReason: null,
+  earlierVerdicts: [],
+  earlierReport: null,
+};
 const NO_LINK_UPDATES = {
   "execution.link_update.get": async () => ({
     type: OperationResultType.Completed,
@@ -207,6 +211,7 @@ function reviewRound(findings: unknown[]) {
       findings,
       unblock_reason: null,
       earlier_verdicts: [],
+      earlier_report: null,
     },
   };
 }
@@ -679,6 +684,7 @@ test("no update keeps the verdict absent at attempt 1", async (t) => {
   const run = fixture();
   stopAfter(t, () => run.dispose());
   run.clients.mission = {
+    "execution.review_round.get": async () => reviewRound([]),
     "execution.rework_assessment.get": async () => NOT_FOUND,
   } as unknown as MethodClients["mission"];
   run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
@@ -687,6 +693,21 @@ test("no update keeps the verdict absent at attempt 1", async (t) => {
     verdict: null,
     cleared: null,
   });
+});
+
+test("readPrior of attempt 1 reads the review round and answers its earlier report", async (t) => {
+  const run = fixture();
+  stopAfter(t, () => run.dispose());
+  const report = "## unit_1 name\n\nK185-EARLIER-FACT";
+  run.clients.mission = {
+    "execution.review_round.get": async () => ({
+      ...reviewRound([]),
+      data: { ...reviewRound([]).data, earlier_report: report },
+    }),
+    "execution.rework_assessment.get": async () => NOT_FOUND,
+  } as unknown as MethodClients["mission"];
+  run.clients.worker = NO_FAILED_CHECKS as unknown as MethodClients["worker"];
+  assert.equal((await readPrior(run, REPOSITORIES)).earlierReport, report);
 });
 
 test("readPrior returns the unblock reason and the earlier verdicts of the review round", async (t) => {
@@ -710,6 +731,7 @@ test("readPrior returns the unblock reason and the earlier verdicts of the revie
         findings: [],
         unblock_reason: "Keep the legacy route.",
         earlier_verdicts: [earlier],
+        earlier_report: null,
       },
     }),
     "execution.rework_assessment.get": async () => NOT_FOUND,
@@ -722,5 +744,6 @@ test("readPrior returns the unblock reason and the earlier verdicts of the revie
     cleared: null,
     unblockReason: "Keep the legacy route.",
     earlierVerdicts: [earlier],
+    earlierReport: null,
   });
 });

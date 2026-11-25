@@ -306,6 +306,7 @@ export interface Prior {
   cleared: string | null;
   unblockReason: string | null;
   earlierVerdicts: EarlierVerdict[];
+  earlierReport: string | null;
 }
 
 type PriorVerdicts = Pick<Prior, "verdict" | "cleared">;
@@ -343,20 +344,20 @@ export async function readPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
 ): Promise<Prior> {
-  const round =
-    run.claim.attempt > FIRST_ATTEMPT ? await readReviewRound(run) : null;
+  const round = await readReviewRound(run);
   const verdicts = await readVerdictsPrior(run, repositories, round);
   return {
     ...verdicts,
-    unblockReason: round?.unblock_reason ?? null,
-    earlierVerdicts: round?.earlier_verdicts ?? [],
+    unblockReason: round.unblock_reason,
+    earlierVerdicts: round.earlier_verdicts,
+    earlierReport: round.earlier_report,
   };
 }
 
 async function readVerdictsPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
-  round: ReviewRound | null,
+  round: ReviewRound,
 ): Promise<PriorVerdicts> {
   const prior = await readUnblockPrior(run, repositories, round);
   const updates = await readLinkUpdates(run);
@@ -402,13 +403,11 @@ async function readRequestedOrClearedPrior(
 async function readUnblockPrior(
   run: ExecutionRun,
   repositories: readonly RepositoryName[],
-  reviewRound: ReviewRound | null,
+  reviewRound: ReviewRound,
 ): Promise<PriorVerdicts> {
   const failed = await readFailedChecks(run, repositories);
   const rework = await readReworkAssessment(run);
-  const findings = rework
-    ? (reviewRound ?? (await readReviewRound(run))).findings
-    : [];
+  const findings = rework ? reviewRound.findings : [];
   const round = rework?.round ?? null;
   if (failed !== null)
     return {

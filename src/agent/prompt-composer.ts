@@ -53,6 +53,7 @@ export function renderWorkPrompt(
     affected_tests?: readonly AffectedTest[];
     tasks?: readonly WorkTask[];
     node?: WorkNode;
+    earlier_report?: string | null;
   },
 ): WorkPrompt {
   assert.ok(unit.node_id);
@@ -84,6 +85,7 @@ export function renderWorkPrompt(
     repositories:
       repositories.length >= LISTED_REPOSITORIES_MIN ? repositories : [],
     affected_tests: unit.affected_tests ?? [],
+    earlier_report: unit.earlier_report ?? null,
   });
   return { text, digest: digest(text) };
 }

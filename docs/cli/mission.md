@@ -1001,9 +1001,10 @@ The read answers 404 `mission.record.not_found` when no unblock opened the claim
 The rework assessment returns the existing `Assessment` schema.
 It is the execution assessment with the greatest `sequence` among the assessments of the claimed attempt whose result is `criterion-not-met`, or `success` while the attempt holds an open finding with the route `fix`.
 The read answers 404 `mission.record.not_found` when the claimed attempt holds no such assessment.
-The review round returns `ReviewRound`: the round of the next assessment of the claimed attempt, whether that round is final, the review base, the open findings of the attempt with the route `fix`, `unblock_reason` and `earlier_verdicts`.
+The review round returns `ReviewRound`: the round of the next assessment of the claimed attempt, whether that round is final, the review base, the open findings of the attempt with the route `fix`, `unblock_reason`, `earlier_verdicts` and `earlier_report`.
 `unblock_reason` is the reason that the unblock stored on the claimed attempt, or null.
 `earlier_verdicts` holds one item per execution assessment of each attempt before the claimed attempt, in sequence order. An item holds `attempt`, `round`, `result`, `rationale` and `findings`, the findings of that assessment.
+`earlier_report` is the text of the newest coder report evidence of the node, of any attempt, or null when the node holds none. The worker reads it at every attempt, so a rework execution of attempt 1 also gets it.
 The `examine`-only dependency reads return `Page<Node | { id, state }>`, `Page<Outcome>` and `Page<Evidence>` for its direct dependencies that are not retired.
 Each dependency resolves to the `node_revision` of its current outcome.
 A dependency without an outcome carries its identity and its state only.

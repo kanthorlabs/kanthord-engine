@@ -793,6 +793,10 @@ components:
               - rationale
               - findings
             additionalProperties: false
+        earlier_report:
+          anyOf:
+            - type: string
+            - type: "null"
       required:
         - round
         - final
@@ -800,4 +804,5 @@ components:
         - findings
         - unblock_reason
         - earlier_verdicts
+        - earlier_report
       additionalProperties: false

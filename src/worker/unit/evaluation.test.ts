@@ -87,6 +87,7 @@ const FIRST_ROUND = {
   findings: [],
   unblock_reason: null,
   earlier_verdicts: [],
+  earlier_report: null,
 };
 const NO_LINK_UPDATES = { items: [], next_cursor: null, total: 0 };
 const PROPOSAL = {
@@ -1543,6 +1544,7 @@ function secondRound(
     ],
     unblock_reason: null,
     earlier_verdicts: [],
+    earlier_report: null,
   } as ReviewRound;
 }
 
@@ -1720,6 +1722,7 @@ test("the evaluation instruction holds the change request text, the unblock reas
       ...FIRST_ROUND,
       unblock_reason: "Keep the legacy route.",
       earlier_verdicts: [earlier],
+      earlier_report: null,
     } as ReviewRound,
     clearedOutcome: {
       id: "outcome",

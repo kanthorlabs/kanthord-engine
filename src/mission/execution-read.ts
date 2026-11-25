@@ -15,6 +15,7 @@ import {
   type ReviewRound,
   reviewRoundSchema,
 } from "./contract.ts";
+import { newestCoderReportOfNode } from "./coder-report.ts";
 import { findingRecord } from "./finding-read.ts";
 import { listFindings, readOpenFixFindings } from "./finding-store.ts";
 import { identitySchema } from "../kernel/identity.ts";
@@ -306,6 +307,7 @@ export function reviewRound(
   const unblockReason =
     readAttempt(tx, claim.nodeId, claim.attempt)?.unblock_reason ?? null;
   const earlierVerdicts = earlierVerdictsOf(tx, claim.nodeId, claim.attempt);
+  const earlierReport = newestCoderReportOfNode(tx, claim.nodeId);
   const round =
     countExecutionAssessmentsOfAttempt(tx, claim.nodeId, claim.attempt) +
     FIRST_ROUND;
@@ -320,6 +322,7 @@ export function reviewRound(
       findings: [],
       unblock_reason: unblockReason,
       earlier_verdicts: earlierVerdicts,
+      earlier_report: earlierReport,
     });
   const base = readReviewBase(
     tx,
@@ -339,6 +342,7 @@ export function reviewRound(
     ),
     unblock_reason: unblockReason,
     earlier_verdicts: earlierVerdicts,
+    earlier_report: earlierReport,
   });
 }
 
