@@ -29,6 +29,12 @@ function hostOf(env: NodeJS.ProcessEnv = {}) {
   };
 }
 
+const SANDBOXED_COMMAND = 'eval "$KANTHORD_BASH_COMMAND"';
+
+function exportedCommand(command: string, temporaryDirectory: string): string {
+  return `export KANTHORD_BASH_COMMAND='${command}' TMPDIR='${temporaryDirectory}' ${packageCacheExports(temporaryDirectory)}; sandboxed ${SANDBOXED_COMMAND}`;
+}
+
 function packageCacheExports(temporaryDirectory: string): string {
   return [
     `pnpm_config_store_dir='${temporaryDirectory}/pnpm-store'`,
@@ -89,11 +95,10 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     cwd,
     hostOf({ TMPDIR: "/var/probe" }),
   );
-  const exported = `export TMPDIR='/var/probe'; export ${packageCacheExports("/var/probe")}; ${COMMAND}`;
-  assert.equal(wrapped, `sandboxed ${exported}`);
+  assert.equal(wrapped, exportedCommand(COMMAND, "/var/probe"));
   const [call] = fake.calls;
   assert.ok(call);
-  assert.equal(call.command, exported);
+  assert.equal(call.command, SANDBOXED_COMMAND);
   assert.equal(call.binShell, undefined);
   assert.deepEqual(call.customConfig.filesystem?.allowWrite, [
     cwd,
@@ -430,14 +435,23 @@ test("(security) denyWrite holds the config and the hooks of each .git directory
 
 test("a wrap exports the TMPDIR of the host before the command", async (t) => {
   const fake = fakeRuntime();
-  await createBashSandbox(fake.runtime, "linux").wrap(
+  const wrapped = await createBashSandbox(fake.runtime, "linux").wrap(
     COMMAND,
     temporary(t),
     hostOf({ TMPDIR: "/var/it's here" }),
   );
-  assert.equal(
-    fake.calls[0]?.command,
-    `export TMPDIR='/var/it'\\''s here'; export ${packageCacheExports("/var/it'\\''s here")}; ${COMMAND}`,
+  assert.equal(wrapped, exportedCommand(COMMAND, "/var/it'\\''s here"));
+});
+
+test("(invariant) the runtime receives the same short command for any agent command", async (t) => {
+  const fake = fakeRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  const long = `echo ${"x".repeat(5000)}`;
+  await sandbox.wrap(COMMAND, temporary(t), hostOf());
+  await sandbox.wrap(long, temporary(t), hostOf());
+  assert.deepEqual(
+    fake.calls.map((call) => call.command),
+    [SANDBOXED_COMMAND, SANDBOXED_COMMAND],
   );
 });
 
@@ -615,15 +629,12 @@ test("(edge) a home child created after the first wrap is denied at the next wra
 test("(happy) a wrapped command exports TMPDIR and the package store and cache under the temporary directory", async (t) => {
   const tmp = temporary(t);
   const fake = fakeRuntime();
-  await createBashSandbox(fake.runtime, "linux").wrap(
+  const wrapped = await createBashSandbox(fake.runtime, "linux").wrap(
     COMMAND,
     temporary(t),
     hostOf({ TMPDIR: tmp }),
   );
-  assert.equal(
-    fake.calls[0]?.command,
-    `export TMPDIR='${tmp}'; export ${packageCacheExports(tmp)}; ${COMMAND}`,
-  );
+  assert.equal(wrapped, exportedCommand(COMMAND, tmp));
 });
 
 test("(happy) the denyWrite list of a wrap holds the default patterns under the cwd and no relative entry", async (t) => {

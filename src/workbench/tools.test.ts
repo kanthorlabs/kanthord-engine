@@ -219,9 +219,8 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
       reset: async () => undefined,
       wrapWithSandbox: async (command, _shell, customConfig) => {
         const denied = customConfig?.filesystem?.denyRead ?? [];
-        return denied.some((path) => command.includes(path))
-          ? "echo denied >&2; exit 1"
-          : command;
+        const paths = denied.map((path) => `'${path}'`).join(" ");
+        return `for path in ${paths}; do case "$KANTHORD_BASH_COMMAND" in *"$path"*) echo denied >&2; exit 1;; esac; done; ${command}`;
       },
     },
     "linux",
@@ -251,19 +250,15 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
   assert.match(JSON.stringify(ran.content), /inside/);
 });
 
-test("the workbench bash exports the package store and the package cache under TMPDIR in the wrapped command", async (t) => {
+test("the workbench bash exports the package store and the package cache under TMPDIR to the command", async (t) => {
   const directory = temporary(t);
   const tmp = temporary(t);
   overrideEnvironment(t, { HOME: temporary(t), TMPDIR: tmp });
-  const wrapped: string[] = [];
   const recording = createBashSandbox(
     {
       initialize: async () => undefined,
       reset: async () => undefined,
-      wrapWithSandbox: async (command) => {
-        wrapped.push(command);
-        return command;
-      },
+      wrapWithSandbox: async (command) => command,
     },
     "linux",
   );
@@ -272,17 +267,23 @@ test("the workbench bash exports the package store and the package cache under T
     cwd: directory,
   }).customTools;
   assert.ok(bash);
-  await bash.execute(
+  const result = await bash.execute(
     "call_bash",
-    { command: "true" },
+    {
+      command:
+        'echo "$pnpm_config_store_dir $pnpm_config_cache_dir $npm_config_cache"',
+    },
     undefined,
     undefined,
     undefined as never,
   );
-  const [command] = wrapped;
-  assert.ok(command?.includes(`pnpm_config_store_dir='${tmp}/pnpm-store'`));
-  assert.ok(command?.includes(`pnpm_config_cache_dir='${tmp}/pnpm-cache'`));
-  assert.ok(command?.includes(`npm_config_cache='${tmp}/npm-cache'`));
+  const text = result.content
+    .map((item) => ("text" in item ? item.text : ""))
+    .join("");
+  assert.ok(
+    text.includes(`${tmp}/pnpm-store ${tmp}/pnpm-cache ${tmp}/npm-cache`),
+    text,
+  );
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [

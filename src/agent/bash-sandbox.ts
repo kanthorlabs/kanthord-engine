@@ -59,6 +59,8 @@ const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
 const NODE_EXECUTABLE = "node";
+const COMMAND_VARIABLE = "KANTHORD_BASH_COMMAND";
+const SANDBOXED_COMMAND = `eval "$${COMMAND_VARIABLE}"`;
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 
@@ -356,8 +358,8 @@ export function createBashSandbox(
       const gitDenied = gitDenyWrite(cwd);
       started ??= start(filesystemOf(denied, [], gitDenied));
       await started;
-      return runtime.wrapWithSandbox(
-        `export TMPDIR=${shellQuoted(temporary)}; export ${packageCacheExports(temporary)}; ${command}`,
+      const sandboxed = await runtime.wrapWithSandbox(
+        SANDBOXED_COMMAND,
         undefined,
         {
           filesystem: filesystemOf(
@@ -368,6 +370,7 @@ export function createBashSandbox(
           network: BASH_NETWORK,
         },
       );
+      return `export ${COMMAND_VARIABLE}=${shellQuoted(command)} TMPDIR=${shellQuoted(temporary)} ${packageCacheExports(temporary)}; ${sandboxed}`;
     },
     async dispose(): Promise<void> {
       await runtime.reset();
