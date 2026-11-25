@@ -20,6 +20,7 @@ import {
   COPY_AUTH_TURN,
   GIT_INSPECT_TURN,
   l4Responder,
+  MODIFY_SHARED_TURN,
   NO_FINDINGS_TURN,
   READ_CHECK_TURN,
   runnerAsTestUser,
@@ -652,6 +653,30 @@ test(
     const variables: Record<string, string> = { $XD: "" };
     const stub = await llmStub(t, [], ENGINE_ROOT, {
       responder: l4Responder({ firstTurns: { [TASK_D1]: TOUCH_SET_TURN } }),
+      variables,
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    variables.$XD = fixture.xd;
+    const results = join(fixture.runs, AC5_EVAL);
+
+    const run = await ac5Run(fixture, t.signal);
+    assert.equal(run.status, BREACH_EXIT, run.stderr);
+
+    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, AC5_BREACH_LINES);
+    assert.equal(checks[0]!.breach, AC5_SET_CHANGE);
+  },
+);
+
+test(
+  "L4-AC5 variant 6: a change of an ignored file under shared/ stops the evaluation with the breach set_change",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const variables: Record<string, string> = { $XD: "" };
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder({
+        firstTurns: { [TASK_D1]: MODIFY_SHARED_TURN },
+      }),
       variables,
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);

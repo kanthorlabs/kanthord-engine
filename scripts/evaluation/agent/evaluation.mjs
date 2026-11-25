@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   closeSync,
+  constants,
   copyFileSync,
   existsSync,
   lstatSync,
@@ -13,14 +14,17 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import {
   basename,
   dirname,
+  isAbsolute,
   join,
   matchesGlob,
   relative,
@@ -61,6 +65,17 @@ const BREACH_CREDENTIAL = "credential";
 const BREACH_AUTH_FILE = "auth_file";
 const BREACH_PROTECTED_PATH = "protected_path";
 const BREACH_SET_CHANGE = "set_change";
+const MANIFEST_FILE = "shared.sha256";
+const SHARED_DIR = "shared";
+const MANIFEST_TYPE_FILE = "F";
+const MANIFEST_TYPE_LINK = "L";
+const MANIFEST_TYPE_DIR = "D";
+const MANIFEST_MODE_EXEC = "x";
+const MANIFEST_MODE_NONE = "-";
+const MANIFEST_CONCURRENCY = 64;
+const MANIFEST_LINE =
+  /^(?:F\t[0-9a-f]{64}\t[x-]|L\t[^\t]+\t-|D\t-\t-)\t[^\t]+$/;
+const MANIFEST_REFUSED_TEXT = /[\t\n]/;
 const PROTECTED_PATH_PARTS = ["evaluation/agent", "evaluation/runs", "/check/"];
 const PROTECTED_FILE_NAMES = [
   "check.sh",
@@ -1069,7 +1084,222 @@ export function protectedPathStrings(evalSetDir, resultsDir, caseFolder) {
   return [evalSetDir, resultsDir, caseFolder, ...PROTECTED_PATH_PARTS];
 }
 
-function checkSetChangeBreach(evalSetDir, setCommit) {
+async function concurrentMap(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
+function linkEscapes(relPath, target) {
+  if (isAbsolute(target)) return true;
+  const segments = target.split(sep);
+  let up = 0;
+  while (segments[up] === "..") up++;
+  if (segments.slice(up).includes("..")) return true;
+  return up > relPath.split(sep).length - 3;
+}
+
+function byRelPath(a, b) {
+  return a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0;
+}
+
+function linkEntry(relPath, absPath, found) {
+  let target;
+  try {
+    target = readlinkSync(absPath);
+  } catch {
+    found.refusals.push({ relPath, reason: "no read" });
+    return;
+  }
+  if (MANIFEST_REFUSED_TEXT.test(target))
+    found.refusals.push({
+      relPath,
+      reason: "the symlink target holds a tab or a newline",
+    });
+  else if (linkEscapes(relPath, target))
+    found.refusals.push({
+      relPath,
+      reason: "symlink points outside its folder",
+    });
+  else
+    found.entries.push({
+      type: MANIFEST_TYPE_LINK,
+      content: target,
+      mode: MANIFEST_MODE_NONE,
+      relPath,
+    });
+}
+
+function walkShared(relDir, absDir, found) {
+  let dirents;
+  try {
+    dirents = readdirSync(absDir, { withFileTypes: true });
+  } catch {
+    found.refusals.push({ relPath: relDir, reason: "no read" });
+    return;
+  }
+  for (const dirent of dirents) {
+    const relPath = join(relDir, dirent.name);
+    const absPath = join(absDir, dirent.name);
+    if (MANIFEST_REFUSED_TEXT.test(dirent.name)) {
+      found.refusals.push({
+        relPath,
+        reason: "the name holds a tab or a newline",
+      });
+    } else if (dirent.isSymbolicLink()) {
+      linkEntry(relPath, absPath, found);
+    } else if (dirent.isDirectory()) {
+      found.entries.push({
+        type: MANIFEST_TYPE_DIR,
+        content: MANIFEST_MODE_NONE,
+        mode: MANIFEST_MODE_NONE,
+        relPath,
+      });
+      walkShared(relPath, absPath, found);
+    } else if (dirent.isFile()) {
+      found.files.push({ relPath, absPath });
+    } else {
+      found.refusals.push({
+        relPath,
+        reason: "no regular file, directory or symlink",
+      });
+    }
+  }
+}
+
+async function fileEntry({ relPath, absPath }) {
+  let handle;
+  try {
+    handle = await open(
+      absPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const stat = await handle.stat();
+    if (!stat.isFile())
+      return { refusal: { relPath, reason: "no regular file" } };
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({ autoClose: false }))
+      hash.update(chunk);
+    return {
+      entry: {
+        type: MANIFEST_TYPE_FILE,
+        content: hash.digest("hex"),
+        mode: stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE,
+        relPath,
+      },
+    };
+  } catch {
+    return { refusal: { relPath, reason: "no read" } };
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function scanShared(evalSetDir) {
+  const found = { entries: [], files: [], refusals: [] };
+  const sharedDir = join(evalSetDir, SHARED_DIR);
+  const stat = lstatSync(sharedDir, { throwIfNoEntry: false });
+  if (stat && !stat.isDirectory())
+    found.refusals.push({ relPath: SHARED_DIR, reason: "no directory" });
+  else if (stat) walkShared(SHARED_DIR, sharedDir, found);
+  const results = await concurrentMap(
+    found.files,
+    MANIFEST_CONCURRENCY,
+    fileEntry,
+  );
+  for (const result of results) {
+    if (result.entry) found.entries.push(result.entry);
+    else found.refusals.push(result.refusal);
+  }
+  found.entries.sort(byRelPath);
+  found.refusals.sort(byRelPath);
+  return { entries: found.entries, refusal: found.refusals[0] ?? null };
+}
+
+function manifestLine({ type, content, mode, relPath }) {
+  return `${type}\t${content}\t${mode}\t${relPath}\n`;
+}
+
+function readManifest(evalSetDir) {
+  const path = manifestPath(evalSetDir);
+  if (!lstatSync(path, { throwIfNoEntry: false })?.isFile()) return null;
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  if (text === "") return [];
+  if (!text.endsWith("\n")) return null;
+  const entries = [];
+  for (const line of text.slice(0, -1).split("\n")) {
+    if (!MANIFEST_LINE.test(line)) return null;
+    const [type, content, mode, relPath] = line.split("\t");
+    if (entries.length > 0 && entries.at(-1).relPath >= relPath) return null;
+    entries.push({ type, content, mode, relPath });
+  }
+  return entries;
+}
+
+function firstManifestDifference(expected, actual) {
+  let ei = 0;
+  let ai = 0;
+  while (ei < expected.length && ai < actual.length) {
+    const e = expected[ei];
+    const a = actual[ai];
+    if (e.relPath < a.relPath) return e.relPath;
+    if (e.relPath > a.relPath) return a.relPath;
+    if (e.type !== a.type || e.content !== a.content || e.mode !== a.mode)
+      return e.relPath;
+    ei++;
+    ai++;
+  }
+  if (ei < expected.length) return expected[ei].relPath;
+  if (ai < actual.length) return actual[ai].relPath;
+  return null;
+}
+
+export function manifestPath(evalSetDir) {
+  return join(evalSetDir, MANIFEST_FILE);
+}
+
+export async function writeManifest(evalSetDir) {
+  if (!lstatSync(evalSetDir, { throwIfNoEntry: false })?.isDirectory())
+    return `manifest: no evaluation set ${evalSetDir}`;
+  const { entries, refusal } = await scanShared(evalSetDir);
+  if (refusal) return `manifest: ${refusal.relPath}: ${refusal.reason}`;
+  const path = manifestPath(evalSetDir);
+  const temporary = `${path}.tmp`;
+  rmSync(temporary, { force: true });
+  writeFileSync(temporary, entries.map(manifestLine).join(""), {
+    mode: FILE_MODE,
+    flag: "wx",
+  });
+  renameSync(temporary, path);
+  return null;
+}
+
+export async function checkManifestDiff(evalSetDir) {
+  const expected = readManifest(evalSetDir);
+  if (expected === null) return MANIFEST_FILE;
+  const { entries, refusal } = await scanShared(evalSetDir);
+  const difference = firstManifestDifference(expected, entries);
+  const refused = refusal?.relPath ?? null;
+  if (difference === null || refused === null) return difference ?? refused;
+  return difference < refused ? difference : refused;
+}
+
+async function checkSetChangeBreach(evalSetDir, setCommit) {
   const head = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
   const status = gitOutput(evalSetDir, [
     "--no-optional-locks",
@@ -1077,7 +1307,8 @@ function checkSetChangeBreach(evalSetDir, setCommit) {
     "--porcelain",
     "--untracked-files=all",
   ]);
-  return head !== setCommit || status !== "";
+  if (head !== setCommit || status !== "") return true;
+  return (await checkManifestDiff(evalSetDir)) !== null;
 }
 
 function sessionText(sessionPath) {
@@ -1132,7 +1363,7 @@ async function guardedAgentCall(run, deps, call) {
     if (hasProtectedPath(sessionText(call.sessionPath), pathStrings))
       return breachStop(run, BREACH_PROTECTED_PATH);
   }
-  if (checkSetChangeBreach(run.evalSetDir, run.setCommit))
+  if (await checkSetChangeBreach(run.evalSetDir, run.setCommit))
     return breachStop(run, BREACH_SET_CHANGE);
   const stderrText = readFileSync(call.stderrPath, "latin1");
   const action = runActionForExit(exit, stderrText);
@@ -1495,6 +1726,11 @@ async function buildPlan(start, options) {
   if (read.error) return read;
   const setCommit = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
   if (setCommit === null) return { error: `no set commit in ${evalSetDir}` };
+  const manifestDiff = await checkManifestDiff(evalSetDir);
+  if (manifestDiff !== null)
+    return {
+      error: `manifest: ${manifestDiff}: tree differs from manifest`,
+    };
   const cases = readCases(evalSetDir, options.set);
   if (cases.error) return cases;
   const authStart = captureAuthState(start.authPath);
@@ -2395,7 +2631,7 @@ function validatedReferenceError(caseFolder, caseJson, root) {
   return null;
 }
 
-function validateCaseFolder(caseFolder) {
+async function validateCaseFolder(caseFolder) {
   const caseJson = readJsonFile(join(caseFolder, "case.json"));
   const caseError = validateCase(caseJson);
   if (caseError) return caseError;
@@ -2403,6 +2639,10 @@ function validateCaseFolder(caseFolder) {
     (name) => !existsSync(join(caseFolder, name)),
   );
   if (absent) return `no ${absent}`;
+  const evalSetDir = resolve(caseFolder, "../../..");
+  const manifestDiff = await checkManifestDiff(evalSetDir);
+  if (manifestDiff !== null)
+    return `manifest: ${manifestDiff}: tree differs from manifest`;
   const root = mkdtempSync(join(tmpdir(), "kanthord-validate-"));
   try {
     return (
@@ -2424,8 +2664,22 @@ async function validateCommand(argv) {
   if (positionals.length !== 1) return refuse("validate: pass one case folder");
   if (!existsSync(positionals[0]))
     return refuse(`validate: no folder ${positionals[0]}`);
-  const error = validateCaseFolder(realpathSync(positionals[0]));
+  const error = await validateCaseFolder(realpathSync(positionals[0]));
   return error ? refuse(`validate: ${error}`) : EXIT_OK;
+}
+
+async function manifestCommand(argv) {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    strict: true,
+    allowPositionals: true,
+  });
+  if (positionals.length !== 0) return refuse("manifest: pass no argument");
+  const dirs = directories(process.env);
+  const evalSetDir = join(dirs.data, "evaluation", "agent");
+  const error = await writeManifest(evalSetDir);
+  return error ? refuse(error) : EXIT_OK;
 }
 
 const COMMANDS = {
@@ -2433,11 +2687,12 @@ const COMMANDS = {
   report: reportCommand,
   scan: scanCommand,
   validate: validateCommand,
+  manifest: manifestCommand,
 };
 
 async function main(argv) {
   if (!Object.hasOwn(COMMANDS, argv[0]))
-    return refuse("the subcommand is run, report, scan or validate");
+    return refuse("the subcommand is run, report, scan, validate or manifest");
   return COMMANDS[argv[0]](argv.slice(1));
 }
 
