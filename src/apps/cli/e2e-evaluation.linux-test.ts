@@ -1029,7 +1029,7 @@ test(
       responder: l4Responder(),
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
-    const resultsE8b = join(fixture.runs, "e8b");
+    const resultsE8b = join(fixture.runs, AC8B_EVAL);
 
     const run1 = await runnerAsTestUser(fixture, {
       script: RUN_SH,
@@ -1144,7 +1144,9 @@ test(
       "cat",
       join(resultsE10b, "report.md"),
     ]);
-    assert.match(reportText, /^A\/A: A1 2 2 diff 0 flips 0, /m);
-    assert.match(reportText, /passes 2 2 diff 0$/m);
+    assert.match(
+      reportText,
+      /^A\/A: A1 2 2 diff 0 flips 0, .*, passes 2 2 diff 0$/m,
+    );
   },
 );
