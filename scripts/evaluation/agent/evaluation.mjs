@@ -938,6 +938,10 @@ function checkSetChangeBreach(evalSetDir, setCommit) {
   return head !== setCommit || status !== "";
 }
 
+function sessionText(sessionPath) {
+  return existsSync(sessionPath) ? readFileSync(sessionPath, "utf8") : "";
+}
+
 function breachStop(run, breach) {
   appendJsonLine(run.checksPath, breachCheckLine(run, breach));
   return { stop: STOP_BREACH, breach };
@@ -983,7 +987,7 @@ async function guardedAgentCall(run, deps, call) {
       dirname(run.resultsPath),
       run.caseFolder,
     );
-    if (hasProtectedPath(readFileSync(call.sessionPath, "utf8"), pathStrings))
+    if (hasProtectedPath(sessionText(call.sessionPath), pathStrings))
       return breachStop(run, BREACH_PROTECTED_PATH);
   }
   if (checkSetChangeBreach(run.evalSetDir, run.setCommit))
@@ -1081,11 +1085,14 @@ function writeJudgeWorkspace(run, judgeWorkspace) {
   return readdirSync(judgeWorkspace).map((name) => join(judgeWorkspace, name));
 }
 
-async function runDiagnosis(run, gradingRoot, deps) {
+function startGateOpen(run, usd) {
   const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
-  const reserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
-  if (!checkStartGate(sum, reserve, run.config.cap_usd))
-    return { stop: STOP_CAP };
+  const reserve = parseUsdCents(usd) / CENTS_PER_DOLLAR;
+  return checkStartGate(sum, reserve, run.config.cap_usd);
+}
+
+async function runDiagnosis(run, gradingRoot, deps) {
+  if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
   const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
   const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
   let exit75Count = 0;
@@ -1107,6 +1114,7 @@ async function runDiagnosis(run, gradingRoot, deps) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
+    if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
   }
   const resultLine = readJsonLines(run.resultsPath).findLast(
     (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
@@ -1143,6 +1151,7 @@ async function evaluateInRoots(run, deps, roots) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
+    if (!startGateOpen(run, run.caseJson.usd)) return { stop: STOP_CAP };
     const resultsDir = dirname(run.checksPath);
     const nextAttempt = nextRunAttempt(resultsDir, run.caseId, run.repeat);
     const nextRunDir = join(
@@ -1414,12 +1423,8 @@ function pendingRuns(plan) {
 async function runPending(plan, deps) {
   plan.credValues = new Set(extractCredentialValues(plan.authPath));
   for (const run of pendingRuns(plan)) {
-    if (!run.diagnosisOnly) {
-      const sum = baseCostSum(run.resultsPath, plan.ratio.r, plan.judgeRatio.r);
-      const reserve = parseUsdCents(run.caseJson.usd) / CENTS_PER_DOLLAR;
-      if (!checkStartGate(sum, reserve, plan.config.cap_usd))
-        return { stop: STOP_CAP };
-    }
+    if (!run.diagnosisOnly && !startGateOpen(run, run.caseJson.usd))
+      return { stop: STOP_CAP };
     const result = await evaluateRun(run, deps);
     if (result.stop) return result;
   }

@@ -37,6 +37,7 @@ interface ResultLine {
 
 interface CheckLine {
   case: string;
+  session: string;
   a1: boolean;
   a2: boolean;
   a3: boolean;
@@ -676,7 +677,18 @@ const AC6_HELD_OUT_ARGS = [
 ];
 const AC6_REPORT_ARGS = ["--evaluation", "e6"];
 const AC6_RETRY_COUNT = 3;
-const AC6_H1_RESUME_DIR = "h1/1-4";
+const AC6_CASE = "h1";
+const AC6_RESUME_SESSIONS = ["h1/1-4/session.jsonl", "h1/2-1/session.jsonl"];
+const AC6_NO_VERDICT = "verdict no verdict";
+const AC6_PASS = "verdict pass";
+const AC6_FAILED_SETUP = "exit 1\n";
+const AC6_SET_CHANGE = "new\n";
+const SET_AUTHOR = [
+  "-c",
+  "user.name=Kanthor Eval",
+  "-c",
+  "user.email=eval@kanthorlabs.invalid",
+];
 const AC6_CLASS_RETRYABLE = "retryable";
 const AC6_AUTH_ENTRY_MISSING = "cli.run.agent.auth_entry_missing";
 const AC6B_EVAL = "e6b";
@@ -686,11 +698,38 @@ const AC7_EVAL = "e7";
 const AC7_CAP_USD = 15;
 const AC7_UNSTARTED = "unstarted runs: 4, unstarted diagnoses: 4";
 const AC7_CAP_LINE = `cap_usd of each call: ${AC7_CAP_USD}`;
-const AC7_BASE_COST = "base cost 0";
-const AC7_MEAN = "mean none";
+const AC7_REPORT_LINES = [
+  "swe@1: list price 0, r none, base cost 0",
+  "re@1: list price 0, r none, base cost 0",
+  "swe@1: base cost of one run: mean none, maximum none",
+  "re@1: base cost of one run: mean none, maximum none",
+  AC7_CAP_LINE,
+  AC7_UNSTARTED,
+];
 const AC7_USD = "16usd";
 const NO_REQUESTS = 0;
 const ONE_CALL = 1;
+
+async function gateParts(results: string): Promise<string[]> {
+  const text = await asTestUser(["cat", join(results, "report.md")]);
+  const gate = lines(text).find((line) => line.startsWith(GATE_PREFIX));
+  assert.ok(gate !== undefined, text);
+  return gate.slice(GATE_PREFIX.length).split(", ");
+}
+
+async function commitSet(set: string): Promise<void> {
+  await asTestUser(["git", "-C", set, "add", "."]);
+  await asTestUser([
+    "git",
+    "-C",
+    set,
+    ...SET_AUTHOR,
+    "commit",
+    "-q",
+    "-m",
+    "change",
+  ]);
+}
 
 test(
   "L4-AC6 variant 1: a stop at HTTP 429 leaves no verdict, and a resume completes the evaluation",
@@ -718,6 +757,7 @@ test(
     assert.equal(retryLines.length, AC6_RETRY_COUNT);
     for (const line of retryLines) {
       assert.equal(line.agent, AGENT_SWE);
+      assert.equal(caseOf(line.session), AC6_CASE);
       assert.equal(line.class, AC6_CLASS_RETRYABLE);
     }
     assert.equal(
@@ -741,8 +781,7 @@ test(
     ).trim();
     assert.equal(noChecks, NO_OUTPUT);
 
-    const report1Text = await asTestUser(["cat", join(results, "report.md")]);
-    assert.match(report1Text, /verdict no verdict/);
+    assert.ok((await gateParts(results)).includes(AC6_NO_VERDICT));
 
     const report1 = await runnerAsTestUser(fixture, {
       script: REPORT_SH,
@@ -750,6 +789,7 @@ test(
       signal: t.signal,
     });
     assert.equal(report1.status, NO_VERDICT_EXIT, report1.stderr);
+    assert.ok((await gateParts(results)).includes(AC6_NO_VERDICT));
 
     const stub2 = await llmStub(t, [], ENGINE_ROOT, {
       responder: l4Responder(),
@@ -767,9 +807,10 @@ test(
     assert.equal(run2.status, SUCCESS_EXIT, run2.stderr);
 
     const checks2 = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
-    assert.equal(checks2.length, REPEATS);
-
-    await asTestUser(["test", "-d", join(results, AC6_H1_RESUME_DIR)]);
+    assert.deepEqual(
+      checks2.map((line) => line.session),
+      AC6_RESUME_SESSIONS.map((session) => join(results, session)),
+    );
 
     const report2 = await runnerAsTestUser(fixture, {
       script: REPORT_SH,
@@ -777,8 +818,7 @@ test(
       signal: t.signal,
     });
     assert.equal(report2.status, SUCCESS_EXIT, report2.stderr);
-    const report2Text = await asTestUser(["cat", join(results, "report.md")]);
-    assert.match(report2Text, /verdict pass/);
+    assert.ok((await gateParts(results)).includes(AC6_PASS));
   },
 );
 
@@ -828,7 +868,7 @@ test(
       "cat",
       join(results, "h1", "1-1", "stderr.txt"),
     ]);
-    assert.match(stderrText, new RegExp(AC6_AUTH_ENTRY_MISSING));
+    assert.ok(stderrText.startsWith(AC6_AUTH_ENTRY_MISSING), stderrText);
 
     await asTestUser(["test", "-f", join(results, "report.md")]);
   },
@@ -852,9 +892,10 @@ test(
     ];
 
     await writeFileAsTestUser(
-      join(fixture.set, "cases", "held-out", "h1", "setup.sh"),
-      "exit 1\n",
+      join(fixture.set, "cases", "held-out", AC6_CASE, "setup.sh"),
+      AC6_FAILED_SETUP,
     );
+    await commitSet(fixture.set);
 
     const run = await runnerAsTestUser(fixture, {
       script: RUN_SH,
@@ -865,16 +906,13 @@ test(
 
     assert.equal(stub.requests.length, NO_REQUESTS);
 
-    const work = join(fixture.xs, ...XS_WORK);
-    const workContent = await asTestUser([
+    const roots = await asTestUser([
       "find",
-      work,
+      join(fixture.xs, ...XS_WORK),
       "-mindepth",
       "1",
-      "-maxdepth",
-      "1",
-    ]).catch(() => "");
-    assert.equal(workContent.trim(), NO_OUTPUT);
+    ]);
+    assert.equal(roots, NO_OUTPUT);
   },
 );
 
@@ -902,15 +940,8 @@ test(
     });
     assert.equal(run1.status, SUCCESS_EXIT, run1.stderr);
 
-    await asTestUser([
-      "sh",
-      "-c",
-      [
-        `printf 'new\\n' > '${join(fixture.set, "README.md")}'`,
-        `git -C '${fixture.set}' add README.md`,
-        `git -C '${fixture.set}' -c user.name=test -c user.email=test@test commit -q -m new`,
-      ].join(" && "),
-    ]);
+    await writeFileAsTestUser(join(fixture.set, "README.md"), AC6_SET_CHANGE);
+    await commitSet(fixture.set);
 
     const requestsBeforeSecond = stub.requests.length;
     const run2 = await runnerAsTestUser(fixture, {
@@ -943,6 +974,7 @@ test(
         JSON.stringify({ ...caseJson, usd: AC7_USD }),
       );
     }
+    await commitSet(fixture.set);
 
     const run = await runnerAsTestUser(fixture, {
       script: RUN_SH,
@@ -978,9 +1010,6 @@ test(
     });
     assert.equal(report.status, NO_VERDICT_EXIT, report.stderr);
 
-    await assertReportLines(results, [AC7_CAP_LINE, AC7_UNSTARTED]);
-    const reportText = await asTestUser(["cat", join(results, "report.md")]);
-    assert.match(reportText, new RegExp(AC7_BASE_COST));
-    assert.match(reportText, new RegExp(AC7_MEAN));
+    await assertReportLines(results, AC7_REPORT_LINES);
   },
 );

@@ -257,20 +257,30 @@ function fakeAgent(options = {}) {
   const calls = [];
   const runAgent = (args, stderrPath) => {
     calls.push(args);
+    const index = calls.length - 1;
     writeFileSync(stderrPath, options.stderr ?? "");
     const workspace = option(args, "--workspace");
-    writeFileSync(option(args, "--session"), options.session ?? "{}\n");
+    if (!options.noSession)
+      writeFileSync(
+        option(args, "--session"),
+        options.sessions?.[index] ?? options.session ?? "{}\n",
+      );
     if (options.work) options.work(workspace);
     else writeFileSync(join(workspace, "ok.txt"), "ok");
-    const exit = options.exit ?? 0;
+    const exit = options.exits?.[index] ?? options.exit ?? 0;
+    const line = {
+      ...resultLine(args, options.end ?? "completed"),
+      ...options.line,
+    };
     if (!options.noResult)
-      appendFileSync(
-        option(args, "--output"),
-        `${JSON.stringify(resultLine(args, options.end ?? "completed"))}\n`,
-      );
+      appendFileSync(option(args, "--output"), `${JSON.stringify(line)}\n`);
     return exit;
   };
-  return { calls, deps: { refresh: async () => {}, runAgent } };
+  const refreshes = [];
+  const refresh = async (authPath, provider) => {
+    refreshes.push(provider);
+  };
+  return { calls, refreshes, deps: { refresh, runAgent } };
 }
 
 async function captured(fn) {
@@ -1444,17 +1454,165 @@ test("L4-U12: nextRunAttempt returns the first attempt number with no run direct
   assert.equal(nextRunAttempt(resultsDir, "c1", 2), 1);
 });
 
-test("L4-U12: the third exit 75 of one run stops the evaluation with exit 1 and no check line", async (t) => {
-  const fixture = makeFixture(t);
-  const plan = await startRun(fixture.start(heldOut("e")));
+function sessionsOf(calls) {
+  return calls.map((args) => option(args, "--session"));
+}
+
+function runFiles(dir) {
+  return Object.fromEntries(
+    readdirSync(dir)
+      .sort()
+      .map((name) => [name, readFileSync(join(dir, name), "utf8")]),
+  );
+}
+
+async function resume(fixture, argv, agent) {
+  const plan = await startRun(fixture.start(argv));
   assert.equal(plan.error, undefined);
-  const agent = fakeAgent({ exit: 75, noResult: true });
-  const output = await captured(() => runPlan(plan, agent.deps));
-  const results = join(fixture.runs, "e");
-  assert.equal(output.value, 1);
-  assert.equal(agent.calls.length, 3);
-  assert.deepEqual(jsonLines(join(results, "checks.jsonl")), []);
-  assert.deepEqual(workRoots(fixture), []);
+  return captured(() => runPlan(plan, agent.deps));
+}
+
+test("L4-U12: an exit 75 starts the run again with a new session file and a new workspace as the next attempt", async (t) => {
+  const run = await runHeldOut(t, "e", { exits: [75] });
+  const h1 = join(run.results, "h1");
+  assert.equal(run.value, 0);
+  assert.deepEqual(sessionsOf(run.agent.calls), [
+    join(h1, "1-1", "session.jsonl"),
+    join(h1, "1-2", "session.jsonl"),
+    join(h1, "2-1", "session.jsonl"),
+  ]);
+  const workspaces = run.agent.calls.map((args) => option(args, "--workspace"));
+  assert.equal(new Set(workspaces).size, 3);
+  assert.equal(run.agent.refreshes.length, 3);
+  assert.deepEqual(
+    run.checks.map((line) => [line.repeat, line.session, line.pass]),
+    [
+      [1, join(h1, "1-2", "session.jsonl"), true],
+      [2, join(h1, "2-1", "session.jsonl"), true],
+    ],
+  );
+  assert.deepEqual(readdirSync(join(h1, "1-1")).sort(), [
+    "session.jsonl",
+    "stderr.txt",
+  ]);
+  assert.equal(jsonLines(join(run.results, "results.jsonl")).length, 3);
+  assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U12: the third exit 75 of one run in one call stops the evaluation, and the resume takes the next free attempt", async (t) => {
+  const run = await runHeldOut(t, "e", { exit: 75 });
+  const h1 = join(run.results, "h1");
+  assert.equal(run.value, 1);
+  assert.deepEqual(sessionsOf(run.agent.calls), [
+    join(h1, "1-1", "session.jsonl"),
+    join(h1, "1-2", "session.jsonl"),
+    join(h1, "1-3", "session.jsonl"),
+  ]);
+  assert.equal(run.agent.refreshes.length, 3);
+  assert.deepEqual(run.checks, []);
+  assert.deepEqual(workRoots(run), []);
+  const text = readFileSync(join(run.results, "report.md"), "utf8");
+  assert.match(text, /verdict no verdict$/m);
+  assert.match(text, /^unstarted runs: 2$/m);
+  const before = ["1-1", "1-2", "1-3"].map((name) => runFiles(join(h1, name)));
+  const agent = fakeAgent({ exits: [75, 75] });
+  const output = await resume(run, heldOut("e"), agent);
+  assert.equal(output.value, 0);
+  assert.deepEqual(sessionsOf(agent.calls), [
+    join(h1, "1-4", "session.jsonl"),
+    join(h1, "1-5", "session.jsonl"),
+    join(h1, "1-6", "session.jsonl"),
+    join(h1, "2-1", "session.jsonl"),
+  ]);
+  assert.deepEqual(
+    ["1-1", "1-2", "1-3"].map((name) => runFiles(join(h1, name))),
+    before,
+  );
+  assert.deepEqual(
+    jsonLines(join(run.results, "checks.jsonl")).map((line) => line.session),
+    [join(h1, "1-6", "session.jsonl"), join(h1, "2-1", "session.jsonl")],
+  );
+  assert.equal(jsonLines(join(run.results, "results.jsonl")).length, 7);
+});
+
+test("L4-U12: a resume after a stop keeps the files of the stopped attempt and skips each run with a check line", async (t) => {
+  const run = await runHeldOut(t, "e", { exits: [0, 1] });
+  const h1 = join(run.results, "h1");
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.length, 1);
+  const before = runFiles(join(h1, "2-1"));
+  const agent = fakeAgent();
+  const output = await resume(run, heldOut("e"), agent);
+  assert.equal(output.value, 0);
+  assert.deepEqual(sessionsOf(agent.calls), [join(h1, "2-2", "session.jsonl")]);
+  assert.deepEqual(runFiles(join(h1, "2-1")), before);
+  assert.deepEqual(
+    jsonLines(join(run.results, "checks.jsonl")).map((line) => line.session),
+    [join(h1, "1-1", "session.jsonl"), join(h1, "2-2", "session.jsonl")],
+  );
+});
+
+test("L4-U12: an exit 1 of run agent with no session file stops the evaluation and writes the report", async (t) => {
+  const run = await runHeldOut(t, "e", {
+    exit: 1,
+    noResult: true,
+    noSession: true,
+  });
+  assert.equal(run.value, 1);
+  assert.equal(run.agent.calls.length, 1);
+  assert.deepEqual(run.checks, []);
+  assert.match(
+    readFileSync(join(run.results, "report.md"), "utf8"),
+    /verdict no verdict$/m,
+  );
+  assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U12: an exit 75 with cli.run.agent.prompt_text_path in stderr stops the evaluation with no restart", async (t) => {
+  const run = await runHeldOut(t, "e", {
+    exit: 75,
+    stderr: "cli.run.agent.prompt_text_path: x\n",
+  });
+  assert.equal(run.value, 1);
+  assert.equal(run.agent.calls.length, 1);
+  assert.deepEqual(run.checks, []);
+});
+
+test("L4-U5: the breach rules apply to an attempt that exits 75 and to the attempt after it", async (t) => {
+  const first = await runHeldOut(t, "e", {
+    exit: 75,
+    sessions: [`{"text":"${KEY}"}\n`],
+  });
+  assert.equal(first.value, 1);
+  assert.equal(first.agent.calls.length, 1);
+  assert.deepEqual(
+    first.checks.map((line) => [line.session, line.breach]),
+    [[join(first.results, "h1", "1-1", "session.jsonl"), "credential"]],
+  );
+  const second = await runHeldOut(t, "e", {
+    exits: [75],
+    sessions: ["{}\n", `{"text":"${KEY}"}\n`],
+  });
+  assert.equal(second.value, 1);
+  assert.equal(second.agent.calls.length, 2);
+  assert.deepEqual(
+    second.checks.map((line) => [line.session, line.breach]),
+    [[join(second.results, "h1", "1-2", "session.jsonl"), "credential"]],
+  );
+  assert.equal(second.stdout.includes(KEY), false);
+});
+
+test("L4-U9: the cost of an attempt that exits 75 counts, and the cap stops the call before the next attempt", async (t) => {
+  const run = await runHeldOut(
+    t,
+    "e",
+    { exit: 75, line: { list_price_usd: 40 } },
+    { config: { model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 4);
+  assert.equal(run.agent.calls.length, 1);
+  assert.deepEqual(run.checks, []);
+  assert.deepEqual(workRoots(run), []);
 });
 
 test("L4-U12: a resume runs the missing diagnosis of a dev run with a check line", async (t) => {
@@ -1472,6 +1630,9 @@ test("L4-U12: a resume runs the missing diagnosis of a dev run with a check line
   assert.equal(agent1.calls[0][2], "swe@1");
   assert.equal(jsonLines(join(results, "checks.jsonl")).length, 1);
   assert.equal(jsonLines(join(results, "diagnoses.jsonl")).length, 0);
+  const gated = fakeDevAgent({});
+  assert.equal((await resume(fixture, devArgs("e"), gated)).value, 4);
+  assert.equal(gated.calls.length, 0);
   writeFile(
     join(fixture.set, "config.json"),
     JSON.stringify({
@@ -1486,6 +1647,14 @@ test("L4-U12: a resume runs the missing diagnosis of a dev run with a check line
   const output2 = await captured(() => runPlan(plan2, agent2.deps));
   assert.equal(output2.value, 0);
   assert.equal(agent2.calls[0][2], "re@1");
+  assert.equal(
+    option(agent2.calls[0], "--session"),
+    join(results, "d1", "1-1", "judge-1.jsonl"),
+  );
+  assert.deepEqual(
+    agent2.calls.map((args) => args[2]),
+    ["re@1", "swe@1", "re@1"],
+  );
   assert.equal(jsonLines(join(results, "checks.jsonl")).length, 2);
   assert.equal(jsonLines(join(results, "diagnoses.jsonl")).length, 2);
   assert.deepEqual(workRoots(fixture), []);
@@ -2035,6 +2204,8 @@ function judgeLine(args, change) {
 
 function fakeDevAgent(options = {}) {
   const calls = [];
+  let judgeCalls = 0;
+  let sweCalls = 0;
   const runAgent = (args, stderrPath) => {
     calls.push(args);
     writeFileSync(stderrPath, "");
@@ -2046,13 +2217,15 @@ function fakeDevAgent(options = {}) {
       if (options.sweWork) options.sweWork(dirname(session));
       const line = resultLine(args, "completed");
       appendFileSync(output, `${JSON.stringify(line)}\n`);
-      return 0;
+      sweCalls++;
+      return options.sweExits?.[sweCalls - 1] ?? 0;
     }
     if (options.judgeWork) options.judgeWork(args);
     writeFileSync(session, options.judgeSession ?? "{}\n");
     const line = judgeLine(args, options.judgeLine);
     appendFileSync(output, `${JSON.stringify(line)}\n`);
-    return options.judgeExit ?? 0;
+    judgeCalls++;
+    return options.judgeExits?.[judgeCalls - 1] ?? options.judgeExit ?? 0;
   };
   return { calls, deps: { refresh: async () => {}, runAgent } };
 }
@@ -2550,6 +2723,83 @@ test("L4-U12: an exit 1 of a diagnosis run stops the evaluation with no diagnosi
   assert.equal(run.checks.length, 1);
   assert.equal(run.diagnoses.length, 0);
   assert.deepEqual(workRoots(run), []);
+});
+
+test("L4-U12: the diagnosis of a run that started again reads the run directory of the last attempt", async (t) => {
+  const checks = [];
+  const judgeWork = (args) => {
+    const path = join(option(args, "--workspace"), "check.json");
+    checks.push(JSON.parse(readFileSync(path, "utf8")).session);
+  };
+  const run = await runDev(t, { sweExits: [75], judgeWork });
+  const last = join(run.results, "d1", "1-2");
+  assert.equal(run.value, 0);
+  assert.equal(checks[0], join(last, "session.jsonl"));
+  assert.equal(run.checks[0].session, join(last, "session.jsonl"));
+  assert.equal(run.diagnoses[0].session, join(last, "judge-1.jsonl"));
+  assert.deepEqual(readdirSync(run.runDir).sort(), [
+    "session.jsonl",
+    "stderr.txt",
+  ]);
+});
+
+test("L4-U9: a resumed diagnosis reserves judge_usd and no usd of the case", async (t) => {
+  const run = await runDev(t, { judgeExit: 1 });
+  assert.equal(run.value, 1);
+  assert.equal(run.checks.length, 1);
+  writeFile(
+    join(run.set, "config.json"),
+    JSON.stringify({ ...VALID_CONFIG, cap_usd: 0.2 }),
+  );
+  const agent = fakeDevAgent({});
+  assert.equal((await resume(run, devArgs("e"), agent)).value, 4);
+  assert.deepEqual(
+    agent.calls.map((args) => args[2]),
+    ["re@1"],
+  );
+  assert.equal(jsonLines(join(run.results, "diagnoses.jsonl")).length, 1);
+});
+
+test("L4-U12: an exit 75 of a diagnosis run starts the diagnosis again as the next attempt", async (t) => {
+  const run = await runDev(t, { judgeExits: [75] });
+  assert.equal(run.value, 0);
+  assert.equal(run.checks.length, 2);
+  assert.deepEqual(
+    run.diagnoses.map((line) => line.session),
+    [
+      join(run.runDir, "judge-2.jsonl"),
+      join(run.results, "d1", "2-1", "judge-1.jsonl"),
+    ],
+  );
+  assert.equal(existsSync(join(run.runDir, "judge-1-stderr.txt")), true);
+});
+
+test("L4-U12: the third exit 75 of one diagnosis run in one call stops the evaluation, and the resume takes the next free attempt", async (t) => {
+  const run = await runDev(t, { judgeExit: 75 });
+  assert.equal(run.value, 1);
+  assert.equal(run.agent.calls.length, 4);
+  assert.equal(run.checks.length, 1);
+  assert.equal(run.diagnoses.length, 0);
+  assert.deepEqual(workRoots(run), []);
+  const agent = fakeDevAgent({});
+  assert.equal((await resume(run, devArgs("e"), agent)).value, 0);
+  assert.equal(
+    option(agent.calls[0], "--session"),
+    join(run.runDir, "judge-4.jsonl"),
+  );
+  assert.equal(jsonLines(join(run.results, "checks.jsonl")).length, 2);
+  assert.equal(jsonLines(join(run.results, "diagnoses.jsonl")).length, 2);
+});
+
+test("L4-U9: the cost of a diagnosis attempt that exits 75 counts, and the cap stops the call before the next attempt", async (t) => {
+  const run = await runDev(
+    t,
+    { judgeExit: 75, judgeLine: { list_price_usd: 40 } },
+    { config: { judge_model: "anthropic/claude-haiku-5-5:high" } },
+  );
+  assert.equal(run.value, 4);
+  assert.equal(run.agent.calls.length, 2);
+  assert.equal(run.diagnoses.length, 0);
 });
 
 test("L4-U12: a diagnosis takes the next free attempt number", async (t) => {
