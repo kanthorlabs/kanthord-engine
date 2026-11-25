@@ -696,6 +696,12 @@ function isHookCall(statement) {
   );
 }
 
+function unseenDeclarations(declarations, included, statement) {
+  return [...readNames(statement)]
+    .flatMap((name) => declarations.get(name) ?? [])
+    .filter((declared) => !included.has(declared));
+}
+
 function helperStatements(tree, call) {
   const declarations = new Map();
   for (const statement of tree.statements)
@@ -704,12 +710,14 @@ function helperStatements(tree, call) {
   const included = new Set([call, ...tree.statements.filter(isHookCall)]);
   const pending = [...included];
   while (pending.length > NO_PENDING) {
-    for (const name of readNames(pending.pop()))
-      for (const statement of declarations.get(name) ?? [])
-        if (!included.has(statement)) {
-          included.add(statement);
-          pending.push(statement);
-        }
+    for (const statement of unseenDeclarations(
+      declarations,
+      included,
+      pending.pop(),
+    )) {
+      included.add(statement);
+      pending.push(statement);
+    }
   }
   included.delete(call);
   return [...included];

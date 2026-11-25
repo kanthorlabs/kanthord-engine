@@ -644,14 +644,7 @@ test("upgrade --reset-changed refuses a migration of an unchanged service that r
       ? { ...entry, migrations: [...entry.migrations, referencing] }
       : entry,
   );
-  const store = createDatabase(
-    paths.database,
-    withReference.map((entry) =>
-      entry.service === WORKBENCH_SERVICE
-        ? serverMigrations.find(({ service }) => service === WORKBENCH_SERVICE)!
-        : entry,
-    ),
-  );
+  const store = createDatabase(paths.database, withReference);
   store.database.exec(CREDENTIAL_ROW);
   store.database.exec(PROJECT_ROW);
   store.close();
