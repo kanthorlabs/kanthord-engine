@@ -377,7 +377,7 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
   assert.equal(processes.calls.length, SINGLE_CALL);
   assert.equal(
     processes.calls[0]?.command,
-    `export KANTHORD_BASH_COMMAND='${COMMAND}' TMPDIR='${tmp}' ${packageCacheExports(tmp)}; sandboxed eval "$KANTHORD_BASH_COMMAND"`,
+    `export KANTHORD_BASH_COMMAND='${COMMAND}' KANTHORD_BASH_TMPDIR='${tmp}' TMPDIR='${tmp}' ${packageCacheExports(tmp)}; sandboxed export TMPDIR="$KANTHORD_BASH_TMPDIR"; eval "$KANTHORD_BASH_COMMAND"`,
   );
   assert.equal(processes.calls[0]?.cwd, cwd);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.allowWrite, [cwd, tmp]);
@@ -417,7 +417,7 @@ test("the swe@1 bash exports the package store and the package cache under the T
   });
   assert.equal(
     processes.calls.at(-1)?.command,
-    `export KANTHORD_BASH_COMMAND='${COMMAND}' TMPDIR='${tmp}' ${packageCacheExports(tmp)}; sandboxed eval "$KANTHORD_BASH_COMMAND"`,
+    `export KANTHORD_BASH_COMMAND='${COMMAND}' KANTHORD_BASH_TMPDIR='${tmp}' TMPDIR='${tmp}' ${packageCacheExports(tmp)}; sandboxed export TMPDIR="$KANTHORD_BASH_TMPDIR"; eval "$KANTHORD_BASH_COMMAND"`,
   );
 });
 

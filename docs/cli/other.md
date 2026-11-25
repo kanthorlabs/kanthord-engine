@@ -803,19 +803,22 @@ directory of the instance. Keep the eval credential under
 absolute path, `denyRead` holds that file and its symlink target.
 
 Every sandboxed bash, the coder bash and the Workbench bash, exports `TMPDIR`
-and also `pnpm_config_store_dir`, `pnpm_config_cache_dir` and
+inside the sandbox, and also `pnpm_config_store_dir`, `pnpm_config_cache_dir` and
 `npm_config_cache` as directories under that `TMPDIR`.
 
 `denyRead` also holds the home directory as one entry. The home directory is
 `HOME` when it is absolute, else the home directory of the user. `allowRead`
 re-allows the workspace, `TMPDIR`, the instance root and the tool roots inside
-that entry. So `~/.git-credentials`, `~/.netrc`, `~/.npmrc`,
+that entry. So `~/.git-credentials`,
+`<XDG_CONFIG_HOME, else ~/.config>/git/credentials`, `~/.netrc`, `~/.npmrc`,
 `~/.config/gh/hosts.yml`, `~/.docker/config.json`, `~/.claude` and
 `~/.codex/auth.json` stay denied, and so does each home child that a later
 command creates. The tool roots are the entries of `PATH` under the home
-directory with their real paths, `~/.gitconfig`,
-`<XDG_CONFIG_HOME, else ~/.config>/git` and the prefix of the `node` executable
-of `PATH`. A path outside the home directory is
+directory with their real paths, `~/.gitconfig`, the files `config`, `ignore`
+and `attributes` of `<XDG_CONFIG_HOME, else ~/.config>/git`, each file that
+these git configuration files include to a depth of 2, and the prefix of the
+`node` executable of `PATH`. A `node` prefix that is a child of the home
+directory is no tool root. A path outside the home directory is
 no tool root. A tool root never removes an entry of the credential paths above.
 The size of the wrapped command does not grow with the number of home children.
 

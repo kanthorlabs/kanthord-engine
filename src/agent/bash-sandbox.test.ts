@@ -30,10 +30,11 @@ function hostOf(env: NodeJS.ProcessEnv = {}) {
   };
 }
 
-const SANDBOXED_COMMAND = 'eval "$KANTHORD_BASH_COMMAND"';
+const SANDBOXED_COMMAND =
+  'export TMPDIR="$KANTHORD_BASH_TMPDIR"; eval "$KANTHORD_BASH_COMMAND"';
 
 function exportedCommand(command: string, temporaryDirectory: string): string {
-  return `export KANTHORD_BASH_COMMAND='${command}' TMPDIR='${temporaryDirectory}' ${packageCacheExports(temporaryDirectory)}; sandboxed ${SANDBOXED_COMMAND}`;
+  return `export KANTHORD_BASH_COMMAND='${command}' KANTHORD_BASH_TMPDIR='${temporaryDirectory}' TMPDIR='${temporaryDirectory}' ${packageCacheExports(temporaryDirectory)}; sandboxed ${SANDBOXED_COMMAND}`;
 }
 
 function packageCacheExports(temporaryDirectory: string): string {
@@ -130,7 +131,9 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     cwd,
     "/var/probe",
     join(ABSENT_HOME, ".gitconfig"),
-    join(ABSENT_HOME, ".config", "git"),
+    join(ABSENT_HOME, ".config", "git", "config"),
+    join(ABSENT_HOME, ".config", "git", "ignore"),
+    join(ABSENT_HOME, ".config", "git", "attributes"),
   ]);
   assert.deepEqual(call.customConfig.filesystem?.denyWrite, [
     join(cwd, ".env"),
@@ -532,6 +535,7 @@ const SECRET_PATHS = [
   ".docker/config.json",
   ".claude/settings.json",
   ".codex/auth.json",
+  ".config/git/credentials",
 ];
 const MANY_CHILDREN = 2000;
 const FEW_CHILDREN = 2;
@@ -601,7 +605,9 @@ test("(invariant guard) the allow list holds the cwd, TMPDIR, the instance root 
     bin,
     toolchain,
     join(home, ".gitconfig"),
-    join(home, ".config", "git"),
+    join(home, ".config", "git", "config"),
+    join(home, ".config", "git", "ignore"),
+    join(home, ".config", "git", "attributes"),
   ];
   const allowed = await allowReadOf(host, cwd);
   const denied = scopedDenyRead(host, cwd);
@@ -610,6 +616,54 @@ test("(invariant guard) the allow list holds the cwd, TMPDIR, the instance root 
     assert.deepEqual(ancestorsOf(denied, path), [home], path);
   }
   assert.deepEqual(denied, [home]);
+});
+
+test("(invariant guard) the allow list keeps each file that the git configuration includes and no other file", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const work = join(home, ".gitconfig-work");
+  const nested = join(home, ".config", "git", "nested");
+  const missing = join(home, ".gitconfig-missing");
+  touch(join(home, ".config", "git", "credentials"));
+  touch(nested);
+  writeFileSync(
+    join(home, ".gitconfig"),
+    [
+      "[user]",
+      "\tname = Probe",
+      '[includeIf "gitdir:~/work/"]',
+      "\tpath = ~/.gitconfig-work",
+      "[include]",
+      `\tpath = "${missing}"`,
+      "[core]",
+      "\tpath = ~/.netrc",
+    ].join("\n"),
+  );
+  writeFileSync(work, "[include]\n\tpath = .config/git/nested\n");
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" },
+    denyRead: [],
+  };
+  const allowed = await allowReadOf(host, cwd);
+  assert.ok(allowed.includes(work), `${work} in ${allowed}`);
+  assert.ok(allowed.includes(nested), `${nested} in ${allowed}`);
+  assert.ok(!allowed.includes(missing));
+  assert.ok(!allowed.includes(join(home, ".netrc")));
+  assert.deepEqual(
+    ancestorsOf(allowed, join(home, ".config", "git", "credentials")),
+    [],
+  );
+});
+
+test("(edge) a node prefix that is a direct child of the home is no tool root", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const bin = join(home, ".local", "bin");
+  mkdirSync(bin, { recursive: true });
+  touch(join(bin, "node"));
+  chmodSync(join(bin, "node"), 0o755);
+  const host = { env: { HOME: home, TMPDIR: tmp, PATH: bin }, denyRead: [] };
+  const allowed = await allowReadOf(host, cwd);
+  assert.ok(allowed.includes(bin));
+  assert.ok(!allowed.includes(join(home, ".local")));
 });
 
 test("(invariant guard) a PATH entry inside a host deny entry leaves that entry in the list", (t) => {
@@ -713,7 +767,9 @@ test("(edge) a cwd outside the home directory leaves the home denied and the too
     tmp,
     join(home, ".local", "bin"),
     join(home, ".gitconfig"),
-    join(home, ".config", "git"),
+    join(home, ".config", "git", "config"),
+    join(home, ".config", "git", "ignore"),
+    join(home, ".config", "git", "attributes"),
   ]);
 });
 

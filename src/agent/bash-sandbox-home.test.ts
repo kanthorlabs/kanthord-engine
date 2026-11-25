@@ -31,6 +31,7 @@ const PNPM = "pnpm";
 const SCRIPT_NAME = "home-path-tool";
 const SCRIPT_OUTPUT = "ran from the home PATH entry";
 const GIT_USER_NAME = "Probe";
+const INCLUDED_MARKER = "included";
 const GIT_CONFIG = [
   "[user]",
   `\tname = ${GIT_USER_NAME}`,
@@ -48,6 +49,7 @@ const SECRET_FILES = [
   ".docker/config.json",
   ".claude/settings.json",
   ".codex/auth.json",
+  ".config/git/credentials",
 ];
 const GIT_USER_FILES = [".gitconfig", ".config/git"];
 const PNPM_GLOBAL_DIRECTORY =
@@ -260,6 +262,40 @@ test(
       GIT_USER_FILES.map((file) => join(h.home, file)),
     );
     assertOutcome(command, outcome, BLOCKED_ON_DARWIN);
+  },
+);
+
+test(
+  "(invariant) the sandboxed command sees the TMPDIR of the host",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    const command = 'echo "$TMPDIR"';
+    const outcome = await inSandbox(h, command);
+    assertOutcome(command, outcome, false);
+    assert.equal(lastLine(outcome), h.env.TMPDIR);
+  },
+);
+
+test(
+  "(edge) git reads a key of a file that the kept .gitconfig includes",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    writeHomeFile(
+      h.home,
+      ".gitconfig",
+      `${GIT_CONFIG}\n[include]\n\tpath = ~/.gitconfig-included\n`,
+    );
+    writeHomeFile(
+      h.home,
+      ".gitconfig-included",
+      `[probe]\n\tmarker = ${INCLUDED_MARKER}\n`,
+    );
+    const command = "git config probe.marker";
+    const outcome = await inSandbox(h, command);
+    assertOutcome(command, outcome, false);
+    assert.equal(lastLine(outcome), INCLUDED_MARKER);
   },
 );
 

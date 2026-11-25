@@ -4,7 +4,9 @@ import {
   constants,
   type Dirent,
   readdirSync,
+  readFileSync,
   realpathSync,
+  statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import {
@@ -57,12 +59,18 @@ const NPM_CACHE_DIRECTORY = "npm-cache";
 const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
+const GIT_CONFIG_FILES = ["config", "ignore", "attributes"];
+const GIT_CONFIG_FILE = "config";
+const GIT_SECTION = /^\s*\[([^\]]+)\]/;
+const GIT_INCLUDE_SECTION = /^\s*include(?:if\s+".*")?\s*$/i;
+const GIT_INCLUDE_PATH = /^\s*path\s*=\s*"?([^"]*?)"?\s*$/i;
 const HOME_PREFIX = "~/";
 const SOCKET_PATH_LIMIT = 104;
 const SOCKET_NAME_RESERVE = 32;
 const NODE_EXECUTABLE = "node";
 const COMMAND_VARIABLE = "KANTHORD_BASH_COMMAND";
-const SANDBOXED_COMMAND = `eval "$${COMMAND_VARIABLE}"`;
+const TEMPORARY_VARIABLE = "KANTHORD_BASH_TMPDIR";
+const SANDBOXED_COMMAND = `export TMPDIR="$${TEMPORARY_VARIABLE}"; eval "$${COMMAND_VARIABLE}"`;
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 
@@ -198,12 +206,58 @@ function isExecutable(path: string): boolean {
   }
 }
 
-function nodePrefix(entries: readonly string[]): string[] {
+function nodePrefix(entries: readonly string[], home: string): string[] {
   const directory = entries.find((entry) =>
     isExecutable(join(entry, NODE_EXECUTABLE)),
   );
   if (directory === undefined) return [];
-  return [dirname(dirname(resolvedOrSame(join(directory, NODE_EXECUTABLE))))];
+  const prefix = resolve(
+    dirname(dirname(resolvedOrSame(join(directory, NODE_EXECUTABLE)))),
+  );
+  return dirname(prefix) === resolve(home) ? [] : [prefix];
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function includeTarget(path: string, file: string, home: string): string {
+  if (path.startsWith(HOME_PREFIX))
+    return join(home, path.slice(HOME_PREFIX.length));
+  return isAbsolute(path) ? path : join(dirname(file), path);
+}
+
+function includedFiles(file: string, home: string): string[] {
+  if (!isFile(file)) return [];
+  const included: string[] = [];
+  let including = false;
+  for (const line of readFileSync(file, "utf8").split("\n")) {
+    const section = GIT_SECTION.exec(line);
+    if (section) including = GIT_INCLUDE_SECTION.test(section[1] ?? "");
+    const target = including ? GIT_INCLUDE_PATH.exec(line)?.[1] : undefined;
+    if (target) included.push(includeTarget(target, file, home));
+  }
+  return included.filter(isFile);
+}
+
+function gitConfigFiles(home: string, configHome: string): string[] {
+  const gitDirectory = join(configHome, GIT_CONFIG_DIRECTORY);
+  const direct = [
+    join(home, GIT_USER_FILE),
+    join(gitDirectory, GIT_CONFIG_FILE),
+  ];
+  const first = direct.flatMap((file) => includedFiles(file, home));
+  const second = first.flatMap((file) => includedFiles(file, home));
+  return [
+    ...direct,
+    ...GIT_CONFIG_FILES.map((name) => join(gitDirectory, name)),
+    ...first,
+    ...second,
+  ];
 }
 
 function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
@@ -215,9 +269,8 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
   const roots = [
     ...entries,
     ...entries.map(resolvedOrSame),
-    join(home, GIT_USER_FILE),
-    join(configHome, GIT_CONFIG_DIRECTORY),
-    ...nodePrefix(entries),
+    ...gitConfigFiles(home, configHome),
+    ...nodePrefix(entries, home),
   ].map((root) => resolve(root));
   return [
     ...new Set(
@@ -410,7 +463,7 @@ export function createBashSandbox(
           network: BASH_NETWORK,
         },
       );
-      return `export ${COMMAND_VARIABLE}=${shellQuoted(command)} TMPDIR=${shellQuoted(temporary)} ${packageCacheExports(temporary)}; ${sandboxed}`;
+      return `export ${COMMAND_VARIABLE}=${shellQuoted(command)} ${TEMPORARY_VARIABLE}=${shellQuoted(temporary)} TMPDIR=${shellQuoted(temporary)} ${packageCacheExports(temporary)}; ${sandboxed}`;
     },
     async dispose(): Promise<void> {
       await runtime.reset();
