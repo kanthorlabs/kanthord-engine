@@ -228,6 +228,57 @@ function resumed(signals: readonly string[]): string[] {
   return signals.filter((signal) => signal.startsWith(CONT));
 }
 
+test("a group whose stop is refused gets no SIGCONT after its kill is refused", () => {
+  const { system, signals } = refusingSystem([
+    { signal: STOP, group: CHILD, code: "EPERM" },
+    { signal: KILL, group: CHILD, code: "EPERM" },
+  ]);
+  assert.throws(() => killProcessTree(LEADER, system), AggregateError);
+  assert.deepEqual(resumed(signals), []);
+});
+
+test("a group that the freeze stopped before a table read error is resumed after its kill is refused", () => {
+  const readFailure = new Error("table read failed");
+  let reads = 0;
+  const signals: string[] = [];
+  const system: ProcessSystem = {
+    readTable: () => {
+      reads += 1;
+      if (reads > FIRST_READ) throw readFailure;
+      return [ownRow, leaderRow, { pid: CHILD, ppid: LEADER, group: CHILD }];
+    },
+    readEnvironments: () => [],
+    readHolders: () => [],
+    signalGroup: (group, signal) => {
+      signals.push(`${signal} ${group}`);
+      if (signal === KILL && group === CHILD) throw errorWithCode("EPERM");
+    },
+  };
+  assert.throws(() => killProcessTree(LEADER, system), AggregateError);
+  assert.deepEqual(resumed(signals), [`${CONT} ${CHILD}`]);
+});
+
+test("a late group after the pass limit gets no SIGCONT after its kill is refused", () => {
+  let next = FORKED;
+  const signals: string[] = [];
+  const system: ProcessSystem = {
+    readTable: () => {
+      next += 1;
+      return [ownRow, leaderRow, { pid: next, ppid: LEADER, group: next }];
+    },
+    readEnvironments: () => [],
+    readHolders: () => [],
+    signalGroup: (group, signal) => {
+      signals.push(`${signal} ${group}`);
+      if (signal === KILL) throw errorWithCode("EPERM");
+    },
+  };
+  assert.throws(() => killProcessTree(LEADER, system), AggregateError);
+  const late = next;
+  assert.ok(!signals.includes(`${CONT} ${late}`));
+  assert.ok(signals.includes(`${CONT} ${late - 1}`));
+});
+
 test("a stopped group whose kill is refused is resumed and the refusal is thrown", () => {
   const { system, signals } = refusingSystem([
     { signal: KILL, group: CHILD, code: "EPERM" },

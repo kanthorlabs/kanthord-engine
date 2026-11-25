@@ -3,7 +3,11 @@ import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import { type BashProcess, processBashOperations } from "./bash-process.ts";
+import {
+  type BashProcess,
+  KILL_FAILURE_SETTLE_MS,
+  processBashOperations,
+} from "./bash-process.ts";
 import { killIfPresent, temporary } from "../kernel/test-support.ts";
 import {
   endProcessGroups,
@@ -59,7 +63,7 @@ const CASE_TIMEOUT_MS = 30_000;
 const KILL_TIMEOUT_SECONDS = 1;
 const PRINT_POLLS = 100;
 const PRINT_POLL_MS = 50;
-const KILL_FAILURE_BOUND_MS = 2000;
+const KILL_TIME_MARGIN_MS = 750;
 const GROUP_CHILDREN =
   "sleep 30 >/dev/null 2>&1 & echo $!; (sleep 30 >/dev/null 2>&1 & echo $!)";
 const GROUP_PIDS = 2;
@@ -258,7 +262,9 @@ test(
     const aborted = Date.now();
     controller.abort();
     await assert.rejects(running, /kill not permitted/);
-    assert.ok(Date.now() - aborted < KILL_FAILURE_BOUND_MS);
+    assert.ok(
+      Date.now() - aborted < KILL_FAILURE_SETTLE_MS + KILL_TIME_MARGIN_MS,
+    );
     assert.doesNotMatch(processField("stat", descendant), STOPPED_STATE);
     process.kill(descendant, SIGNAL_TERM);
     for (let poll = 0; poll < PRINT_POLLS && alive(descendant); poll += 1)
