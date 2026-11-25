@@ -815,9 +815,10 @@ start. The bash has no unsandboxed fallback.
 The node verification commands and the local git of the worker run outside the
 sandbox. The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
 agent refuse a path outside the workspace and an absolute path, as the Workbench
-tools do. A review agent also reads the evidence folder of its own review with
-`read`, `grep`, `find` and `ls`, and it cannot edit or write there. A Linux host
-of a worker instance needs `bubblewrap`, `socat` and `ripgrep` on `PATH`. A macOS host needs `ripgrep` (`rg`). A container placement
+tools do. A review or examine agent also reads the evidence folder of its own
+evaluation with `read`, `grep`, `find` and `ls`, and it cannot edit or write
+there. A Linux host of a worker instance needs `bubblewrap`, `socat` and
+`ripgrep` on `PATH`. A macOS host needs `ripgrep` (`rg`). A container placement
 does not support the coder bash. The sandbox needs bubblewrap, `socat`, `rg` and
 user namespaces, and the default seccomp profile of the slot container blocks
 user namespaces.
