@@ -645,3 +645,35 @@ test("(happy) the denyWrite list of a wrap holds the default patterns under the 
     initial.filesystem.denyWrite.every((entry) => entry.startsWith(sep)),
   );
 });
+
+test("(edge) a PATH entry inside a node_modules directory is no tool root", (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const packages = join(home, "project", "node_modules", ".bin");
+  mkdirSync(packages, { recursive: true });
+  touch(join(home, "project", "node_modules", "left", "file"));
+  const denied = (path: string) =>
+    scopedDenyRead(
+      { env: { HOME: home, TMPDIR: tmp, PATH: path }, denyRead: [] },
+      cwd,
+    );
+  assert.deepEqual(denied(`${packages}:/usr/bin`), denied("/usr/bin"));
+  assert.ok(covers(denied(packages), packages));
+});
+
+test("(edge) a PATH entry inside a directory that the process cannot read adds no entry and no error", (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const closed = join(home, "closed");
+  const inside = join(closed, "bin");
+  mkdirSync(inside, { recursive: true });
+  chmodSync(closed, 0o000);
+  let denied: string[];
+  try {
+    denied = scopedDenyRead(
+      { env: { HOME: home, TMPDIR: tmp, PATH: inside }, denyRead: [] },
+      cwd,
+    );
+  } finally {
+    chmodSync(closed, 0o755);
+  }
+  assert.ok(!covers(denied, inside));
+});

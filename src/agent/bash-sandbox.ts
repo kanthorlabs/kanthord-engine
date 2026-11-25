@@ -40,6 +40,7 @@ const UNRESOLVABLE_ENTRY_CODES = [
   "EPERM",
   "ELOOP",
 ];
+const UNREADABLE_ENTRY_CODES = ["EACCES", "EPERM"];
 const PARENT_SEGMENT = "..";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 const EVAL_AUTH_FILE_VARIABLE = "EVAL_ANTHROPIC_AUTH_FILE";
@@ -58,6 +59,7 @@ const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
 const NODE_EXECUTABLE = "node";
+const PROJECT_PACKAGES_DIRECTORY = "node_modules";
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 
@@ -157,8 +159,18 @@ function entriesOf(directory: string): Dirent[] {
   }
 }
 
+function readableEntriesOf(directory: string): Dirent[] {
+  try {
+    return entriesOf(directory);
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== undefined && UNREADABLE_ENTRY_CODES.includes(code)) return [];
+    throw error;
+  }
+}
+
 function besideKept(ancestor: string, kept: readonly string[]): string[] {
-  return entriesOf(ancestor).flatMap((entry) => {
+  return readableEntriesOf(ancestor).flatMap((entry) => {
     const child = join(ancestor, entry.name);
     const inside = kept.filter((path) => isWithin(child, path));
     if (!inside.length) return [child];
@@ -183,6 +195,10 @@ function pathEntries(env: NodeJS.ProcessEnv): string[] {
   return (env.PATH ?? "").split(delimiter).filter(isAbsolute);
 }
 
+function inProjectPackages(path: string): boolean {
+  return path.split(sep).includes(PROJECT_PACKAGES_DIRECTORY);
+}
+
 function isExecutable(path: string): boolean {
   try {
     accessSync(path, constants.X_OK);
@@ -201,7 +217,7 @@ function nodePrefix(entries: readonly string[]): string[] {
 }
 
 function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
-  const entries = pathEntries(env);
+  const entries = pathEntries(env).filter((entry) => !inProjectPackages(entry));
   const configHome =
     env.XDG_CONFIG_HOME !== undefined && isAbsolute(env.XDG_CONFIG_HOME)
       ? env.XDG_CONFIG_HOME
