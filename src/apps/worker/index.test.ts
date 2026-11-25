@@ -871,7 +871,7 @@ test("(security) the instance deny list holds the instance pi directory, the sib
   const files = ["tracking.db", "tracking.db-wal", "kanthord.db.bak-1"];
   for (const file of files) writeFileSync(join(data, file), "");
   const denied = scopedDenyRead(
-    { ...instanceDenyRead(env, directories), env: { TMPDIR: tmp } },
+    { ...instanceDenyRead(env, directories), env: { HOME: home, TMPDIR: tmp } },
     workspace,
   );
   for (const path of [

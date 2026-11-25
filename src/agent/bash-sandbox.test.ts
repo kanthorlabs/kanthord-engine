@@ -1,18 +1,40 @@
 import assert from "node:assert/strict";
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  chmodSync,
+  mkdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join, sep } from "node:path";
 import { test, type TestContext } from "node:test";
 import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { createBashSandbox, hostDenyRead } from "./bash-sandbox.ts";
+import {
+  createBashSandbox,
+  hostDenyRead,
+  scopedDenyRead,
+} from "./bash-sandbox.ts";
 import { piAgentDirectory } from "./pi.ts";
 
 const TWICE = 2;
 const ONCE = 1;
 const COMMAND = "echo hi";
+const ABSENT_HOME = "/kanthord-absent-home";
 
 function hostOf(env: NodeJS.ProcessEnv = {}) {
-  return { env, denyRead: hostDenyRead(process.env) };
+  return {
+    env: { HOME: ABSENT_HOME, ...env },
+    denyRead: hostDenyRead(process.env),
+  };
+}
+
+function packageCacheExports(temporaryDirectory: string): string {
+  return [
+    `pnpm_config_store_dir='${temporaryDirectory}/pnpm-store'`,
+    `pnpm_config_cache_dir='${temporaryDirectory}/pnpm-cache'`,
+    `npm_config_cache='${temporaryDirectory}/npm-cache'`,
+  ].join(" ");
 }
 
 function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
@@ -67,7 +89,7 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     cwd,
     hostOf({ TMPDIR: "/var/probe" }),
   );
-  const exported = `export TMPDIR='/var/probe'; ${COMMAND}`;
+  const exported = `export TMPDIR='/var/probe'; export ${packageCacheExports("/var/probe")}; ${COMMAND}`;
   assert.equal(wrapped, `sandboxed ${exported}`);
   const [call] = fake.calls;
   assert.ok(call);
@@ -97,10 +119,10 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     "~/.pi/agent",
   ]);
   assert.deepEqual(call.customConfig.filesystem?.denyWrite, [
-    ".env",
-    ".env.*",
-    "*.pem",
-    "*.key",
+    join(cwd, ".env"),
+    join(cwd, ".env.*"),
+    join(cwd, "*.pem"),
+    join(cwd, "*.key"),
   ]);
 });
 
@@ -325,7 +347,7 @@ test("(security) with a worker environment denyRead holds the credential paths, 
   const { env, place, instance, workspace, tmp } = instanceLayout(t);
   const fake = fakeRuntime();
   await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, workspace, {
-    env: { TMPDIR: tmp },
+    env: { HOME: ABSENT_HOME, TMPDIR: tmp },
     denyRead: hostDenyRead(env, { pi: join(instance, "pi") }),
     root: instance,
   });
@@ -355,7 +377,7 @@ test("(security) an instance root created after the first wrap is denied on the 
   const fake = fakeRuntime();
   const sandbox = createBashSandbox(fake.runtime, "linux");
   const host = {
-    env: { TMPDIR: tmp },
+    env: { HOME: ABSENT_HOME, TMPDIR: tmp },
     denyRead: hostDenyRead(env, { pi: join(instance, "pi") }),
     root: instance,
   };
@@ -415,7 +437,7 @@ test("a wrap exports the TMPDIR of the host before the command", async (t) => {
   );
   assert.equal(
     fake.calls[0]?.command,
-    `export TMPDIR='/var/it'\\''s here'; ${COMMAND}`,
+    `export TMPDIR='/var/it'\\''s here'; export ${packageCacheExports("/var/it'\\''s here")}; ${COMMAND}`,
   );
 });
 
@@ -428,4 +450,198 @@ test("dispose resets the runtime and the next wrap initializes it again", async 
   assert.equal(fake.resets.length, ONCE);
   await sandbox.wrap(COMMAND, cwd, hostOf());
   assert.equal(fake.initialized.length, TWICE);
+});
+
+const SECRET_PATHS = [
+  ".git-credentials",
+  ".netrc",
+  ".npmrc",
+  ".config/gh/hosts.yml",
+  ".docker/config.json",
+  ".claude/settings.json",
+  ".codex/auth.json",
+];
+
+function homeLayout(t: TestContext) {
+  const root = realpathSync(temporary(t));
+  const home = join(root, "home");
+  const cwd = join(home, "work", "repo");
+  const tmp = join(root, "tmp");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(tmp);
+  return { root, home, cwd, tmp };
+}
+
+function touch(path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, "");
+}
+
+function covers(list: readonly string[], path: string): boolean {
+  return list.some((entry) => path === entry || path.startsWith(entry + sep));
+}
+
+test("(invariant guard) the deny list covers each credential path of a home that holds the cwd", (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  for (const file of SECRET_PATHS) touch(join(home, file));
+  const denied = scopedDenyRead(
+    { env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" }, denyRead: [] },
+    cwd,
+  );
+  for (const file of SECRET_PATHS)
+    assert.ok(covers(denied, join(home, file)), file);
+  assert.ok(!covers(denied, cwd));
+});
+
+test("(invariant guard) the deny list names no cwd, TMPDIR, instance root, tool root or ancestor of them", (t) => {
+  const { home, cwd } = homeLayout(t);
+  const tmp = join(home, "scratch", "tmp");
+  const instance = join(home, "instances", "coder-1");
+  const bin = join(home, ".local", "bin");
+  const toolchain = join(home, ".nvm", "versions", "v1");
+  for (const directory of [tmp, instance, bin, join(toolchain, "bin")])
+    mkdirSync(directory, { recursive: true });
+  touch(join(toolchain, "bin", "node"));
+  chmodSync(join(toolchain, "bin", "node"), 0o755);
+  touch(join(toolchain, "lib", "node_modules", "file"));
+  touch(join(home, ".gitconfig"));
+  touch(join(home, ".config", "git", "ignore"));
+  touch(join(home, ".config", "other", "file"));
+  touch(join(home, "instances", "coder-2", "file"));
+  touch(join(home, ".netrc"));
+  const kept = [
+    cwd,
+    tmp,
+    instance,
+    bin,
+    toolchain,
+    join(home, ".gitconfig"),
+    join(home, ".config", "git"),
+  ];
+  const denied = scopedDenyRead(
+    {
+      env: {
+        HOME: home,
+        TMPDIR: tmp,
+        PATH: [bin, join(toolchain, "bin")].join(":"),
+      },
+      denyRead: [],
+      root: instance,
+    },
+    cwd,
+  );
+  for (const path of kept)
+    assert.ok(!covers(denied, path), `${path} in ${denied}`);
+  assert.ok(!covers(denied, join(toolchain, "lib", "node_modules", "file")));
+  assert.ok(covers(denied, join(home, ".netrc")));
+  assert.ok(covers(denied, join(home, ".config", "other")));
+  assert.ok(covers(denied, join(home, "instances", "coder-2")));
+});
+
+test("(invariant guard) a PATH entry inside a host deny entry leaves that entry in the list", (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_STATE_HOME: join(home, ".local", "state"),
+    XDG_DATA_HOME: join(home, ".local", "share"),
+  };
+  const place = directories(env);
+  const piBin = join(home, ".pi", "agent", "bin");
+  const configBin = join(place.config, "bin");
+  mkdirSync(piBin, { recursive: true });
+  mkdirSync(configBin, { recursive: true });
+  const denied = scopedDenyRead(
+    {
+      env: { ...env, TMPDIR: tmp, PATH: [piBin, configBin].join(":") },
+      denyRead: hostDenyRead(env),
+    },
+    cwd,
+  );
+  assert.ok(denied.includes("~/.pi/agent"));
+  assert.ok(denied.includes(place.config));
+});
+
+test("(edge) a cwd outside the home directory leaves each home child denied except the tool roots and their ancestors", (t) => {
+  const { root, home, tmp } = homeLayout(t);
+  const cwd = join(root, "workspace");
+  mkdirSync(cwd);
+  touch(join(home, ".gitconfig"));
+  touch(join(home, ".config", "git", "ignore"));
+  touch(join(home, ".config", "gh", "hosts.yml"));
+  touch(join(home, ".local", "bin", "tool"));
+  touch(join(home, ".local", "share", "data"));
+  touch(join(home, ".cache", "data"));
+  touch(join(home, "docs", "note"));
+  const denied = scopedDenyRead(
+    {
+      env: {
+        HOME: home,
+        TMPDIR: tmp,
+        PATH: ["/usr/bin", join(home, ".local", "bin")].join(":"),
+      },
+      denyRead: [],
+    },
+    cwd,
+  );
+  assert.deepEqual(
+    [...denied].sort(),
+    [
+      join(home, ".cache"),
+      join(home, ".config", "gh"),
+      join(home, ".local", "share"),
+      join(home, "docs"),
+      join(home, "work"),
+    ].sort(),
+  );
+});
+
+test("(edge) a home child created after the first wrap is denied at the next wrap", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const fake = fakeRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" },
+    denyRead: [],
+  };
+  await sandbox.wrap(COMMAND, cwd, host);
+  const later = join(home, ".later-credentials");
+  assert.ok(!fake.calls[0]?.customConfig.filesystem?.denyRead.includes(later));
+  touch(later);
+  await sandbox.wrap(COMMAND, cwd, host);
+  assert.ok(fake.calls[1]?.customConfig.filesystem?.denyRead.includes(later));
+});
+
+test("(happy) a wrapped command exports TMPDIR and the package store and cache under the temporary directory", async (t) => {
+  const tmp = temporary(t);
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(
+    COMMAND,
+    temporary(t),
+    hostOf({ TMPDIR: tmp }),
+  );
+  assert.equal(
+    fake.calls[0]?.command,
+    `export TMPDIR='${tmp}'; export ${packageCacheExports(tmp)}; ${COMMAND}`,
+  );
+});
+
+test("(happy) the denyWrite list of a wrap holds the default patterns under the cwd and no relative entry", async (t) => {
+  const cwd = temporary(t);
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, cwd, hostOf());
+  const denyWrite = fake.calls[0]?.customConfig.filesystem?.denyWrite ?? [];
+  assert.deepEqual(denyWrite, [
+    join(cwd, ".env"),
+    join(cwd, ".env.*"),
+    join(cwd, "*.pem"),
+    join(cwd, "*.key"),
+  ]);
+  assert.ok(denyWrite.every((entry) => entry.startsWith(sep)));
+  const initial = fake.initialized[0] as {
+    filesystem: { denyWrite: string[] };
+  };
+  assert.ok(
+    initial.filesystem.denyWrite.every((entry) => entry.startsWith(sep)),
+  );
 });

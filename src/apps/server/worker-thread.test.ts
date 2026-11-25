@@ -201,7 +201,11 @@ test("(security) a slot thread gets a deny_read list of the server environment t
   const tmp = join(slotRoot, "tmp");
   assert.ok(data.deny_read.includes(join(slot.state, "pi")));
   const denied = scopedDenyRead(
-    { env: { TMPDIR: tmp }, denyRead: data.deny_read, root: slotRoot },
+    {
+      env: { HOME: join(serverRoot, "home"), TMPDIR: tmp },
+      denyRead: data.deny_read,
+      root: slotRoot,
+    },
     workspace,
   );
   assert.ok(denied.includes(server.config));

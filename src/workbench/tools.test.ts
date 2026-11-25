@@ -18,7 +18,7 @@ import {
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { directories } from "../kernel/xdg.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { overrideEnvironment, temporary } from "../kernel/test-support.ts";
 import {
   testHumanIdentity,
   testReadOnlyIdentity,
@@ -212,6 +212,7 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
 
 test("(security) a workbench bash call that reads tracking.db fails under the denyRead list", async (t) => {
   const directory = temporary(t);
+  overrideEnvironment(t, { HOME: temporary(t) });
   const emulated = createBashSandbox(
     {
       initialize: async () => undefined,
@@ -248,6 +249,40 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
     undefined as never,
   );
   assert.match(JSON.stringify(ran.content), /inside/);
+});
+
+test("the workbench bash exports the package store and the package cache under TMPDIR in the wrapped command", async (t) => {
+  const directory = temporary(t);
+  const tmp = temporary(t);
+  overrideEnvironment(t, { HOME: temporary(t), TMPDIR: tmp });
+  const wrapped: string[] = [];
+  const recording = createBashSandbox(
+    {
+      initialize: async () => undefined,
+      reset: async () => undefined,
+      wrapWithSandbox: async (command) => {
+        wrapped.push(command);
+        return command;
+      },
+    },
+    "linux",
+  );
+  t.mock.method(bashSandbox, "wrap", recording.wrap);
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
+  assert.ok(bash);
+  await bash.execute(
+    "call_bash",
+    { command: "true" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const [command] = wrapped;
+  assert.ok(command?.includes(`pnpm_config_store_dir='${tmp}/pnpm-store'`));
+  assert.ok(command?.includes(`pnpm_config_cache_dir='${tmp}/pnpm-cache'`));
+  assert.ok(command?.includes(`npm_config_cache='${tmp}/npm-cache'`));
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [

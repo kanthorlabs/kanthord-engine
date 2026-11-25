@@ -796,15 +796,23 @@ The `swe@1` bash of a coder execution runs in the sandbox of
 `@anthropic-ai/sandbox-runtime` `0.0.26`, as the Workbench bash does. The
 [Built-in tools](./workbench.md#built-in-tools) section of the Workbench page
 states the configuration and the paths. `allowWrite` holds the workspace and the
-`TMPDIR` of the instance. Each command exports that `TMPDIR`. The bash sets
-`pnpm_config_store_dir`, `pnpm_config_cache_dir` and `npm_config_cache` to
-directories under that `TMPDIR`. `denyRead` holds the credential paths of the
+`TMPDIR` of the instance. Each command exports that `TMPDIR`. Each command also
+exports `pnpm_config_store_dir`, `pnpm_config_cache_dir` and `npm_config_cache`
+as directories under that `TMPDIR`, in the coder bash and in the Workbench bash. `denyRead` holds the credential paths of the
 worker process, among them `~/.config/kanthord-eval`, `~/.pi/agent` and the pi
 directory of the instance. Keep the eval credential under
 `~/.config/kanthord-eval/`. When `EVAL_ANTHROPIC_AUTH_FILE` names a custom
 absolute path, `denyRead` holds that file and its symlink target.
 
-`denyRead` names no workspace, no `TMPDIR` and no ancestor of them. For each
+`denyRead` also holds each child of the home directory that is not on the path
+to a kept path. The kept paths are the workspace, `TMPDIR`, the instance root and
+the tool roots: the entries of `PATH` under the home directory, `~/.gitconfig`,
+`<XDG_CONFIG_HOME, else ~/.config>/git` and the prefix of the `node` executable.
+So `~/.git-credentials`, `~/.netrc`, `~/.npmrc`, `~/.docker` and `~/.claude` stay
+denied. A tool root never removes an entry of the credential paths above.
+
+`denyRead` names no workspace, no `TMPDIR`, no tool root and no ancestor of them,
+except an entry of the credential paths that holds a tool root. For each
 entry that is an ancestor of the instance root, `denyRead` holds each child of
 the entry that is not on the path to the root. So the other instance roots,
 `tracking.db`, its `-wal` and `-shm` files and each `*.bak-*` file stay denied.

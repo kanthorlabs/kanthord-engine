@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
-import { type Dirent, readdirSync, realpathSync } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  accessSync,
+  constants,
+  type Dirent,
+  readdirSync,
+  realpathSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import {
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
@@ -18,6 +33,13 @@ const LOG_FILE = "kanthord.log";
 const PROJECTS_DIRECTORY = "projects";
 const ENVIRONMENTS_DIRECTORY = "environments";
 const MISSING_ENTRY = "ENOENT";
+const UNRESOLVABLE_ENTRY_CODES = [
+  "ENOENT",
+  "ENOTDIR",
+  "EACCES",
+  "EPERM",
+  "ELOOP",
+];
 const PARENT_SEGMENT = "..";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 const EVAL_AUTH_FILE_VARIABLE = "EVAL_ANTHROPIC_AUTH_FILE";
@@ -29,6 +51,13 @@ const GIT_DIRECTORY = ".git";
 const GIT_SEARCH_DEPTH = 3;
 const GIT_SEARCH_END = 0;
 const GIT_PROTECTED_ENTRIES = ["config", "hooks"];
+const PNPM_STORE_DIRECTORY = "pnpm-store";
+const PNPM_CACHE_DIRECTORY = "pnpm-cache";
+const NPM_CACHE_DIRECTORY = "npm-cache";
+const GIT_USER_FILE = ".gitconfig";
+const USER_CONFIG_DIRECTORY = ".config";
+const GIT_CONFIG_DIRECTORY = "git";
+const NODE_EXECUTABLE = "node";
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 
@@ -65,6 +94,17 @@ function realTarget(path: string): string {
     return realpathSync(path);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === MISSING_ENTRY) return path;
+    throw error;
+  }
+}
+
+function resolvedOrSame(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== undefined && UNRESOLVABLE_ENTRY_CODES.includes(code))
+      return path;
     throw error;
   }
 }
@@ -117,11 +157,13 @@ function entriesOf(directory: string): Dirent[] {
   }
 }
 
-function besideRoot(ancestor: string, root: string): string[] {
+function besideKept(ancestor: string, kept: readonly string[]): string[] {
   return entriesOf(ancestor).flatMap((entry) => {
     const child = join(ancestor, entry.name);
-    if (!isWithin(child, root)) return [child];
-    return isWithin(root, child) ? [] : besideRoot(child, root);
+    const inside = kept.filter((path) => isWithin(child, path));
+    if (!inside.length) return [child];
+    if (inside.some((path) => isWithin(path, child))) return [];
+    return besideKept(child, inside);
   });
 }
 
@@ -130,16 +172,68 @@ function rootDenyRead(host: SandboxHost): string[] {
   if (root === undefined) return [];
   return host.denyRead
     .filter((denied) => isWithin(denied, root))
-    .flatMap((ancestor) => besideRoot(ancestor, root));
+    .flatMap((ancestor) => besideKept(ancestor, [root]));
+}
+
+function homeOf(env: NodeJS.ProcessEnv): string {
+  return env.HOME !== undefined && isAbsolute(env.HOME) ? env.HOME : homedir();
+}
+
+function pathEntries(env: NodeJS.ProcessEnv): string[] {
+  return (env.PATH ?? "").split(delimiter).filter(isAbsolute);
+}
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function nodePrefix(entries: readonly string[]): string[] {
+  const directory = entries.find((entry) =>
+    isExecutable(join(entry, NODE_EXECUTABLE)),
+  );
+  if (directory === undefined) return [];
+  return [dirname(dirname(resolvedOrSame(join(directory, NODE_EXECUTABLE))))];
+}
+
+function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
+  const entries = pathEntries(env);
+  const configHome =
+    env.XDG_CONFIG_HOME !== undefined && isAbsolute(env.XDG_CONFIG_HOME)
+      ? env.XDG_CONFIG_HOME
+      : join(home, USER_CONFIG_DIRECTORY);
+  const roots = [
+    ...entries,
+    ...entries.map(resolvedOrSame),
+    join(home, GIT_USER_FILE),
+    join(configHome, GIT_CONFIG_DIRECTORY),
+    ...nodePrefix(entries),
+  ];
+  return [...new Set(roots.filter((root) => isWithin(home, root)))];
+}
+
+function homeDenyRead(home: string, kept: readonly string[]): string[] {
+  if (kept.some((path) => isWithin(path, home))) return [];
+  return besideKept(home, kept);
 }
 
 export function scopedDenyRead(host: SandboxHost, cwd: string): string[] {
   const allowed = [cwd, host.env.TMPDIR ?? TEMPORARY_FALLBACK];
   const roots = host.root === undefined ? [] : [host.root];
+  const home = homeOf(host.env);
   return [
     ...new Set([
       ...withoutAncestors(host.denyRead, [...allowed, ...roots]),
       ...withoutAncestors(rootDenyRead(host), allowed),
+      ...homeDenyRead(home, [
+        ...allowed,
+        ...roots,
+        ...toolRoots(host.env, home),
+      ]),
     ]),
   ];
 }
@@ -188,6 +282,12 @@ export function hostDenyRead(
   ];
 }
 
+function defaultDenyWrite(cwd: string): string[] {
+  return DEFAULT_CONFIG.filesystem.denyWrite.map((entry) =>
+    isAbsolute(entry) ? entry : join(cwd, entry),
+  );
+}
+
 function filesystemOf(
   denyRead: string[],
   allowWrite: string[],
@@ -197,8 +297,16 @@ function filesystemOf(
     ...DEFAULT_CONFIG.filesystem,
     denyRead,
     allowWrite,
-    denyWrite: [...DEFAULT_CONFIG.filesystem.denyWrite, ...denyWrite],
+    denyWrite,
   };
+}
+
+function packageCacheExports(temporary: string): string {
+  return [
+    `pnpm_config_store_dir=${shellQuoted(join(temporary, PNPM_STORE_DIRECTORY))}`,
+    `pnpm_config_cache_dir=${shellQuoted(join(temporary, PNPM_CACHE_DIRECTORY))}`,
+    `npm_config_cache=${shellQuoted(join(temporary, NPM_CACHE_DIRECTORY))}`,
+  ].join(" ");
 }
 
 export function createBashSandbox(
@@ -238,10 +346,14 @@ export function createBashSandbox(
       started ??= start(filesystemOf(denied, [], gitDenied));
       await started;
       return runtime.wrapWithSandbox(
-        `export TMPDIR=${shellQuoted(temporary)}; ${command}`,
+        `export TMPDIR=${shellQuoted(temporary)}; export ${packageCacheExports(temporary)}; ${command}`,
         undefined,
         {
-          filesystem: filesystemOf(denied, [cwd, temporary], gitDenied),
+          filesystem: filesystemOf(
+            denied,
+            [cwd, temporary],
+            [...defaultDenyWrite(cwd), ...gitDenied],
+          ),
           network: BASH_NETWORK,
         },
       );

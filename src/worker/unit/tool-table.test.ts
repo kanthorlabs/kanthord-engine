@@ -7,7 +7,11 @@ import type {
   BashToolOptions,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
+import {
+  hostEnvironment,
+  overrideEnvironment,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { bashSandbox, createBashSandbox } from "../../agent/bash-sandbox.ts";
 import { loadPi } from "../../agent/pi.ts";
@@ -65,6 +69,14 @@ class CallRecordingProcesses extends ToolProcesses {
       },
     };
   }
+}
+
+function packageCacheExports(temporaryDirectory: string): string {
+  return [
+    `pnpm_config_store_dir='${join(temporaryDirectory, "pnpm-store")}'`,
+    `pnpm_config_cache_dir='${join(temporaryDirectory, "pnpm-cache")}'`,
+    `npm_config_cache='${join(temporaryDirectory, "npm-cache")}'`,
+  ].join(" ");
 }
 
 function unwrapped(t: TestContext) {
@@ -347,6 +359,7 @@ function sandboxedTools(
 }
 
 test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR of the environment in allowWrite", async (t) => {
+  overrideEnvironment(t, { HOME: temporary(t) });
   const pi = await loadPi();
   const fake = fakeSandboxRuntime();
   const sandbox = createBashSandbox(fake.runtime, "linux");
@@ -365,16 +378,18 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
   assert.equal(processes.calls.length, SINGLE_CALL);
   assert.equal(
     processes.calls[0]?.command,
-    `sandboxed export TMPDIR='${tmp}'; ${COMMAND}`,
+    `sandboxed export TMPDIR='${tmp}'; export ${packageCacheExports(tmp)}; ${COMMAND}`,
   );
   assert.equal(processes.calls[0]?.cwd, cwd);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.allowWrite, [cwd, tmp]);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.denyRead, denyRead);
 });
 
-test("the swe@1 bash puts the package store and the package cache under the TMPDIR of the environment", async (t) => {
-  unwrapped(t);
+test("the swe@1 bash exports the package store and the package cache under the TMPDIR of the environment in the wrapped command", async (t) => {
   const pi = await loadPi();
+  const fake = fakeSandboxRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  t.mock.method(bashSandbox, "wrap", sandbox.wrap);
   let captured: BashToolOptions | undefined;
   const mockPi = {
     ...pi,
@@ -386,6 +401,7 @@ test("the swe@1 bash puts the package store and the package cache under the TMPD
   const processes = new CallRecordingProcesses(pi.getShellConfig());
   const cwd = temporary(t);
   const tmp = temporary(t);
+  overrideEnvironment(t, { HOME: temporary(t) });
   const tools = sandboxedTools(mockPi, {
     processes,
     cwd,
@@ -397,10 +413,10 @@ test("the swe@1 bash puts the package store and the package cache under the TMPD
     env: { ...hostEnvironment(), TMPDIR: tmp },
     onData: () => {},
   });
-  const env = processes.calls.at(-1)?.env;
-  assert.equal(env?.pnpm_config_store_dir, join(tmp, "pnpm-store"));
-  assert.equal(env?.pnpm_config_cache_dir, join(tmp, "pnpm-cache"));
-  assert.equal(env?.npm_config_cache, join(tmp, "npm-cache"));
+  assert.equal(
+    processes.calls.at(-1)?.command,
+    `sandboxed export TMPDIR='${tmp}'; export ${packageCacheExports(tmp)}; ${COMMAND}`,
+  );
 });
 
 test("(security) a rejected wrap rejects the bash call, spawns no process and records no timeout", async (t) => {

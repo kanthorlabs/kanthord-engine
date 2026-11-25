@@ -5,12 +5,11 @@ import {
   chmodSync,
   constants,
   mkdirSync,
-  readdirSync,
   realpathSync,
   writeFileSync,
 } from "node:fs";
 import { platform } from "node:os";
-import { delimiter, dirname, join, sep } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { after, test, type TestContext } from "node:test";
 import { promisify } from "node:util";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
@@ -22,7 +21,6 @@ const execFileAsync = promisify(execFile);
 const SANDBOX_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux"];
 const DARWIN: NodeJS.Platform = "darwin";
 const BLOCKED_ON_DARWIN = platform() === DARWIN;
-const TODO_REASON = "F160: task 02";
 const COMMAND_TIMEOUT_MS = 30_000;
 const CASE_TIMEOUT_MS = 60_000;
 const SUCCESS = 0;
@@ -32,9 +30,10 @@ const PNPM_FALLBACK_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
 const PNPM = "pnpm";
 const SCRIPT_NAME = "home-path-tool";
 const SCRIPT_OUTPUT = "ran from the home PATH entry";
+const GIT_USER_NAME = "Probe";
 const GIT_CONFIG = [
   "[user]",
-  "\tname = Probe",
+  `\tname = ${GIT_USER_NAME}`,
   "\temail = probe@example.test",
   "[init]",
   "\tdefaultBranch = main",
@@ -47,8 +46,9 @@ const SECRET_FILES = [
   ".npmrc",
   ".config/gh/hosts.yml",
   ".docker/config.json",
+  ".claude/settings.json",
+  ".codex/auth.json",
 ];
-const GIT_USER_FILES = [".gitconfig", ".config/git"];
 const PNPM_GLOBAL_DIRECTORY =
   platform() === DARWIN ? "Library/Preferences/pnpm" : ".config/pnpm";
 const PNPM_COMMANDS = ["pnpm --version", "pnpm config get store-dir"];
@@ -137,25 +137,6 @@ function fakeHome(t: TestContext, pathEntries: readonly string[] = []): Home {
   return { home, cwd, env };
 }
 
-function contains(ancestor: string, path: string): boolean {
-  return path === ancestor || path.startsWith(`${ancestor}${sep}`);
-}
-
-function deniedBeside(directory: string, kept: readonly string[]): string[] {
-  return readdirSync(directory).flatMap((name) => {
-    const child = join(directory, name);
-    const inside = kept.filter((path) => contains(child, path));
-    if (!inside.length) return [child];
-    if (inside.some((path) => contains(path, child))) return [];
-    return deniedBeside(child, inside);
-  });
-}
-
-function denyList(h: Home, keptInHome: readonly string[]): string[] {
-  const kept = [h.cwd, ...keptInHome.map((entry) => join(h.home, entry))];
-  return deniedBeside(h.home, kept);
-}
-
 function isExitCode(code: unknown): code is number {
   return Number.isInteger(code);
 }
@@ -189,14 +170,10 @@ async function execute(
 
 const sandbox = createBashSandbox(SandboxManager);
 
-async function inSandbox(
-  h: Home,
-  command: string,
-  denyRead: string[],
-): Promise<Outcome> {
+async function inSandbox(h: Home, command: string): Promise<Outcome> {
   const wrapped = await sandbox.wrap(command, h.cwd, {
     env: h.env,
-    denyRead,
+    denyRead: [],
   });
   return execute(wrapped, h.cwd, h.env);
 }
@@ -241,10 +218,9 @@ test(
   { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = fakeHome(t);
-    const denyRead = denyList(h, GIT_USER_FILES);
     for (const file of SECRET_FILES) {
       const command = `cat ${join(h.home, file)}`;
-      const outcome = await inSandbox(h, command, denyRead);
+      const outcome = await inSandbox(h, command);
       assert.ok(
         !outcome.output.includes(secretContent(file)),
         `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
@@ -259,27 +235,23 @@ test(
   { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = fakeHome(t);
-    const denyRead = denyList(h, GIT_USER_FILES);
     for (const command of [
       "git status",
       "git commit --allow-empty -q -m probe",
     ])
-      assertOutcome(command, await inSandbox(h, command, denyRead), false);
+      assertOutcome(command, await inSandbox(h, command), false);
   },
 );
 
 test(
-  "(edge) git status with .gitconfig and .config/git denied",
-  {
-    skip: unavailable,
-    timeout: CASE_TIMEOUT_MS,
-    todo: BLOCKED_ON_DARWIN ? TODO_REASON : false,
-  },
+  "(edge) git reads the user name of the kept .gitconfig",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = fakeHome(t);
-    const command = "git status";
-    const outcome = await inSandbox(h, command, denyList(h, []));
-    assertOutcome(command, outcome, BLOCKED_ON_DARWIN);
+    const command = "git config user.name";
+    const outcome = await inSandbox(h, command);
+    assertOutcome(command, outcome, false);
+    assert.equal(lastLine(outcome), GIT_USER_NAME);
   },
 );
 
@@ -293,9 +265,8 @@ test(
   },
   async (t) => {
     const h = fakeHome(t);
-    const denyRead = denyList(h, []);
     for (const command of PNPM_COMMANDS) {
-      const outcome = await inSandbox(h, command, denyRead);
+      const outcome = await inSandbox(h, command);
       assert.ok(
         !outcome.output.includes(secretContent(".npmrc")),
         `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
@@ -309,11 +280,7 @@ test(
   { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = fakeHome(t, [".local/bin"]);
-    const outcome = await inSandbox(
-      h,
-      SCRIPT_NAME,
-      denyList(h, [".local/bin"]),
-    );
+    const outcome = await inSandbox(h, SCRIPT_NAME);
     assertOutcome(SCRIPT_NAME, outcome, false);
     assert.equal(lastLine(outcome), SCRIPT_OUTPUT);
   },
