@@ -528,11 +528,12 @@ function detailFacts(detail: string): {
 }
 
 function probeFailureVerdict(error: unknown): ProofVerdict {
+  const reason = gitFailureReason(error);
   if (
     error instanceof GitWriteError &&
     error.stage === GitStage.Push &&
     error.code === RepositoryErrorCode.GitFailed &&
-    gitFailureReason(error) === ResourceFailureReason.Unclassified
+    reason === ResourceFailureReason.Unclassified
   )
     return failedVerdict(
       EnvironmentFailureClass.PushRefused,
@@ -540,7 +541,7 @@ function probeFailureVerdict(error: unknown): ProofVerdict {
     );
   return failedVerdict(
     EnvironmentFailureClass.ProbeFailed,
-    `${gitFailureReason(error)}: ${pushTailOf(error)}`,
+    `${reason}: ${pushTailOf(error)}`,
   );
 }
 

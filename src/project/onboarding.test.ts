@@ -2587,6 +2587,24 @@ test(
 );
 
 test(
+  "a push that the SSH server refuses for the key fails the record with probe_failed and key_refused",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "git@git.example: Permission denied (publickey).",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^key_refused: /);
+  },
+);
+
+test(
   "a probe that cannot resolve the host fails the record with probe_failed and host_unreachable",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
