@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   readdirSync,
   readFileSync,
@@ -82,8 +83,19 @@ function newPaths(
   );
 }
 
-function recordedUnder(paths: ReadonlySet<string>, changed: string): string[] {
-  return [...paths].filter((path) => contains(path, changed));
+function isNestedRepository(absolute: string): boolean {
+  return existsSync(join(absolute, GIT_DIRECTORY));
+}
+
+function releasable(
+  directory: string,
+  paths: ReadonlySet<string>,
+  changed: string,
+): string[] {
+  return [...paths].filter(
+    (path) =>
+      contains(path, changed) && !isNestedRepository(join(directory, path)),
+  );
 }
 
 export class VerificationWrites {
@@ -168,7 +180,11 @@ export class VerificationWrites {
 
   private release(absolute: string): void {
     for (const [directory, paths] of this.written)
-      for (const path of recordedUnder(paths, relative(directory, absolute)))
+      for (const path of releasable(
+        directory,
+        paths,
+        relative(directory, absolute),
+      ))
         paths.delete(path);
   }
 

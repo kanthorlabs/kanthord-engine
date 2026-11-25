@@ -691,6 +691,28 @@ test("a change inside the .git directory of a recorded nested repository keeps t
   assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
 });
 
+test("(invariant guard) a recorded nested repository stays in the record after a bash change inside it", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "git init -q vendor/lib && echo out > vendor/lib/file",
+  );
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
+  await runBash(tools, "echo changed > vendor/lib/file");
+  assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
+});
+
+test("(invariant guard) a recorded plain directory leaves the record after a bash change inside it", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "git init -q gen && echo out > gen/out.txt",
+  );
+  await runBash(tools, VERIFY);
+  assert.deepEqual(writes.pathsOf(directory), ["gen"]);
+  await runBash(tools, "rm -rf gen/.git && echo changed > gen/out.txt");
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
 test("a verification run that creates a nested repository records it without a trailing slash", async (t) => {
   const { directory, writes, tools } = await verificationCheckout(
     t,

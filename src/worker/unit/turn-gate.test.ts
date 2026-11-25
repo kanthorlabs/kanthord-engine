@@ -461,6 +461,59 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     );
   });
 
+  test("a write inside a recorded nested repository leaves its gitlink out of the turn commit and keeps the file in the work tree", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const nestedFile = `${VENDOR_DIRECTORY}/x.txt`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [bash(clone), write(nestedFile, "x"), fauxAssistantMessage("done")],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.equal(existsSync(join(h.root, nestedFile)), true);
+    assert.equal(
+      await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
+      NO_TREE_ENTRY,
+    );
+  });
+
+  test("a bash change inside a recorded nested repository leaves its gitlink out of the turn commit", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [
+        bash(clone),
+        bash(`echo changed > ${VENDOR_DIRECTORY}/x.txt`),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.equal(
+      await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
+      NO_TREE_ENTRY,
+    );
+  });
+
+  test("a write of another file after a write inside a recorded nested repository is in the turn commit", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [
+        bash(clone),
+        write(`${VENDOR_DIRECTORY}/x.txt`, "x"),
+        write(WORK_FILE, "a"),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [WORK_FILE]);
+  });
+
   test("the turn gate restores a moved gitlink and keeps an uncommitted edit inside the submodule", async (t) => {
     const h = await fixture(t, [], []);
     const source = await submoduleSource(t);
