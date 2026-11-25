@@ -86,6 +86,7 @@ export interface SandboxHost extends SandboxScope {
 
 export interface DenyReadScope {
   pi?: string;
+  config?: string;
 }
 
 function isWithin(ancestor: string, path: string): boolean {
@@ -176,6 +177,7 @@ export function hostDenyRead(
     join(place.state, LOG_FILE),
     place.config,
     ...overriddenConfigFile(env),
+    ...(scope.config === undefined ? [] : [resolve(scope.config)]),
     ...evalAuthFile(env),
     place.data,
     ...DATABASE_FILES.map((file) => join(place.data, file)),

@@ -397,6 +397,7 @@ function inventorySources(
 }
 
 export function composeServices(options: ComposeServicesOptions) {
+  const configFile = options.configPath ?? configPath();
   const repoConnector = repositoryConnectorOf(options);
   const github = new platformImplementations.github(options.github);
   const s3 = new storageImplementations.s3();
@@ -460,7 +461,7 @@ export function composeServices(options: ComposeServicesOptions) {
       },
     },
   });
-  const threadDriver = new ThreadDriver();
+  const threadDriver = new ThreadDriver(configFile);
   const containerImage = `${options.config.worker.container_image}:${packageVersion()}`;
   const containerHost =
     options.containerRuntimeHost ?? systemRuntimeHost(process.env);
@@ -1427,6 +1428,7 @@ export function composeServices(options: ComposeServicesOptions) {
   });
   const workbench = new WorkbenchService({
     store: options.store,
+    configFile,
     agentVariant: getVariant,
     agentVariants: listVariants,
     invites,
@@ -1484,7 +1486,7 @@ export function composeServices(options: ComposeServicesOptions) {
       store: options.store,
       databasePath: options.store.path,
       trackingDatabasePath: options.trackingStore.path,
-      configPath: options.configPath ?? configPath(),
+      configPath: configFile,
       stateDirectory: options.stateDirectory,
       breakdownRows: {
         mission_evidence: { delete_operation: "mission.evidence.delete" },

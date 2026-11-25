@@ -120,6 +120,18 @@ test("(security) denyRead holds a config file that KANTHORD_CONFIG names outside
   );
 });
 
+test("hostDenyRead holds the resolved config file of the scope", (t) => {
+  const file = join(temporary(t), "serve", "kanthord.yaml");
+  assert.ok(hostDenyRead(process.env, { config: file }).includes(file));
+});
+
+test("(invariant) without a config scope hostDenyRead keeps the KANTHORD_CONFIG file", (t) => {
+  const overridden = join(temporary(t), "kanthord.yaml");
+  const env = { ...process.env, KANTHORD_CONFIG: overridden };
+  assert.ok(hostDenyRead(env).includes(overridden));
+  assert.ok(hostDenyRead(env, {}).includes(overridden));
+});
+
 test("an empty KANTHORD_CONFIG adds no denyRead entry", async (t) => {
   const cwd = temporary(t);
   const previous = process.env.KANTHORD_CONFIG;

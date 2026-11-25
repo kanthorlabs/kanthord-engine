@@ -315,13 +315,19 @@ export function operationTool(
   };
 }
 
+interface BuiltinPlace {
+  cwd: string;
+  config?: string;
+}
+
 export function builtinTools(
   pi: PiCodingAgent,
   agentName: string,
-  cwd: string,
+  place: BuiltinPlace,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
   const agent = getAgentDeclaration(agentName);
   assert.ok(agent);
+  const { cwd, config } = place;
   assert.ok(cwd);
   const allowlist: string[] = [...agent.tools.builtin];
   if (!agent.tools.builtin.includes(BuiltinTool.Bash))
@@ -340,7 +346,7 @@ export function builtinTools(
         const env = childEnvironment(options.env ?? process.env);
         const wrapped = await bashSandbox.wrap(command, directory, {
           env,
-          denyRead: hostDenyRead(process.env),
+          denyRead: hostDenyRead(process.env, { config }),
         });
         return local.exec(wrapped, directory, { ...options, env });
       },

@@ -80,11 +80,9 @@ const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
-  const [bash] = builtinTools(
-    await loadPi(),
-    "swe@1",
-    temporary(t),
-  ).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: temporary(t),
+  }).customTools;
   assert.ok(bash);
   let ready = false;
   const failure: Error = await bash
@@ -110,11 +108,9 @@ test("a workbench bash call that times out leaves no process of its tree", async
 
 test("a background child of a Workbench bash call lives after the call", async (t) => {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
-  const [bash] = builtinTools(
-    await loadPi(),
-    "swe@1",
-    temporary(t),
-  ).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: temporary(t),
+  }).customTools;
   assert.ok(bash);
   const result = await bash.execute(
     "call_bash",
@@ -142,7 +138,9 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
     "wrap",
     async (command: string) => `echo wrapped; ${command}`,
   );
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   const command = `echo "seen=\${${name}-unset}"`;
   const result = await bash.execute(
@@ -163,13 +161,40 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
   assert.match(text, /^wrapped\nseen=unset\n/);
 });
 
+test("(invariant) the workbench bash passes the config file of serve to the wrap in the denyRead list", async (t) => {
+  const directory = temporary(t);
+  const configFile = join(temporary(t), "serve", "kanthord.yaml");
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string) => command,
+  );
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+    config: configFile,
+  }).customTools;
+  assert.ok(bash);
+  await bash.execute(
+    "call_bash",
+    { command: "true" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const [call] = wrap.mock.calls;
+  assert.ok(call);
+  assert.ok(call.arguments[2]?.denyRead.includes(configFile));
+});
+
 test("a workbench bash call fails and spawns no process when the wrap rejects", async (t) => {
   const directory = temporary(t);
   const marker = join(directory, "marker");
   const wrap = t.mock.method(bashSandbox, "wrap", async () => {
     throw new Error("the bash sandbox is not available: probe");
   });
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   await assert.rejects(
     bash.execute(
@@ -201,7 +226,9 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
     "linux",
   );
   t.mock.method(bashSandbox, "wrap", emulated.wrap);
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   const tracking = join(directories(process.env).data, "tracking.db");
   const denied = await bash.execute(
