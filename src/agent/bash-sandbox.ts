@@ -218,9 +218,11 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
     join(home, GIT_USER_FILE),
     join(configHome, GIT_CONFIG_DIRECTORY),
     ...nodePrefix(entries),
-  ];
+  ].map((root) => resolve(root));
   return [
-    ...new Set(roots.filter((root) => root !== home && isWithin(home, root))),
+    ...new Set(
+      roots.filter((root) => root !== resolve(home) && isWithin(home, root)),
+    ),
   ];
 }
 
