@@ -1,0 +1,320 @@
+import assert from "node:assert/strict";
+import { execFile, execFileSync } from "node:child_process";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
+import { platform } from "node:os";
+import { delimiter, dirname, join, sep } from "node:path";
+import { after, test, type TestContext } from "node:test";
+import { promisify } from "node:util";
+import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { temporary, UNSET_GIT_ENVIRONMENT } from "../kernel/test-support.ts";
+import { createBashSandbox } from "./bash-sandbox.ts";
+
+const execFileAsync = promisify(execFile);
+
+const SANDBOX_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux"];
+const DARWIN: NodeJS.Platform = "darwin";
+const BLOCKED_ON_DARWIN = platform() === DARWIN;
+const TODO_REASON = "F160: task 02";
+const COMMAND_TIMEOUT_MS = 30_000;
+const CASE_TIMEOUT_MS = 60_000;
+const SUCCESS = 0;
+const SCRIPT_MODE = 0o755;
+const SYSTEM_PATH = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
+const PNPM_FALLBACK_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
+const PNPM = "pnpm";
+const SCRIPT_NAME = "home-path-tool";
+const SCRIPT_OUTPUT = "ran from the home PATH entry";
+const GIT_CONFIG = [
+  "[user]",
+  "\tname = Probe",
+  "\temail = probe@example.test",
+  "[init]",
+  "\tdefaultBranch = main",
+  "[commit]",
+  "\tgpgsign = false",
+].join("\n");
+const SECRET_FILES = [
+  ".git-credentials",
+  ".netrc",
+  ".npmrc",
+  ".config/gh/hosts.yml",
+  ".docker/config.json",
+];
+const GIT_USER_FILES = [".gitconfig", ".config/git"];
+const PNPM_GLOBAL_DIRECTORY =
+  platform() === DARWIN ? "Library/Preferences/pnpm" : ".config/pnpm";
+const PNPM_COMMANDS = ["pnpm --version", "pnpm config get store-dir"];
+
+interface Outcome {
+  status: number;
+  output: string;
+}
+
+interface Home {
+  home: string;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}
+
+function secretContent(file: string): string {
+  return `secret=${file}`;
+}
+
+function writeHomeFile(home: string, file: string, content: string): void {
+  const path = join(home, file);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${content}\n`);
+}
+
+function executableIn(directory: string, name: string): boolean {
+  try {
+    accessSync(join(directory, name), constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function pnpmDirectory(): string | undefined {
+  const candidates = [
+    ...(process.env.PATH ?? "").split(delimiter),
+    dirname(process.execPath),
+    ...(process.env.npm_execpath ? [dirname(process.env.npm_execpath)] : []),
+    ...PNPM_FALLBACK_PATH,
+  ];
+  return candidates.find((directory) => executableIn(directory, PNPM));
+}
+
+function childPath(extra: readonly string[]): string {
+  const pnpm = pnpmDirectory();
+  return [
+    ...extra,
+    ...(process.env.PATH ?? "").split(delimiter),
+    dirname(process.execPath),
+    ...(pnpm === undefined ? [] : [pnpm]),
+    ...SYSTEM_PATH,
+  ].join(delimiter);
+}
+
+function fakeHome(t: TestContext, pathEntries: readonly string[] = []): Home {
+  const root = realpathSync(temporary(t));
+  const home = join(root, "home");
+  const cwd = join(home, "repo");
+  const tmp = join(root, "tmp");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(tmp);
+  writeHomeFile(home, ".gitconfig", GIT_CONFIG);
+  writeHomeFile(home, ".config/git/ignore", "ignored-by-probe");
+  for (const file of SECRET_FILES)
+    writeHomeFile(home, file, secretContent(file));
+  writeHomeFile(home, `${PNPM_GLOBAL_DIRECTORY}/rc`, "update-notifier=false");
+  const bin = join(home, ".local/bin");
+  mkdirSync(bin, { recursive: true });
+  const script = join(bin, SCRIPT_NAME);
+  writeFileSync(script, `#!/bin/sh\necho '${SCRIPT_OUTPUT}'\n`);
+  chmodSync(script, SCRIPT_MODE);
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...UNSET_GIT_ENVIRONMENT,
+    HOME: home,
+    TMPDIR: tmp,
+    PATH: childPath(pathEntries.map((entry) => join(home, entry))),
+    XDG_CONFIG_HOME: undefined,
+    PNPM_HOME: undefined,
+    pnpm_config_store_dir: undefined,
+    pnpm_config_cache_dir: undefined,
+    npm_config_cache: undefined,
+  };
+  execFileSync("git", ["init", "-q"], { cwd, env });
+  return { home, cwd, env };
+}
+
+function contains(ancestor: string, path: string): boolean {
+  return path === ancestor || path.startsWith(`${ancestor}${sep}`);
+}
+
+function deniedBeside(directory: string, kept: readonly string[]): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    const child = join(directory, name);
+    const inside = kept.filter((path) => contains(child, path));
+    if (!inside.length) return [child];
+    if (inside.some((path) => contains(path, child))) return [];
+    return deniedBeside(child, inside);
+  });
+}
+
+function denyList(h: Home, keptInHome: readonly string[]): string[] {
+  const kept = [h.cwd, ...keptInHome.map((entry) => join(h.home, entry))];
+  return deniedBeside(h.home, kept);
+}
+
+function isExitCode(code: unknown): code is number {
+  return Number.isInteger(code);
+}
+
+async function execute(
+  command: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<Outcome> {
+  try {
+    const { stdout, stderr } = await execFileAsync("bash", ["-c", command], {
+      cwd,
+      env,
+      timeout: COMMAND_TIMEOUT_MS,
+      encoding: "utf8",
+    });
+    return { status: SUCCESS, output: `${stdout}${stderr}` };
+  } catch (error) {
+    const failure = error as {
+      code?: unknown;
+      stdout?: string;
+      stderr?: string;
+    };
+    if (!isExitCode(failure.code)) throw error;
+    return {
+      status: failure.code,
+      output: `${failure.stdout ?? ""}${failure.stderr ?? ""}`,
+    };
+  }
+}
+
+const sandbox = createBashSandbox(SandboxManager);
+
+async function inSandbox(
+  h: Home,
+  command: string,
+  denyRead: string[],
+): Promise<Outcome> {
+  const wrapped = await sandbox.wrap(command, h.cwd, {
+    env: h.env,
+    denyRead,
+  });
+  return execute(wrapped, h.cwd, h.env);
+}
+
+async function sandboxUnavailable(): Promise<string | false> {
+  if (!SANDBOX_PLATFORMS.includes(platform()))
+    return `the bash sandbox runs on darwin and linux, not on ${platform()}`;
+  try {
+    const wrapped = await sandbox.wrap("true", process.cwd(), {
+      env: process.env,
+      denyRead: [],
+    });
+    const probe = await execute(wrapped, process.cwd(), process.env);
+    return probe.status === SUCCESS
+      ? false
+      : `the sandbox cannot run a command: ${probe.output.trim()}`;
+  } catch (error) {
+    return `the sandbox cannot start: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+const unavailable = await sandboxUnavailable();
+
+after(() => sandbox.dispose());
+
+function lastLine(outcome: Outcome): string {
+  return outcome.output.trim().split("\n").at(-1) ?? "";
+}
+
+function assertOutcome(
+  command: string,
+  outcome: Outcome,
+  blocked: boolean,
+): void {
+  const reason = `${command}: exit ${outcome.status}, ${lastLine(outcome)}`;
+  if (blocked) assert.notEqual(outcome.status, SUCCESS, reason);
+  else assert.equal(outcome.status, SUCCESS, reason);
+}
+
+test(
+  "(invariant) cat of each secret file of the fake home fails under the deny list",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    const denyRead = denyList(h, GIT_USER_FILES);
+    for (const file of SECRET_FILES) {
+      const command = `cat ${join(h.home, file)}`;
+      const outcome = await inSandbox(h, command, denyRead);
+      assert.ok(
+        !outcome.output.includes(secretContent(file)),
+        `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
+      );
+      if (BLOCKED_ON_DARWIN) assert.notEqual(outcome.status, SUCCESS, command);
+    }
+  },
+);
+
+test(
+  "(happy) git status and git commit pass in the cwd with .gitconfig and .config/git kept",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    const denyRead = denyList(h, GIT_USER_FILES);
+    for (const command of [
+      "git status",
+      "git commit --allow-empty -q -m probe",
+    ])
+      assertOutcome(command, await inSandbox(h, command, denyRead), false);
+  },
+);
+
+test(
+  "(edge) git status with .gitconfig and .config/git denied",
+  {
+    skip: unavailable,
+    timeout: CASE_TIMEOUT_MS,
+    todo: BLOCKED_ON_DARWIN ? TODO_REASON : false,
+  },
+  async (t) => {
+    const h = fakeHome(t);
+    const command = "git status";
+    const outcome = await inSandbox(h, command, denyList(h, []));
+    assertOutcome(command, outcome, BLOCKED_ON_DARWIN);
+  },
+);
+
+test(
+  "(edge) pnpm --version and pnpm config get store-dir with .npmrc and the pnpm global configuration denied",
+  {
+    skip:
+      unavailable ||
+      (pnpmDirectory() === undefined && "pnpm is not on any PATH entry"),
+    timeout: CASE_TIMEOUT_MS,
+    todo: BLOCKED_ON_DARWIN ? TODO_REASON : false,
+  },
+  async (t) => {
+    const h = fakeHome(t);
+    const denyRead = denyList(h, []);
+    for (const command of PNPM_COMMANDS)
+      assertOutcome(
+        command,
+        await inSandbox(h, command, denyRead),
+        BLOCKED_ON_DARWIN,
+      );
+  },
+);
+
+test(
+  "(happy) a script in a kept home PATH entry runs",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t, [".local/bin"]);
+    const outcome = await inSandbox(
+      h,
+      SCRIPT_NAME,
+      denyList(h, [".local/bin"]),
+    );
+    assertOutcome(SCRIPT_NAME, outcome, false);
+    assert.equal(lastLine(outcome), SCRIPT_OUTPUT);
+  },
+);
