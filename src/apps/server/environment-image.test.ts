@@ -517,6 +517,8 @@ const CACHE_ROOT = "/var/lib/kanthord/.cache";
 const CACHE_DEFAULT_LINES = [
   `ENV npm_config_cache=${CACHE_ROOT}/npm`,
   `ENV npm_config_store_dir=${CACHE_ROOT}/pnpm-store`,
+  `ENV pnpm_config_store_dir=${CACHE_ROOT}/pnpm-store`,
+  `ENV pnpm_config_cache_dir=${CACHE_ROOT}/pnpm-cache`,
   `ENV PIP_CACHE_DIR=${CACHE_ROOT}/pip`,
   `ENV GOMODCACHE=${CACHE_ROOT}/go-mod`,
   `ENV CARGO_HOME=${CACHE_ROOT}/cargo`,
@@ -534,7 +536,7 @@ function layerLines(environment: Map<string, string>): string[] {
   }).split("\n");
 }
 
-test("the layer keeps a cache variable of the document and writes the other four defaults before the document variables", () => {
+test("the layer keeps a cache variable of the document and writes the other six defaults before the document variables", () => {
   const lines = layerLines(new Map([["CARGO_HOME", "/custom"]]));
   assert.ok(lines.includes('ENV CARGO_HOME="/custom"'));
   assert.ok(!lines.includes(`ENV CARGO_HOME=${CACHE_ROOT}/cargo`));
@@ -543,6 +545,29 @@ test("the layer keeps a cache variable of the document and writes the other four
   assert.ok(
     lines.indexOf(CACHE_DEFAULT_LINES[0]!) <
       lines.indexOf('ENV CARGO_HOME="/custom"'),
+  );
+});
+
+test("the layer keeps pnpm_config_store_dir of the document and writes no default for it", () => {
+  const lines = layerLines(new Map([["pnpm_config_store_dir", "/custom"]]));
+  assert.ok(lines.includes('ENV pnpm_config_store_dir="/custom"'));
+  assert.ok(
+    !lines.includes(`ENV pnpm_config_store_dir=${CACHE_ROOT}/pnpm-store`),
+  );
+  assert.deepEqual(
+    lines.filter((line) => line.startsWith("ENV pnpm_config_store_dir=")),
+    ['ENV pnpm_config_store_dir="/custom"'],
+  );
+});
+
+test("the layer keeps npm_config_store_dir of the document and still writes the pnpm_config_store_dir default", () => {
+  const lines = layerLines(new Map([["npm_config_store_dir", "/custom"]]));
+  assert.ok(lines.includes('ENV npm_config_store_dir="/custom"'));
+  assert.ok(
+    !lines.includes(`ENV npm_config_store_dir=${CACHE_ROOT}/pnpm-store`),
+  );
+  assert.ok(
+    lines.includes(`ENV pnpm_config_store_dir=${CACHE_ROOT}/pnpm-store`),
   );
 });
 
