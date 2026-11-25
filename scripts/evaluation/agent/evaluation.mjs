@@ -3,8 +3,8 @@ import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
   closeSync,
+  constants,
   copyFileSync,
-  createReadStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -14,10 +14,12 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
+import { open } from "node:fs/promises";
 import { tmpdir, userInfo } from "node:os";
 import {
   basename,
@@ -67,9 +69,13 @@ const MANIFEST_FILE = "shared.sha256";
 const SHARED_DIR = "shared";
 const MANIFEST_TYPE_FILE = "F";
 const MANIFEST_TYPE_LINK = "L";
+const MANIFEST_TYPE_DIR = "D";
 const MANIFEST_MODE_EXEC = "x";
 const MANIFEST_MODE_NONE = "-";
 const MANIFEST_CONCURRENCY = 64;
+const MANIFEST_LINE =
+  /^(?:F\t[0-9a-f]{64}\t[x-]|L\t[^\t]+\t-|D\t-\t-)\t[^\t]+$/;
+const MANIFEST_REFUSED_TEXT = /[\t\n]/;
 const PROTECTED_PATH_PARTS = ["evaluation/agent", "evaluation/runs", "/check/"];
 const PROTECTED_FILE_NAMES = [
   "check.sh",
@@ -1078,14 +1084,6 @@ export function protectedPathStrings(evalSetDir, resultsDir, caseFolder) {
   return [evalSetDir, resultsDir, caseFolder, ...PROTECTED_PATH_PARTS];
 }
 
-async function hashFile(filePath) {
-  const hash = createHash("sha256");
-  for await (const chunk of createReadStream(filePath)) {
-    hash.update(chunk);
-  }
-  return hash.digest("hex");
-}
-
 async function concurrentMap(items, limit, fn) {
   const results = new Array(items.length);
   let idx = 0;
@@ -1102,35 +1100,173 @@ async function concurrentMap(items, limit, fn) {
   return results;
 }
 
-function symlinkEscapes(evalSetDir, relPath, target) {
+function linkEscapes(relPath, target) {
   if (isAbsolute(target)) return true;
-  const parts = relPath.split(sep);
-  if (parts.length < 3) return true;
-  const nameDir = join(evalSetDir, SHARED_DIR, parts[1]);
-  const absLink = join(evalSetDir, relPath);
-  const resolved = resolve(dirname(absLink), target);
-  return !resolved.startsWith(nameDir + sep) && resolved !== nameDir;
+  const segments = target.split(sep);
+  let up = 0;
+  while (segments[up] === "..") up++;
+  if (segments.slice(up).includes("..")) return true;
+  return up > relPath.split(sep).length - 3;
 }
 
-function manifestLine(type, content, mode, relPath) {
+function byRelPath(a, b) {
+  return a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0;
+}
+
+function linkEntry(relPath, absPath, found) {
+  let target;
+  try {
+    target = readlinkSync(absPath);
+  } catch {
+    found.refusals.push({ relPath, reason: "no read" });
+    return;
+  }
+  if (MANIFEST_REFUSED_TEXT.test(target))
+    found.refusals.push({
+      relPath,
+      reason: "the symlink target holds a tab or a newline",
+    });
+  else if (linkEscapes(relPath, target))
+    found.refusals.push({
+      relPath,
+      reason: "symlink points outside its folder",
+    });
+  else
+    found.entries.push({
+      type: MANIFEST_TYPE_LINK,
+      content: target,
+      mode: MANIFEST_MODE_NONE,
+      relPath,
+    });
+}
+
+function walkShared(relDir, absDir, found) {
+  let dirents;
+  try {
+    dirents = readdirSync(absDir, { withFileTypes: true });
+  } catch {
+    found.refusals.push({ relPath: relDir, reason: "no read" });
+    return;
+  }
+  for (const dirent of dirents) {
+    const relPath = join(relDir, dirent.name);
+    const absPath = join(absDir, dirent.name);
+    if (MANIFEST_REFUSED_TEXT.test(dirent.name)) {
+      found.refusals.push({
+        relPath,
+        reason: "the name holds a tab or a newline",
+      });
+    } else if (dirent.isSymbolicLink()) {
+      linkEntry(relPath, absPath, found);
+    } else if (dirent.isDirectory()) {
+      found.entries.push({
+        type: MANIFEST_TYPE_DIR,
+        content: MANIFEST_MODE_NONE,
+        mode: MANIFEST_MODE_NONE,
+        relPath,
+      });
+      walkShared(relPath, absPath, found);
+    } else if (dirent.isFile()) {
+      found.files.push({ relPath, absPath });
+    } else {
+      found.refusals.push({
+        relPath,
+        reason: "no regular file, directory or symlink",
+      });
+    }
+  }
+}
+
+async function fileEntry({ relPath, absPath }) {
+  let handle;
+  try {
+    handle = await open(
+      absPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
+    const stat = await handle.stat();
+    if (!stat.isFile())
+      return { refusal: { relPath, reason: "no regular file" } };
+    const hash = createHash("sha256");
+    for await (const chunk of handle.createReadStream({ autoClose: false }))
+      hash.update(chunk);
+    return {
+      entry: {
+        type: MANIFEST_TYPE_FILE,
+        content: hash.digest("hex"),
+        mode: stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE,
+        relPath,
+      },
+    };
+  } catch {
+    return { refusal: { relPath, reason: "no read" } };
+  } finally {
+    await handle?.close();
+  }
+}
+
+async function scanShared(evalSetDir) {
+  const found = { entries: [], files: [], refusals: [] };
+  const sharedDir = join(evalSetDir, SHARED_DIR);
+  const stat = lstatSync(sharedDir, { throwIfNoEntry: false });
+  if (stat && !stat.isDirectory())
+    found.refusals.push({ relPath: SHARED_DIR, reason: "no directory" });
+  else if (stat) walkShared(SHARED_DIR, sharedDir, found);
+  const results = await concurrentMap(
+    found.files,
+    MANIFEST_CONCURRENCY,
+    fileEntry,
+  );
+  for (const result of results) {
+    if (result.entry) found.entries.push(result.entry);
+    else found.refusals.push(result.refusal);
+  }
+  found.entries.sort(byRelPath);
+  found.refusals.sort(byRelPath);
+  return { entries: found.entries, refusal: found.refusals[0] ?? null };
+}
+
+function manifestLine({ type, content, mode, relPath }) {
   return `${type}\t${content}\t${mode}\t${relPath}\n`;
 }
 
-function parseManifestEntries(text) {
-  const entries = new Map();
-  for (const line of text.split("\n")) {
-    if (!line) continue;
-    const tab1 = line.indexOf("\t");
-    const tab2 = line.indexOf("\t", tab1 + 1);
-    const tab3 = line.indexOf("\t", tab2 + 1);
-    if (tab1 === -1 || tab2 === -1 || tab3 === -1) continue;
-    const type = line.slice(0, tab1);
-    const content = line.slice(tab1 + 1, tab2);
-    const mode = line.slice(tab2 + 1, tab3);
-    const relPath = line.slice(tab3 + 1);
-    entries.set(relPath, { type, content, mode });
+function readManifest(evalSetDir) {
+  const path = manifestPath(evalSetDir);
+  if (!lstatSync(path, { throwIfNoEntry: false })?.isFile()) return null;
+  let text;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  if (text === "") return [];
+  if (!text.endsWith("\n")) return null;
+  const entries = [];
+  for (const line of text.slice(0, -1).split("\n")) {
+    if (!MANIFEST_LINE.test(line)) return null;
+    const [type, content, mode, relPath] = line.split("\t");
+    if (entries.length > 0 && entries.at(-1).relPath >= relPath) return null;
+    entries.push({ type, content, mode, relPath });
   }
   return entries;
+}
+
+function firstManifestDifference(expected, actual) {
+  let ei = 0;
+  let ai = 0;
+  while (ei < expected.length && ai < actual.length) {
+    const e = expected[ei];
+    const a = actual[ai];
+    if (e.relPath < a.relPath) return e.relPath;
+    if (e.relPath > a.relPath) return a.relPath;
+    if (e.type !== a.type || e.content !== a.content || e.mode !== a.mode)
+      return e.relPath;
+    ei++;
+    ai++;
+  }
+  if (ei < expected.length) return expected[ei].relPath;
+  if (ai < actual.length) return actual[ai].relPath;
+  return null;
 }
 
 export function manifestPath(evalSetDir) {
@@ -1138,126 +1274,29 @@ export function manifestPath(evalSetDir) {
 }
 
 export async function writeManifest(evalSetDir) {
-  const sharedDir = join(evalSetDir, SHARED_DIR);
-  if (!existsSync(sharedDir)) {
-    writeFileSync(manifestPath(evalSetDir), "", { mode: FILE_MODE });
-    return null;
-  }
-  const dirEntries = readdirSync(sharedDir, {
-    recursive: true,
-    withFileTypes: true,
+  if (!lstatSync(evalSetDir, { throwIfNoEntry: false })?.isDirectory())
+    return `manifest: no evaluation set ${evalSetDir}`;
+  const { entries, refusal } = await scanShared(evalSetDir);
+  if (refusal) return `manifest: ${refusal.relPath}: ${refusal.reason}`;
+  const path = manifestPath(evalSetDir);
+  const temporary = `${path}.tmp`;
+  rmSync(temporary, { force: true });
+  writeFileSync(temporary, entries.map(manifestLine).join(""), {
+    mode: FILE_MODE,
+    flag: "wx",
   });
-  const fileItems = [];
-  const linkEntries = [];
-  for (const entry of dirEntries) {
-    const absPath = join(entry.parentPath, entry.name);
-    const relPath = join(SHARED_DIR, relative(sharedDir, absPath));
-    if (entry.isSymbolicLink()) {
-      const target = readlinkSync(absPath);
-      if (symlinkEscapes(evalSetDir, relPath, target))
-        return `manifest: ${relPath}: symlink points outside its folder`;
-      linkEntries.push({
-        type: MANIFEST_TYPE_LINK,
-        content: target,
-        mode: MANIFEST_MODE_NONE,
-        relPath,
-      });
-    } else if (entry.isFile()) {
-      const stat = lstatSync(absPath);
-      const mode = stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE;
-      fileItems.push({ relPath, absPath, mode });
-    }
-  }
-  const hashes = await concurrentMap(
-    fileItems,
-    MANIFEST_CONCURRENCY,
-    ({ absPath }) => hashFile(absPath),
-  );
-  const allEntries = [...linkEntries];
-  for (let i = 0; i < fileItems.length; i++) {
-    allEntries.push({
-      type: MANIFEST_TYPE_FILE,
-      content: hashes[i],
-      mode: fileItems[i].mode,
-      relPath: fileItems[i].relPath,
-    });
-  }
-  allEntries.sort((a, b) =>
-    a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0,
-  );
-  const lines = allEntries.map(({ type, content, mode, relPath }) =>
-    manifestLine(type, content, mode, relPath),
-  );
-  writeFileSync(manifestPath(evalSetDir), lines.join(""), { mode: FILE_MODE });
+  renameSync(temporary, path);
   return null;
 }
 
 export async function checkManifestDiff(evalSetDir) {
-  const manifestFile = manifestPath(evalSetDir);
-  const sharedDir = join(evalSetDir, SHARED_DIR);
-  const manifestExists = existsSync(manifestFile);
-  const sharedExists = existsSync(sharedDir);
-  if (!manifestExists && !sharedExists) return null;
-  const expected = parseManifestEntries(
-    manifestExists ? readFileSync(manifestFile, "utf8") : "",
-  );
-  const fileItems = [];
-  const actual = new Map();
-  if (sharedExists) {
-    const dirEntries = readdirSync(sharedDir, {
-      recursive: true,
-      withFileTypes: true,
-    });
-    for (const entry of dirEntries) {
-      const absPath = join(entry.parentPath, entry.name);
-      const relPath = join(SHARED_DIR, relative(sharedDir, absPath));
-      if (entry.isSymbolicLink()) {
-        const target = readlinkSync(absPath);
-        actual.set(relPath, {
-          type: MANIFEST_TYPE_LINK,
-          content: target,
-          mode: MANIFEST_MODE_NONE,
-        });
-      } else if (entry.isFile()) {
-        const stat = lstatSync(absPath);
-        const mode =
-          stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE;
-        fileItems.push({ relPath, absPath, mode });
-      }
-    }
-  }
-  const hashes = await concurrentMap(
-    fileItems,
-    MANIFEST_CONCURRENCY,
-    ({ absPath }) => hashFile(absPath),
-  );
-  for (let i = 0; i < fileItems.length; i++) {
-    const { relPath, mode } = fileItems[i];
-    actual.set(relPath, {
-      type: MANIFEST_TYPE_FILE,
-      content: hashes[i],
-      mode,
-    });
-  }
-  const expectedPaths = [...expected.keys()].sort();
-  const actualPaths = [...actual.keys()].sort();
-  let ei = 0;
-  let ai = 0;
-  while (ei < expectedPaths.length && ai < actualPaths.length) {
-    const ep = expectedPaths[ei];
-    const ap = actualPaths[ai];
-    if (ep < ap) return ep;
-    if (ep > ap) return ap;
-    const e = expected.get(ep);
-    const a = actual.get(ep);
-    if (e.type !== a.type || e.content !== a.content || e.mode !== a.mode)
-      return ep;
-    ei++;
-    ai++;
-  }
-  if (ei < expectedPaths.length) return expectedPaths[ei];
-  if (ai < actualPaths.length) return actualPaths[ai];
-  return null;
+  const expected = readManifest(evalSetDir);
+  if (expected === null) return MANIFEST_FILE;
+  const { entries, refusal } = await scanShared(evalSetDir);
+  const difference = firstManifestDifference(expected, entries);
+  const refused = refusal?.relPath ?? null;
+  if (difference === null || refused === null) return difference ?? refused;
+  return difference < refused ? difference : refused;
 }
 
 async function checkSetChangeBreach(evalSetDir, setCommit) {

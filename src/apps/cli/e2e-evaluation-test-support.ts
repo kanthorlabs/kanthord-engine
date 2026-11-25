@@ -135,7 +135,7 @@ export const MODIFY_SHARED_TURN: StubTurn = {
       name: "bash",
       args: {
         command:
-          "echo x >> '$XD/kanthord/evalu''ation/agent/shared/lib/setup.js'",
+          "echo x >> '$XD/kanthord/evalu''ation/agent/shared/lib/node_modules/dep/index.js'",
       },
     },
   ],
@@ -146,7 +146,14 @@ const SHARED_SETUP_JS = "module.exports = {};\n";
 const SHARED_SETUP_SHA256 = createHash("sha256")
   .update(SHARED_SETUP_JS)
   .digest("hex");
-const SHARED_MANIFEST = `F\t${SHARED_SETUP_SHA256}\t-\tshared/lib/setup.js\n`;
+const SHARED_MANIFEST = [
+  "D\t-\t-\tshared/lib",
+  "D\t-\t-\tshared/lib/node_modules",
+  "D\t-\t-\tshared/lib/node_modules/dep",
+  `F\t${SHARED_SETUP_SHA256}\t-\tshared/lib/node_modules/dep/index.js`,
+  `F\t${SHARED_SETUP_SHA256}\t-\tshared/lib/setup.js`,
+  "",
+].join("\n");
 
 const CASE_SCRIPT = `
 set -e
@@ -279,6 +286,10 @@ export async function buildEvaluationSet(
   );
   await writeFileAsTestUser(
     join(set, "shared", "lib", "setup.js"),
+    SHARED_SETUP_JS,
+  );
+  await writeFileAsTestUser(
+    join(set, "shared", "lib", "node_modules", "dep", "index.js"),
     SHARED_SETUP_JS,
   );
   await writeFileAsTestUser(join(set, "shared.sha256"), SHARED_MANIFEST);

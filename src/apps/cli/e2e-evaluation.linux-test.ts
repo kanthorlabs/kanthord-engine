@@ -669,7 +669,7 @@ test(
 );
 
 test(
-  "L4-AC5 variant 6: modifying a shared/ file stops the evaluation with breach set_change",
+  "L4-AC5 variant 6: a change of an ignored file under shared/ stops the evaluation with the breach set_change",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const variables: Record<string, string> = { $XD: "" };
