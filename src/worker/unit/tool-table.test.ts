@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
+import type { SandboxRuntimeConfig } from "@anthropic-ai/sandbox-runtime";
 import { unusedHostTools } from "./test-support.ts";
 import { test, type TestContext } from "node:test";
 import type {
@@ -312,9 +313,7 @@ test("the bash tool of swe@1 runs its command through the exec of ToolProcesses.
 });
 
 function fakeSandboxRuntime() {
-  const customConfigs: {
-    filesystem?: { allowWrite: string[]; denyRead: string[] };
-  }[] = [];
+  const customConfigs: Partial<SandboxRuntimeConfig>[] = [];
   return {
     customConfigs,
     runtime: {
@@ -382,7 +381,10 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
   );
   assert.equal(processes.calls[0]?.cwd, cwd);
   assert.deepEqual(fake.customConfigs[0]?.filesystem?.allowWrite, [cwd, tmp]);
-  assert.deepEqual(fake.customConfigs[0]?.filesystem?.denyRead, denyRead);
+  assert.deepEqual(fake.customConfigs[0]?.filesystem?.denyRead, [
+    ...denyRead,
+    hostEnvironment().HOME,
+  ]);
 });
 
 test("the swe@1 bash exports the package store and the package cache under the TMPDIR of the environment in the wrapped command", async (t) => {

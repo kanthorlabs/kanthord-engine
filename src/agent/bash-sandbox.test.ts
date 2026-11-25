@@ -49,6 +49,7 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
     binShell: string | undefined;
     customConfig: {
       filesystem?: {
+        allowRead: string[];
         allowWrite: string[];
         denyRead: string[];
         denyWrite: string[];
@@ -122,6 +123,13 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
     join(place.state, "environments"),
     "~/.config/kanthord-eval",
     "~/.pi/agent",
+    ABSENT_HOME,
+  ]);
+  assert.deepEqual(call.customConfig.filesystem?.allowRead, [
+    cwd,
+    "/var/probe",
+    join(ABSENT_HOME, ".gitconfig"),
+    join(ABSENT_HOME, ".config", "git"),
   ]);
   assert.deepEqual(call.customConfig.filesystem?.denyWrite, [
     join(cwd, ".env"),
@@ -277,6 +285,10 @@ test("a sandbox file in the cwd changes nothing", async (t) => {
   const second = configured.calls[0]?.customConfig;
   assert.deepEqual(second?.network, first?.network);
   assert.deepEqual(second?.filesystem?.denyRead, first?.filesystem?.denyRead);
+  assert.deepEqual(second?.filesystem?.allowRead, [
+    cwd,
+    ...(first?.filesystem?.allowRead.slice(1) ?? []),
+  ]);
   assert.deepEqual(second?.filesystem?.allowWrite, [cwd, "/tmp"]);
   assert.deepEqual(plain.initialized, configured.initialized);
   assert.equal(
@@ -292,6 +304,7 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
   const [call] = fake.calls;
   assert.ok(call);
   assert.deepEqual(Object.keys(call.customConfig.filesystem ?? {}).sort(), [
+    "allowRead",
     "allowWrite",
     "denyRead",
     "denyWrite",
@@ -475,6 +488,9 @@ const SECRET_PATHS = [
   ".claude/settings.json",
   ".codex/auth.json",
 ];
+const MANY_CHILDREN = 2000;
+const FEW_CHILDREN = 2;
+const WRAPPED_LIMIT = 64 * 1024;
 
 function homeLayout(t: TestContext) {
   const root = realpathSync(temporary(t));
@@ -491,23 +507,29 @@ function touch(path: string): void {
   writeFileSync(path, "");
 }
 
-function covers(list: readonly string[], path: string): boolean {
-  return list.some((entry) => path === entry || path.startsWith(entry + sep));
+async function allowReadOf(
+  host: Parameters<ReturnType<typeof createBashSandbox>["wrap"]>[2],
+  cwd: string,
+): Promise<string[]> {
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(COMMAND, cwd, host);
+  return fake.calls[0]?.customConfig.filesystem?.allowRead ?? [];
 }
 
-test("(invariant guard) the deny list covers each credential path of a home that holds the cwd", (t) => {
+test("(invariant guard) the deny list holds the home and the allow list holds no credential path or ancestor of one", async (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   for (const file of SECRET_PATHS) touch(join(home, file));
-  const denied = scopedDenyRead(
-    { env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" }, denyRead: [] },
-    cwd,
-  );
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" },
+    denyRead: [],
+  };
+  assert.deepEqual(scopedDenyRead(host, cwd), [home]);
+  const allowed = await allowReadOf(host, cwd);
   for (const file of SECRET_PATHS)
-    assert.ok(covers(denied, join(home, file)), file);
-  assert.ok(!covers(denied, cwd));
+    assert.deepEqual(ancestorsOf(allowed, join(home, file)), [], file);
 });
 
-test("(invariant guard) the deny list names no cwd, TMPDIR, instance root, tool root or ancestor of them", (t) => {
+test("(invariant guard) the allow list holds the cwd, TMPDIR, the instance root and each tool root and the deny list names none of them", async (t) => {
   const { home, cwd } = homeLayout(t);
   const tmp = join(home, "scratch", "tmp");
   const instance = join(home, "instances", "coder-1");
@@ -517,12 +539,16 @@ test("(invariant guard) the deny list names no cwd, TMPDIR, instance root, tool 
     mkdirSync(directory, { recursive: true });
   touch(join(toolchain, "bin", "node"));
   chmodSync(join(toolchain, "bin", "node"), 0o755);
-  touch(join(toolchain, "lib", "node_modules", "file"));
-  touch(join(home, ".gitconfig"));
-  touch(join(home, ".config", "git", "ignore"));
-  touch(join(home, ".config", "other", "file"));
   touch(join(home, "instances", "coder-2", "file"));
-  touch(join(home, ".netrc"));
+  const host = {
+    env: {
+      HOME: home,
+      TMPDIR: tmp,
+      PATH: [bin, join(toolchain, "bin")].join(":"),
+    },
+    denyRead: [],
+    root: instance,
+  };
   const kept = [
     cwd,
     tmp,
@@ -532,24 +558,13 @@ test("(invariant guard) the deny list names no cwd, TMPDIR, instance root, tool 
     join(home, ".gitconfig"),
     join(home, ".config", "git"),
   ];
-  const denied = scopedDenyRead(
-    {
-      env: {
-        HOME: home,
-        TMPDIR: tmp,
-        PATH: [bin, join(toolchain, "bin")].join(":"),
-      },
-      denyRead: [],
-      root: instance,
-    },
-    cwd,
-  );
-  for (const path of kept)
-    assert.ok(!covers(denied, path), `${path} in ${denied}`);
-  assert.ok(!covers(denied, join(toolchain, "lib", "node_modules", "file")));
-  assert.ok(covers(denied, join(home, ".netrc")));
-  assert.ok(covers(denied, join(home, ".config", "other")));
-  assert.ok(covers(denied, join(home, "instances", "coder-2")));
+  const allowed = await allowReadOf(host, cwd);
+  const denied = scopedDenyRead(host, cwd);
+  for (const path of kept) {
+    assert.ok(allowed.includes(path), `${path} in ${allowed}`);
+    assert.deepEqual(ancestorsOf(denied, path), [home], path);
+  }
+  assert.deepEqual(denied, [home]);
 });
 
 test("(invariant guard) a PATH entry inside a host deny entry leaves that entry in the list", (t) => {
@@ -576,41 +591,31 @@ test("(invariant guard) a PATH entry inside a host deny entry leaves that entry 
   assert.ok(denied.includes(place.config));
 });
 
-test("(edge) a cwd outside the home directory leaves each home child denied except the tool roots and their ancestors", (t) => {
+test("(edge) a cwd outside the home directory leaves the home denied and the tool roots allowed", async (t) => {
   const { root, home, tmp } = homeLayout(t);
   const cwd = join(root, "workspace");
   mkdirSync(cwd);
-  touch(join(home, ".gitconfig"));
-  touch(join(home, ".config", "git", "ignore"));
-  touch(join(home, ".config", "gh", "hosts.yml"));
   touch(join(home, ".local", "bin", "tool"));
-  touch(join(home, ".local", "share", "data"));
-  touch(join(home, ".cache", "data"));
-  touch(join(home, "docs", "note"));
-  const denied = scopedDenyRead(
-    {
-      env: {
-        HOME: home,
-        TMPDIR: tmp,
-        PATH: ["/usr/bin", join(home, ".local", "bin")].join(":"),
-      },
-      denyRead: [],
+  touch(join(home, ".config", "gh", "hosts.yml"));
+  const host = {
+    env: {
+      HOME: home,
+      TMPDIR: tmp,
+      PATH: ["/usr/bin", join(home, ".local", "bin")].join(":"),
     },
+    denyRead: [],
+  };
+  assert.deepEqual(scopedDenyRead(host, cwd), [home]);
+  assert.deepEqual(await allowReadOf(host, cwd), [
     cwd,
-  );
-  assert.deepEqual(
-    [...denied].sort(),
-    [
-      join(home, ".cache"),
-      join(home, ".config", "gh"),
-      join(home, ".local", "share"),
-      join(home, "docs"),
-      join(home, "work"),
-    ].sort(),
-  );
+    tmp,
+    join(home, ".local", "bin"),
+    join(home, ".gitconfig"),
+    join(home, ".config", "git"),
+  ]);
 });
 
-test("(edge) a home child created after the first wrap is denied at the next wrap", async (t) => {
+test("(edge) a home child created after the first wrap stays denied through the home entry", async (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   const fake = fakeRuntime();
   const sandbox = createBashSandbox(fake.runtime, "linux");
@@ -619,11 +624,32 @@ test("(edge) a home child created after the first wrap is denied at the next wra
     denyRead: [],
   };
   await sandbox.wrap(COMMAND, cwd, host);
-  const later = join(home, ".later-credentials");
-  assert.ok(!fake.calls[0]?.customConfig.filesystem?.denyRead.includes(later));
-  touch(later);
+  touch(join(home, ".later-credentials"));
   await sandbox.wrap(COMMAND, cwd, host);
-  assert.ok(fake.calls[1]?.customConfig.filesystem?.denyRead.includes(later));
+  for (const call of fake.calls)
+    assert.deepEqual(call.customConfig.filesystem?.denyRead, [home]);
+});
+
+test("(regression: K195) the filesystem rules in the wrapped command stay below 64 KiB and keep their size with 2000 home children", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const fake = fakeRuntime();
+  fake.runtime.wrapWithSandbox = async (command, _binShell, customConfig) =>
+    `sandboxed ${command} ${JSON.stringify(customConfig?.filesystem)}`;
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" },
+    denyRead: [],
+  };
+  const sizeOf = async (): Promise<number> =>
+    (await sandbox.wrap(COMMAND, cwd, host)).length;
+  for (let child = 0; child < FEW_CHILDREN; child += ONCE)
+    touch(join(home, `child-${child}`));
+  const few = await sizeOf();
+  for (let child = FEW_CHILDREN; child < MANY_CHILDREN; child += ONCE)
+    touch(join(home, `child-${child}`));
+  const many = await sizeOf();
+  assert.ok(many < WRAPPED_LIMIT, `${many} bytes`);
+  assert.equal(many, few);
 });
 
 test("(happy) a wrapped command exports TMPDIR and the package store and cache under the temporary directory", async (t) => {
@@ -657,34 +683,38 @@ test("(happy) the denyWrite list of a wrap holds the default patterns under the 
   );
 });
 
-test("(edge) a PATH entry inside a node_modules directory is no tool root", (t) => {
+test("(edge) a PATH entry inside a node_modules directory is no tool root", async (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   const packages = join(home, "project", "node_modules", ".bin");
   mkdirSync(packages, { recursive: true });
-  touch(join(home, "project", "node_modules", "left", "file"));
-  const denied = (path: string) =>
-    scopedDenyRead(
+  const allowed = (path: string) =>
+    allowReadOf(
       { env: { HOME: home, TMPDIR: tmp, PATH: path }, denyRead: [] },
       cwd,
     );
-  assert.deepEqual(denied(`${packages}:/usr/bin`), denied("/usr/bin"));
-  assert.ok(covers(denied(packages), packages));
+  assert.deepEqual(
+    await allowed(`${packages}:/usr/bin`),
+    await allowed("/usr/bin"),
+  );
 });
 
-test("(edge) a PATH entry inside a directory that the process cannot read adds no entry and no error", (t) => {
+test("(edge) a PATH entry inside a directory that the process cannot read adds no error", (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   const closed = join(home, "closed");
-  const inside = join(closed, "bin");
-  mkdirSync(inside, { recursive: true });
+  mkdirSync(join(closed, "bin"), { recursive: true });
   chmodSync(closed, 0o000);
-  let denied: string[];
   try {
-    denied = scopedDenyRead(
-      { env: { HOME: home, TMPDIR: tmp, PATH: inside }, denyRead: [] },
-      cwd,
+    assert.deepEqual(
+      scopedDenyRead(
+        {
+          env: { HOME: home, TMPDIR: tmp, PATH: join(closed, "bin") },
+          denyRead: [],
+        },
+        cwd,
+      ),
+      [home],
     );
   } finally {
     chmodSync(closed, 0o755);
   }
-  assert.ok(!covers(denied, inside));
 });

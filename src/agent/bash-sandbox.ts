@@ -40,7 +40,6 @@ const UNRESOLVABLE_ENTRY_CODES = [
   "EPERM",
   "ELOOP",
 ];
-const UNREADABLE_ENTRY_CODES = ["EACCES", "EPERM"];
 const PARENT_SEGMENT = "..";
 const DATABASE_FILES = ["kanthord.db", "kanthord.db-wal", "kanthord.db-shm"];
 const EVAL_AUTH_FILE_VARIABLE = "EVAL_ANTHROPIC_AUTH_FILE";
@@ -74,12 +73,15 @@ const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
   deniedDomains: [],
 };
 
+const CREDENTIAL_DIRECTORIES = ["~/.ssh", "~/.aws", "~/.gnupg"];
+const PROTECTED_FILES = [".env", ".env.*", "*.pem", "*.key"];
+
 const DEFAULT_CONFIG: SandboxRuntimeConfig = {
   network: BASH_NETWORK,
   filesystem: {
-    denyRead: ["~/.ssh", "~/.aws", "~/.gnupg"],
+    denyRead: CREDENTIAL_DIRECTORIES,
     allowWrite: [],
-    denyWrite: [".env", ".env.*", "*.pem", "*.key"],
+    denyWrite: PROTECTED_FILES,
   },
 };
 
@@ -161,23 +163,11 @@ function entriesOf(directory: string): Dirent[] {
   }
 }
 
-function readableEntriesOf(directory: string): Dirent[] {
-  try {
-    return entriesOf(directory);
-  } catch (error) {
-    const { code } = error as NodeJS.ErrnoException;
-    if (code !== undefined && UNREADABLE_ENTRY_CODES.includes(code)) return [];
-    throw error;
-  }
-}
-
-function besideKept(ancestor: string, kept: readonly string[]): string[] {
-  return readableEntriesOf(ancestor).flatMap((entry) => {
+function besideRoot(ancestor: string, root: string): string[] {
+  return entriesOf(ancestor).flatMap((entry) => {
     const child = join(ancestor, entry.name);
-    const inside = kept.filter((path) => isWithin(child, path));
-    if (!inside.length) return [child];
-    if (inside.some((path) => isWithin(path, child))) return [];
-    return besideKept(child, inside);
+    if (!isWithin(child, root)) return [child];
+    return isWithin(root, child) ? [] : besideRoot(child, root);
   });
 }
 
@@ -186,7 +176,7 @@ function rootDenyRead(host: SandboxHost): string[] {
   if (root === undefined) return [];
   return host.denyRead
     .filter((denied) => isWithin(denied, root))
-    .flatMap((ancestor) => besideKept(ancestor, [root]));
+    .flatMap((ancestor) => besideRoot(ancestor, root));
 }
 
 function homeOf(env: NodeJS.ProcessEnv): string {
@@ -234,24 +224,28 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
   return [...new Set(roots.filter((root) => isWithin(home, root)))];
 }
 
-function homeDenyRead(home: string, kept: readonly string[]): string[] {
-  if (kept.some((path) => isWithin(path, home))) return [];
-  return besideKept(home, kept);
+function instanceRoots(host: SandboxHost): string[] {
+  return host.root === undefined ? [] : [host.root];
+}
+
+function keptReadPaths(host: SandboxHost, cwd: string): string[] {
+  return [
+    ...new Set([
+      cwd,
+      host.env.TMPDIR ?? TEMPORARY_FALLBACK,
+      ...instanceRoots(host),
+      ...toolRoots(host.env, homeOf(host.env)),
+    ]),
+  ];
 }
 
 export function scopedDenyRead(host: SandboxHost, cwd: string): string[] {
   const allowed = [cwd, host.env.TMPDIR ?? TEMPORARY_FALLBACK];
-  const roots = host.root === undefined ? [] : [host.root];
-  const home = homeOf(host.env);
   return [
     ...new Set([
-      ...withoutAncestors(host.denyRead, [...allowed, ...roots]),
+      ...withoutAncestors(host.denyRead, [...allowed, ...instanceRoots(host)]),
       ...withoutAncestors(rootDenyRead(host), allowed),
-      ...homeDenyRead(home, [
-        ...allowed,
-        ...roots,
-        ...toolRoots(host.env, home),
-      ]),
+      homeOf(host.env),
     ]),
   ];
 }
@@ -282,7 +276,7 @@ export function hostDenyRead(
 ): string[] {
   const place = directories(env);
   return [
-    ...DEFAULT_CONFIG.filesystem.denyRead,
+    ...CREDENTIAL_DIRECTORIES,
     piDirectory(env),
     ...(scope.pi === undefined ? [] : [scope.pi]),
     join(place.state, WORKERS_DIRECTORY),
@@ -301,22 +295,22 @@ export function hostDenyRead(
 }
 
 function defaultDenyWrite(cwd: string): string[] {
-  return DEFAULT_CONFIG.filesystem.denyWrite.map((entry) =>
+  return PROTECTED_FILES.map((entry) =>
     isAbsolute(entry) ? entry : join(cwd, entry),
   );
 }
 
+interface FilesystemRules {
+  denyRead: string[];
+  allowRead: string[];
+  allowWrite: string[];
+  denyWrite: string[];
+}
+
 function filesystemOf(
-  denyRead: string[],
-  allowWrite: string[],
-  denyWrite: string[],
+  rules: FilesystemRules,
 ): SandboxRuntimeConfig["filesystem"] {
-  return {
-    ...DEFAULT_CONFIG.filesystem,
-    denyRead,
-    allowWrite,
-    denyWrite,
-  };
+  return { ...DEFAULT_CONFIG.filesystem, ...rules };
 }
 
 function packageCacheExports(temporary: string): string {
@@ -361,17 +355,25 @@ export function createBashSandbox(
       const temporary = host.env.TMPDIR ?? TEMPORARY_FALLBACK;
       const denied = scopedDenyRead(host, cwd);
       const gitDenied = gitDenyWrite(cwd);
-      started ??= start(filesystemOf(denied, [], gitDenied));
+      started ??= start(
+        filesystemOf({
+          denyRead: denied,
+          allowRead: [],
+          allowWrite: [],
+          denyWrite: gitDenied,
+        }),
+      );
       await started;
       const sandboxed = await runtime.wrapWithSandbox(
         SANDBOXED_COMMAND,
         undefined,
         {
-          filesystem: filesystemOf(
-            denied,
-            [cwd, temporary],
-            [...defaultDenyWrite(cwd), ...gitDenied],
-          ),
+          filesystem: filesystemOf({
+            denyRead: denied,
+            allowRead: keptReadPaths(host, cwd),
+            allowWrite: [cwd, temporary],
+            denyWrite: [...defaultDenyWrite(cwd), ...gitDenied],
+          }),
           network: BASH_NETWORK,
         },
       );

@@ -793,7 +793,7 @@ receive `KANTHORD_WORKER_CONFIG`, `KANTHORD_MACHINE_CONFIG`, `KANTHORD_TOKEN` or
 `KANTHORD_ENDPOINT`. They receive no variable whose name starts with `EVAL_`.
 
 The `swe@1` bash of a coder execution runs in the sandbox of
-`@anthropic-ai/sandbox-runtime` `0.0.26`, as the Workbench bash does. The
+`@anthropic-ai/sandbox-runtime` `0.0.82`, as the Workbench bash does. The
 [Built-in tools](./workbench.md#built-in-tools) section of the Workbench page
 states the configuration and the paths. `allowWrite` holds the workspace and the
 `TMPDIR` of the instance. Each command exports that `TMPDIR`. Every sandboxed
@@ -805,27 +805,28 @@ directory of the instance. Keep the eval credential under
 `~/.config/kanthord-eval/`. When `EVAL_ANTHROPIC_AUTH_FILE` names a custom
 absolute path, `denyRead` holds that file and its symlink target.
 
-`denyRead` also holds each child of the home directory that is not on the path
-to the workspace, `TMPDIR`, the instance root or a tool root. The home directory
-is `HOME` when it is absolute, else the home directory of the user. For a child
-that is an ancestor of one of these paths, `denyRead` holds the children of that
-child by the same rule. So `~/.git-credentials`, `~/.netrc`, `~/.npmrc`,
+`denyRead` also holds the home directory as one entry. The home directory is
+`HOME` when it is absolute, else the home directory of the user. `allowRead`
+re-allows the workspace, `TMPDIR`, the instance root and the tool roots inside
+that entry. So `~/.git-credentials`, `~/.netrc`, `~/.npmrc`,
 `~/.config/gh/hosts.yml`, `~/.docker/config.json`, `~/.claude` and
-`~/.codex/auth.json` stay denied. The tool roots are the entries of `PATH` under
-the home directory with their real paths, except an entry inside a
-`node_modules` directory, `~/.gitconfig`,
-`<XDG_CONFIG_HOME, else ~/.config>/git` and the prefix of the `node` executable
-of `PATH`. A tool root never removes an entry of the credential paths above.
+`~/.codex/auth.json` stay denied, and so does each home child that a later
+command creates. The tool roots are the entries of `PATH` under the home
+directory with their real paths, except an entry inside a `node_modules`
+directory, `~/.gitconfig`, `<XDG_CONFIG_HOME, else ~/.config>/git` and the
+prefix of the `node` executable of `PATH`. A path outside the home directory is
+no tool root. A tool root never removes an entry of the credential paths above.
+The size of the wrapped command does not grow with the number of home children.
 
-Apart from an entry of the credential paths that holds a tool root, `denyRead`
-names no workspace, no `TMPDIR`, no tool root and no ancestor of them. For each
-entry that is an ancestor of the instance root, `denyRead` holds each child of
-the entry that is not on the path to the root. So the other instance roots,
-`tracking.db`, its `-wal` and `-shm` files and each `*.bak-*` file stay denied.
-The bash computes the list at each call, so a later instance root and a later
-home child are also denied. `denyWrite` holds `.env`, `.env.*`, `*.pem` and
-`*.key` under the workspace of the call. A bash call fails with an error tool
-result when the sandbox cannot start. The bash has no unsandboxed fallback.
+Apart from the home directory, `denyRead` names no workspace, no `TMPDIR`, no
+tool root and no ancestor of them. For each entry that is an ancestor of the
+instance root, `denyRead` holds each child of the entry that is not on the path
+to the root. So the other instance roots, `tracking.db`, its `-wal` and `-shm`
+files and each `*.bak-*` file stay denied. The bash computes the list at each
+call, so a later instance root is also denied. `denyWrite` holds `.env`,
+`.env.*`, `*.pem` and `*.key` under the workspace of the call. A bash call fails
+with an error tool result when the sandbox cannot start. The bash has no
+unsandboxed fallback.
 
 The node verification commands and the local git of the worker run outside the
 sandbox. The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
