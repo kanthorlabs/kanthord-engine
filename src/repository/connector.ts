@@ -109,6 +109,7 @@ const GATE_DECLARATION_FILE = ".kanthord/affected-tests.json";
 const BARE_HEAD_FILE = "HEAD";
 const REMOTE_BRANCH_PREFIX = "refs/remotes/origin/";
 const OPTION_PREFIX = "-";
+const PROBE_DELETE_MS = 30000;
 const GIT_DIR_OPTION = "--git-dir=";
 const ENTRY_FIELD_SEPARATOR = " ";
 const GATE_DECLARATION_VERSION = 1;
@@ -1043,6 +1044,19 @@ async function pushSnapshotWith(
   });
 }
 
+async function pushThenDelete(
+  push: () => Promise<unknown>,
+  remove: () => Promise<unknown>,
+): Promise<void> {
+  try {
+    await push();
+  } catch (error) {
+    await remove().catch(() => undefined);
+    throw error;
+  }
+  await remove();
+}
+
 export async function probePush(
   input: ProbePushInput,
   context: Context,
@@ -1054,25 +1068,30 @@ export async function probePush(
   const deadlineAt = Date.now() + deadlineMs;
   const ref = `refs/heads/${branch}`;
   await beforePush(() =>
-    withAccess(ssh, context, deadlineMs, (agent) =>
+    withAccess(ssh, context, deadlineMs + PROBE_DELETE_MS, (agent) =>
       inFreshDirectory(freshWriteDirectory, async (directory) => {
         const git = gitIn(directory, context, deadlineAt, "probe push", agent);
         await atStage(GitStage.BeforePush, async () => {
-          await cloneWith(
-            address,
-            directory,
-            context,
-            remainingMs(deadlineAt),
-            agent,
-          );
+          await git(["init", "--quiet"]);
+          await git(["remote", "add", "origin", "--", address]);
           await git(["check-ref-format", "--branch", branch]);
-          await git(["fetch", "origin", baseCommit]);
+          await git(["fetch", "--depth=1", "--no-tags", "origin", baseCommit]);
         });
-        await atStage(GitStage.Push, () =>
-          git(["push", "origin", `${baseCommit}:${ref}`]),
-        );
-        await atStage(GitStage.Push, () =>
-          git(["push", "origin", "--delete", ref]),
+        await pushThenDelete(
+          () =>
+            atStage(GitStage.Push, () =>
+              git(["push", "origin", `${baseCommit}:${ref}`]),
+            ),
+          () =>
+            atStage(GitStage.Push, () =>
+              gitIn(
+                directory,
+                context,
+                Date.now() + PROBE_DELETE_MS,
+                "probe delete",
+                agent,
+              )(["push", "origin", "--delete", ref]),
+            ),
         );
       }),
     ),

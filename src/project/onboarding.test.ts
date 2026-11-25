@@ -20,11 +20,14 @@ import {
   type Environment,
   EnvironmentSource,
 } from "../kernel/devcontainer.ts";
-import { OperationError } from "../kernel/errors.ts";
+import { DeadlineExceeded } from "../kernel/context.ts";
+import { Diagnostic, OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import { IN_MEMORY_DATABASE, Store } from "../kernel/store.ts";
 import { stopAfter, temporary } from "../kernel/test-support.ts";
 import { testServiceIdentity } from "../kernel/test-identity.ts";
+import { GitStage, GitWriteError } from "../repository/connector.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type RepositoryFile,
@@ -64,6 +67,7 @@ import {
   type ImageBuildResult,
   type ProofFile,
   ProofFiles,
+  proofFileSchema,
   type ProofInput,
   PROVED_SUFFIX,
 } from "./environment-state.ts";
@@ -89,16 +93,20 @@ import {
 } from "./store.ts";
 
 const PROJECT = "project_1";
+const PUSH_CREDENTIAL = "deploy";
+const PUSH_REVISION = 1;
 const APP: RepositoryGroup = {
   binding_id: "binding_app",
   binding_name: "app",
   resource_identity: "repository:github:acme/app",
+  ssh_credential: PUSH_CREDENTIAL,
   review_flow: null,
 };
 const DOCS: RepositoryGroup = {
   binding_id: "binding_docs",
   binding_name: "docs",
   resource_identity: "repository:github:acme/docs",
+  ssh_credential: PUSH_CREDENTIAL,
   review_flow: null,
 };
 const SECRET_VARIABLE = "REGISTRY_AUTH";
@@ -135,6 +143,15 @@ const EXECUTION = "execution";
 const BUILD_FAILED = "build_failed";
 const NO_SPACE = "no space";
 const BOOM = "boom";
+
+function gitWriteFailure(stage: GitStage, text: string): GitWriteError {
+  return new GitWriteError(
+    stage,
+    new Diagnostic(RepositoryErrorCode.GitFailed, "git failed.", {
+      cause: new Error(text),
+    }),
+  );
+}
 const MAKE_SETUP = "make setup";
 const MAKE_TEST = "make test";
 const PROVE = "prove";
@@ -144,6 +161,7 @@ const IMAGE = "image";
 const EXECUTION_ID = "execution_1";
 const SETUP_FAILED = "setup_failed";
 const PUSH_REFUSED = "push_refused";
+const PROBE_FAILED = "probe_failed";
 const DISK_LOW = "disk_low";
 const DISK_FREE_RATIO = 0.1;
 const DISK_LOW_TAIL = "free_bytes=9 total_bytes=100 ratio=0.1";
@@ -243,6 +261,7 @@ function proofFile(sum: string, override: Partial<ProofFile> = {}): ProofFile {
     repairs: 0,
     ended_at: 1,
     commit: BASE_COMMIT,
+    push_credential: { name: PUSH_CREDENTIAL, revision: PUSH_REVISION },
     ...override,
   };
 }
@@ -276,6 +295,7 @@ class Harness {
   proveResults: CommandResult[] = [];
   proveError: Error | null = null;
   probeError: Error | null = null;
+  sshRevisions = new Map<string, number>();
   probeCalls: Array<{ bindingId: string; commit: string; runId: string }> = [];
   disk = { free_bytes: 50, total_bytes: 100 };
   images = new Map<string, string>([
@@ -438,6 +458,8 @@ class Harness {
         this.probeCalls.push({ bindingId, commit, runId });
         if (this.probeError !== null) throw this.probeError;
       },
+      sshCredentialRevisionOf: (credential) =>
+        this.sshRevisions.get(credential) ?? PUSH_REVISION,
       freeDisk: async () => {
         this.order.push("freeDisk");
         return this.disk;
@@ -721,6 +743,8 @@ function record(override: Partial<GroupRecord> = {}): GroupRecord {
     digest: "d",
     tag: "t",
     proof: null,
+    push_credential: { name: PUSH_CREDENTIAL, revision: PUSH_REVISION },
+    push_stale: false,
     repairs: 0,
     proved: false,
     read_succeeded: true,
@@ -2326,6 +2350,7 @@ function resolvingHarness(
       binding_id: binding.id,
       binding_name: "repo",
       resource_identity: binding.resource_identity,
+      ssh_credential: "ssh-github.com",
       review_flow: null,
     };
   });
@@ -2467,7 +2492,10 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = hostHarness(t);
-    h.probeError = new Error("remote: pre-receive hook declined");
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "remote: pre-receive hook declined",
+    );
     await h.compute();
     await h.ended();
     assert.deepEqual(h.order, ["freeDisk", "probePush"]);
@@ -2486,7 +2514,8 @@ test(
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
     const h = hostHarness(t);
-    h.probeError = new Error(
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
       "refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope",
     );
     await h.compute();
@@ -2498,6 +2527,218 @@ test(
       file.tail,
       /^The binding credential has no `workflow` scope: /,
     );
+  },
+);
+
+test(
+  "a probe that fails before the push with a deadline error fails the record with probe_failed and the reason",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = new GitWriteError(
+      GitStage.BeforePush,
+      new DeadlineExceeded(),
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^deadline_exceeded: /);
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+  },
+);
+
+test(
+  "a push that ends on the git deadline fails the record with probe_failed and deadline_exceeded",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "probe push: Git deadline exceeded",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^deadline_exceeded: /);
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+  },
+);
+
+test(
+  "a push that cannot reach the host fails the record with probe_failed and host_unreachable",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "ssh: connect to host git.example port 22: Connection refused",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^host_unreachable: /);
+  },
+);
+
+test(
+  "a push that the SSH server refuses for the key fails the record with probe_failed and key_refused",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "git@git.example: Permission denied (publickey).",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^key_refused: /);
+  },
+);
+
+test(
+  "a probe that cannot resolve the host fails the record with probe_failed and host_unreachable",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.BeforePush,
+      "ssh: Could not resolve hostname git.example",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^host_unreachable: /);
+    assert.match(file.tail, /Could not resolve hostname/);
+  },
+);
+
+test(
+  "a failed proof of the class probe_failed starts no session",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = agentHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.BeforePush,
+      "ssh: Could not resolve hostname git.example",
+    );
+    await failRun(h);
+    await turn();
+    await turn();
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+    assert.equal(h.sessionInputs.length, NO_CALLS);
+    assert.equal(h.state().repairs, NO_REPAIRS);
+  },
+);
+
+const OTHER_PUSH_CREDENTIAL = "other";
+const NEW_PUSH_REVISION = 2;
+
+test(
+  "a new revision of the push credential makes a host group run the probe again",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    h.sshRevisions.set(PUSH_CREDENTIAL, NEW_PUSH_REVISION);
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    assert.equal(h.probeCalls.length, TWO_CALLS);
+    assert.deepEqual(h.proofOf(h.digest())?.push_credential, {
+      name: PUSH_CREDENTIAL,
+      revision: NEW_PUSH_REVISION,
+    });
+  },
+);
+
+test(
+  "another ssh credential name of the binding starts a run at the next read",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    h.bindings = facts([{ ...APP, ssh_credential: OTHER_PUSH_CREDENTIAL }], []);
+    await h.compute();
+    await h.ended(TWO_CALLS);
+    assert.equal(h.probeCalls.length, TWO_CALLS);
+    assert.equal(
+      h.proofOf(h.digest())?.push_credential?.name,
+      OTHER_PUSH_CREDENTIAL,
+    );
+  },
+);
+
+test(
+  "a new revision of the push credential of a proved image starts a run that builds no image",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = new Harness(t);
+    h.open();
+    h.proveResults = PASSING_RESULTS;
+    const sum = h.digest();
+    h.existing.add(h.tagOf(sum));
+    h.existing.add(h.provedOf(sum));
+    h.writeProof(proofFile(sum));
+    await h.compute();
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(h.probeCalls.length, NO_CALLS);
+    const tag = h.state().tag;
+    h.sshRevisions.set(PUSH_CREDENTIAL, NEW_PUSH_REVISION);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.events.includes(BUILD), false);
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.state().tag, tag);
+    assert.equal(h.digest(), sum);
+    assert.equal(h.state().status, EnvironmentStatus.Ready);
+    assert.equal(h.proofOf(sum)?.push_credential?.revision, NEW_PUSH_REVISION);
+  },
+);
+
+test(
+  "an unchanged push credential starts no run and no second probe",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    await h.compute();
+    await h.ended();
+    await h.compute();
+    await turn();
+    await turn();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.logged(RUN_ENDED).length, ONE_CALL);
+  },
+);
+
+test(
+  "a stored proof file with no push credential starts one run and then none",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    const legacy = proofFile(h.digest(), { push_credential: undefined });
+    assert.equal(proofFileSchema.safeParse(legacy).success, true);
+    h.writeProof(legacy);
+    await h.compute();
+    await h.ended();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    await h.compute();
+    await turn();
+    await turn();
+    assert.equal(h.probeCalls.length, ONE_CALL);
+    assert.equal(h.logged(RUN_ENDED).length, ONE_CALL);
   },
 );
 
@@ -2553,7 +2794,7 @@ test(
     const h = new Harness(t);
     h.bindings = facts([APP], [remoteWorker]);
     h.resolution = STORED;
-    h.probeError = new Error(BOOM);
+    h.probeError = gitWriteFailure(GitStage.Push, BOOM);
     await h.compute();
     await h.ended();
     assert.deepEqual(h.order, ["probePush"]);

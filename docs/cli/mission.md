@@ -925,7 +925,8 @@ The required-action and request sets of an `examine` node are empty.
   60 s, at most 60 times. While the project is paused, a round makes no check and no merge.
   The round waits 60 s and runs again with the same round number, so a pause uses no round.
   A human landing during a pause resolves after the resume. KanthorD merges a `kanthord` landing pull request when its
-  every check of the head commit passes, except the `ignored_checks` of the binding. A merge that answers `confirmed_failure`,
+  every check of the head commit passes, except the `ignored_checks` of the binding. KanthorD waits for the first check run
+  of a new head for at most 300 s. A merge that answers `confirmed_failure`,
   `retryable_refusal` or `unknown_outcome` runs the next round after 60 s.
   A 502 merge answer first compares the tree of the base branch with the tree of the tested commit. Equal trees answer the
   merge as merged and run no retry. The check of an open pull request whose head is the tested commit and whose tree equals
