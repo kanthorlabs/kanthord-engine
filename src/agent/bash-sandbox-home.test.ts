@@ -225,7 +225,8 @@ test(
         !outcome.output.includes(secretContent(file)),
         `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
       );
-      if (BLOCKED_ON_DARWIN) assert.notEqual(outcome.status, SUCCESS, command);
+      if (BLOCKED_ON_DARWIN || file.includes("/"))
+        assert.notEqual(outcome.status, SUCCESS, command);
     }
   },
 );
