@@ -715,6 +715,7 @@ async function liveStopUnit(
           findings: [],
           unblock_reason: null,
           earlier_verdicts: [],
+          earlier_report: null,
         }),
       "evidence.submit": async () =>
         completed({ evidence: { id: "verification" } }),

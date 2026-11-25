@@ -9,6 +9,7 @@ import {
   repositoryOf,
   type StepsState,
 } from "./steps-implement.ts";
+import { earlierSectionOf } from "./earlier-report.ts";
 import { sshAccessOf, type WorkspaceCheckout } from "./workspace.ts";
 import { GitStep, withinGit } from "./method-telemetry.ts";
 import { gatedAgent, mergeCommitMessage } from "./turn-gate.ts";
@@ -56,6 +57,7 @@ export function nodeWork(state: StepsState) {
     repositories: implementRepositoriesOf(state),
     affected_tests: state.affectedTests,
     tasks: state.revision.tasks,
+    earlier_report: earlierSectionOf(state, state.input.claim.node_id),
   });
 }
 

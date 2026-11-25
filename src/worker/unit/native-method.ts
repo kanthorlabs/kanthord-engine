@@ -188,6 +188,7 @@ export async function runNativeExecution(
         cleared: prior.cleared,
         unblockReason: prior.unblockReason,
         earlierVerdicts: prior.earlierVerdicts,
+        earlierReport: prior.earlierReport,
         unchangedTurns: 0,
         refreshed: null,
         lastVerification: null,

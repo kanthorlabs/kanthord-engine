@@ -642,7 +642,7 @@ old.
 For a `pull_request` action, the pull request title is `<commit_type>: <node name>`.
 `commit_type` comes from the pinned revision of the node, `feat` when absent.
 A node name that starts with a commit header prefix, `<type>: ` or `<type>(<scope>): `, loses that prefix, so the title holds one commit type.
-The pull request body holds the newest coder report of the attempt, then the gate file text when gate files exist, joined by a blank line. The body holds at most 65536 characters, and a longer coder report loses its end so that the gate file text stays whole. A pull request with no coder report and no gate file has no body. A reused pull request keeps its body.
+The pull request body holds the newest coder report of the attempt, which holds the earlier section of each unit that its done record skipped in its execution, then the gate file text when gate files exist, joined by a blank line. The body holds at most 65536 characters, and a longer coder report loses its end so that the gate file text stays whole. A pull request with no coder report and no gate file has no body. A reused pull request keeps its body.
 The title follows the header rules of the [worker commits](./worker.md).
 
 For a `pull_request` action with the landing `kanthord`, `intake.action.perform`

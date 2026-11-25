@@ -71,6 +71,11 @@ import {
 } from "./judgement.ts";
 import { isDone, readDoneRecords, writeDoneRecord } from "./done-record.ts";
 import {
+  earlierSectionOf,
+  earlierSectionsOf,
+  reportSectionOf,
+} from "./earlier-report.ts";
+import {
   readAttemptEvidence,
   type Verdict,
   VerdictSource,
@@ -145,17 +150,54 @@ function noteReport(
   unit: TaskContent,
   text: string | undefined,
 ): void {
-  if (text?.trim())
-    reports.set(unit.id, `## ${unit.id} ${unit.content.name}\n\n${text}`);
+  if (text?.trim()) reports.set(unit.id, reportSectionOf(unit, text));
   else reports.delete(unit.id);
+}
+
+function reportUnitsOf(
+  state: Pick<StepsState, "input" | "revision">,
+): TaskContent[] {
+  return [
+    ...state.revision.tasks,
+    nodeUnitOf(state.input.claim.node_id, state.revision),
+  ];
+}
+
+export function carriedReportsOf(
+  state: Pick<StepsState, "earlierReport" | "input" | "revision">,
+  done: ReadonlySet<string>,
+): Map<string, string> {
+  const units = reportUnitsOf(state);
+  const earlier = earlierSectionsOf(
+    state.earlierReport,
+    units.map((unit) => unit.id),
+  );
+  return new Map(
+    units
+      .filter((unit) => isDone(done, unit))
+      .flatMap((unit) => {
+        const section = earlier.get(unit.id);
+        return section === undefined ? [] : [[unit.id, section] as const];
+      }),
+  );
+}
+
+export function coderReportTextOf(
+  state: Pick<StepsState, "input" | "revision">,
+  reports: ReadonlyMap<string, string>,
+): string | null {
+  const sections = reportUnitsOf(state).flatMap(
+    (unit) => reports.get(unit.id) ?? [],
+  );
+  return sections.length === NO_TASKS ? null : sections.join("\n\n");
 }
 
 async function submitCoderReport(
   state: StepsState,
   reports: ReadonlyMap<string, string>,
 ): Promise<void> {
-  if (reports.size === NO_TASKS) return;
-  const report = [...reports.values()].join("\n\n");
+  const report = coderReportTextOf(state, reports);
+  if (report === null) return;
   await state.run.submitEvidence(state.input.claim.node_id, {
     subject: CODER_REPORT_SUBJECT,
     assets: [
@@ -369,7 +411,7 @@ async function runUnits(
   taskRunner: TaskRunner,
 ): Promise<UnitsEnd> {
   const completed = new Set<string>();
-  const reports = new Map<string, string>();
+  const reports = carriedReportsOf(state, checked.done);
   let units: readonly PendingTask[] = withSetupInstruction(
     checked.pending,
     state.setupInstruction,
@@ -656,6 +698,7 @@ export interface StepsState {
   cleared: string | null;
   unblockReason: string | null;
   earlierVerdicts: EarlierVerdict[];
+  earlierReport: string | null;
   unchangedTurns: number;
   refreshed: RefreshResult | null;
   lastVerification: VerificationFacts;
@@ -824,6 +867,7 @@ export function taskWork(state: StepsState, task: TaskContent) {
     repositories: implementRepositoriesOf(state),
     affected_tests: state.affectedTests,
     node: state.revision.content,
+    earlier_report: earlierSectionOf(state, task.id),
   });
 }
 

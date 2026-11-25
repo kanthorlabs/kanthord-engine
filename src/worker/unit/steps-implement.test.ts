@@ -35,6 +35,8 @@ import { CHECKOUTS_DIRECTORY, WorkspaceKind } from "./workspace.ts";
 import { DONE_TRAILER, doneRecordOf } from "./done-record.ts";
 import { readPushRecord } from "./push-record.ts";
 import {
+  carriedReportsOf,
+  coderReportTextOf,
   HEAD_COMMIT_SUBJECT,
   runStepsImplement,
   runTask,
@@ -592,6 +594,114 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
   test("a rerun of a routed unit with an empty last text removes its section", async (t) => {
     const { report, other } = await rerouteReportOf(t, "");
     assert.equal(report, `## ${other.id} other\n\nother final`);
+  });
+
+  test("regression: K185 an execution that skips the done task 1 submits the earlier task 1 section and the new task 2 section", async (t) => {
+    const first = task("first", "true");
+    const second = task("second", "true");
+    const h = await fixture(
+      t,
+      [first, second],
+      [
+        writeFile("one"),
+        fauxAssistantMessage("first final"),
+        writeFile("two"),
+        fauxAssistantMessage("second final"),
+      ],
+    );
+    const earlier = recordEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    const earlierReport = reportTextOf(earlier);
+    assert.equal(
+      earlierReport,
+      `## ${first.id} first\n\nfirst final\n\n## ${second.id} second\n\nsecond final`,
+    );
+    const revised = {
+      ...second,
+      content: { ...second.content, criterion: "revised" },
+    };
+    const next = await nextExecution(
+      t,
+      { ...h, revision: { ...h.revision, tasks: [first, revised] } },
+      [writeFile("three"), fauxAssistantMessage("second again")],
+    );
+    next.earlierReport = earlierReport;
+    const later = recordEvidence(next);
+    recordReleases(next);
+    await runStepsImplement(next);
+    assert.equal(
+      reportTextOf(later),
+      `## ${first.id} first\n\nfirst final\n\n## ${second.id} second\n\nsecond again`,
+    );
+  });
+
+  test("a unit that runs again and gives a new section keeps only the new section in the report", async (t) => {
+    const work = task("work", "true");
+    const h = await fixture(
+      t,
+      [work],
+      [writeFile("again"), fauxAssistantMessage("new final")],
+    );
+    h.earlierReport = `## ${work.id} work\n\nold fact`;
+    const bodies = recordEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    assert.equal(reportTextOf(bodies), `## ${work.id} work\n\nnew final`);
+  });
+
+  test("a budget end stores no coder report, also with an earlier report", async (t) => {
+    const work = task("work", "true");
+    const h = await fixture(
+      t,
+      [work],
+      [
+        fauxAssistantMessage(
+          fauxToolCall("write", { path: "notes", content: "partial" }),
+          { stopReason: "toolUse" },
+        ),
+      ],
+      1,
+    );
+    h.earlierReport = `## ${work.id} work\n\nold fact`;
+    const bodies = recordEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    assert.equal(reportTextOf(bodies), null);
+  });
+
+  test("the report build carries the earlier section of a done unit and no section of a unit that did not run", async (t) => {
+    const first = task("first", "true");
+    const second = task("second", "true");
+    const h = await fixture(t, [first, second], []);
+    const firstSection = `## ${first.id} first\n\nfirst fact`;
+    h.earlierReport = `${firstSection}\n\n## ${second.id} second\n\nsecond fact`;
+    const reports = carriedReportsOf(h, new Set([doneRecordOf(first)]));
+    assert.equal(coderReportTextOf(h, reports), firstSection);
+  });
+
+  test("regression: K185 the first prompt of a unit that runs again holds its earlier section under the heading Earlier report", async (t) => {
+    const work = task("work", "true");
+    const h = await fixture(
+      t,
+      [work],
+      [writeFile("again"), fauxAssistantMessage("final")],
+    );
+    h.earlierReport = `## ${work.id} work\n\nK185-EARLIER-FACT`;
+    assert.match(
+      taskWork(h, work).text,
+      /## Earlier report\n[\s\S]*\n## [^\n]+ work\n\nK185-EARLIER-FACT$/,
+    );
+    acceptEvidence(h);
+    recordReleases(h);
+    await runStepsImplement(h);
+    const prompt = JSON.stringify(h.provider.calls[0]);
+    assert.ok(prompt.includes("## Earlier report"));
+    assert.ok(
+      prompt.indexOf("## Earlier report") < prompt.indexOf("K185-EARLIER-FACT"),
+    );
+    h.earlierReport = null;
+    assert.equal(taskWork(h, work).text.includes("Earlier report"), false);
   });
 
   test("a budget end stores no coder report", async (t) => {

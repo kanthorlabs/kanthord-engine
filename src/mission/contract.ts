@@ -1920,6 +1920,7 @@ export const reviewRoundSchema = z.strictObject({
   findings: z.array(findingSchema),
   unblock_reason: textSchema.nullable(),
   earlier_verdicts: z.array(earlierVerdictSchema),
+  earlier_report: z.string().nullable(),
 });
 export type ReviewRound = z.infer<typeof reviewRoundSchema>;
 export const findingDecideSchema = z.strictObject({
