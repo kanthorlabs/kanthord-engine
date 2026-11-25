@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFile, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { once } from "node:events";
-import { createWriteStream, readFileSync, statSync } from "node:fs";
+import { createWriteStream, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { test, type TestContext } from "node:test";
@@ -23,6 +23,7 @@ import {
   workerOperations,
 } from "../../worker/contract.ts";
 import { SlotControl } from "../worker/thread-data.ts";
+import type { SlotExit, SlotInstance } from "./slot-driver.ts";
 import { ContainerDriver } from "./container-driver.ts";
 import {
   CONTAINER_UID,
@@ -59,6 +60,10 @@ const GENERATION = 1;
 const SERVE_SLOT_PID = "2";
 const READY_MESSAGE = "Worker application ready";
 const FAILED_MESSAGE = "worker.pool.instance_failed";
+const SANDBOX_UNAVAILABLE = "worker.slot.sandbox_unavailable";
+const F52_REASON = "F52: the bash sandbox cannot start in the slot container";
+const PROBE_SETTLE_MS = 15000;
+const NO_SETTLE = 0;
 const MARKER_TEXT = "slot volume marker";
 const TMPDIR_ANSWER = "tmpdir script ran";
 const OTHER_OWNER = "7ZZZZZZZZZZZZZZZZZZZZZZZZZ";
@@ -184,6 +189,75 @@ async function liveDriver(t: TestContext) {
   const runtime = status.container_runtime!;
   stopAfter(t, () => removeOwned(runtime, driver.owner));
   return { driver, runtime, masterKey };
+}
+
+function readLog(path: string): string {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
+
+type LiveDriver = Awaited<ReturnType<typeof liveDriver>>;
+
+interface LaunchedSlot {
+  instance: SlotInstance;
+  name: string;
+  exit: SlotExit | null;
+  log: string;
+}
+
+async function launchSlot(
+  t: TestContext,
+  live: LiveDriver,
+  label: string,
+  settleMs = NO_SETTLE,
+): Promise<LaunchedSlot> {
+  const slot = poolInstance(label);
+  const root = temporary(t);
+  const { port1, port2 } = new MessageChannel();
+  stopAfter(t, () => port1.close());
+  const stderrLog = join(root, "stderr.log");
+  const output = createWriteStream(stderrLog);
+  const instance = live.driver.launch({
+    instance: slot,
+    entries: [launchEntry(live.masterKey, slot, port2)],
+    root,
+    output,
+    environment: process.env,
+  });
+  stopAfter(t, () => instance.terminate());
+  const name = slotName(slot.name);
+  const polling = new AbortController();
+  const runs = waitUntil(
+    () => running(live.runtime, name),
+    Boolean,
+    AbortSignal.any([t.signal, polling.signal]),
+  ).then(() => null);
+  runs.catch(() => {});
+  let exit: SlotExit | null;
+  try {
+    exit = await Promise.race([runs, instance.exited]);
+  } finally {
+    polling.abort();
+  }
+  if (exit === null && settleMs > NO_SETTLE)
+    exit = await Promise.race([
+      instance.exited,
+      delay(settleMs, null, { signal: t.signal }),
+    ]);
+  if (exit !== null) {
+    output.end();
+    await once(output, "finish");
+  }
+  return { instance, name, exit, log: readLog(stderrLog) };
+}
+
+function slotUnavailable(t: TestContext, slot: LaunchedSlot): boolean {
+  if (slot.exit === null) return false;
+  assert.ok(
+    slot.log.includes(SANDBOX_UNAVAILABLE),
+    `the slot exited with code ${slot.exit.code} before it ran: ${slot.log}`,
+  );
+  t.skip(F52_REASON);
+  return true;
 }
 
 function poolInstance(name: string): PoolInstance {
@@ -312,6 +386,44 @@ async function containerPool(t: TestContext) {
   };
 }
 
+type LivePool = Awaited<ReturnType<typeof containerPool>>;
+
+async function waitRegistered(t: TestContext, f: LivePool) {
+  const stderrLog = join(
+    f.stateDirectory,
+    "workers",
+    f.containerInstance[0]!,
+    "stderr.log",
+  );
+  const state = await waitUntil(
+    async () => ({
+      items: await f.instances(),
+      log: readLog(stderrLog),
+    }),
+    ({ items, log }) =>
+      items.length === ONE_ITEM || log.includes(SANDBOX_UNAVAILABLE),
+    t.signal,
+  );
+  if (state.items.length === ONE_ITEM) return state.items;
+  t.skip(F52_REASON);
+  return null;
+}
+
+test(
+  "a container slot starts its sandbox probe and exits 1 with worker.slot.sandbox_unavailable, or runs after a passing probe",
+  { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
+  async (t) => {
+    const live = await liveDriver(t);
+    const slot = await launchSlot(t, live, "boxed-probe", PROBE_SETTLE_MS);
+    if (slot.exit !== null) {
+      assert.equal(slot.exit.code, FAILED_CODE, slot.log);
+      assert.ok(slot.log.includes(SANDBOX_UNAVAILABLE), slot.log);
+      return;
+    }
+    assert.ok(!slot.log.includes(SANDBOX_UNAVAILABLE), slot.log);
+  },
+);
+
 test(
   "a container slot registers, keeps the containment, drains, resumes its volume and stops",
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
@@ -320,11 +432,9 @@ test(
     await f.setCount(1);
     f.fixture.worker.startPool();
     const started = performance.now();
-    const [item] = await waitUntil(
-      f.instances,
-      (items) => items.length === ONE_ITEM,
-      t.signal,
-    );
+    const registered = await waitRegistered(t, f);
+    if (!registered) return;
+    const [item] = registered;
     t.diagnostic(
       `criterion 1: registered in ${Math.round(performance.now() - started)} ms`,
     );
@@ -465,20 +575,11 @@ test(
   "terminate ends a container that ignores the stop control within 5 s",
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
-    const { driver, runtime, masterKey } = await liveDriver(t);
-    const slot = poolInstance("boxed-live");
-    const root = temporary(t);
-    const { port1, port2 } = new MessageChannel();
-    stopAfter(t, () => port1.close());
-    const instance = driver.launch({
-      instance: slot,
-      entries: [launchEntry(masterKey, slot, port2)],
-      root,
-      output: createWriteStream(join(root, "stderr.log")),
-      environment: process.env,
-    });
-    const name = slotName(slot.name);
-    await waitUntil(() => running(runtime, name), Boolean, t.signal);
+    const live = await liveDriver(t);
+    const { runtime } = live;
+    const launched = await launchSlot(t, live, "boxed-live");
+    if (slotUnavailable(t, launched)) return;
+    const { instance, name } = launched;
     await shell(runtime, name, `kill -STOP ${SERVE_SLOT_PID}`);
     instance.control(SlotControl.Stop);
     await delay(STOP_GRACE_MS);
@@ -526,7 +627,16 @@ test(
     );
     stopAfter(t, () => launcher.kill("SIGKILL"));
     const name = slotName(slot.name);
-    await waitUntil(() => running(runtime, name), Boolean, t.signal);
+    const stderrLog = join(root, "stderr.log");
+    const state = await waitUntil(
+      async () => ({
+        runs: await running(runtime, name),
+        log: readLog(stderrLog),
+      }),
+      ({ runs, log }) => runs || log.includes(SANDBOX_UNAVAILABLE),
+      t.signal,
+    );
+    if (!state.runs) return t.skip(F52_REASON);
     launcher.kill("SIGKILL");
     await once(launcher, "exit");
     await driver.prepare();
@@ -579,11 +689,7 @@ test(
     const f = await containerPool(t);
     await f.setCount(1);
     f.fixture.worker.startPool();
-    await waitUntil(
-      f.instances,
-      (items) => items.length === ONE_ITEM,
-      t.signal,
-    );
+    if (!(await waitRegistered(t, f))) return;
     const name = slotName(f.containerInstance[0]!);
     await shell(
       f.runtime,
@@ -639,11 +745,7 @@ test(
     assert.equal(seeded.code, SUCCESS_CODE, seeded.stderr);
     await f.setCount(1);
     f.fixture.worker.startPool();
-    await waitUntil(
-      f.instances,
-      (items) => items.length === ONE_ITEM,
-      t.signal,
-    );
+    if (!(await waitRegistered(t, f))) return;
     const hostFile = join(
       f.stateDirectory,
       "workers",
