@@ -646,7 +646,14 @@ interface Submitted {
   }[];
 }
 
+interface ReviewTurn {
+  directory: string;
+  readRoots?: readonly string[];
+  instruction: string;
+}
+
 interface ReviewOptions {
+  turn?: (turn: ReviewTurn) => void;
   reply?: string;
   repository?: ReturnType<typeof repositorySetup>;
   snapshot?: string;
@@ -841,18 +848,17 @@ async function reviewOf(
     resource_budget: setup.resource_budget,
   });
   let opens = 0;
-  const openings: { directory: string; readRoots?: readonly string[] }[] = [];
   const open = async (
     directory: string,
     _verification?: undefined,
     readRoots?: readonly string[],
   ) => {
     opens++;
-    openings.push({ directory, readRoots });
     return {
       budget,
       instruct: async (_work: WorkPrompt, instruction: string) => {
         instructions.push(instruction);
+        options.turn?.({ directory, readRoots, instruction });
       },
       lastText: () =>
         options.reply ??
@@ -887,7 +893,6 @@ async function reviewOf(
     actionRequests,
     workspaces,
     opens: () => opens,
-    openings,
   };
 }
 
@@ -1553,42 +1558,42 @@ test("a round with a review base submits one patch evidence and the findings wit
 
 test("regression: K194 a review turn reads patch_paths[0] through the confinement hook and gets the patch text", async (t) => {
   const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
+  const reads: string[] = [];
   const review = await reviewOf(t, "true", undefined, {
     bindings: [binding],
     transport: localTransport,
     round: secondRound([binding], true),
     reply: ROUND_SUCCESS,
+    turn: ({ directory, readRoots, instruction }) => {
+      const handlers: ((event: ToolCallEvent) => unknown)[] = [];
+      (checkoutConfinement(directory, readRoots) as (pi: ExtensionAPI) => void)(
+        {
+          on: (_name: string, handler: (event: ToolCallEvent) => unknown) =>
+            handlers.push(handler),
+        } as unknown as ExtensionAPI,
+      );
+      const bundle = JSON.parse(
+        instruction
+          .split("\n")
+          .find((line) => line.startsWith("Evidence: "))!
+          .slice("Evidence: ".length),
+      );
+      const path = bundle.patch_paths[0] as string;
+      assert.equal(
+        handlers[0]!({
+          type: "tool_call",
+          toolCallId: "call",
+          toolName: "read",
+          input: { path },
+        } as unknown as ToolCallEvent),
+        undefined,
+      );
+      reads.push(readFileSync(join(directory, path), "utf8"));
+    },
   });
-  const bundle = JSON.parse(
-    review.instructions[0]!.split("\n")
-      .find((line) => line.startsWith("Evidence: "))!
-      .slice("Evidence: ".length),
-  );
-  const [opening] = review.openings;
-  assert.ok(opening?.readRoots);
-  const handlers: ((event: ToolCallEvent) => unknown)[] = [];
-  (
-    checkoutConfinement(opening.directory, opening.readRoots) as (
-      pi: ExtensionAPI,
-    ) => void
-  )({
-    on: (_name: string, handler: (event: ToolCallEvent) => unknown) =>
-      handlers.push(handler),
-  } as unknown as ExtensionAPI);
-  const path = bundle.patch_paths[0] as string;
-  assert.equal(
-    handlers[0]!({
-      type: "tool_call",
-      toolCallId: "call",
-      toolName: "read",
-      input: { path },
-    } as unknown as ToolCallEvent),
-    undefined,
-  );
-  assert.match(
-    readFileSync(join(opening.directory, path), "utf8"),
-    /\+\+\+ b\/fix/,
-  );
+  assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
+  assert.equal(reads.length, SINGLE_RELEASE);
+  assert.match(reads[0]!, /\+\+\+ b\/fix/);
 });
 
 test("two bindings with patches over 5 MiB submit two patch evidences, each under the body limit", async (t) => {
