@@ -59,7 +59,6 @@ const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
 const NODE_EXECUTABLE = "node";
-const PROJECT_PACKAGES_DIRECTORY = "node_modules";
 const SINGLE_QUOTE = /'/g;
 const QUOTED_SINGLE_QUOTE = "'\\''";
 
@@ -195,10 +194,6 @@ function pathEntries(env: NodeJS.ProcessEnv): string[] {
   return (env.PATH ?? "").split(delimiter).filter(isAbsolute);
 }
 
-function inProjectPackages(path: string): boolean {
-  return path.split(sep).includes(PROJECT_PACKAGES_DIRECTORY);
-}
-
 function isExecutable(path: string): boolean {
   try {
     accessSync(path, constants.X_OK);
@@ -217,7 +212,7 @@ function nodePrefix(entries: readonly string[]): string[] {
 }
 
 function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
-  const entries = pathEntries(env).filter((entry) => !inProjectPackages(entry));
+  const entries = pathEntries(env);
   const configHome =
     env.XDG_CONFIG_HOME !== undefined && isAbsolute(env.XDG_CONFIG_HOME)
       ? env.XDG_CONFIG_HOME
