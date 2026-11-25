@@ -204,3 +204,90 @@ test("every other tool name passes unchanged", (t) => {
   for (const tool of ["bash", "probe", "environment_write"])
     assert.equal(f.call(tool, { path: "/etc/passwd" }), undefined);
 });
+
+function readRootFixture(t: TestContext) {
+  const base = mkdtempSync(join(tmpdir(), "confinement-"));
+  stopAfter(t, () => rmSync(base, { recursive: true, force: true }));
+  const root = join(base, "checkouts", "engine");
+  const evidence = join(base, "evidence");
+  const outside = join(base, "outside");
+  mkdirSync(root, { recursive: true });
+  mkdirSync(evidence);
+  mkdirSync(outside);
+  writeFileSync(join(evidence, "round-1-engine.patch"), "patch");
+  writeFileSync(join(outside, "secret"), "secret");
+  symlinkSync(join(outside, "secret"), join(evidence, "link"));
+  const handlers: Handler[] = [];
+  const extension = checkoutConfinement(root, [evidence]) as (
+    pi: ExtensionAPI,
+  ) => void;
+  extension({
+    on: (_name: string, handler: Handler) => handlers.push(handler),
+  } as unknown as ExtensionAPI);
+  const call = (toolName: string, input: Record<string, unknown>) =>
+    handlers[0]!({
+      type: "tool_call",
+      toolCallId: "call",
+      toolName,
+      input,
+    } as unknown as ToolCallEvent);
+  return { root, evidence, call };
+}
+
+const BUNDLE_PATCH = "../../evidence/round-1-engine.patch";
+
+function blocked(path: string) {
+  return {
+    block: true,
+    reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,
+  };
+}
+
+test("(happy path) a read of a file in a read root passes", (t) => {
+  const f = readRootFixture(t);
+  assert.equal(f.call("read", { path: BUNDLE_PATCH }), undefined);
+});
+
+test("(happy path) grep, find and ls of a read root pass", (t) => {
+  const f = readRootFixture(t);
+  for (const tool of ["grep", "find", "ls"])
+    assert.equal(f.call(tool, { path: "../../evidence" }), undefined);
+});
+
+test("(invariant guard) an edit and a write in a read root are blocked", (t) => {
+  const f = readRootFixture(t);
+  for (const tool of WRITE_TOOLS)
+    assert.deepEqual(
+      f.call(tool, { path: BUNDLE_PATCH }),
+      blocked(BUNDLE_PATCH),
+    );
+});
+
+test("(edge) a read of a symlink in a read root that points outside it is blocked", (t) => {
+  const f = readRootFixture(t);
+  const path = "../../evidence/link";
+  assert.deepEqual(f.call("read", { path }), blocked(path));
+});
+
+test("(invariant guard) an absolute path into a read root is blocked", (t) => {
+  const f = readRootFixture(t);
+  const path = join(f.evidence, "round-1-engine.patch");
+  for (const tool of [...FILE_TOOLS, ...WRITE_TOOLS])
+    assert.deepEqual(f.call(tool, { path }), blocked(path));
+});
+
+test("(invariant guard) with no read root a read of the bundle path is blocked", (t) => {
+  const f = fixture(t);
+  assert.deepEqual(
+    f.call("read", { path: BUNDLE_PATCH }),
+    blocked(BUNDLE_PATCH),
+  );
+});
+
+test("(invariant guard) a read beside a read root is blocked", (t) => {
+  const f = readRootFixture(t);
+  const path = "../outside/secret";
+  assert.deepEqual(f.call("read", { path }), blocked(path));
+  const deep = "../../outside/secret";
+  assert.deepEqual(f.call("read", { path: deep }), blocked(deep));
+});

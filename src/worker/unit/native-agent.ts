@@ -64,6 +64,7 @@ export interface NativeAgentInput {
   knownSecrets: KnownSecrets;
   budget: ExecutionBudget;
   workspace: string;
+  readRoots?: readonly string[];
   hostHome: string;
   env: NodeJS.ProcessEnv;
   denyRead: readonly string[];
@@ -313,11 +314,11 @@ function verificationWritesOf(
 }
 
 function sessionHooks(
-  workspace: string,
+  input: Pick<NativeAgentInput, "workspace" | "readRoots">,
   pinned: InlineExtension,
   writes: VerificationWrites | undefined,
 ): InlineExtension[] {
-  const hooks = [pinned, checkoutConfinement(workspace)];
+  const hooks = [pinned, checkoutConfinement(input.workspace, input.readRoots)];
   if (writes) hooks.push(writes.ownership());
   return hooks;
 }
@@ -379,7 +380,7 @@ export async function openNativeAgent(
         writes,
       ),
       hostHome: input.hostHome,
-      hooks: sessionHooks(input.workspace, pins.hook, writes),
+      hooks: sessionHooks(input, pins.hook, writes),
       context,
       sessionManager,
       knownSecrets: secrets,
