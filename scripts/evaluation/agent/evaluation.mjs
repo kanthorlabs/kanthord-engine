@@ -92,9 +92,12 @@ const EXIT_STOP = 1;
 const EXIT_NO_VERDICT = 3;
 const EXIT_CAP = 4;
 const GRADED_RUN_EXITS = [0, 4, 5];
+const EXIT_RETRYABLE = 75;
+const MAX_RETRYABLE = 3;
 const PROMPT_TEXT_PATH_CODE = "cli.run.agent.prompt_text_path";
 const ACTION_GRADE = "grade";
 const ACTION_STOP = "stop";
+const ACTION_RETRY = "retry";
 const VERDICT_PASS = "pass";
 const VERDICT_FAIL = "fail";
 const VERDICT_NONE = "no verdict";
@@ -557,6 +560,7 @@ export function computeGate(checks, cases, options) {
 
 export function runActionForExit(exitCode, stderrText) {
   if (stderrText.includes(PROMPT_TEXT_PATH_CODE)) return ACTION_STOP;
+  if (exitCode === EXIT_RETRYABLE) return ACTION_RETRY;
   return GRADED_RUN_EXITS.includes(exitCode) ? ACTION_GRADE : ACTION_STOP;
 }
 
@@ -934,6 +938,10 @@ function checkSetChangeBreach(evalSetDir, setCommit) {
   return head !== setCommit || status !== "";
 }
 
+function sessionText(sessionPath) {
+  return existsSync(sessionPath) ? readFileSync(sessionPath, "utf8") : "";
+}
+
 function breachStop(run, breach) {
   appendJsonLine(run.checksPath, breachCheckLine(run, breach));
   return { stop: STOP_BREACH, breach };
@@ -979,14 +987,15 @@ async function guardedAgentCall(run, deps, call) {
       dirname(run.resultsPath),
       run.caseFolder,
     );
-    if (hasProtectedPath(readFileSync(call.sessionPath, "utf8"), pathStrings))
+    if (hasProtectedPath(sessionText(call.sessionPath), pathStrings))
       return breachStop(run, BREACH_PROTECTED_PATH);
   }
   if (checkSetChangeBreach(run.evalSetDir, run.setCommit))
     return breachStop(run, BREACH_SET_CHANGE);
   const stderrText = readFileSync(call.stderrPath, "latin1");
-  if (runActionForExit(exit, stderrText) === ACTION_STOP)
-    return { stop: `${call.label} exit ${exit}` };
+  const action = runActionForExit(exit, stderrText);
+  if (action === ACTION_STOP) return { stop: `${call.label} exit ${exit}` };
+  if (action === ACTION_RETRY) return { stop: null, retry: true };
   return { stop: null };
 }
 
@@ -997,6 +1006,12 @@ function nextJudgeAttempt(runDir) {
     existsSync(join(runDir, `judge-${n}-stderr.txt`))
   )
     n++;
+  return n;
+}
+
+export function nextRunAttempt(resultsDir, caseId, repeat) {
+  let n = 1;
+  while (existsSync(join(resultsDir, caseId, `${repeat}-${n}`))) n++;
   return n;
 }
 
@@ -1070,64 +1085,103 @@ function writeJudgeWorkspace(run, judgeWorkspace) {
   return readdirSync(judgeWorkspace).map((name) => join(judgeWorkspace, name));
 }
 
-async function runDiagnosis(run, gradingRoot, deps) {
+function startGateOpen(run, usd) {
   const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
-  const reserve = parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR;
-  if (!checkStartGate(sum, reserve, run.config.cap_usd))
-    return { stop: STOP_CAP };
+  const reserve = parseUsdCents(usd) / CENTS_PER_DOLLAR;
+  return checkStartGate(sum, reserve, run.config.cap_usd);
+}
+
+async function runDiagnosis(run, gradingRoot, deps) {
+  if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
   const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
   const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
-  const attempt = nextJudgeAttempt(run.runDir);
-  const sessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
-  const called = await guardedAgentCall(run, deps, {
-    label: "judge",
-    model: run.config.judge_model,
-    wall: JUDGE_WALL,
-    args: runAgentArgsJudge(run, judgeWorkspace, sessionPath),
-    inputPaths,
-    sessionPath,
-    stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
-    protectedPathSearch: false,
-  });
-  if (called.stop) return called;
+  let exit75Count = 0;
+  let judgeSessionPath;
+  for (;;) {
+    const attempt = nextJudgeAttempt(run.runDir);
+    judgeSessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
+    const called = await guardedAgentCall(run, deps, {
+      label: "judge",
+      model: run.config.judge_model,
+      wall: JUDGE_WALL,
+      args: runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath),
+      inputPaths,
+      sessionPath: judgeSessionPath,
+      stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+      protectedPathSearch: false,
+    });
+    if (called.stop) return called;
+    if (!called.retry) break;
+    exit75Count++;
+    if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
+    if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
+  }
   const resultLine = readJsonLines(run.resultsPath).findLast(
-    (line) => line.agent === PROFILE_RE && line.session === sessionPath,
+    (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
   );
   appendJsonLine(run.diagnosesPath, {
-    session: sessionPath,
+    session: judgeSessionPath,
     ...parseDiagnosis(resultLine?.text, resultLine?.end),
   });
   return { stop: null };
 }
 
 async function evaluateInRoots(run, deps, roots) {
-  const workspace = join(roots[0], WORKSPACE_NAME);
-  const bundle = join(run.caseFolder, "repo.bundle");
-  const savedConfig = cloneSteps(bundle, workspace, run.caseJson.commit);
-  if (savedConfig === null) return { stop: "the workspace clone failed" };
-  if (!runSetup(run.caseFolder, workspace))
-    return { stop: "setup.sh failed in the workspace" };
-  const called = await guardedAgentCall(run, deps, {
-    label: "run agent",
-    model: run.config.model,
-    wall: run.caseJson.wall,
-    args: runAgentArgs(run, workspace),
-    inputPaths: [],
-    sessionPath: run.sessionPath,
-    stderrPath: join(run.runDir, "stderr.txt"),
-    protectedPathSearch: true,
-  });
-  if (called.stop) return called;
+  let currentRun = run;
+  let exit75Count = 0;
+  let savedConfig;
+  for (;;) {
+    const workspace = join(roots[roots.length - 1], WORKSPACE_NAME);
+    const bundle = join(run.caseFolder, "repo.bundle");
+    savedConfig = cloneSteps(bundle, workspace, run.caseJson.commit);
+    if (savedConfig === null) return { stop: "the workspace clone failed" };
+    if (!runSetup(run.caseFolder, workspace))
+      return { stop: "setup.sh failed in the workspace" };
+    const called = await guardedAgentCall(currentRun, deps, {
+      label: "run agent",
+      model: run.config.model,
+      wall: run.caseJson.wall,
+      args: runAgentArgs(currentRun, workspace),
+      inputPaths: [],
+      sessionPath: currentRun.sessionPath,
+      stderrPath: join(currentRun.runDir, "stderr.txt"),
+      protectedPathSearch: true,
+    });
+    if (called.stop) return called;
+    if (!called.retry) break;
+    exit75Count++;
+    if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
+    if (!startGateOpen(run, run.caseJson.usd)) return { stop: STOP_CAP };
+    const resultsDir = dirname(run.checksPath);
+    const nextAttempt = nextRunAttempt(resultsDir, run.caseId, run.repeat);
+    const nextRunDir = join(
+      resultsDir,
+      run.caseId,
+      `${run.repeat}-${nextAttempt}`,
+    );
+    currentRun = {
+      ...currentRun,
+      runDir: nextRunDir,
+      sessionPath: join(nextRunDir, "session.jsonl"),
+    };
+    roots.push(makeRoot(run.workBaseDir));
+  }
+  const workspace = join(roots[roots.length - 1], WORKSPACE_NAME);
   const gradingRoot = makeRoot(run.workBaseDir);
   roots.push(gradingRoot);
-  const graded = gradeWorkspace(run, { workspace, savedConfig, gradingRoot });
+  const graded = gradeWorkspace(currentRun, {
+    workspace,
+    savedConfig,
+    gradingRoot,
+  });
   if (graded.stop || run.set !== SET_DEV) return graded;
-  return runDiagnosis(run, gradingRoot, deps);
+  return runDiagnosis(currentRun, gradingRoot, deps);
 }
 
 export async function evaluateRun(run, deps) {
   const roots = [makeRoot(run.workBaseDir)];
   try {
+    if (run.diagnosisOnly) return await runDiagnosis(run, roots[0], deps);
     return await evaluateInRoots(run, deps, roots);
   } finally {
     for (const root of roots) rmSync(root, { recursive: true, force: true });
@@ -1304,8 +1358,14 @@ function baseCostSum(resultsPath, sweR, judgeR) {
   return sum;
 }
 
-function planRun(plan, entry, repeat) {
-  const runDir = join(plan.resultsDir, entry.id, `${repeat}-1`);
+function planRun(plan, entry, repeat, runDirOverride) {
+  const runDir =
+    runDirOverride ??
+    join(
+      plan.resultsDir,
+      entry.id,
+      `${repeat}-${nextRunAttempt(plan.resultsDir, entry.id, repeat)}`,
+    );
   return {
     caseId: entry.id,
     caseFolder: entry.folder,
@@ -1330,17 +1390,31 @@ function planRun(plan, entry, repeat) {
   };
 }
 
+function planRunDiagnosisOnly(plan, entry, repeat, checkLine) {
+  return {
+    ...planRun(plan, entry, repeat, dirname(checkLine.session)),
+    diagnosisOnly: true,
+  };
+}
+
 function pendingRuns(plan) {
-  const done = new Set(
-    readJsonLines(join(plan.resultsDir, "checks.jsonl")).map(
-      (line) => `${line.case}:${line.repeat}`,
-    ),
-  );
+  const checks = readJsonLines(join(plan.resultsDir, "checks.jsonl"));
+  const diagnoses = readJsonLines(join(plan.resultsDir, DIAGNOSES_FILE));
+  const done = new Set(checks.map((line) => `${line.case}:${line.repeat}`));
+  const lastChecks = lastCheckLines(checks);
   const runs = [];
   for (const entry of plan.cases) {
     for (let repeat = 1; repeat <= plan.iteration.repeats; repeat++) {
-      if (!done.has(`${entry.id}:${repeat}`))
+      const key = `${entry.id}:${repeat}`;
+      if (!done.has(key)) {
         runs.push(planRun(plan, entry, repeat));
+      } else if (plan.set === SET_DEV) {
+        const lastCheck = lastChecks.find(
+          (line) => line.case === entry.id && line.repeat === repeat,
+        );
+        if (lastCheck && !diagnosisOf(diagnoses, lastCheck))
+          runs.push(planRunDiagnosisOnly(plan, entry, repeat, lastCheck));
+      }
     }
   }
   return runs;
@@ -1349,9 +1423,7 @@ function pendingRuns(plan) {
 async function runPending(plan, deps) {
   plan.credValues = new Set(extractCredentialValues(plan.authPath));
   for (const run of pendingRuns(plan)) {
-    const sum = baseCostSum(run.resultsPath, plan.ratio.r, plan.judgeRatio.r);
-    const reserve = parseUsdCents(run.caseJson.usd) / CENTS_PER_DOLLAR;
-    if (!checkStartGate(sum, reserve, plan.config.cap_usd))
+    if (!run.diagnosisOnly && !startGateOpen(run, run.caseJson.usd))
       return { stop: STOP_CAP };
     const result = await evaluateRun(run, deps);
     if (result.stop) return result;
