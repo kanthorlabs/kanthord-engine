@@ -27,6 +27,7 @@ import {
   captureAuthState,
   checkAuthFileBreach,
   checkFrontend,
+  checkManifestDiff,
   checkProxyEnv,
   checkResultKeys,
   checkScope,
@@ -46,6 +47,7 @@ import {
   gradeRun,
   hasProtectedPath,
   highestTierCost,
+  manifestPath,
   modelBlend,
   nextRunAttempt,
   oneChangeError,
@@ -69,6 +71,7 @@ import {
   startRun,
   validateCase,
   validateConfig,
+  writeManifest,
   writeTranscript,
 } from "./evaluation.mjs";
 
@@ -4115,4 +4118,165 @@ test("L4-U18: validate refuses a folder that is no case folder", (t) => {
   assert.equal(runScript(["validate", root]).status, 1);
   assert.equal(runScript(["validate", join(root, "absent")]).status, 1);
   assert.equal(runScript(["validate"]).status, 1);
+});
+
+test("L4-U21: writeManifest writes shared.sha256 with mode 0600 and correct entries", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  const error = await writeManifest(evalSetDir);
+  assert.equal(error, null);
+  const mPath = manifestPath(evalSetDir);
+  assert.ok(existsSync(mPath));
+  assert.equal(lstatSync(mPath).mode & 0o777, 0o600);
+  const lines = readFileSync(mPath, "utf8").split("\n").filter(Boolean);
+  assert.equal(lines.length, 1);
+  const fields = lines[0].split("\t");
+  assert.equal(fields[0], "F");
+  assert.match(fields[1], /^[0-9a-f]{64}$/);
+  assert.equal(fields[2], "-");
+  assert.equal(fields[3], join("shared", "lib", "setup.js"));
+});
+
+test("L4-U21: writeManifest writes an empty manifest when shared/ is absent", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  mkdirSync(evalSetDir, { recursive: true });
+  const error = await writeManifest(evalSetDir);
+  assert.equal(error, null);
+  assert.equal(readFileSync(manifestPath(evalSetDir), "utf8"), "");
+});
+
+test("L4-U21: writeManifest marks an executable file with x", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "run.sh"), "exit 0\n");
+  chmodSync(join(sharedDir, "run.sh"), 0o755);
+  await writeManifest(evalSetDir);
+  const lines = readFileSync(manifestPath(evalSetDir), "utf8")
+    .split("\n")
+    .filter(Boolean);
+  assert.equal(lines[0].split("\t")[2], "x");
+});
+
+test("L4-U21: writeManifest refuses a symlink with an absolute target", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  symlinkSync("/etc/passwd", join(sharedDir, "link"));
+  const error = await writeManifest(evalSetDir);
+  assert.ok(typeof error === "string" && error.includes("link"));
+});
+
+test("L4-U21: writeManifest refuses a symlink that escapes its shared/<name>/ folder", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  symlinkSync("../../other", join(sharedDir, "escape"));
+  const error = await writeManifest(evalSetDir);
+  assert.ok(typeof error === "string" && error.includes("escape"));
+});
+
+test("L4-U21: checkManifestDiff returns null for a matching tree", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  await writeManifest(evalSetDir);
+  assert.equal(await checkManifestDiff(evalSetDir), null);
+});
+
+test("L4-U21: checkManifestDiff returns null when neither shared/ nor shared.sha256 exists", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  mkdirSync(evalSetDir, { recursive: true });
+  assert.equal(await checkManifestDiff(evalSetDir), null);
+});
+
+test("L4-U21: checkManifestDiff returns the missing entry path", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  await writeManifest(evalSetDir);
+  rmSync(join(sharedDir, "setup.js"));
+  const diff = await checkManifestDiff(evalSetDir);
+  assert.equal(diff, join("shared", "lib", "setup.js"));
+});
+
+test("L4-U21: checkManifestDiff returns the extra entry path", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  await writeManifest(evalSetDir);
+  writeFileSync(join(sharedDir, "extra.js"), "module.exports = 1;\n");
+  const diff = await checkManifestDiff(evalSetDir);
+  assert.ok(typeof diff === "string");
+});
+
+test("L4-U21: checkManifestDiff returns the changed entry path for changed content", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  await writeManifest(evalSetDir);
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = 1;\n");
+  const diff = await checkManifestDiff(evalSetDir);
+  assert.equal(diff, join("shared", "lib", "setup.js"));
+});
+
+test("L4-U21: checkManifestDiff returns the changed entry path for a changed executable bit", async (t) => {
+  const root = tempDir(t);
+  const evalSetDir = join(root, "set");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "run.sh"), "exit 0\n");
+  await writeManifest(evalSetDir);
+  chmodSync(join(sharedDir, "run.sh"), 0o755);
+  const diff = await checkManifestDiff(evalSetDir);
+  assert.equal(diff, join("shared", "lib", "run.sh"));
+});
+
+test("L4-U21: manifest subcommand writes shared.sha256 for the XDG data dir", (t) => {
+  const root = tempDir(t);
+  const xd = join(root, "xd");
+  const evalSetDir = join(xd, "kanthord", "evaluation", "agent");
+  const sharedDir = join(evalSetDir, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  const result = runScript(["manifest"], {
+    env: { XDG_DATA_HOME: xd },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(existsSync(manifestPath(evalSetDir)));
+});
+
+test("L4-U21: manifest subcommand refuses an argument", (t) => {
+  const root = tempDir(t);
+  const result = runScript(["manifest", root]);
+  assert.equal(result.status, 1);
+});
+
+test("L4-U21: validate refuses a case when the manifest differs from the tree", async (t) => {
+  const root = tempDir(t);
+  const { folder, set } = makeValidateCase(root, "c1");
+  const sharedDir = join(set, "shared", "lib");
+  mkdirSync(sharedDir, { recursive: true });
+  writeFileSync(join(sharedDir, "setup.js"), "module.exports = {};\n");
+  await writeManifest(set);
+  writeFileSync(join(sharedDir, "extra.js"), "module.exports = 1;\n");
+  const result = runValidate(root, folder);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /manifest/);
 });

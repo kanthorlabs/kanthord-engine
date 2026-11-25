@@ -1,4 +1,5 @@
 import { execFile, spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -127,6 +128,25 @@ export const TOUCH_SET_TURN: StubTurn = {
   ],
   usage: TURN_USAGE,
 };
+export const MODIFY_SHARED_TURN: StubTurn = {
+  kind: "tool_calls",
+  calls: [
+    {
+      name: "bash",
+      args: {
+        command:
+          "echo x >> '$XD/kanthord/evalu''ation/agent/shared/lib/setup.js'",
+      },
+    },
+  ],
+  usage: TURN_USAGE,
+};
+
+const SHARED_SETUP_JS = "module.exports = {};\n";
+const SHARED_SETUP_SHA256 = createHash("sha256")
+  .update(SHARED_SETUP_JS)
+  .digest("hex");
+const SHARED_MANIFEST = `F\t${SHARED_SETUP_SHA256}\t-\tshared/lib/setup.js\n`;
 
 const CASE_SCRIPT = `
 set -e
@@ -253,7 +273,16 @@ export async function buildEvaluationSet(
     join(set, "binding", "frontend.md"),
     "# Binding\n\nfrontend fixture\n",
   );
-  await writeFileAsTestUser(join(set, ".gitignore"), "config.json\n");
+  await writeFileAsTestUser(
+    join(set, ".gitignore"),
+    "config.json\nshared/*/node_modules/\n",
+  );
+  await writeFileAsTestUser(
+    join(set, "shared", "lib", "setup.js"),
+    SHARED_SETUP_JS,
+  );
+  await writeFileAsTestUser(join(set, "shared.sha256"), SHARED_MANIFEST);
+  await asTestUser(["chmod", "0600", join(set, "shared.sha256")]);
   await asTestUser(["sh", "-c", SET_COMMIT_SCRIPT, "sh", set]);
   await writeFileAsTestUser(
     join(set, "config.json"),

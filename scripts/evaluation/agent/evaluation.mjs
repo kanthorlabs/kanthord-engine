@@ -4,6 +4,7 @@ import {
   appendFileSync,
   closeSync,
   copyFileSync,
+  createReadStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -21,6 +22,7 @@ import { tmpdir, userInfo } from "node:os";
 import {
   basename,
   dirname,
+  isAbsolute,
   join,
   matchesGlob,
   relative,
@@ -61,6 +63,13 @@ const BREACH_CREDENTIAL = "credential";
 const BREACH_AUTH_FILE = "auth_file";
 const BREACH_PROTECTED_PATH = "protected_path";
 const BREACH_SET_CHANGE = "set_change";
+const MANIFEST_FILE = "shared.sha256";
+const SHARED_DIR = "shared";
+const MANIFEST_TYPE_FILE = "F";
+const MANIFEST_TYPE_LINK = "L";
+const MANIFEST_MODE_EXEC = "x";
+const MANIFEST_MODE_NONE = "-";
+const MANIFEST_CONCURRENCY = 64;
 const PROTECTED_PATH_PARTS = ["evaluation/agent", "evaluation/runs", "/check/"];
 const PROTECTED_FILE_NAMES = [
   "check.sh",
@@ -1069,7 +1078,189 @@ export function protectedPathStrings(evalSetDir, resultsDir, caseFolder) {
   return [evalSetDir, resultsDir, caseFolder, ...PROTECTED_PATH_PARTS];
 }
 
-function checkSetChangeBreach(evalSetDir, setCommit) {
+async function hashFile(filePath) {
+  const hash = createHash("sha256");
+  for await (const chunk of createReadStream(filePath)) {
+    hash.update(chunk);
+  }
+  return hash.digest("hex");
+}
+
+async function concurrentMap(items, limit, fn) {
+  const results = new Array(items.length);
+  let idx = 0;
+  async function worker() {
+    while (true) {
+      const i = idx++;
+      if (i >= items.length) break;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
+function symlinkEscapes(evalSetDir, relPath, target) {
+  if (isAbsolute(target)) return true;
+  const parts = relPath.split(sep);
+  if (parts.length < 3) return true;
+  const nameDir = join(evalSetDir, SHARED_DIR, parts[1]);
+  const absLink = join(evalSetDir, relPath);
+  const resolved = resolve(dirname(absLink), target);
+  return !resolved.startsWith(nameDir + sep) && resolved !== nameDir;
+}
+
+function manifestLine(type, content, mode, relPath) {
+  return `${type}\t${content}\t${mode}\t${relPath}\n`;
+}
+
+function parseManifestEntries(text) {
+  const entries = new Map();
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    const tab1 = line.indexOf("\t");
+    const tab2 = line.indexOf("\t", tab1 + 1);
+    const tab3 = line.indexOf("\t", tab2 + 1);
+    if (tab1 === -1 || tab2 === -1 || tab3 === -1) continue;
+    const type = line.slice(0, tab1);
+    const content = line.slice(tab1 + 1, tab2);
+    const mode = line.slice(tab2 + 1, tab3);
+    const relPath = line.slice(tab3 + 1);
+    entries.set(relPath, { type, content, mode });
+  }
+  return entries;
+}
+
+export function manifestPath(evalSetDir) {
+  return join(evalSetDir, MANIFEST_FILE);
+}
+
+export async function writeManifest(evalSetDir) {
+  const sharedDir = join(evalSetDir, SHARED_DIR);
+  if (!existsSync(sharedDir)) {
+    writeFileSync(manifestPath(evalSetDir), "", { mode: FILE_MODE });
+    return null;
+  }
+  const dirEntries = readdirSync(sharedDir, {
+    recursive: true,
+    withFileTypes: true,
+  });
+  const fileItems = [];
+  const linkEntries = [];
+  for (const entry of dirEntries) {
+    const absPath = join(entry.parentPath, entry.name);
+    const relPath = join(SHARED_DIR, relative(sharedDir, absPath));
+    if (entry.isSymbolicLink()) {
+      const target = readlinkSync(absPath);
+      if (symlinkEscapes(evalSetDir, relPath, target))
+        return `manifest: ${relPath}: symlink points outside its folder`;
+      linkEntries.push({
+        type: MANIFEST_TYPE_LINK,
+        content: target,
+        mode: MANIFEST_MODE_NONE,
+        relPath,
+      });
+    } else if (entry.isFile()) {
+      const stat = lstatSync(absPath);
+      const mode = stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE;
+      fileItems.push({ relPath, absPath, mode });
+    }
+  }
+  const hashes = await concurrentMap(
+    fileItems,
+    MANIFEST_CONCURRENCY,
+    ({ absPath }) => hashFile(absPath),
+  );
+  const allEntries = [...linkEntries];
+  for (let i = 0; i < fileItems.length; i++) {
+    allEntries.push({
+      type: MANIFEST_TYPE_FILE,
+      content: hashes[i],
+      mode: fileItems[i].mode,
+      relPath: fileItems[i].relPath,
+    });
+  }
+  allEntries.sort((a, b) =>
+    a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0,
+  );
+  const lines = allEntries.map(({ type, content, mode, relPath }) =>
+    manifestLine(type, content, mode, relPath),
+  );
+  writeFileSync(manifestPath(evalSetDir), lines.join(""), { mode: FILE_MODE });
+  return null;
+}
+
+export async function checkManifestDiff(evalSetDir) {
+  const manifestFile = manifestPath(evalSetDir);
+  const sharedDir = join(evalSetDir, SHARED_DIR);
+  const manifestExists = existsSync(manifestFile);
+  const sharedExists = existsSync(sharedDir);
+  if (!manifestExists && !sharedExists) return null;
+  const expected = parseManifestEntries(
+    manifestExists ? readFileSync(manifestFile, "utf8") : "",
+  );
+  const fileItems = [];
+  const actual = new Map();
+  if (sharedExists) {
+    const dirEntries = readdirSync(sharedDir, {
+      recursive: true,
+      withFileTypes: true,
+    });
+    for (const entry of dirEntries) {
+      const absPath = join(entry.parentPath, entry.name);
+      const relPath = join(SHARED_DIR, relative(sharedDir, absPath));
+      if (entry.isSymbolicLink()) {
+        const target = readlinkSync(absPath);
+        actual.set(relPath, {
+          type: MANIFEST_TYPE_LINK,
+          content: target,
+          mode: MANIFEST_MODE_NONE,
+        });
+      } else if (entry.isFile()) {
+        const stat = lstatSync(absPath);
+        const mode =
+          stat.mode & 0o111 ? MANIFEST_MODE_EXEC : MANIFEST_MODE_NONE;
+        fileItems.push({ relPath, absPath, mode });
+      }
+    }
+  }
+  const hashes = await concurrentMap(
+    fileItems,
+    MANIFEST_CONCURRENCY,
+    ({ absPath }) => hashFile(absPath),
+  );
+  for (let i = 0; i < fileItems.length; i++) {
+    const { relPath, mode } = fileItems[i];
+    actual.set(relPath, {
+      type: MANIFEST_TYPE_FILE,
+      content: hashes[i],
+      mode,
+    });
+  }
+  const expectedPaths = [...expected.keys()].sort();
+  const actualPaths = [...actual.keys()].sort();
+  let ei = 0;
+  let ai = 0;
+  while (ei < expectedPaths.length && ai < actualPaths.length) {
+    const ep = expectedPaths[ei];
+    const ap = actualPaths[ai];
+    if (ep < ap) return ep;
+    if (ep > ap) return ap;
+    const e = expected.get(ep);
+    const a = actual.get(ep);
+    if (e.type !== a.type || e.content !== a.content || e.mode !== a.mode)
+      return ep;
+    ei++;
+    ai++;
+  }
+  if (ei < expectedPaths.length) return expectedPaths[ei];
+  if (ai < actualPaths.length) return actualPaths[ai];
+  return null;
+}
+
+async function checkSetChangeBreach(evalSetDir, setCommit) {
   const head = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
   const status = gitOutput(evalSetDir, [
     "--no-optional-locks",
@@ -1077,7 +1268,8 @@ function checkSetChangeBreach(evalSetDir, setCommit) {
     "--porcelain",
     "--untracked-files=all",
   ]);
-  return head !== setCommit || status !== "";
+  if (head !== setCommit || status !== "") return true;
+  return (await checkManifestDiff(evalSetDir)) !== null;
 }
 
 function sessionText(sessionPath) {
@@ -1132,7 +1324,7 @@ async function guardedAgentCall(run, deps, call) {
     if (hasProtectedPath(sessionText(call.sessionPath), pathStrings))
       return breachStop(run, BREACH_PROTECTED_PATH);
   }
-  if (checkSetChangeBreach(run.evalSetDir, run.setCommit))
+  if (await checkSetChangeBreach(run.evalSetDir, run.setCommit))
     return breachStop(run, BREACH_SET_CHANGE);
   const stderrText = readFileSync(call.stderrPath, "latin1");
   const action = runActionForExit(exit, stderrText);
@@ -1495,6 +1687,11 @@ async function buildPlan(start, options) {
   if (read.error) return read;
   const setCommit = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
   if (setCommit === null) return { error: `no set commit in ${evalSetDir}` };
+  const manifestDiff = await checkManifestDiff(evalSetDir);
+  if (manifestDiff !== null)
+    return {
+      error: `manifest: ${manifestDiff}: tree differs from manifest`,
+    };
   const cases = readCases(evalSetDir, options.set);
   if (cases.error) return cases;
   const authStart = captureAuthState(start.authPath);
@@ -2395,7 +2592,7 @@ function validatedReferenceError(caseFolder, caseJson, root) {
   return null;
 }
 
-function validateCaseFolder(caseFolder) {
+async function validateCaseFolder(caseFolder) {
   const caseJson = readJsonFile(join(caseFolder, "case.json"));
   const caseError = validateCase(caseJson);
   if (caseError) return caseError;
@@ -2403,6 +2600,10 @@ function validateCaseFolder(caseFolder) {
     (name) => !existsSync(join(caseFolder, name)),
   );
   if (absent) return `no ${absent}`;
+  const evalSetDir = resolve(caseFolder, "../../..");
+  const manifestDiff = await checkManifestDiff(evalSetDir);
+  if (manifestDiff !== null)
+    return `manifest: ${manifestDiff}: tree differs from manifest`;
   const root = mkdtempSync(join(tmpdir(), "kanthord-validate-"));
   try {
     return (
@@ -2424,8 +2625,22 @@ async function validateCommand(argv) {
   if (positionals.length !== 1) return refuse("validate: pass one case folder");
   if (!existsSync(positionals[0]))
     return refuse(`validate: no folder ${positionals[0]}`);
-  const error = validateCaseFolder(realpathSync(positionals[0]));
+  const error = await validateCaseFolder(realpathSync(positionals[0]));
   return error ? refuse(`validate: ${error}`) : EXIT_OK;
+}
+
+async function manifestCommand(argv) {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    strict: true,
+    allowPositionals: true,
+  });
+  if (positionals.length !== 0) return refuse("manifest: pass no argument");
+  const dirs = directories(process.env);
+  const evalSetDir = join(dirs.data, "evaluation", "agent");
+  const error = await writeManifest(evalSetDir);
+  return error ? refuse(error) : EXIT_OK;
 }
 
 const COMMANDS = {
@@ -2433,11 +2648,12 @@ const COMMANDS = {
   report: reportCommand,
   scan: scanCommand,
   validate: validateCommand,
+  manifest: manifestCommand,
 };
 
 async function main(argv) {
   if (!Object.hasOwn(COMMANDS, argv[0]))
-    return refuse("the subcommand is run, report, scan or validate");
+    return refuse("the subcommand is run, report, scan, validate or manifest");
   return COMMANDS[argv[0]](argv.slice(1));
 }
 
