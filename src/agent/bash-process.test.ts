@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { type BashProcess, processBashOperations } from "./bash-process.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { killIfPresent, temporary } from "../kernel/test-support.ts";
 import {
   endProcessGroups,
   markedGroups,
@@ -56,15 +56,10 @@ test("a background child of a worker bash call is dead when the call ends", asyn
 });
 
 const CASE_TIMEOUT_MS = 30_000;
-const F79_OPEN = {
-  todo: "F79 path 5: stays open, no task of this node fixes it",
-  timeout: CASE_TIMEOUT_MS,
-};
 const KILL_TIMEOUT_SECONDS = 1;
 const PRINT_POLLS = 100;
 const PRINT_POLL_MS = 50;
-const SETTLE_WAIT_MS = 500;
-const SIGNAL_WAIT_MS = 300;
+const KILL_FAILURE_BOUND_MS = 2000;
 const GROUP_CHILDREN =
   "sleep 30 >/dev/null 2>&1 & echo $!; (sleep 30 >/dev/null 2>&1 & echo $!)";
 const GROUP_PIDS = 2;
@@ -80,8 +75,6 @@ const SIGNAL_TERM = "SIGTERM";
 const ABORTED = "aborted";
 const GROUP_PID_LIMIT = 0;
 const NO_PIDS = 0;
-const PENDING = "pending";
-const SETTLED = "settled";
 
 function processField(field: string, pid: number): string {
   return execFileSync("ps", ["-o", `${field}=`, "-p", String(pid)])
@@ -224,8 +217,8 @@ test(
 );
 
 test(
-  "F79 path 5: a kill failure leaves a stopped descendant that ignores SIGTERM and holds the call open",
-  F79_OPEN,
+  "F79 path 5: a kill failure resumes each stopped group and the call rejects with the failure",
+  { timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const signal = process.kill.bind(process);
     const refused = t.mock.method(
@@ -249,10 +242,6 @@ test(
       },
       signal: controller.signal,
     });
-    const settled = running.then(
-      () => SETTLED,
-      () => SETTLED,
-    );
     const printed = await printedUntil(
       () => output,
       (text) =>
@@ -261,18 +250,19 @@ test(
     );
     const [descendant] = spawnedPids(t, [{ type: "text", text: printed }]);
     assert.ok(descendant);
-    controller.abort();
-    assert.equal(
-      await Promise.race([settled, delay(SETTLE_WAIT_MS, PENDING)]),
-      PENDING,
-    );
-    assert.match(processField("stat", descendant), STOPPED_STATE);
-    process.kill(descendant, SIGNAL_TERM);
-    await delay(SIGNAL_WAIT_MS);
-    assert.equal(alive(descendant), true);
     const group = Number(processField("pgid", descendant));
-    refused.mock.restore();
-    process.kill(-group, SIGNAL_KILL);
+    t.after(() => {
+      refused.mock.restore();
+      killIfPresent(-group);
+    });
+    const aborted = Date.now();
+    controller.abort();
     await assert.rejects(running, /kill not permitted/);
+    assert.ok(Date.now() - aborted < KILL_FAILURE_BOUND_MS);
+    assert.doesNotMatch(processField("stat", descendant), STOPPED_STATE);
+    process.kill(descendant, SIGNAL_TERM);
+    for (let poll = 0; poll < PRINT_POLLS && alive(descendant); poll += 1)
+      await delay(PRINT_POLL_MS);
+    assert.equal(alive(descendant), false);
   },
 );

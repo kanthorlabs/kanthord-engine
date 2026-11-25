@@ -13,6 +13,7 @@ import {
 const MILLISECONDS_PER_SECOND = 1000;
 const TIMER_LIMIT_MS = 2_147_483_647;
 const OUTPUT_IDLE_MS = 100;
+const KILL_FAILURE_SETTLE_MS = 500;
 const NO_TIMEOUT_MS = 0;
 const SIGNAL_EXIT_BASE = 128;
 const FAILED_EXIT = 1;
@@ -63,18 +64,22 @@ async function runBash(
   if (signal?.aborted) throw new Error(ABORTED);
   await assertWorkingDirectory(cwd);
   const child = spawnShell(shell, command, { cwd, env, marker: group.marker });
-  const killer = childKiller(child);
+  const killer = childKiller(child, onData);
   const timer = armKillTimer(killer.kill, timeoutMs);
   signal?.addEventListener("abort", killer.kill, { once: true });
   if (signal?.aborted) killer.kill();
   child.stdout?.on("data", onData);
   child.stderr?.on("data", onData);
   try {
-    const exitCode = await childExit(child);
+    const exitCode = await Promise.race([
+      childExit(child),
+      killer.failureSettled.then(() => null),
+    ]);
     assertBashOutcome(killer, { signal, timeout });
     return { exitCode: exitCode ?? signalExit(child) };
   } finally {
     clearTimeout(timer);
+    killer.dispose();
     signal?.removeEventListener("abort", killer.kill);
     settleChild(child, killer.wasKilled(), { settled, group });
   }
@@ -129,11 +134,21 @@ interface ChildKiller {
   kill: () => void;
   wasKilled: () => boolean;
   failure: () => unknown;
+  failureSettled: Promise<void>;
+  dispose: () => void;
 }
 
-function childKiller(child: ChildProcess): ChildKiller {
+function childKiller(
+  child: ChildProcess,
+  onData: (data: Buffer) => void,
+): ChildKiller {
   let killed = false;
   let killFailure: unknown = null;
+  let failureTimer: NodeJS.Timeout | undefined;
+  let settleFailure = () => {};
+  const failureSettled = new Promise<void>((resolve) => {
+    settleFailure = resolve;
+  });
   return {
     kill: () => {
       if (killed || child.pid === undefined) return;
@@ -142,11 +157,27 @@ function childKiller(child: ChildProcess): ChildKiller {
         killTree(child);
       } catch (error) {
         killFailure = error;
+        failureTimer = setTimeout(settleFailure, KILL_FAILURE_SETTLE_MS);
       }
     },
     wasKilled: () => killed,
     failure: () => killFailure,
+    failureSettled,
+    dispose: () => {
+      clearTimeout(failureTimer);
+      if (killFailure !== null) abandonOutput(child, onData);
+    },
   };
+}
+
+function abandonOutput(
+  child: ChildProcess,
+  onData: (data: Buffer) => void,
+): void {
+  child.stdout?.off("data", onData);
+  child.stderr?.off("data", onData);
+  child.stdout?.destroy();
+  child.stderr?.destroy();
 }
 
 function markedEnvironment(

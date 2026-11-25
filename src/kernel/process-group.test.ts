@@ -29,6 +29,7 @@ const FORKED = 1003;
 const FOREIGN = 2000;
 const STOP = "SIGSTOP";
 const KILL = "SIGKILL";
+const CONT = "SIGCONT";
 const TERM = "SIGTERM";
 const ONE_MS = 1;
 const ESCAPED_SECONDS = 60;
@@ -38,6 +39,7 @@ const FORKS_MAX = 50;
 const POLLS = 100;
 const START_POLLS = 500;
 const TWO_FAILURES = 2;
+const BOTH_CODES = "EPERM,EACCES";
 const NO_READS = 0;
 const NO_PROCESSES = 0;
 const ONE_ORPHAN = 1;
@@ -199,6 +201,94 @@ test("an absent group is no failure, one failure throws itself and two throw an 
     (error: unknown) =>
       error instanceof AggregateError && error.errors.length === TWO_FAILURES,
   );
+});
+
+interface RefusedSignal {
+  signal: string;
+  group: number;
+  code: string;
+}
+
+function refusingSystem(refused: RefusedSignal[]) {
+  const { system, signals } = recordingSystem([
+    () => [ownRow, leaderRow, { pid: CHILD, ppid: LEADER, group: CHILD }],
+  ]);
+  const record = system.signalGroup;
+  system.signalGroup = (group, signal) => {
+    record(group, signal);
+    const match = refused.find(
+      (entry) => entry.signal === signal && entry.group === group,
+    );
+    if (match) throw errorWithCode(match.code);
+  };
+  return { system, signals };
+}
+
+function resumed(signals: readonly string[]): string[] {
+  return signals.filter((signal) => signal.startsWith(CONT));
+}
+
+test("a stopped group whose kill is refused is resumed and the refusal is thrown", () => {
+  const { system, signals } = refusingSystem([
+    { signal: KILL, group: CHILD, code: "EPERM" },
+  ]);
+  assert.throws(() => killProcessTree(LEADER, system), /EPERM/);
+  assert.deepEqual(resumed(signals), [`${CONT} ${CHILD}`]);
+  assert.ok(
+    signals.lastIndexOf(`${KILL} ${CHILD}`) <
+      signals.indexOf(`${CONT} ${CHILD}`),
+  );
+});
+
+test("a stopped group whose kill passes is not resumed", () => {
+  const { system, signals } = refusingSystem([]);
+  killProcessTree(LEADER, system);
+  assert.deepEqual(resumed(signals), []);
+});
+
+test("a stopped group that is absent at the kill is not resumed and is no failure", () => {
+  const { system, signals } = refusingSystem([
+    { signal: KILL, group: CHILD, code: "ESRCH" },
+  ]);
+  killProcessTree(LEADER, system);
+  assert.deepEqual(resumed(signals), []);
+});
+
+test("a refused resume is a second failure next to the refused kill", () => {
+  const { system } = refusingSystem([
+    { signal: KILL, group: CHILD, code: "EPERM" },
+    { signal: CONT, group: CHILD, code: "EACCES" },
+  ]);
+  assert.throws(
+    () => killProcessTree(LEADER, system),
+    (error: unknown) =>
+      error instanceof AggregateError &&
+      error.errors.length === TWO_FAILURES &&
+      error.errors.map((inner: Error) => inner.message).join() === BOTH_CODES,
+  );
+});
+
+test("a resume that finds the group absent is no failure", () => {
+  const { system } = refusingSystem([
+    { signal: KILL, group: CHILD, code: "EPERM" },
+    { signal: CONT, group: CHILD, code: "ESRCH" },
+  ]);
+  assert.throws(() => killProcessTree(LEADER, system), /EPERM/);
+});
+
+test("a group that was never stopped is not resumed when its kill is refused", () => {
+  const { system, signals } = recordingSystem([
+    () => {
+      throw new Error("table read failed");
+    },
+  ]);
+  const record = system.signalGroup;
+  system.signalGroup = (group, signal) => {
+    record(group, signal);
+    if (signal === KILL) throw errorWithCode("EPERM");
+  };
+  assert.throws(() => killProcessTree(LEADER, system), AggregateError);
+  assert.deepEqual(resumed(signals), []);
 });
 
 test("a kill after the leader exited signals only the leader group and walks no table", () => {
