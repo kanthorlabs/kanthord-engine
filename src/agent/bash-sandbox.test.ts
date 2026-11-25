@@ -591,6 +591,36 @@ test("(invariant guard) a PATH entry inside a host deny entry leaves that entry 
   assert.ok(denied.includes(place.config));
 });
 
+test("(invariant guard) the allow list holds no PATH entry that lies inside a host deny entry", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_STATE_HOME: join(home, ".local", "state"),
+    XDG_DATA_HOME: join(home, ".local", "share"),
+  };
+  const place = directories(env);
+  const piBin = join(home, ".pi", "agent", "bin");
+  const configBin = join(place.config, "bin");
+  const toolBin = join(home, ".local", "bin");
+  for (const directory of [piBin, configBin, toolBin])
+    mkdirSync(directory, { recursive: true });
+  const allowed = await allowReadOf(
+    {
+      env: {
+        ...env,
+        TMPDIR: tmp,
+        PATH: [piBin, configBin, toolBin].join(":"),
+      },
+      denyRead: hostDenyRead(env),
+    },
+    cwd,
+  );
+  assert.ok(allowed.includes(toolBin));
+  assert.ok(!allowed.includes(piBin));
+  assert.ok(!allowed.includes(configBin));
+});
+
 test("(edge) a cwd outside the home directory leaves the home denied and the tool roots allowed", async (t) => {
   const { root, home, tmp } = homeLayout(t);
   const cwd = join(root, "workspace");

@@ -57,6 +57,7 @@ const NPM_CACHE_DIRECTORY = "npm-cache";
 const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
+const HOME_PREFIX = "~/";
 const NODE_EXECUTABLE = "node";
 const PROJECT_PACKAGES_DIRECTORY = "node_modules";
 const COMMAND_VARIABLE = "KANTHORD_BASH_COMMAND";
@@ -228,13 +229,28 @@ function instanceRoots(host: SandboxHost): string[] {
   return host.root === undefined ? [] : [host.root];
 }
 
+function expandedHome(path: string, home: string): string {
+  return path.startsWith(HOME_PREFIX)
+    ? join(home, path.slice(HOME_PREFIX.length))
+    : path;
+}
+
+function outsideHostDeny(host: SandboxHost, home: string, root: string) {
+  return !host.denyRead.some((denied) =>
+    isWithin(expandedHome(denied, home), root),
+  );
+}
+
 function keptReadPaths(host: SandboxHost, cwd: string): string[] {
+  const home = homeOf(host.env);
   return [
     ...new Set([
       cwd,
       host.env.TMPDIR ?? TEMPORARY_FALLBACK,
       ...instanceRoots(host),
-      ...toolRoots(host.env, homeOf(host.env)),
+      ...toolRoots(host.env, home).filter((root) =>
+        outsideHostDeny(host, home, root),
+      ),
     ]),
   ];
 }
