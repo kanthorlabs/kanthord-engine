@@ -164,6 +164,8 @@ const RERUN_FILE_LIMIT = 8;
 const RUN_TEMPORARY_PREFIX = "kanthord-affected-";
 const FAILED_FILE_NAME = "failed.jsonl";
 const AFFECTED_REPORTER = "./scripts/affected-reporter.mjs";
+const PROGRESS_REPORTER = "./scripts/progress-reporter.mjs";
+const STDERR_DESTINATION = "--test-reporter-destination=stderr";
 const PNPM = "pnpm";
 const CHANGES_ENVIRONMENT = "KANTHORD_CHANGES";
 const REPORT_ENVIRONMENT = "KANTHORD_AFFECTED_REPORT";
@@ -503,7 +505,7 @@ export function computeChanges(root, base) {
   return [...tracked, ...untracked];
 }
 
-export function runTests(root, files, concurrency) {
+export function runTests(root, files, concurrency, { progress = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), RUN_TEMPORARY_PREFIX));
   try {
     const destination = join(directory, FAILED_FILE_NAME);
@@ -515,6 +517,9 @@ export function runTests(root, files, concurrency) {
         `${REPORTER_OPTION}${AFFECTED_REPORTER}`,
         STDOUT_DESTINATION,
         `${DESTINATION_OPTION}${destination}`,
+        ...(progress
+          ? [`${REPORTER_OPTION}${PROGRESS_REPORTER}`, STDERR_DESTINATION]
+          : []),
         ...files,
       ],
       { cwd: root, stdio: STDIO_INHERIT },

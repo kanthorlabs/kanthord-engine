@@ -649,6 +649,8 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
     PATH: HOST_PATH,
   });
   assert.equal(result.status, FAILED);
+  assert.doesNotMatch(result.stderr, /^(start|end): /m);
+  assert.doesNotMatch(result.stdout, /^(start|end): /m);
   assert.deepEqual(withoutFloor(result.report), {
     version: 3,
     selection: "related",
