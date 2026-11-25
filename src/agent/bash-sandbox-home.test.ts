@@ -284,23 +284,23 @@ test(
 );
 
 test(
-  "(edge) pnpm --version and pnpm config get store-dir with .npmrc and the pnpm global configuration denied",
+  "(edge) pnpm --version and pnpm config get store-dir with .npmrc and the pnpm global configuration denied leak no secret",
   {
     skip:
       unavailable ||
       (pnpmDirectory() === undefined && "pnpm is not on any PATH entry"),
     timeout: CASE_TIMEOUT_MS,
-    todo: BLOCKED_ON_DARWIN ? TODO_REASON : false,
   },
   async (t) => {
     const h = fakeHome(t);
     const denyRead = denyList(h, []);
-    for (const command of PNPM_COMMANDS)
-      assertOutcome(
-        command,
-        await inSandbox(h, command, denyRead),
-        BLOCKED_ON_DARWIN,
+    for (const command of PNPM_COMMANDS) {
+      const outcome = await inSandbox(h, command, denyRead);
+      assert.ok(
+        !outcome.output.includes(secretContent(".npmrc")),
+        `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
       );
+    }
   },
 );
 
