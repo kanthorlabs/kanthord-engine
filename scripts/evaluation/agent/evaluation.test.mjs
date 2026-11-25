@@ -44,6 +44,7 @@ import {
   hasProtectedPath,
   highestTierCost,
   modelBlend,
+  nextRunAttempt,
   parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
@@ -1400,8 +1401,17 @@ test("L4-U12: the exits 0, 4 and 5 grade the run", () => {
 });
 
 test("L4-U12: the exits 1 and 2 and each other exit stop the evaluation", () => {
-  for (const exit of [1, 2, 3, 75, 100])
+  for (const exit of [1, 2, 3, 100])
     assert.equal(runActionForExit(exit, ""), "stop", String(exit));
+});
+
+test("L4-U12: exit 75 retries the run", () => {
+  assert.equal(runActionForExit(75, ""), "retry");
+});
+
+test("L4-U12: cli.run.agent.prompt_text_path in stderr stops exit 75 before retry", () => {
+  const stderr = '{"code":"cli.run.agent.prompt_text_path"}\n';
+  assert.equal(runActionForExit(75, stderr), "stop");
 });
 
 test("L4-U12: cli.run.agent.prompt_text_path in stderr stops the evaluation", () => {
@@ -1421,6 +1431,64 @@ test("L4-U12: an exit 1 of run agent stops the evaluation with exit 1 and no che
   );
   const report = await reportEvaluation(run.start(["--evaluation", "e"]));
   assert.equal(report.verdict, "no verdict");
+});
+
+test("L4-U12: nextRunAttempt returns the first attempt number with no run directory", (t) => {
+  const root = tempDir(t);
+  const resultsDir = join(root, "r");
+  assert.equal(nextRunAttempt(resultsDir, "c1", 1), 1);
+  mkdirSync(join(resultsDir, "c1", "1-1"), { recursive: true });
+  assert.equal(nextRunAttempt(resultsDir, "c1", 1), 2);
+  mkdirSync(join(resultsDir, "c1", "1-2"), { recursive: true });
+  assert.equal(nextRunAttempt(resultsDir, "c1", 1), 3);
+  assert.equal(nextRunAttempt(resultsDir, "c1", 2), 1);
+});
+
+test("L4-U12: the third exit 75 of one run stops the evaluation with exit 1 and no check line", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent({ exit: 75, noResult: true });
+  const output = await captured(() => runPlan(plan, agent.deps));
+  const results = join(fixture.runs, "e");
+  assert.equal(output.value, 1);
+  assert.equal(agent.calls.length, 3);
+  assert.deepEqual(jsonLines(join(results, "checks.jsonl")), []);
+  assert.deepEqual(workRoots(fixture), []);
+});
+
+test("L4-U12: a resume runs the missing diagnosis of a dev run with a check line", async (t) => {
+  const fixture = makeDevFixture(t, {
+    d1: { json: { usd: "0.1usd" } },
+    config: { judge_usd: "0.51usd", cap_usd: 0.5 },
+  });
+  const plan1 = await startRun(fixture.start(devArgs("e")));
+  assert.equal(plan1.error, undefined);
+  const agent1 = fakeDevAgent({});
+  const output1 = await captured(() => runPlan(plan1, agent1.deps));
+  const results = join(fixture.runs, "e");
+  assert.equal(output1.value, 4);
+  assert.equal(agent1.calls.length, 1);
+  assert.equal(agent1.calls[0][2], "swe@1");
+  assert.equal(jsonLines(join(results, "checks.jsonl")).length, 1);
+  assert.equal(jsonLines(join(results, "diagnoses.jsonl")).length, 0);
+  writeFile(
+    join(fixture.set, "config.json"),
+    JSON.stringify({
+      ...VALID_CONFIG,
+      judge_usd: "0.51usd",
+      cap_usd: 5,
+    }),
+  );
+  const plan2 = await startRun(fixture.start(devArgs("e")));
+  assert.equal(plan2.error, undefined);
+  const agent2 = fakeDevAgent({});
+  const output2 = await captured(() => runPlan(plan2, agent2.deps));
+  assert.equal(output2.value, 0);
+  assert.equal(agent2.calls[0][2], "re@1");
+  assert.equal(jsonLines(join(results, "checks.jsonl")).length, 2);
+  assert.equal(jsonLines(join(results, "diagnoses.jsonl")).length, 2);
+  assert.deepEqual(workRoots(fixture), []);
 });
 
 test("L4-U13: the start checks refuse NODE_USE_ENV_PROXY", () => {
