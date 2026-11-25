@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { PromptTemplate } from "../../agent/contract.ts";
 import type { SetupFailure } from "./environment-setup.ts";
 import { canonicalJSON } from "../../kernel/json.ts";
@@ -73,7 +74,11 @@ import {
 import { renderWorkPrompt } from "../../agent/prompt-composer.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import { commandOwners } from "./release-gate.ts";
-import { type ExamineCheckout, workRepositoriesOf } from "./workspace.ts";
+import {
+  EVIDENCE_DIRECTORY,
+  type ExamineCheckout,
+  workRepositoriesOf,
+} from "./workspace.ts";
 import { ActionResultKind, ExecutionIntent } from "../contract.ts";
 import {
   environmentDigestsOf,
@@ -104,7 +109,11 @@ export async function requestAndRelease(
 const NO_ITEMS = 0;
 const NO_PATCHES = 0;
 export const VERIFICATION_SUBJECT = "Evaluation verification results";
-type OpenAgent = (directory: string) => Promise<NativeAgent>;
+type OpenAgent = (
+  directory: string,
+  verification?: undefined,
+  readRoots?: readonly string[],
+) => Promise<NativeAgent>;
 
 interface JudgedFacts {
   blockers: readonly Blocker[];
@@ -577,6 +586,12 @@ async function submitPatchEvidence(context: EvaluateContext) {
   return patchIds;
 }
 
+function evidenceReadRoots(prepared: PreparedEvaluation): string[] {
+  return prepared.key === prepared.directory
+    ? []
+    : [join(prepared.key, EVIDENCE_DIRECTORY)];
+}
+
 type EvaluationAssessment = Awaited<ReturnType<typeof evaluate>>;
 
 async function unchangedAssessmentOf(
@@ -643,6 +658,7 @@ async function evaluate(
     input.setup.intent === ExecutionIntent.Examine
       ? await readDependencies(run)
       : null;
+  const readRoots = evidenceReadRoots(prepared);
   const judgement = await endedByBudget(run, budget, () =>
     judge(
       input,
@@ -652,7 +668,7 @@ async function evaluate(
       verificationRun,
       prepared.directory,
       prepared.checkouts,
-      openAgent,
+      (directory) => openAgent(directory, undefined, readRoots),
       dependencies,
       prepared.setupFailure,
       affected,

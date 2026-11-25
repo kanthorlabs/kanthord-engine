@@ -21,6 +21,12 @@ const FILE_TOOLS: ReadonlySet<string> = new Set([
   "edit",
   "write",
 ]);
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "read",
+  "grep",
+  "find",
+  "ls",
+]);
 const HOME_PREFIX = "~";
 const AT_PREFIX = "@";
 const FILE_URL = /^file:\/\//;
@@ -92,30 +98,64 @@ function readTarget(path: string): string {
   );
 }
 
-function leaves(root: string, raw: string, toolName: string): boolean {
+function relativePath(raw: string): string | null {
   let path: string;
   try {
     path = normalized(raw);
   } catch {
-    return true;
+    return null;
   }
-  if (isAbsolute(path) || path.startsWith(HOME_PREFIX)) return true;
-  if (path.split(SEGMENT_SEPARATOR).includes(PARENT_SEGMENT)) return true;
-  const joined = resolve(root, path);
-  const resolved = resolveNearest(
-    toolName === READ_TOOL ? readTarget(joined) : joined,
-  );
-  return resolved === null || !inside(realpathSync(root), resolved);
+  return isAbsolute(path) || path.startsWith(HOME_PREFIX) ? null : path;
 }
 
-export function checkoutConfinement(root: string): InlineExtension {
+function resolvedTarget(
+  root: string,
+  path: string,
+  toolName: string,
+): string | null {
+  const joined = resolve(root, path);
+  return resolveNearest(toolName === READ_TOOL ? readTarget(joined) : joined);
+}
+
+function inReadRoot(readRoots: readonly string[], resolved: string): boolean {
+  return readRoots.some((readRoot) => {
+    const real = resolveNearest(readRoot);
+    return real !== null && inside(real, resolved);
+  });
+}
+
+interface Roots {
+  root: string;
+  readRoots: readonly string[];
+}
+
+function leaves(
+  { root, readRoots }: Roots,
+  raw: string,
+  toolName: string,
+): boolean {
+  const path = relativePath(raw);
+  if (path === null) return true;
+  const resolved = resolvedTarget(root, path, toolName);
+  if (resolved === null) return true;
+  if (READ_ONLY_TOOLS.has(toolName) && inReadRoot(readRoots, resolved))
+    return false;
+  if (path.split(SEGMENT_SEPARATOR).includes(PARENT_SEGMENT)) return true;
+  return !inside(realpathSync(root), resolved);
+}
+
+export function checkoutConfinement(
+  root: string,
+  readRoots: readonly string[] = [],
+): InlineExtension {
   assert.ok(isAbsolute(root));
+  assert.ok(readRoots.every((readRoot) => isAbsolute(readRoot)));
   return (pi) => {
     pi.on("tool_call", (event) => {
       if (!FILE_TOOLS.has(event.toolName)) return undefined;
       const { path } = event.input as { path?: unknown };
       if (!isString(path)) return undefined;
-      if (!leaves(root, path, event.toolName)) return undefined;
+      if (!leaves({ root, readRoots }, path, event.toolName)) return undefined;
       return {
         block: true,
         reason: `The path ${path} is outside the checkout. Use a relative path inside the checkout.`,

@@ -54,6 +54,11 @@ import {
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { simpleGit } from "simple-git";
+import type {
+  ExtensionAPI,
+  ToolCallEvent,
+} from "@earendil-works/pi-coding-agent";
+import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
@@ -836,8 +841,14 @@ async function reviewOf(
     resource_budget: setup.resource_budget,
   });
   let opens = 0;
-  const open = async () => {
+  const openings: { directory: string; readRoots?: readonly string[] }[] = [];
+  const open = async (
+    directory: string,
+    _verification?: undefined,
+    readRoots?: readonly string[],
+  ) => {
     opens++;
+    openings.push({ directory, readRoots });
     return {
       budget,
       instruct: async (_work: WorkPrompt, instruction: string) => {
@@ -876,6 +887,7 @@ async function reviewOf(
     actionRequests,
     workspaces,
     opens: () => opens,
+    openings,
   };
 }
 
@@ -1537,6 +1549,46 @@ test("a round with a review base submits one patch evidence and the findings wit
   assert.deepEqual(attributes[EvaluationAttribute.ActionLabels], ["S1"]);
   assert.equal(attributes[EvaluationAttribute.FixedCount], SINGLE_RELEASE);
   assert.deepEqual(attributes[EvaluationAttribute.UnmetIds], []);
+});
+
+test("regression: K194 a review turn reads patch_paths[0] through the confinement hook and gets the patch text", async (t) => {
+  const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
+  const review = await reviewOf(t, "true", undefined, {
+    bindings: [binding],
+    transport: localTransport,
+    round: secondRound([binding], true),
+    reply: ROUND_SUCCESS,
+  });
+  const bundle = JSON.parse(
+    review.instructions[0]!.split("\n")
+      .find((line) => line.startsWith("Evidence: "))!
+      .slice("Evidence: ".length),
+  );
+  const [opening] = review.openings;
+  assert.ok(opening?.readRoots);
+  const handlers: ((event: ToolCallEvent) => unknown)[] = [];
+  (
+    checkoutConfinement(opening.directory, opening.readRoots) as (
+      pi: ExtensionAPI,
+    ) => void
+  )({
+    on: (_name: string, handler: (event: ToolCallEvent) => unknown) =>
+      handlers.push(handler),
+  } as unknown as ExtensionAPI);
+  const path = bundle.patch_paths[0] as string;
+  assert.equal(
+    handlers[0]!({
+      type: "tool_call",
+      toolCallId: "call",
+      toolName: "read",
+      input: { path },
+    } as unknown as ToolCallEvent),
+    undefined,
+  );
+  assert.match(
+    readFileSync(join(opening.directory, path), "utf8"),
+    /\+\+\+ b\/fix/,
+  );
 });
 
 test("two bindings with patches over 5 MiB submit two patch evidences, each under the body limit", async (t) => {
