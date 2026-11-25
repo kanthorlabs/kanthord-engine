@@ -796,14 +796,15 @@ The `swe@1` bash of a coder execution runs in the sandbox of
 `@anthropic-ai/sandbox-runtime` `0.0.82`, as the Workbench bash does. The
 [Built-in tools](./workbench.md#built-in-tools) section of the Workbench page
 states the configuration and the paths. `allowWrite` holds the workspace and the
-`TMPDIR` of the instance. Each command exports that `TMPDIR`. Every sandboxed
-bash, the coder bash and the Workbench bash, also exports
-`pnpm_config_store_dir`, `pnpm_config_cache_dir` and `npm_config_cache` as
-directories under that `TMPDIR`. `denyRead` holds the credential paths of the
-worker process, among them `~/.config/kanthord-eval`, `~/.pi/agent` and the pi
+`TMPDIR` of the instance. `denyRead` holds the credential paths of the worker
+process, among them `~/.config/kanthord-eval`, `~/.pi/agent` and the pi
 directory of the instance. Keep the eval credential under
 `~/.config/kanthord-eval/`. When `EVAL_ANTHROPIC_AUTH_FILE` names a custom
 absolute path, `denyRead` holds that file and its symlink target.
+
+Every sandboxed bash, the coder bash and the Workbench bash, exports `TMPDIR`
+and also `pnpm_config_store_dir`, `pnpm_config_cache_dir` and
+`npm_config_cache` as directories under that `TMPDIR`.
 
 `denyRead` also holds the home directory as one entry. The home directory is
 `HOME` when it is absolute, else the home directory of the user. `allowRead`
