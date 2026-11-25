@@ -162,6 +162,7 @@ components:
                               - affected_invalid
                               - affected_timeout
                               - push_refused
+                              - probe_failed
                               - disk_low
                           - type: "null"
                       origin:

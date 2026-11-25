@@ -290,6 +290,128 @@ test("probePush throws the hook text of a refused push and leaves no probe branc
   assert.equal(await probeBranches(bare), NO_BRANCHES);
 });
 
+const ANCESTOR_COMMITS = 3;
+const SHORT_PROBE_DEADLINE_MS = 2_500;
+const HOOK_SLEEP_SECONDS = 6;
+const PUSH_STEP = /^push origin /;
+const FETCHED_ONE_COMMIT = "fetched 1";
+
+async function addCommits(
+  t: TestContext,
+  bare: string,
+  count: number,
+): Promise<void> {
+  const work = join(temporary(t), "ancestors");
+  await execFileAsync("git", ["clone", "-q", bare, work], {
+    env: isolatedGitEnvironment(process.env),
+  });
+  for (let index = 0; index < count; index += 1)
+    await git(work, [
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      `ancestor ${index}`,
+    ]);
+  await git(work, ["push", "-q", "origin", BASE_BRANCH]);
+}
+
+async function gitShim(t: TestContext): Promise<string> {
+  const directory = temporary(t);
+  const log = join(directory, "git-commands.log");
+  const shim = join(directory, "git");
+  const { stdout } = await execFileAsync("sh", ["-c", "command -v git"]);
+  await writeFile(
+    shim,
+    `#!/bin/sh
+echo "$*" >> "${log}"
+if [ "$1" = push ]; then echo "fetched $("${stdout.trim()}" rev-list --count FETCH_HEAD)" >> "${log}"; fi
+exec "${stdout.trim()}" "$@"
+`,
+  );
+  await chmod(shim, HOOK_MODE);
+  const original = process.env.PATH;
+  process.env.PATH = `${directory}:${original}`;
+  t.after(() => {
+    process.env.PATH = original;
+  });
+  return log;
+}
+
+test("probePush of a base commit with three ancestors pushes it, deletes the branch and adds no commit", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  await addCommits(t, bare, ANCESTOR_COMMITS);
+  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
+  const commits = await git(bare, ["rev-list", "--all", "--count"]);
+  await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
+    background,
+    ssh,
+  );
+  assert.equal(await probeBranches(bare), NO_BRANCHES);
+  assert.equal(await git(bare, ["rev-list", "--all", "--count"]), commits);
+  assert.equal(await git(bare, ["rev-parse", BASE_BRANCH]), base);
+});
+
+test("probePush runs no clone and fetches one commit", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  await addCommits(t, bare, ANCESTOR_COMMITS);
+  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
+  const log = await gitShim(t);
+  await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: DEADLINE_MS,
+    },
+    background,
+    ssh,
+  );
+  const commands = (await readFile(log, "utf8")).trim().split("\n");
+  assert.ok(commands.every((command) => !command.startsWith("clone")));
+  assert.ok(commands.some((command) => command.startsWith("fetch --depth=1 ")));
+  assert.ok(commands.some((command) => PUSH_STEP.test(command)));
+  assert.ok(commands.includes(FETCHED_ONE_COMMIT));
+});
+
+test("regression: e10 gate S3 probePush deletes the branch after a push that ends on the deadline after the ref update", async (t) => {
+  const { address, bare, ssh } = await sshRemote(t);
+  const base = await git(bare, ["rev-parse", BASE_BRANCH]);
+  const marker = join(bare, "slept");
+  const hook = join(bare, "hooks", "post-receive");
+  await writeFile(
+    hook,
+    `#!/bin/sh\nif [ ! -e "${marker}" ]; then touch "${marker}"; sleep ${HOOK_SLEEP_SECONDS}; fi\n`,
+  );
+  await chmod(hook, HOOK_MODE);
+  const failure = await probePush(
+    {
+      address,
+      baseCommit: base,
+      branch: PROBE_BRANCH,
+      deadlineMs: SHORT_PROBE_DEADLINE_MS,
+    },
+    background,
+    ssh,
+  ).then(
+    () => assert.fail("A push that passes the deadline must fail."),
+    (error: unknown) => error,
+  );
+  assert.ok(failure instanceof GitWriteError);
+  assert.equal(failure.stage, GitStage.Push);
+  assert.equal(
+    gitFailureReason(failure),
+    ResourceFailureReason.DeadlineExceeded,
+  );
+  assert.equal(await probeBranches(bare), NO_BRANCHES);
+});
+
 test("the author and the committer are the account that the greeting of the key names", async (t) => {
   const { address, bare, ssh } = await sshRemote(t, USER_GREETING);
   const { commit } = await nodeCommit(t, address, ssh);

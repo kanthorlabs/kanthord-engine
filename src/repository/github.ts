@@ -55,7 +55,10 @@ const REVIEW_PAGE_LIMIT = 30;
 const NO_CHANGE_REQUESTS = 0;
 const NO_FAILED_CHECKS = 0;
 const NO_PENDING_CHECKS = 0;
+const NO_CHECKS = 0;
 const CHECK_RUN_PAGE_SIZE = 100;
+const CHECK_SETTLE_MS = 300000;
+const NO_CHECK_YET = "kanthord/no-check-yet";
 const BRANCH_RULES_ROUTE = "GET /repos/{owner}/{repo}/rules/branches/{branch}";
 const CHECK_RUNS_ROUTE = "GET /repos/{owner}/{repo}/commits/{ref}/check-runs";
 const COMMIT_STATUSES_ROUTE =
@@ -358,6 +361,7 @@ const pullRequestHeadSchema = z.looseObject({
 const requiredCheckPullRequestSchema = z.looseObject({
   head: z.looseObject({ sha: z.string().min(MIN_SEGMENT_LENGTH) }),
   base: z.looseObject({ ref: z.string().min(MIN_SEGMENT_LENGTH) }),
+  updated_at: z.string(),
 });
 const branchRuleListSchema = z.array(
   z.looseObject({ type: z.string(), parameters: z.unknown().optional() }),
@@ -900,6 +904,21 @@ export function foldRequiredChecks(
   return { pending: pending.sort(), failed: failed.sort() };
 }
 
+interface HeadChecks {
+  pending: string[];
+  failed: string[];
+}
+
+function holdUnsettledHead(
+  folded: HeadChecks,
+  checkCount: number,
+  updatedAt: number,
+): HeadChecks {
+  if (checkCount > NO_CHECKS || Date.now() - updatedAt >= CHECK_SETTLE_MS)
+    return folded;
+  return { ...folded, pending: [...folded.pending, NO_CHECK_YET].sort() };
+}
+
 export function hasNextLink(link: string | null): boolean {
   assert.ok(link === null || isString(link));
   return (
@@ -1270,6 +1289,8 @@ export class GitHubPlatform {
     if (!parsed.success) return unreadableBody(CallKind.Read);
     const head = parsed.data.head.sha;
     const base = parsed.data.base.ref;
+    const updatedAt = Date.parse(parsed.data.updated_at);
+    if (Number.isNaN(updatedAt)) return unreadableBody(CallKind.Read);
     const rules = await this.#listPages(call, target, BRANCH_RULES_ROUTE, {
       branch: base,
     });
@@ -1280,11 +1301,7 @@ export class GitHubPlatform {
     });
     try {
       const required = requiredContextsOf(rules.value);
-      const checkRuns = await this.#exchange(call, target, {
-        kind: CallKind.Read,
-        route: CHECK_RUNS_ROUTE,
-        parameters: { ref: head, per_page: CHECK_RUN_PAGE_SIZE },
-      });
+      const checkRuns = await this.#listCheckRuns(call, target, head);
       if (!checkRuns.ok) return checkRuns;
       const statuses = await this.#listPages(
         call,
@@ -1293,17 +1310,41 @@ export class GitHubPlatform {
         { ref: head },
       );
       if (!statuses.ok) return statuses;
+      const folded = foldRequiredChecks(
+        { required, ignoredChecks: pullRequest.ignoredChecks },
+        { check_runs: checkRuns.value },
+        statuses.value,
+      );
       return read(
-        foldRequiredChecks(
-          { required, ignoredChecks: pullRequest.ignoredChecks },
-          checkRuns.value.data,
-          statuses.value,
+        holdUnsettledHead(
+          folded,
+          checkRuns.value.length + statuses.value.length,
+          updatedAt,
         ),
       );
     } catch (error) {
       if (error instanceof z.ZodError) return unreadableBody(CallKind.Read);
       throw error;
     }
+  }
+
+  async #listCheckRuns(
+    call: GitHubCall,
+    target: GitHubTarget,
+    head: string,
+  ): Promise<GitHubAnswer<unknown[]>> {
+    const runs: unknown[] = [];
+    for (let page = FIRST_PAGE; page <= REVIEW_PAGE_LIMIT; page += 1) {
+      const answer = await this.#exchange(call, target, {
+        kind: CallKind.Read,
+        route: CHECK_RUNS_ROUTE,
+        parameters: { ref: head, per_page: CHECK_RUN_PAGE_SIZE, page },
+      });
+      if (!answer.ok) return answer;
+      runs.push(...checkRunsBodySchema.parse(answer.value.data).check_runs);
+      if (!hasNextLink(answer.value.link)) return { ok: true, value: runs };
+    }
+    return unreadableBody(CallKind.Read);
   }
 
   async #listPages(

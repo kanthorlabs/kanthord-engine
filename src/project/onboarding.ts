@@ -12,8 +12,11 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { DiskSpace } from "../kernel/disk.ts";
+import { ResourceFailureReason } from "../kernel/health.ts";
 import { isObject, isString } from "../kernel/values.ts";
-import { pushTailOf } from "../repository/git-failure.ts";
+import { GitStage, GitWriteError } from "../repository/connector.ts";
+import { RepositoryErrorCode } from "../repository/contract.ts";
+import { gitFailureReason, pushTailOf } from "../repository/git-failure.ts";
 import { type ServerTrace, SpanStatus } from "../tracking/contract.ts";
 import {
   type CheckResult,
@@ -71,6 +74,7 @@ import {
   ProofOutcome,
   type ProofVerdict,
   PROVED_SUFFIX,
+  type PushCredential,
 } from "./environment-state.ts";
 
 export {
@@ -82,6 +86,7 @@ const KEY_SEPARATOR = "\u0000";
 const SINGLE_REPOSITORY = 1;
 const NO_WORKER_BINDING = 0;
 const NO_ITEMS = 0;
+const NO_REVISION = 0;
 const NOT_QUEUED = -1;
 const MS_PER_MINUTE = 60000;
 const PENDING_RETRY_MS = 60000;
@@ -129,6 +134,7 @@ export type AttemptAnswer =
 const UNREPAIRABLE_CLASSES: ReadonlySet<EnvironmentFailureClass | null> =
   new Set([
     EnvironmentFailureClass.PushRefused,
+    EnvironmentFailureClass.ProbeFailed,
     EnvironmentFailureClass.DiskLow,
   ]);
 
@@ -139,6 +145,7 @@ export interface RepositoryGroup {
   binding_name: string;
   resource_identity: string;
   environment_secrets?: Readonly<Record<string, string>>;
+  ssh_credential: string;
   review_flow: ReviewFlow | null;
 }
 
@@ -167,6 +174,7 @@ export interface OnboardingDependencies {
   ): Promise<GroupResolution>;
   baseCommitOf(bindingId: string, context: Context): Promise<string>;
   probePush(input: BindingProbeInput, context: Context): Promise<void>;
+  sshCredentialRevisionOf(credential: string): number;
   freeDisk(): Promise<DiskSpace>;
   diskFreeRatio: number;
   runtime: EnvironmentRuntime;
@@ -219,6 +227,8 @@ export interface GroupRecord {
   digest: string | null;
   tag: string | null;
   proof: ProofFile | null;
+  push_credential: PushCredential;
+  push_stale: boolean;
   repairs: number;
   proved: boolean;
   read_succeeded: boolean;
@@ -399,6 +409,8 @@ function emptyRecord(
     digest: null,
     tag: null,
     proof: null,
+    push_credential: { name: group.ssh_credential, revision: NO_REVISION },
+    push_stale: false,
     repairs: 0,
     proved: false,
     read_succeeded: false,
@@ -430,12 +442,33 @@ function staleFailure(
   return proof?.outcome === ProofOutcome.Failed && proof.commit !== commit;
 }
 
+function stalePushCredential(
+  proof: ProofFile | null,
+  current: PushCredential,
+): boolean {
+  if (proof === null) return false;
+  const proved = proof.push_credential;
+  return (
+    proved === undefined ||
+    proved.name !== current.name ||
+    proved.revision !== current.revision
+  );
+}
+
+function usableProof(
+  stored: ProofFile | null,
+  staleAtCommit: boolean,
+  stalePush: boolean,
+): ProofFile | null {
+  return staleAtCommit || stalePush ? null : stored;
+}
+
 function provedTarget(record: GroupRecord): boolean {
   if (
     record.target === EnvironmentTarget.Image &&
     record.source !== EnvironmentSource.None
   )
-    return record.proved;
+    return record.proved && !record.push_stale;
   return record.proof?.outcome === ProofOutcome.Passed;
 }
 
@@ -492,6 +525,24 @@ function detailFacts(detail: string): {
     command: parsed.data.command ?? NO_COMMAND,
     exit_code: parsed.data.exit_code ?? NO_EXIT_CODE,
   };
+}
+
+function probeFailureVerdict(error: unknown): ProofVerdict {
+  const reason = gitFailureReason(error);
+  if (
+    error instanceof GitWriteError &&
+    error.stage === GitStage.Push &&
+    error.code === RepositoryErrorCode.GitFailed &&
+    reason === ResourceFailureReason.Unclassified
+  )
+    return failedVerdict(
+      EnvironmentFailureClass.PushRefused,
+      pushTailOf(error),
+    );
+  return failedVerdict(
+    EnvironmentFailureClass.ProbeFailed,
+    `${reason}: ${pushTailOf(error)}`,
+  );
 }
 
 function failedVerdict(
@@ -993,6 +1044,11 @@ export class Onboarding {
     const path = environmentPath(group.resource_identity);
     const stored = proofs.read(path, sum);
     const stale = staleFailure(stored, resolved.commit);
+    const pushCredential = {
+      name: group.ssh_credential,
+      revision: this.dependencies.sshCredentialRevisionOf(group.ssh_credential),
+    };
+    const pushStale = stalePushCredential(stored, pushCredential);
     const next: GroupRecord = {
       ...(previous ?? emptyRecord(projectId, group, target)),
       binding_id: group.binding_id,
@@ -1005,7 +1061,9 @@ export class Onboarding {
       secrets,
       digest: sum,
       tag,
-      proof: stale ? null : stored,
+      push_credential: pushCredential,
+      push_stale: pushStale,
+      proof: usableProof(stored, stale, pushStale),
       repairs: stored?.repairs ?? 0,
       proved: await this.provedImage(tag, stale),
       read_succeeded: true,
@@ -1422,10 +1480,7 @@ export class Onboarding {
       );
     } catch (error) {
       if (signal.aborted) throw error;
-      return failedVerdict(
-        EnvironmentFailureClass.PushRefused,
-        pushTailOf(error),
-      );
+      return probeFailureVerdict(error);
     }
     return null;
   }
@@ -1548,8 +1603,10 @@ export class Onboarding {
       repairs: 0,
       ended_at: this.dependencies.now(),
       commit,
+      push_credential: record.push_credential,
     };
     record.proof = proofs.write(path, file);
+    record.push_stale = false;
     record.repairs = record.proof.repairs;
     const proved = verdict.outcome === ProofOutcome.Passed && tag !== null;
     if (proved) {
@@ -1814,6 +1871,7 @@ export class Onboarding {
       repairs: record.proof?.repairs ?? 0,
       ended_at: this.dependencies.now(),
       commit: record.commit,
+      push_credential: record.push_credential,
     };
   }
 

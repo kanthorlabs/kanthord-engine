@@ -210,6 +210,7 @@ import {
   Onboarding,
   targetOf,
 } from "./onboarding.ts";
+import { newestLiveSshRevision } from "./push-credential.ts";
 
 const SSH_UNREACHABLE_STATUS = 422;
 const PROJECTS_DIRECTORY = "projects";
@@ -988,6 +989,10 @@ export class ProjectService implements Service, ProjectBindings {
       baseCommitOf: (bindingId, context) =>
         this.environments.baseCommitOf(bindingId, context),
       probePush: (...input) => this.environments.probePush(...input),
+      sshCredentialRevisionOf: (credential) =>
+        this.operationalStore.transaction((tx) =>
+          newestLiveSshRevision(this.credentialRecords, tx, credential),
+        ),
       freeDisk: () => freeDiskOf(this.stateDirectory),
       diskFreeRatio: dependencies.diskFreeRatio,
       runtime: dependencies.environmentRuntime,
@@ -2254,6 +2259,7 @@ export class ProjectService implements Service, ProjectBindings {
               binding_name: binding.name,
               resource_identity: binding.resource_identity,
               environment_secrets: config.environment_secrets ?? {},
+              ssh_credential: config.ssh_credential,
               review_flow: reviewFlowOf(config),
             };
           }),

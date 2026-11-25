@@ -73,9 +73,22 @@ export function gitFailureReason(error: unknown): ResourceFailureReason {
       ? REFUSAL_REASONS.get(error.code)
       : undefined;
   if (refusal !== undefined) return refusal;
-  if (!(error instanceof Diagnostic) || !(error.cause instanceof Error))
-    return ResourceFailureReason.Unclassified;
-  return classifyGitFailure(error.cause.message);
+  if (!(error instanceof Diagnostic)) return ResourceFailureReason.Unclassified;
+  return classifyCauseChain(error.cause);
+}
+
+function classifyCauseChain(cause: unknown): ResourceFailureReason {
+  let failure = cause;
+  for (
+    let depth = 0;
+    depth < MAX_CAUSE_DEPTH && failure instanceof Error;
+    depth++
+  ) {
+    const reason = classifyGitFailure(failure.message);
+    if (reason !== ResourceFailureReason.Unclassified) return reason;
+    failure = failure.cause;
+  }
+  return ResourceFailureReason.Unclassified;
 }
 
 function stderrOf(error: unknown): string {

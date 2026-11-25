@@ -992,6 +992,7 @@ export const EnvironmentFailureClass = {
   AffectedInvalid: "affected_invalid",
   AffectedTimeout: "affected_timeout",
   PushRefused: "push_refused",
+  ProbeFailed: "probe_failed",
   DiskLow: "disk_low",
 } as const;
 export type EnvironmentFailureClass =

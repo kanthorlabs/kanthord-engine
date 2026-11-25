@@ -446,7 +446,7 @@ function fixture(t: TestContext, overrides: Partial<Dependencies> = {}) {
     verifyRepositoryCredential: unexpected,
     identity: PROJECT_IDENTITY,
     custody: ssh.custody,
-    credentialRecords: {} as never,
+    credentialRecords: { get: () => ({ revisions: [] }) } as never,
     sshAccessOf: (tx, granted, material) =>
       repository.sshAccessOf(tx, granted, material),
     workerAgentsOf: unexpected,

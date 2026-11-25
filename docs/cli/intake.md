@@ -618,8 +618,12 @@ MCP server and the Mission Service reach them through the direct adapter.
   `{ head_commit, base_branch, pending, failed }`. `pending` and `failed` name
   every check of the head commit that has not ended and that failed. A check is
   the newest check run of a name, the newest commit status of a context or a
-  required context of the base branch rules. A required context with no run and
-  no status is `pending`. The answer drops the names of
+  required context of the base branch rules. The read reads every page of the
+  check runs of the head commit. A required context with no run and
+  no status is `pending`. A head commit with no run and no status answers
+  `pending: ["kanthord/no-check-yet"]` while the `updated_at` of the pull
+  request is less than 300 s old. After 300 s, that head commit has no check.
+  The answer drops the names of
   `strategy.action.ignored_checks` of the binding. A pull request with no
   required context still answers the check runs of its head. `next_cursor` is
   `null`.
