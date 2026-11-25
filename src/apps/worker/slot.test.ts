@@ -306,11 +306,15 @@ test(
   "kanthord serve slot exits 1 with worker.slot.channel_closed at the end of stdin",
   { timeout: MAIN_SLOT_TIMEOUT_MS },
   async (t) => {
-    const instance = spawnSlot(t, [
-      "--input-type=module",
-      "-e",
-      `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
-    ]);
+    const instance = spawnSlot(
+      t,
+      [
+        "--input-type=module",
+        "-e",
+        `process.argv=[process.execPath,"kanthord","serve","slot"];await import(${JSON.stringify(MAIN_URL)});`,
+      ],
+      { ...hostEnvironment(), TMPDIR: temporary(t) },
+    );
     instance.child.stdin.end();
     const exit = await instance.exited;
     assert.equal(exit.code, SLOT_FAILURE);
