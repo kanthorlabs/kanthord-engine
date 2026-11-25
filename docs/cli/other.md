@@ -813,9 +813,9 @@ that entry. So `~/.git-credentials`, `~/.netrc`, `~/.npmrc`,
 `~/.config/gh/hosts.yml`, `~/.docker/config.json`, `~/.claude` and
 `~/.codex/auth.json` stay denied, and so does each home child that a later
 command creates. The tool roots are the entries of `PATH` under the home
-directory with their real paths, except an entry inside a `node_modules`
-directory, `~/.gitconfig`, `<XDG_CONFIG_HOME, else ~/.config>/git` and the
-prefix of the `node` executable of `PATH`. A path outside the home directory is
+directory with their real paths, `~/.gitconfig`,
+`<XDG_CONFIG_HOME, else ~/.config>/git` and the prefix of the `node` executable
+of `PATH`. A path outside the home directory is
 no tool root. A tool root never removes an entry of the credential paths above.
 The size of the wrapped command does not grow with the number of home children.
 

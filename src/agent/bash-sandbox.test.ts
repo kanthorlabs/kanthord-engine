@@ -758,19 +758,15 @@ test("(happy) the denyWrite list of a wrap holds the default patterns under the 
   );
 });
 
-test("(edge) a PATH entry inside a node_modules directory is no tool root", async (t) => {
+test("(edge) a PATH entry inside a node_modules directory is a tool root", async (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   const packages = join(home, "project", "node_modules", ".bin");
   mkdirSync(packages, { recursive: true });
-  const allowed = (path: string) =>
-    allowReadOf(
-      { env: { HOME: home, TMPDIR: tmp, PATH: path }, denyRead: [] },
-      cwd,
-    );
-  assert.deepEqual(
-    await allowed(`${packages}:/usr/bin`),
-    await allowed("/usr/bin"),
+  const allowed = await allowReadOf(
+    { env: { HOME: home, TMPDIR: tmp, PATH: packages }, denyRead: [] },
+    cwd,
   );
+  assert.ok(allowed.includes(packages));
 });
 
 test("(edge) a PATH entry inside a directory that the process cannot read adds no error", (t) => {
