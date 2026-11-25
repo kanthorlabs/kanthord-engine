@@ -147,6 +147,8 @@ export const CACHE_DIRECTORY_SCRIPT = `mkdir -p ${CACHE_MOUNT} && chown ${CONTAI
 export const CACHE_DEFAULTS = [
   ["npm_config_cache", "npm"],
   ["npm_config_store_dir", "pnpm-store"],
+  ["pnpm_config_store_dir", "pnpm-store"],
+  ["pnpm_config_cache_dir", "pnpm-cache"],
   ["PIP_CACHE_DIR", "pip"],
   ["GOMODCACHE", "go-mod"],
   ["CARGO_HOME", "cargo"],
