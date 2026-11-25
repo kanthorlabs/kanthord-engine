@@ -696,6 +696,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
     recordReleases(h);
     await runStepsImplement(h);
     const prompt = JSON.stringify(h.provider.calls[0]);
+    assert.ok(prompt.includes("## Earlier report"));
     assert.ok(
       prompt.indexOf("## Earlier report") < prompt.indexOf("K185-EARLIER-FACT"),
     );
