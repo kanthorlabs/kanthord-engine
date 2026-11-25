@@ -7,15 +7,17 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import {
   basename,
   dirname,
@@ -31,6 +33,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { isolatedGitEnvironment } from "../../../dist/kernel/git-environment.js";
 import { directories } from "../../../dist/kernel/xdg.js";
+import { findPatternText } from "../../../dist/agent/sensitive-text.js";
 
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const ENGINE_ROOT = resolve(dirname(SCRIPT_PATH), "../../..");
@@ -152,6 +155,15 @@ const SWE_GLOBAL_KEYS = ["provider", "model", "reasoning_effort"];
 const KIND_KEYS = ["system_prompt_digest"];
 const RESULT_KEYS = [...SWE_GLOBAL_KEYS, ...KIND_KEYS];
 const CASE_KEYS = ["input_digest", "budget"];
+const COMMON_KEYS = [
+  "input_digest",
+  "engine_version",
+  "provider",
+  "model",
+  "reasoning_effort",
+  "budget",
+];
+const DIGEST_KEY = "system_prompt_digest";
 const CASE_REQUIRED = ["kind", "commit", "wall", "usd", "allowed"];
 const CONFIG_REQUIRED = [
   "cap_usd",
@@ -164,6 +176,35 @@ const CONFIG_REQUIRED = [
 ];
 const BASE_PRICE_KEYS = ["input", "output", "cacheRead"];
 const MIN_REPEATS = 2;
+const ASPECT_VALUES = ["A1", "A2", "A3", "A4", "A5", "A6", "A7"];
+const HYPOTHESIS_MAX_LENGTH = 500;
+const ONE_CHANGE_FILES = [
+  "static/prompt/role/swe@1.md",
+  "static/prompt/swe@1.md",
+];
+const VERDICT_KEEP = "keep";
+const VERDICT_REVERT = "revert";
+const RE_COMPARE_KEYS = ["provider", "model", "reasoning_effort"];
+const NOISE_FLOOR = 2;
+const REFERENCE_TRIES = 3;
+const GITLINK_MODE = "160000";
+const STAGED_DIFF_ARGS = [
+  "diff",
+  "--cached",
+  "--raw",
+  "-z",
+  "--no-renames",
+  "--abbrev=40",
+  "--diff-filter=ACM",
+];
+const VALIDATE_FILES = [
+  "repo.bundle",
+  "setup.sh",
+  "task.md",
+  "check/check.sh",
+  "check/tests",
+  "check/reference.patch",
+];
 
 function randomName() {
   let name = "";
@@ -556,6 +597,107 @@ export function computeGate(checks, cases, options) {
   if (checks.length < planned) verdict = VERDICT_NONE;
   if (breaches > 0) verdict = VERDICT_FAIL;
   return { verdict, shares, breaches };
+}
+
+export function goodOnRunNoise(check, diagnosis, aspect, isParent) {
+  const lc = aspect.toLowerCase();
+  if (lc in check) return Boolean(check[lc]);
+  if (!diagnosis?.valid) return isParent;
+  return !diagnosis.findings.some(
+    (f) => f.aspect === aspect && SEVERITIES_NOT_GOOD.includes(f.severity),
+  );
+}
+
+export function flipsCountForAspect(checks, diagnoses, aspect, isParent) {
+  const byCaseId = Map.groupBy(checks, (c) => c.case);
+  let flips = 0;
+  for (const caseChecks of byCaseId.values()) {
+    const goods = caseChecks.filter((check) =>
+      goodOnRunNoise(check, diagnosisOf(diagnoses, check), aspect, isParent),
+    );
+    if (goods.length > 0 && goods.length < caseChecks.length) flips++;
+  }
+  return flips;
+}
+
+export function passFlipsCount(checks) {
+  const byCaseId = Map.groupBy(checks, (c) => c.case);
+  let flips = 0;
+  for (const caseChecks of byCaseId.values()) {
+    const passes = caseChecks.filter((c) => c.pass).length;
+    if (passes > 0 && passes < caseChecks.length) flips++;
+  }
+  return flips;
+}
+
+function distinctCount(lines, key) {
+  return new Set(lines.map((line) => JSON.stringify(line[key]))).size;
+}
+
+function caseComparabilityError(lines, parentLines, isReplicate) {
+  if (lines.length === 0 || parentLines.length === 0) return null;
+  const both = [...lines, ...parentLines];
+  const differing = COMMON_KEYS.find((key) => distinctCount(both, key) > 1);
+  if (differing) return differing;
+  if (isReplicate)
+    return distinctCount(both, DIGEST_KEY) > 1 ? DIGEST_KEY : null;
+  const digests = new Set(lines.map((line) => line[DIGEST_KEY]));
+  return parentLines.some((line) => digests.has(line[DIGEST_KEY]))
+    ? DIGEST_KEY
+    : null;
+}
+
+export function comparabilityError(pair) {
+  const { iteration, parentIteration } = pair;
+  if (iteration.stage !== parentIteration.stage) return "stage";
+  if (iteration.set_commit !== parentIteration.set_commit) return "set_commit";
+  const ofCase = (lines, id) =>
+    lines.filter(
+      (line) =>
+        line.agent === PROFILE_SWE &&
+        caseOfSession(String(line.session)) === id,
+    );
+  for (const entry of pair.cases) {
+    const error = caseComparabilityError(
+      ofCase(pair.results, entry.id),
+      ofCase(pair.parentResults, entry.id),
+      Boolean(iteration.replicate),
+    );
+    if (error) return error;
+  }
+  return null;
+}
+
+function reLinesOfPair(results, parentResults) {
+  const re = results.filter((line) => line.agent === PROFILE_RE);
+  const parentRe = parentResults.filter((line) => line.agent === PROFILE_RE);
+  if (re.length === 0 || parentRe.length === 0) return [];
+  return [...re, ...parentRe];
+}
+
+export function reDigestError(results, parentResults) {
+  const lines = reLinesOfPair(results, parentResults);
+  return distinctCount(lines, DIGEST_KEY) > 1 ? DIGEST_KEY : null;
+}
+
+export function reKeysDiffer(results, parentResults) {
+  const lines = reLinesOfPair(results, parentResults);
+  return RE_COMPARE_KEYS.some((key) => distinctCount(lines, key) > 1);
+}
+
+export function oneChangeError(engineRoot, parentCommit, newCommit) {
+  if (parentCommit === newCommit) return null;
+  const result = gitOutput(engineRoot, [
+    "diff",
+    "--name-only",
+    parentCommit,
+    newCommit,
+  ]);
+  if (result === null) return "git diff failed for the engine commits";
+  const changed = result.split("\n").filter(Boolean);
+  const extra = changed.filter((p) => !ONE_CHANGE_FILES.includes(p));
+  if (extra.length > 0) return `git diff --name-only names ${extra[0]}`;
+  return null;
 }
 
 export function runActionForExit(exitCode, stderrText) {
@@ -1240,6 +1382,10 @@ function parseRunOptions(argv) {
         evaluation: { type: "string" },
         stage: { type: "string" },
         set: { type: "string" },
+        parent: { type: "string" },
+        aspect: { type: "string" },
+        hypothesis: { type: "string" },
+        replicate: { type: "string" },
       },
       strict: true,
     }));
@@ -1252,10 +1398,47 @@ function parseRunOptions(argv) {
     return { error: "--stage is 1 or 2" };
   if (!SET_VALUES.includes(values.set))
     return { error: "--set is dev or held-out" };
+  const hasParent = values.parent !== undefined;
+  const hasReplicate = values.replicate !== undefined;
+  if (hasParent && values.set !== SET_DEV)
+    return { error: "--parent requires --set dev" };
+  if (hasParent && values.aspect === undefined)
+    return { error: "--parent requires --aspect" };
+  if (hasParent && values.hypothesis === undefined)
+    return { error: "--parent requires --hypothesis" };
+  if (!hasParent && values.aspect !== undefined)
+    return { error: "--aspect requires --parent" };
+  if (!hasParent && values.hypothesis !== undefined)
+    return { error: "--hypothesis requires --parent" };
+  if (
+    hasParent &&
+    values.aspect !== undefined &&
+    !ASPECT_VALUES.includes(values.aspect)
+  )
+    return { error: "--aspect is A1 to A7" };
+  if (
+    hasParent &&
+    values.hypothesis !== undefined &&
+    (values.hypothesis.length < 1 ||
+      values.hypothesis.length > HYPOTHESIS_MAX_LENGTH)
+  )
+    return { error: "--hypothesis is 1 to 500 characters" };
+  if (hasReplicate && hasParent)
+    return { error: "--replicate requires no --parent" };
+  if (hasReplicate && values.set !== SET_DEV)
+    return { error: "--replicate requires --set dev" };
+  if (hasReplicate && (!values.replicate || !EVAL_ID_RE.test(values.replicate)))
+    return { error: "--replicate holds letters, digits, - and _" };
+  if (hasParent && (!values.parent || !EVAL_ID_RE.test(values.parent)))
+    return { error: "--parent holds letters, digits, - and _" };
   return {
     evalId: values.evaluation,
     stage: Number(values.stage),
     set: values.set,
+    parent: values.parent ?? null,
+    aspect: values.aspect ?? null,
+    hypothesis: values.hypothesis ?? null,
+    replicate: values.replicate ?? null,
   };
 }
 
@@ -1277,6 +1460,14 @@ function iterationError(plan, existing) {
   if (existing.set !== plan.set) return "--set differs from iteration";
   if (existing.set_commit !== plan.setCommit)
     return "set_commit differs from the HEAD of the evaluation set";
+  if ((existing.parent ?? null) !== (plan.parent ?? null))
+    return "--parent differs from iteration";
+  if ((existing.replicate ?? null) !== (plan.replicate ?? null))
+    return "--replicate differs from iteration";
+  if ((existing.aspect ?? null) !== (plan.aspect ?? null))
+    return "--aspect differs from iteration";
+  if ((existing.hypothesis ?? null) !== (plan.hypothesis ?? null))
+    return "--hypothesis differs from iteration";
   return null;
 }
 
@@ -1288,10 +1479,10 @@ function newIteration(plan) {
     engine_commit: plan.engineCommit,
     repeats: plan.config.repeats,
     gate_share: plan.set === SET_HELD_OUT ? plan.config.gate_share : null,
-    parent: null,
-    replicate: null,
-    aspect: null,
-    hypothesis: null,
+    parent: plan.parent ?? null,
+    replicate: plan.replicate ?? null,
+    aspect: plan.aspect ?? null,
+    hypothesis: plan.hypothesis ?? null,
   };
 }
 
@@ -1309,6 +1500,28 @@ async function buildPlan(start, options) {
   const authStart = captureAuthState(start.authPath);
   if (authStart === null) return { error: "auth.json is no regular file" };
   const resultsBaseDir = join(dirs.state, "evaluation", "runs");
+  if (options.parent !== null) {
+    const parentIteration = readJsonFile(
+      join(resultsBaseDir, options.parent, "iteration.json"),
+    );
+    if (!isObject(parentIteration))
+      return { error: `--parent ${options.parent}: no iteration.json` };
+    if (parentIteration.stage !== options.stage)
+      return { error: `--parent ${options.parent}: stage differs` };
+    if (parentIteration.set !== SET_DEV)
+      return { error: `--parent ${options.parent}: set is not dev` };
+  }
+  if (options.replicate !== null) {
+    const replicateIteration = readJsonFile(
+      join(resultsBaseDir, options.replicate, "iteration.json"),
+    );
+    if (!isObject(replicateIteration))
+      return { error: `--replicate ${options.replicate}: no iteration.json` };
+    if (replicateIteration.stage !== options.stage)
+      return { error: `--replicate ${options.replicate}: stage differs` };
+    if (replicateIteration.set !== SET_DEV)
+      return { error: `--replicate ${options.replicate}: set is not dev` };
+  }
   return {
     ...options,
     ...read,
@@ -1593,11 +1806,19 @@ function gateLines(report) {
   const shares = gate.shares.map(
     (s) => `pass share ${s.kind} ${shareText(s.passes, s.planned)}`,
   );
+  const stage1Parts = [];
+  if (iteration.stage === BINDING_STAGE && report.stage1PassShares) {
+    for (const s of report.stage1PassShares)
+      stage1Parts.push(
+        `stage 1 pass share ${s.kind} ${shareText(s.passes, s.planned)}`,
+      );
+  }
   const line = [
     ...shares,
     `gate_share ${iteration.gate_share}`,
     `breaches ${gate.breaches}`,
     `earlier held-out evaluations ${report.earlier}`,
+    ...stage1Parts,
     `verdict ${gate.verdict}`,
   ].join(", ");
   return { verdict: gate.verdict, lines: ["## Gate", "", `gate: ${line}`, ""] };
@@ -1659,10 +1880,112 @@ function devLines(report) {
   lines.push(
     "",
     `set-difficulty: ${ceiling} ceiling, ${floor} floor of ${cases.length}`,
-    `verdict ${verdict}`,
+    ...(report.parent && !iteration.replicate ? [] : [`verdict ${verdict}`]),
     "",
   );
   return { lines, verdict };
+}
+
+function goodCountNoise(checks, diagnoses, aspect, isParent) {
+  return checks.filter((check) =>
+    goodOnRunNoise(check, diagnosisOf(diagnoses, check), aspect, isParent),
+  ).length;
+}
+
+function iterationCounts(newReport, parentReport) {
+  const target = newReport.iteration.aspect;
+  const parentFlips = flipsCountForAspect(
+    parentReport.checks,
+    parentReport.diagnoses,
+    target,
+    true,
+  );
+  const passes = (report) => report.checks.filter((c) => c.pass).length;
+  return {
+    goodNew: goodCountNoise(
+      newReport.checks,
+      newReport.diagnoses,
+      target,
+      false,
+    ),
+    goodParent: goodCountNoise(
+      parentReport.checks,
+      parentReport.diagnoses,
+      target,
+      true,
+    ),
+    noiseTarget: Math.max(NOISE_FLOOR, parentFlips),
+    passesNew: passes(newReport),
+    passesParent: passes(parentReport),
+    noisePass: Math.max(NOISE_FLOOR, passFlipsCount(parentReport.checks)),
+  };
+}
+
+function hasEachPlannedLine(report) {
+  const planned = report.cases.length * report.iteration.repeats;
+  return (
+    report.checks.length === planned && report.diagnoses.length === planned
+  );
+}
+
+function noiseRuleVerdict(newReport, parentReport, counts) {
+  if (newReport.checks.some((c) => c.breach)) return VERDICT_REVERT;
+  if (!hasEachPlannedLine(newReport) || !hasEachPlannedLine(parentReport))
+    return VERDICT_NONE;
+  if (
+    DIAGNOSED_ASPECTS.includes(newReport.iteration.aspect) &&
+    newReport.reKeysDiffer
+  )
+    return VERDICT_NONE;
+  const gain = counts.goodNew - counts.goodParent;
+  const loss = counts.passesParent - counts.passesNew;
+  if (gain >= counts.noiseTarget && loss < counts.noisePass)
+    return VERDICT_KEEP;
+  return VERDICT_REVERT;
+}
+
+function iterationLines(newReport, parentReport) {
+  const counts = iterationCounts(newReport, parentReport);
+  const verdict = noiseRuleVerdict(newReport, parentReport, counts);
+  const diffs = ASPECT_VALUES.map((a) => {
+    const gn = goodCountNoise(newReport.checks, newReport.diagnoses, a, false);
+    const gp = goodCountNoise(
+      parentReport.checks,
+      parentReport.diagnoses,
+      a,
+      true,
+    );
+    return `${a} ${gn - gp}`;
+  }).join(", ");
+  const lines = [
+    "## Iteration",
+    "",
+    `iteration: target ${newReport.iteration.aspect}, good parent ${counts.goodParent} new ${counts.goodNew} noise ${counts.noiseTarget}, passes parent ${counts.passesParent} new ${counts.passesNew} noise ${counts.noisePass}, verdict ${verdict}`,
+    `diff: ${diffs}`,
+    "",
+  ];
+  return { lines, verdict };
+}
+
+function aaLineText(newReport, parentReport) {
+  const newChecks = newReport.checks;
+  const parentChecks = parentReport.checks;
+  const newDiagnoses = newReport.diagnoses ?? [];
+  const parentDiagnoses = parentReport.diagnoses ?? [];
+  const aspectParts = ASPECT_VALUES.map((a) => {
+    const gFirst = goodCountNoise(parentChecks, parentDiagnoses, a, false);
+    const gSecond = goodCountNoise(newChecks, newDiagnoses, a, false);
+    const diff = gSecond - gFirst;
+    const flips = flipsCountForAspect(parentChecks, parentDiagnoses, a, false);
+    return `${a} ${gFirst} ${gSecond} diff ${diff} flips ${flips}`;
+  });
+  const passesFirst = parentChecks.filter((c) => c.pass).length;
+  const passesSecond = newChecks.filter((c) => c.pass).length;
+  const parts = [
+    ...aspectParts,
+    `passes ${passesFirst} ${passesSecond} diff ${passesSecond - passesFirst}`,
+  ];
+  return ["## A/A", "", `A/A: ${parts.join(", ")}`, ""];
 }
 
 function runRecords(report) {
@@ -1671,6 +1994,15 @@ function runRecords(report) {
     .map((check) => diagnosisOf(report.diagnoses ?? [], check))
     .filter((line) => line !== undefined);
   return { ...report, checks, diagnoses, judgeR: report.judgeR ?? null };
+}
+
+function iterationHeadLines(iteration) {
+  if (!iteration.parent) return [];
+  return [
+    `parent: ${iteration.parent}`,
+    `target aspect: ${iteration.aspect}`,
+    `hypothesis: ${iteration.hypothesis}`,
+  ];
 }
 
 export function buildReport(input) {
@@ -1684,6 +2016,7 @@ export function buildReport(input) {
     `stage: ${iteration.stage}`,
     `set: ${iteration.set}`,
     `set commit: ${iteration.set_commit}`,
+    ...iterationHeadLines(iteration),
     "",
     ...goalLines(report, joined),
   ];
@@ -1697,6 +2030,16 @@ export function buildReport(input) {
     const dev = devLines(report);
     verdict = dev.verdict;
     lines.push(...dev.lines);
+  }
+  if (input.parent) {
+    const parentReport = runRecords(input.parent);
+    if (iteration.replicate) {
+      lines.push(...aaLineText(report, parentReport));
+    } else {
+      const compared = iterationLines(report, parentReport);
+      verdict = compared.verdict;
+      lines.push(...compared.lines);
+    }
   }
   lines.push(...costLines(report));
   return { text: lines.join("\n"), verdict };
@@ -1719,6 +2062,9 @@ function writeReport(evaluation) {
     results: readJsonLines(join(resultsDir, "results.jsonl")),
     calls: readJsonLines(join(resultsDir, "calls.jsonl")),
     diagnoses: readJsonLines(join(resultsDir, DIAGNOSES_FILE)),
+    parent: evaluation.parentRecords ?? null,
+    reKeysDiffer: evaluation.reKeysDiffer ?? false,
+    stage1PassShares: evaluation.stage1PassShares ?? null,
   });
   writeFileSync(join(resultsDir, "report.md"), report.text, {
     mode: FILE_MODE,
@@ -1741,6 +2087,67 @@ function parseReportOptions(argv) {
   }
 }
 
+function refusedReport(resultsDir, error) {
+  rmSync(join(resultsDir, "report.md"), { force: true });
+  return { error };
+}
+
+function pairError(pair) {
+  const { iteration, parentIteration, results, parentResults } = pair;
+  const comparability = comparabilityError(pair);
+  if (comparability) return `comparability: ${comparability}`;
+  const digest = reDigestError(results, parentResults);
+  if (digest) return `re@1: ${digest}`;
+  if (iteration.replicate) return null;
+  return oneChangeError(
+    pair.engineRoot,
+    parentIteration.engine_commit,
+    iteration.engine_commit,
+  );
+}
+
+function readPair(pair) {
+  const { iteration, results, cases } = pair;
+  const parentId = iteration.parent ?? iteration.replicate ?? null;
+  if (parentId === null) return { parent: null, reKeysDiffer: false };
+  const parentDir = join(pair.resultsBaseDir, parentId);
+  const parentIteration = readJsonFile(join(parentDir, "iteration.json"));
+  if (!isObject(parentIteration))
+    return { error: `parent ${parentId}: no iteration.json` };
+  const parentResults = readJsonLines(join(parentDir, "results.jsonl"));
+  const error = pairError({ ...pair, parentIteration, parentResults });
+  if (error) return { error };
+  return {
+    reKeysDiffer: reKeysDiffer(results, parentResults),
+    parent: {
+      evalId: parentId,
+      iteration: parentIteration,
+      cases,
+      checks: readJsonLines(join(parentDir, "checks.jsonl")),
+      diagnoses: readJsonLines(join(parentDir, DIAGNOSES_FILE)),
+    },
+  };
+}
+
+function lastPassedStageOneShares(resultsBaseDir, evalSetDir) {
+  const cases = readCases(evalSetDir, SET_HELD_OUT);
+  if (cases.error) return null;
+  const evaluations = heldOutEvaluations(resultsBaseDir, 1).sort(
+    (a, b) => b.startedMs - a.startedMs,
+  );
+  for (const entry of evaluations) {
+    const checks = readJsonLines(
+      join(resultsBaseDir, entry.id, "checks.jsonl"),
+    );
+    const gate = computeGate(lastCheckLines(checks), cases.cases, {
+      repeats: entry.iteration.repeats,
+      gateShare: entry.iteration.gate_share,
+    });
+    if (gate.verdict === VERDICT_PASS) return gate.shares;
+  }
+  return null;
+}
+
 export async function reportEvaluation(start) {
   const options = parseReportOptions(start.argv);
   if (options.error) return options;
@@ -1760,10 +2167,23 @@ export async function reportEvaluation(start) {
   const difference = checkResultKeys(results, kindOf);
   if (difference) {
     const [first, second] = difference.lines;
-    return {
-      error: `results.jsonl: lines ${first} and ${second} differ in ${difference.key}`,
-    };
+    return refusedReport(
+      resultsDir,
+      `results.jsonl: lines ${first} and ${second} differ in ${difference.key}`,
+    );
   }
+  const pair = readPair({
+    iteration,
+    results,
+    cases: cases.cases,
+    resultsBaseDir,
+    engineRoot: start.engineRoot ?? ENGINE_ROOT,
+  });
+  if (pair.error) return refusedReport(resultsDir, pair.error);
+  const stage1PassShares =
+    iteration.stage === BINDING_STAGE && iteration.set === SET_HELD_OUT
+      ? lastPassedStageOneShares(resultsBaseDir, evalSetDir)
+      : null;
   const verdict = writeReport({
     evalId: options.evalId,
     resultsDir,
@@ -1772,6 +2192,9 @@ export async function reportEvaluation(start) {
     cases: cases.cases,
     ratio: read.ratio,
     judgeRatio: read.judgeRatio,
+    parentRecords: pair.parent,
+    reKeysDiffer: pair.reKeysDiffer,
+    stage1PassShares,
   });
   return { verdict };
 }
@@ -1798,17 +2221,223 @@ async function reportCommand(argv) {
   const result = await reportEvaluation({
     argv,
     env: process.env,
+    engineRoot: ENGINE_ROOT,
     readPrices: readModelPrices,
   });
   if (result.error) return refuse(result.error);
   return result.verdict === VERDICT_NONE ? EXIT_NO_VERDICT : EXIT_OK;
 }
 
-const COMMANDS = { run: runCommand, report: reportCommand };
+function lineNumberOfOffset(text, offset) {
+  return text.slice(0, offset).split("\n").length;
+}
+
+function scanText(name, text) {
+  let spans;
+  try {
+    spans = findPatternText(text);
+  } catch {
+    return null;
+  }
+  for (const span of spans) {
+    const line = lineNumberOfOffset(text, span.start);
+    process.stdout.write(`${name}:${line}:${span.rule}\n`);
+  }
+  return spans.length;
+}
+
+function stagedGit(args, encoding) {
+  const env = isolatedGitEnvironment(process.env);
+  if (process.env.GIT_INDEX_FILE)
+    env.GIT_INDEX_FILE = process.env.GIT_INDEX_FILE;
+  const result = spawnSync("git", args, {
+    env,
+    encoding,
+    maxBuffer: CHECK_OUTPUT_LIMIT,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.status === 0 ? result.stdout : null;
+}
+
+function stagedEntries() {
+  const raw = stagedGit(STAGED_DIFF_ARGS, "utf8");
+  if (raw === null) return null;
+  const fields = raw.split("\0");
+  const entries = [];
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const [, mode, , blob] = fields[i].split(" ");
+    if (mode !== GITLINK_MODE) entries.push({ name: fields[i + 1], blob });
+  }
+  return entries;
+}
+
+function stagedTexts() {
+  const entries = stagedEntries();
+  if (entries === null) return { error: "scan: git gives no staged files" };
+  const texts = [];
+  for (const entry of entries) {
+    const content = stagedGit(["cat-file", "blob", entry.blob]);
+    if (content === null)
+      return { error: `scan: cannot read the staged ${entry.name}` };
+    texts.push({ name: entry.name, text: content.toString("utf8") });
+  }
+  return { texts };
+}
+
+function listedTexts(paths) {
+  const texts = [];
+  for (const name of paths) {
+    try {
+      texts.push({ name, text: readFileSync(name, "utf8") });
+    } catch {
+      return { error: `scan: cannot read ${name}` };
+    }
+  }
+  return { texts };
+}
+
+async function scanCommand(argv) {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    strict: true,
+    allowPositionals: true,
+  });
+  const read =
+    positionals.length === 0 ? stagedTexts() : listedTexts(positionals);
+  if (read.error) return refuse(read.error);
+  let matches = 0;
+  for (const { name, text } of read.texts) {
+    const count = scanText(name, text);
+    if (count === null) return refuse(`scan: cannot scan ${name}`);
+    matches += count;
+  }
+  return matches > 0 ? EXIT_STOP : EXIT_OK;
+}
+
+function validatedPathError(dir, strings) {
+  const entries = readdirSync(dir, { recursive: true, withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(entry.parentPath, entry.name);
+    const name = relative(dir, path);
+    if (namesProtectedPath(`/${name}`, strings))
+      return `rule 6: the path ${name} holds a protected string`;
+    if (
+      entry.isSymbolicLink() &&
+      namesProtectedPath(readlinkSync(path), strings)
+    )
+      return `rule 6: the link ${name} holds a protected string`;
+  }
+  return null;
+}
+
+function validatedTextError(caseFolder, kind, strings) {
+  const binding = join("binding", `${kind}.md`);
+  const texts = [
+    ["task.md", join(caseFolder, "task.md")],
+    [binding, join(strings[0], binding)],
+  ];
+  for (const [name, path] of texts) {
+    if (!existsSync(path)) return `no ${name}`;
+    if (namesProtectedPath(readFileSync(path, "utf8"), strings))
+      return `rule 6: ${name} holds a protected string`;
+  }
+  return null;
+}
+
+function validatedBaseError(caseFolder, caseJson, root) {
+  const dir = join(root, "c");
+  const grade = {
+    caseFolder,
+    gradingDir: dir,
+    checkTxtPath: join(root, "c.txt"),
+  };
+  if (
+    cloneSteps(join(caseFolder, "repo.bundle"), dir, caseJson.commit) === null
+  )
+    return "the clone failed";
+  if (!runSetup(caseFolder, dir)) return "setup.sh failed";
+  const evalSetDir = resolve(caseFolder, "../../..");
+  const strings = [evalSetDir, caseFolder, ...PROTECTED_PATH_PARTS];
+  const held =
+    validatedTextError(caseFolder, caseJson.kind, strings) ??
+    validatedPathError(dir, strings);
+  if (held) return held;
+  if (!copyHiddenTests(join(caseFolder, "check", "tests"), dir))
+    return "the copy of check/tests failed";
+  if (runCheckMode(grade, MODE_FAIL_TO_PASS))
+    return "rule 7: fail_to_pass exits 0 on C";
+  const failed = [MODE_PASS_TO_PASS, MODE_CONVENTIONS].find(
+    (mode) => !runCheckMode(grade, mode),
+  );
+  return failed ? `rule 7: ${failed} fails on C` : null;
+}
+
+function validatedReferenceError(caseFolder, caseJson, root) {
+  const diffPath = join(caseFolder, "check", "reference.patch");
+  const scope = checkScope(readFileSync(diffPath, "latin1"), caseJson.allowed);
+  if (!scope.pass) return `rule 8: reference.patch breaks ${scope.reason}`;
+  for (let attempt = 1; attempt <= REFERENCE_TRIES; attempt++) {
+    const graded = gradeRun({
+      caseFolder,
+      caseJson,
+      diffPath,
+      gradingDir: join(root, `g${attempt}`),
+      checkTxtPath: join(root, `g${attempt}.txt`),
+    });
+    if (graded.stop) return graded.stop;
+    const failed = Object.keys(graded.aspects).filter(
+      (aspect) => !graded.aspects[aspect],
+    );
+    if (failed.length > 0)
+      return `rule 8: reference.patch fails ${failed.join(", ")} in try ${attempt} of ${REFERENCE_TRIES}`;
+  }
+  return null;
+}
+
+function validateCaseFolder(caseFolder) {
+  const caseJson = readJsonFile(join(caseFolder, "case.json"));
+  const caseError = validateCase(caseJson);
+  if (caseError) return caseError;
+  const absent = VALIDATE_FILES.find(
+    (name) => !existsSync(join(caseFolder, name)),
+  );
+  if (absent) return `no ${absent}`;
+  const root = mkdtempSync(join(tmpdir(), "kanthord-validate-"));
+  try {
+    return (
+      validatedBaseError(caseFolder, caseJson, root) ??
+      validatedReferenceError(caseFolder, caseJson, root)
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+async function validateCommand(argv) {
+  const { positionals } = parseArgs({
+    args: argv,
+    options: {},
+    strict: true,
+    allowPositionals: true,
+  });
+  if (positionals.length !== 1) return refuse("validate: pass one case folder");
+  if (!existsSync(positionals[0]))
+    return refuse(`validate: no folder ${positionals[0]}`);
+  const error = validateCaseFolder(realpathSync(positionals[0]));
+  return error ? refuse(`validate: ${error}`) : EXIT_OK;
+}
+
+const COMMANDS = {
+  run: runCommand,
+  report: reportCommand,
+  scan: scanCommand,
+  validate: validateCommand,
+};
 
 async function main(argv) {
   if (!Object.hasOwn(COMMANDS, argv[0]))
-    return refuse("the subcommand is run or report");
+    return refuse("the subcommand is run, report, scan or validate");
   return COMMANDS[argv[0]](argv.slice(1));
 }
 
