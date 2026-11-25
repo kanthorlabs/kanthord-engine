@@ -27,7 +27,7 @@ import {
 } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { platform } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
@@ -124,6 +124,7 @@ async function fixture(
     turnCheck?: (context: CancellationContext) => Promise<void>;
     intent?: ExecutionIntent;
     sessionRoot?: false | string;
+    readRoots?: readonly string[];
   } = {},
 ) {
   const setup = anthropicSetup(overrides);
@@ -179,6 +180,7 @@ async function fixture(
       resource_budget: setup.resource_budget,
     }),
     workspace,
+    readRoots: options.readRoots,
     hostHome,
     env: hostEnvironment(),
     denyRead: [],
@@ -277,6 +279,33 @@ test("(security) a worker read of an absolute path outside the workspace is bloc
   assert.equal(results.length, OUTSIDE_READS);
   for (const result of results) assert.equal(result.isError, true);
   assert.ok(!callText(h).includes(SECRET_FILE_TEXT));
+});
+
+test("(K194) a worker with a read root reads a file in it and cannot write there", async (t) => {
+  const evidence = temporary(t);
+  writeFileSync(join(evidence, "note.txt"), SECRET_FILE_TEXT);
+  const path = join("..", basename(evidence), "note.txt");
+  const h = await fixture(
+    t,
+    [
+      tool("read", { path }),
+      tool("write", {
+        path: join("..", basename(evidence), "new.txt"),
+        content: CONTENT,
+      }),
+      fauxAssistantMessage("done"),
+    ],
+    {},
+    unusedHostTools,
+    { readRoots: [evidence] },
+  );
+  await h.agent.prompt(WORK);
+  const [read] = toolResults(h, "read");
+  assert.equal(read?.isError, false);
+  assert.ok(callText(h).includes(SECRET_FILE_TEXT));
+  const [write] = toolResults(h, "write");
+  assert.equal(write?.isError, true);
+  assert.ok(!existsSync(join(evidence, "new.txt")));
 });
 
 test("dispose ends the agent.session span once with the entry count", async (t) => {

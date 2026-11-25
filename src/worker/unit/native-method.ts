@@ -110,6 +110,7 @@ export async function runNativeExecution(
       const open = async (
         workspace: string,
         verification?: VerificationScope,
+        readRoots?: readonly string[],
       ) => {
         const agent = input.setup.agents[WORKING_AGENT];
         assert.ok(agent);
@@ -126,6 +127,7 @@ export async function runNativeExecution(
           knownSecrets: secrets,
           budget,
           workspace,
+          readRoots,
           hostHome: input.hostHome,
           env: input.env,
           denyRead: input.denyRead,
