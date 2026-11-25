@@ -88,7 +88,7 @@ const CACHE_FILE = "pkg/__pycache__/check.pyc";
 const GEN_FILE = "gen/out.txt";
 const WRITE_GEN = `mkdir -p gen && echo out > ${GEN_FILE}`;
 const SNAP_FILE = "pkg/snap.txt";
-const WRITE_SNAP = `echo snap > ${SNAP_FILE}`;
+const WRITE_SNAP = `mkdir -p pkg && echo snap > ${SNAP_FILE}`;
 const WRITE_GEN_PAIR =
   "mkdir -p gen && echo a > gen/a.txt && echo b > gen/b.txt";
 const VENDOR_DIRECTORY = "vendor/lib";
