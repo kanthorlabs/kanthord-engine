@@ -21,6 +21,7 @@ const TWICE = 2;
 const ONCE = 1;
 const COMMAND = "echo hi";
 const ABSENT_HOME = "/kanthord-absent-home";
+const LONG_TEMPORARY = 90;
 
 function hostOf(env: NodeJS.ProcessEnv = {}) {
   return {
@@ -218,6 +219,50 @@ test("denyRead holds the pi directory and names no ancestor of the cwd", async (
     ),
     [],
   );
+});
+
+test("initialize runs with a short TMPDIR when the TMPDIR of the process is too long for a socket path, and the TMPDIR returns after it", async (t) => {
+  const previous = process.env.TMPDIR;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  });
+  const seen: (string | undefined)[] = [];
+  const fake = fakeRuntime({
+    initialize: async () => {
+      seen.push(process.env.TMPDIR);
+    },
+  });
+  const long = join("/var", "x".repeat(LONG_TEMPORARY));
+  process.env.TMPDIR = long;
+  await createBashSandbox(fake.runtime, "linux").wrap(
+    COMMAND,
+    temporary(t),
+    hostOf(),
+  );
+  assert.deepEqual(seen, ["/tmp"]);
+  assert.equal(process.env.TMPDIR, long);
+});
+
+test("initialize keeps a short TMPDIR of the process", async (t) => {
+  const previous = process.env.TMPDIR;
+  t.after(() => {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  });
+  const seen: (string | undefined)[] = [];
+  const fake = fakeRuntime({
+    initialize: async () => {
+      seen.push(process.env.TMPDIR);
+    },
+  });
+  process.env.TMPDIR = "/var/short";
+  await createBashSandbox(fake.runtime, "linux").wrap(
+    COMMAND,
+    temporary(t),
+    hostOf(),
+  );
+  assert.deepEqual(seen, ["/var/short"]);
 });
 
 test("a rejected initialize makes every wrap reject and never retries", async (t) => {

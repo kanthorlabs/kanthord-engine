@@ -6,7 +6,7 @@ import {
   readdirSync,
   realpathSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   delimiter,
   dirname,
@@ -58,6 +58,8 @@ const GIT_USER_FILE = ".gitconfig";
 const USER_CONFIG_DIRECTORY = ".config";
 const GIT_CONFIG_DIRECTORY = "git";
 const HOME_PREFIX = "~/";
+const SOCKET_PATH_LIMIT = 104;
+const SOCKET_NAME_RESERVE = 32;
 const NODE_EXECUTABLE = "node";
 const PROJECT_PACKAGES_DIRECTORY = "node_modules";
 const COMMAND_VARIABLE = "KANTHORD_BASH_COMMAND";
@@ -337,6 +339,22 @@ function packageCacheExports(temporary: string): string {
   ].join(" ");
 }
 
+async function initializeWithShortTemporary(
+  runtime: Runtime,
+  config: SandboxRuntimeConfig,
+): Promise<void> {
+  if (tmpdir().length + SOCKET_NAME_RESERVE <= SOCKET_PATH_LIMIT)
+    return runtime.initialize(config);
+  const previous = process.env.TMPDIR;
+  process.env.TMPDIR = TEMPORARY_FALLBACK;
+  try {
+    await runtime.initialize(config);
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+  }
+}
+
 export function createBashSandbox(
   runtime: Runtime,
   platform: NodeJS.Platform = process.platform,
@@ -350,7 +368,7 @@ export function createBashSandbox(
         `${UNAVAILABLE}: the platform ${platform} is unsupported`,
       );
     try {
-      await runtime.initialize({
+      await initializeWithShortTemporary(runtime, {
         ...DEFAULT_CONFIG,
         filesystem,
       });
