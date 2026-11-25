@@ -410,17 +410,14 @@ async function waitRegistered(t: TestContext, f: LivePool) {
 }
 
 test(
-  "a container slot starts its sandbox probe and exits 1 with worker.slot.sandbox_unavailable, or runs after a passing probe",
+  "a container slot whose sandbox cannot start exits 1 with worker.slot.sandbox_unavailable",
   { skip: SKIP, timeout: LIVE_TIMEOUT_MS },
   async (t) => {
     const live = await liveDriver(t);
     const slot = await launchSlot(t, live, "boxed-probe", PROBE_SETTLE_MS);
-    if (slot.exit !== null) {
-      assert.equal(slot.exit.code, FAILED_CODE, slot.log);
-      assert.ok(slot.log.includes(SANDBOX_UNAVAILABLE), slot.log);
-      return;
-    }
-    assert.ok(!slot.log.includes(SANDBOX_UNAVAILABLE), slot.log);
+    assert.ok(slot.exit, `the slot still runs: ${slot.log}`);
+    assert.equal(slot.exit.code, FAILED_CODE, slot.log);
+    assert.ok(slot.log.includes(SANDBOX_UNAVAILABLE), slot.log);
   },
 );
 

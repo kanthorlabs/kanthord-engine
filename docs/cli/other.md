@@ -1094,9 +1094,11 @@ runs it, and help does not list it. It takes no option.
   `bash -c` and a deadline of 10 s. The slot disposes the sandbox after the
   probe. A failed probe exits `1` with `worker.slot.sandbox_unavailable` and the
   probe detail, before the slot reads the `init` frame and before it starts a
-  thread. The pool restarts the slot with its backoff, which starts at 1 s and
+  thread. `SIGTERM` or `SIGINT` during the probe exits `0` and starts no thread.
+  The pool restarts the slot with its backoff, which starts at 1 s and
   stops at 300 s, and logs `worker.pool.instance_failed` with the exit code.
-- After the probe, it reads the frames and starts the worker thread with the
+- After the probe, it reads the frames, arms the `init` deadline of 10 s from the
+  probe end, and starts the worker thread with the
   operational log on standard error.
 - A `control` frame sends `drain` or `stop` to the thread. `SIGTERM` and `SIGINT`
   send `stop`. A thread that does not exit within 5 s after a signal is
@@ -1106,12 +1108,12 @@ runs it, and help does not list it. It takes no option.
 
 It exits `1` with a diagnostic in these cases:
 
-| Code                              | Condition                                                                                                                            |
-| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `worker.slot.sandbox_unavailable` | The sandbox probe fails: the wrap rejects, or the wrapped `true` exits non-zero or exceeds 10 s. The `detail` field holds the cause. |
-| `worker.slot.init_absent`         | No `init` frame arrives within 10 s.                                                                                                 |
-| `worker.slot.frame_invalid`       | A line on standard input is no valid frame, or the first frame is not `init`, or a second `init` arrives.                            |
-| `worker.slot.channel_closed`      | Standard input reaches its end, or no frame arrives within 15 s.                                                                     |
+| Code                              | Condition                                                                                                                                                                          |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker.slot.sandbox_unavailable` | The sandbox probe fails: the wrap rejects, or the wrapped `true` exits non-zero or exceeds 10 s, or the sandbox dispose after the probe fails. The `detail` field holds the cause. |
+| `worker.slot.init_absent`         | No `init` frame arrives within 10 s of the probe end.                                                                                                                              |
+| `worker.slot.frame_invalid`       | A line on standard input is no valid frame, or the first frame is not `init`, or a second `init` arrives.                                                                          |
+| `worker.slot.channel_closed`      | Standard input reaches its end, or no frame arrives within 15 s.                                                                                                                   |
 
 ## Local JWT issuance
 
@@ -1373,7 +1375,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `cli.pagination.limit_out_of_range`              | The `--limit` value exceeds 1000.                                                                                                                                                                                                                                                                                                                                  | list commands with `--limit`                                               |
 | local           | `cli.serve.unsupported_application`              | The named `serve` application is neither `worker` nor the default server.                                                                                                                                                                                                                                                                                          | serve                                                                      |
 | local           | `worker.slot.sandbox_unavailable`                | The sandbox probe fails: the wrap rejects, or the wrapped `true` exits non-zero or exceeds 10 s. The `detail` field holds the cause.                                                                                                                                                                                                                               | serve slot                                                                 |
-| local           | `worker.slot.init_absent`                        | No `init` frame arrives within 10 s.                                                                                                                                                                                                                                                                                                                               | serve slot                                                                 |
+| local           | `worker.slot.init_absent`                        | No `init` frame arrives within 10 s of the probe end.                                                                                                                                                                                                                                                                                                              | serve slot                                                                 |
 | local           | `worker.slot.frame_invalid`                      | A line on standard input is no valid frame, or the first frame is not `init`, or a second `init` arrives.                                                                                                                                                                                                                                                          | serve slot                                                                 |
 | local           | `worker.slot.channel_closed`                     | Standard input reaches its end, or no frame arrives within 15 s.                                                                                                                                                                                                                                                                                                   | serve slot                                                                 |
 | local           | `cli.serve.worker_config`                        | `serve worker` was given the unsupported `--config` option.                                                                                                                                                                                                                                                                                                        | serve worker                                                               |
