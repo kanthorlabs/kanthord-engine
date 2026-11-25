@@ -1,22 +1,28 @@
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   lstatSync,
   readdirSync,
   readFileSync,
   readlinkSync,
   type Stats,
 } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
 import type { Context } from "../../kernel/context.ts";
 import { isString } from "../../kernel/values.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
-import { untrackedPaths } from "./local-git.ts";
+import { indexedPaths, untrackedPaths } from "./local-git.ts";
 
 const OWNING_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
 const MISSING = "missing";
 const GIT_DIRECTORY = ".git";
 const NO_PATHS = 0;
+const EMPTY_WORD = "";
+const CURRENT_DIRECTORY = ".";
+const WHITESPACE = /\s+/;
+const QUOTED_WORD = /^(["'])(.*)\1$/;
+const TRAILING_SLASH = /\/$/;
 
 export interface VerificationScope {
   commands: readonly string[];
@@ -82,8 +88,48 @@ function newPaths(
   );
 }
 
-function recordedUnder(paths: ReadonlySet<string>, changed: string): string[] {
-  return [...paths].filter((path) => contains(path, changed));
+function commandWords(command: string): Set<string> {
+  const words = command
+    .split(WHITESPACE)
+    .map((word) => word.replace(QUOTED_WORD, "$2").replace(TRAILING_SLASH, ""));
+  return new Set(
+    words.filter((word) => word !== EMPTY_WORD && word !== CURRENT_DIRECTORY),
+  );
+}
+
+function listsPathOrParent(
+  words: ReadonlySet<string>,
+  candidate: string,
+  checkout: string,
+): boolean {
+  for (let name = candidate; name !== CURRENT_DIRECTORY; name = dirname(name))
+    if (name !== checkout && words.has(name)) return true;
+  return false;
+}
+
+function namesPath(
+  words: ReadonlySet<string>,
+  checkout: string,
+  path: string,
+): boolean {
+  return [path, join(checkout, path)].some((candidate) =>
+    listsPathOrParent(words, candidate, checkout),
+  );
+}
+
+function isNestedRepository(absolute: string): boolean {
+  return existsSync(join(absolute, GIT_DIRECTORY));
+}
+
+function releasable(
+  directory: string,
+  paths: ReadonlySet<string>,
+  changed: string,
+): string[] {
+  return [...paths].filter(
+    (path) =>
+      contains(path, changed) && !isNestedRepository(join(directory, path)),
+  );
 }
 
 export class VerificationWrites {
@@ -105,7 +151,7 @@ export class VerificationWrites {
   track<T>(command: string, run: () => Promise<T>): Promise<T> {
     return this.commands.has(command.trim())
       ? this.observe(run)
-      : this.guard(run);
+      : this.guard(command, run);
   }
 
   pathsOf(directory: string): string[] {
@@ -134,13 +180,35 @@ export class VerificationWrites {
     }
   }
 
-  private async guard<T>(run: () => Promise<T>): Promise<T> {
+  private async guard<T>(command: string, run: () => Promise<T>): Promise<T> {
     const before = this.fingerprints();
     if (before.size === NO_PATHS) return run();
     try {
       return await run();
     } finally {
       this.releaseChanged(before);
+      await this.releaseStaged(command);
+    }
+  }
+
+  private async releaseStaged(command: string): Promise<void> {
+    const words = commandWords(command);
+    for (const [directory, paths] of this.written) {
+      const checkout = relative(this.workspace, directory);
+      const named = [...paths].filter((path) =>
+        namesPath(words, checkout, path),
+      );
+      if (named.length === NO_PATHS) continue;
+      const staged = await indexedPaths(
+        {
+          env: this.env,
+          directory,
+          context: this.context,
+          deadlineMs: COMMAND_LIMIT_MS,
+        },
+        named,
+      );
+      for (const path of staged) this.release(join(directory, path));
     }
   }
 
@@ -168,7 +236,11 @@ export class VerificationWrites {
 
   private release(absolute: string): void {
     for (const [directory, paths] of this.written)
-      for (const path of recordedUnder(paths, relative(directory, absolute)))
+      for (const path of releasable(
+        directory,
+        paths,
+        relative(directory, absolute),
+      ))
         paths.delete(path);
   }
 

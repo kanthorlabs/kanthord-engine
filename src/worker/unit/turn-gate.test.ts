@@ -87,6 +87,10 @@ const SUBMODULE = "sub";
 const CACHE_FILE = "pkg/__pycache__/check.pyc";
 const GEN_FILE = "gen/out.txt";
 const WRITE_GEN = `mkdir -p gen && echo out > ${GEN_FILE}`;
+const SNAP_FILE = "pkg/snap.txt";
+const WRITE_SNAP = `mkdir -p pkg && echo snap > ${SNAP_FILE}`;
+const WRITE_GEN_PAIR =
+  "mkdir -p gen && echo a > gen/a.txt && echo b > gen/b.txt";
 const VENDOR_DIRECTORY = "vendor/lib";
 const KEPT_FILE = "keep";
 const EDITED_CONTENT = "edited";
@@ -459,6 +463,120 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
       NO_TREE_ENTRY,
     );
+  });
+
+  test("a write inside a recorded nested repository leaves its gitlink out of the turn commit and keeps the file in the work tree", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const nestedFile = `${VENDOR_DIRECTORY}/x.txt`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [bash(clone), write(nestedFile, "x"), fauxAssistantMessage("done")],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.equal(existsSync(join(h.root, nestedFile)), true);
+    assert.equal(
+      await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
+      NO_TREE_ENTRY,
+    );
+  });
+
+  test("a bash change inside a recorded nested repository leaves its gitlink out of the turn commit", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [
+        bash(clone),
+        bash(`echo changed > ${VENDOR_DIRECTORY}/x.txt`),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.equal(
+      await simpleGit(h.root).raw(["ls-tree", "HEAD", VENDOR_DIRECTORY]),
+      NO_TREE_ENTRY,
+    );
+  });
+
+  test("a write of another file after a write inside a recorded nested repository is in the turn commit", async (t) => {
+    const source = await submoduleSource(t);
+    const clone = `git clone ${source.address} ${VENDOR_DIRECTORY}`;
+    const h = await fixture(
+      t,
+      [task("verify", clone)],
+      [
+        bash(clone),
+        write(`${VENDOR_DIRECTORY}/x.txt`, "x"),
+        write(WORK_FILE, "a"),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [WORK_FILE]);
+  });
+
+  test("a bash call that stages a recorded path puts the path in the turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_SNAP)],
+      [
+        bash(WRITE_SNAP),
+        bash(`git add ${SNAP_FILE}`),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [SNAP_FILE]);
+  });
+
+  test("a bash call that stages and commits a recorded path puts the path in the turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_SNAP)],
+      [
+        bash(WRITE_SNAP),
+        bash(`git add ${SNAP_FILE} && git commit -qm snap`),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [SNAP_FILE]);
+  });
+
+  test("(invariant guard: F90) a bash call that stages everything leaves a recorded path out of the turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_CACHE)],
+      [
+        bash(WRITE_CACHE),
+        write(WORK_FILE, "a"),
+        bash("git add -A && git commit -qm all"),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual(await committedFiles(h.root), [WORK_FILE]);
+    assert.equal(existsSync(join(h.root, CACHE_FILE)), true);
+  });
+
+  test("a bash call that stages a parent directory puts every recorded path under it in the turn commit", async (t) => {
+    const h = await fixture(
+      t,
+      [task("verify", WRITE_GEN_PAIR)],
+      [
+        bash(WRITE_GEN_PAIR),
+        bash("git add gen/"),
+        fauxAssistantMessage("done"),
+      ],
+    );
+    await gatedAgent(h, GATE_MESSAGE).prompt(EMPTY_PROMPT);
+    assert.deepEqual((await committedFiles(h.root)).sort(), [
+      "gen/a.txt",
+      "gen/b.txt",
+    ]);
   });
 
   test("the turn gate restores a moved gitlink and keeps an uncommitted edit inside the submodule", async (t) => {
