@@ -691,6 +691,48 @@ test("a change inside the .git directory of a recorded nested repository keeps t
   assert.deepEqual(writes.pathsOf(directory), ["vendor/lib"]);
 });
 
+test("a bash call that names a recorded path and stages it removes the path from the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "echo snap > pkg/snap.txt && echo other > pkg/other.txt",
+  );
+  await runBash(tools, VERIFY);
+  await runBash(tools, "git add pkg/snap.txt");
+  assert.deepEqual(writes.pathsOf(directory), ["pkg/other.txt"]);
+});
+
+test("a bash call that names a parent directory of recorded paths and stages them removes the paths from the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "echo a > pkg/a.txt && echo b > pkg/b.txt",
+  );
+  await runBash(tools, VERIFY);
+  await runBash(tools, "git add 'pkg/'");
+  assert.deepEqual(writes.pathsOf(directory), []);
+});
+
+test("(invariant guard) a bash call that stages everything keeps every recorded path in the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "echo snap > pkg/snap.txt",
+  );
+  await runBash(tools, VERIFY);
+  await runBash(tools, "git add .");
+  await runBash(tools, "git add -A");
+  await runBash(tools, "git add --all");
+  assert.deepEqual(writes.pathsOf(directory), ["pkg/snap.txt"]);
+});
+
+test("(invariant guard) a bash call that names a recorded path and stages nothing keeps the path in the record", async (t) => {
+  const { directory, writes, tools } = await verificationCheckout(
+    t,
+    "echo snap > pkg/snap.txt",
+  );
+  await runBash(tools, VERIFY);
+  await runBash(tools, "cat pkg/snap.txt");
+  assert.deepEqual(writes.pathsOf(directory), ["pkg/snap.txt"]);
+});
+
 test("(invariant guard) a recorded nested repository stays in the record after a bash change inside it", async (t) => {
   const { directory, writes, tools } = await verificationCheckout(
     t,

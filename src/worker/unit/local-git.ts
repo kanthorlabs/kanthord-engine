@@ -1505,6 +1505,28 @@ export async function untrackedPaths(call: GitCall): Promise<string[]> {
     .map((entry) => entry.slice(STATUS_PREFIX_LENGTH).replace(/\/$/, ""));
 }
 
+export async function indexedPaths(
+  call: GitCall,
+  paths: readonly string[],
+): Promise<string[]> {
+  const indexed: string[] = [];
+  for (const batch of pathBatches(paths))
+    indexed.push(
+      ...(
+        await run(
+          call.env,
+          call.directory,
+          ["--literal-pathspecs", "ls-files", "--cached", "-z", "--", ...batch],
+          call.context,
+          call.deadlineMs,
+        )
+      )
+        .split(NUL)
+        .filter(Boolean),
+    );
+  return indexed;
+}
+
 function remover(path: string): void {
   rmSync(path, { recursive: true, force: true });
 }

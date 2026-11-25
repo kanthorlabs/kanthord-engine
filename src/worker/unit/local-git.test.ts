@@ -34,6 +34,7 @@ import {
   fetchLocal,
   fileAtRevision,
   headCommit,
+  indexedPaths,
   isAncestor,
   type LineRange,
   mergeBase,
@@ -312,6 +313,20 @@ test("a work commit leaves out a verification write and keeps the file", async (
     (await git.raw(["ls-files", PYCACHE_FILE])).trim(),
     CLEAN_STATUS,
   );
+});
+
+test("indexed paths answer the paths that the index holds and treat a glob character as a literal", async (t) => {
+  const { directory, git } = await repositoryWithTree(t, "");
+  writeFileSync(join(directory, "star*"), CACHE_CONTENT);
+  writeFileSync(join(directory, "starfish"), CACHE_CONTENT);
+  writeFileSync(join(directory, "loose"), CACHE_CONTENT);
+  await git.raw(["--literal-pathspecs", "add", "star*"]);
+  const call = { env, directory, context: background, deadlineMs: 10000 };
+  assert.deepEqual(
+    await indexedPaths(call, ["tracked", "star*", "starfish", "loose"]),
+    ["star*", "tracked"],
+  );
+  assert.deepEqual(await indexedPaths(call, []), []);
 });
 
 test("a tree id stays the same when an amend changes only the commit and differs when a file changes", async (t) => {
