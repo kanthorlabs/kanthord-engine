@@ -12,6 +12,7 @@ import {
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
 import type { DiskSpace } from "../kernel/disk.ts";
+import { ResourceFailureReason } from "../kernel/health.ts";
 import { isObject, isString } from "../kernel/values.ts";
 import { GitStage, GitWriteError } from "../repository/connector.ts";
 import { RepositoryErrorCode } from "../repository/contract.ts";
@@ -530,7 +531,8 @@ function probeFailureVerdict(error: unknown): ProofVerdict {
   if (
     error instanceof GitWriteError &&
     error.stage === GitStage.Push &&
-    error.code === RepositoryErrorCode.GitFailed
+    error.code === RepositoryErrorCode.GitFailed &&
+    gitFailureReason(error) === ResourceFailureReason.Unclassified
   )
     return failedVerdict(
       EnvironmentFailureClass.PushRefused,

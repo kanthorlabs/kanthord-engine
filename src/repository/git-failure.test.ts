@@ -176,6 +176,28 @@ test("gitFailureReason answers deadline_exceeded for a deadline before the push"
   );
 });
 
+test("gitFailureReason reads the git text inside a push-stage GitWriteError", () => {
+  const pushError = (text: string) =>
+    new GitWriteError(
+      GitStage.Push,
+      new Diagnostic(RepositoryErrorCode.GitFailed, "git failed.", {
+        cause: new Error(text),
+      }),
+    );
+  assert.equal(
+    gitFailureReason(pushError("ssh: Could not resolve hostname git.example")),
+    ResourceFailureReason.HostUnreachable,
+  );
+  assert.equal(
+    gitFailureReason(pushError("probe push: Git deadline exceeded")),
+    ResourceFailureReason.DeadlineExceeded,
+  );
+  assert.equal(
+    gitFailureReason(pushError("remote: pre-receive hook declined")),
+    ResourceFailureReason.Unclassified,
+  );
+});
+
 test("a GitHub refusal for the missing workflow scope is a workflow_scope push refusal with that line as detail", () => {
   const refusal = pushRefusalOf(pushFailure(WORKFLOW_REFUSAL));
   assert.equal(refusal?.kind, PushRefusalKind.WorkflowScope);

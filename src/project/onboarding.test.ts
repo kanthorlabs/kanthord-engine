@@ -2550,6 +2550,43 @@ test(
 );
 
 test(
+  "a push that ends on the git deadline fails the record with probe_failed and deadline_exceeded",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "probe push: Git deadline exceeded",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^deadline_exceeded: /);
+    assert.equal(h.state().failure?.class, PROBE_FAILED);
+  },
+);
+
+test(
+  "a push that cannot reach the host fails the record with probe_failed and host_unreachable",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const h = hostHarness(t);
+    h.probeError = gitWriteFailure(
+      GitStage.Push,
+      "ssh: connect to host git.example port 22: Connection refused",
+    );
+    await h.compute();
+    await h.ended();
+    const file = h.proofOf(h.digest());
+    assert.ok(file);
+    assert.equal(file.class, PROBE_FAILED);
+    assert.match(file.tail, /^host_unreachable: /);
+  },
+);
+
+test(
   "a probe that cannot resolve the host fails the record with probe_failed and host_unreachable",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
