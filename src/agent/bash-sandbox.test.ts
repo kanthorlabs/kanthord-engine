@@ -666,6 +666,17 @@ test("(invariant guard) the allow list holds no PATH entry that lies inside a ho
   assert.ok(!allowed.includes(configBin));
 });
 
+test("(invariant guard) a PATH entry equal to the home directory adds no tool root and keeps the home out of the allow list", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  touch(join(home, ".netrc"));
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: ["/usr/bin", home].join(":") },
+    denyRead: [],
+  };
+  assert.deepEqual(scopedDenyRead(host, cwd), [home]);
+  assert.ok(!(await allowReadOf(host, cwd)).includes(home));
+});
+
 test("(edge) a cwd outside the home directory leaves the home denied and the tool roots allowed", async (t) => {
   const { root, home, tmp } = homeLayout(t);
   const cwd = join(root, "workspace");

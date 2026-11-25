@@ -219,7 +219,9 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
     join(configHome, GIT_CONFIG_DIRECTORY),
     ...nodePrefix(entries),
   ];
-  return [...new Set(roots.filter((root) => isWithin(home, root)))];
+  return [
+    ...new Set(roots.filter((root) => root !== home && isWithin(home, root))),
+  ];
 }
 
 function instanceRoots(host: SandboxHost): string[] {

@@ -49,6 +49,7 @@ const SECRET_FILES = [
   ".claude/settings.json",
   ".codex/auth.json",
 ];
+const GIT_USER_FILES = [".gitconfig", ".config/git"];
 const PNPM_GLOBAL_DIRECTORY =
   platform() === DARWIN ? "Library/Preferences/pnpm" : ".config/pnpm";
 const PNPM_COMMANDS = ["pnpm --version", "pnpm config get store-dir"];
@@ -170,10 +171,14 @@ async function execute(
 
 const sandbox = createBashSandbox(SandboxManager);
 
-async function inSandbox(h: Home, command: string): Promise<Outcome> {
+async function inSandbox(
+  h: Home,
+  command: string,
+  denyRead: string[] = [],
+): Promise<Outcome> {
   const wrapped = await sandbox.wrap(command, h.cwd, {
     env: h.env,
-    denyRead: [],
+    denyRead,
   });
   return execute(wrapped, h.cwd, h.env);
 }
@@ -225,8 +230,7 @@ test(
         !outcome.output.includes(secretContent(file)),
         `${command}: exit ${outcome.status}, ${lastLine(outcome)}`,
       );
-      if (BLOCKED_ON_DARWIN || file.includes("/"))
-        assert.notEqual(outcome.status, SUCCESS, command);
+      assert.notEqual(outcome.status, SUCCESS, command);
     }
   },
 );
@@ -241,6 +245,21 @@ test(
       "git commit --allow-empty -q -m probe",
     ])
       assertOutcome(command, await inSandbox(h, command), false);
+  },
+);
+
+test(
+  "(edge) git status with .gitconfig and .config/git denied",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    const command = "git status";
+    const outcome = await inSandbox(
+      h,
+      command,
+      GIT_USER_FILES.map((file) => join(h.home, file)),
+    );
+    assertOutcome(command, outcome, BLOCKED_ON_DARWIN);
   },
 );
 
