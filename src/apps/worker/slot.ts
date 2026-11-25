@@ -194,6 +194,7 @@ export class SlotSession {
     this.arm(this.options.initDeadlineMs, () => {
       if (!this.thread) this.fail(initAbsent());
     });
+    this.lastFrame = performance.now();
     this.watchFrames(this.options.frameDeadlineMs);
   }
 

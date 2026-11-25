@@ -50,7 +50,8 @@ const SANDBOX_UNAVAILABLE = "worker.slot.sandbox_unavailable";
 const WRAP_FAILURE = "wrap rejected for the test";
 const DISPOSE_REJECTION = "dispose rejected for the test";
 const PROBE_DETAIL = "probe detail from the test";
-const SLOW_PROBE_MS = 600;
+const SLOW_PROBE_MS = 2000;
+const FRAME_DEADLINE_BELOW_PROBE_MS = 600;
 const SLOW_PROBE_SOURCE = `async () => {
   process.stderr.write("probe started\\n");
   await new Promise((resolve) => setTimeout(resolve, ${LONG_DEADLINE_MS}));
@@ -430,6 +431,21 @@ test("serve slot reads the init frame after a passing probe and counts the init 
   assert.equal(exit.code, SLOT_FAILURE);
   assert.match(exit.stderr, /worker\.slot\.init_absent/);
   assert.ok(elapsed >= SLOW_PROBE_MS + SHORT_DEADLINE_MS, String(elapsed));
+
+  const framesAfterProbe = slot(
+    t,
+    {
+      initDeadlineMs: SHORT_DEADLINE_MS,
+      frameDeadlineMs: FRAME_DEADLINE_BELOW_PROBE_MS,
+    },
+    undefined,
+    "",
+    probe,
+  );
+  const quiet = await framesAfterProbe.exited;
+  assert.equal(quiet.code, SLOT_FAILURE);
+  assert.match(quiet.stderr, /worker\.slot\.init_absent/);
+  assert.doesNotMatch(quiet.stderr, /worker\.slot\.channel_closed/);
 });
 
 test("the default probe answers null on a host that starts the sandbox", async (t) => {
