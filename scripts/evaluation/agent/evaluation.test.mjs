@@ -32,6 +32,7 @@ import {
   checkScope,
   checkStartGate,
   cloneSteps,
+  comparabilityError,
   computeBaseCost,
   computeGate,
   copyHiddenTests,
@@ -39,17 +40,22 @@ import {
   diffArgs,
   diffSteps,
   extractCredentialValues,
+  flipsCountForAspect,
+  goodOnRunNoise,
   gradeCheckRecord,
   gradeRun,
   hasProtectedPath,
   highestTierCost,
   modelBlend,
   nextRunAttempt,
+  oneChangeError,
   parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
+  passFlipsCount,
   protectedPathStrings,
   readModelPrices,
+  reDigestError,
   refreshAuth,
   refreshedAuthBreach,
   removeRunFilesOnCredential,
@@ -3056,4 +3062,694 @@ test("L4-U19: the transcript cuts each tool result to 4,000 characters", (t) => 
 
 test("L4-U19: an absent session file gives an empty transcript", (t) => {
   assert.equal(transcriptOf(t, null), "");
+});
+
+const EVAL_SCRIPT = fileURLToPath(new URL("evaluation.mjs", import.meta.url));
+
+const FAKE_LLM_KEY =
+  "sk-ant-oat01-AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfGhIjKlMnAbCdEfGhIjKlMnOpQrStUvWxYzAbCdEfG1a";
+
+function makeValidateCase(root, id, overrides = {}) {
+  const { folder, json } = makeCase(root, id, overrides);
+  const workDir = join(root, `${id}-patch-work`);
+  git(undefined, ["clone", "--quiet", join(folder, "repo.bundle"), workDir]);
+  writeFileSync(join(workDir, "ok.txt"), "ok\n");
+  git(workDir, ["add", "ok.txt"]);
+  const patchResult = spawnSync("git", ["diff", "--staged", "--binary"], {
+    cwd: workDir,
+    encoding: "utf8",
+    env: isolatedGitEnvironment(process.env),
+  });
+  writeFileSync(join(folder, "check", "reference.patch"), patchResult.stdout);
+  rmSync(workDir, { recursive: true });
+  return { folder, json };
+}
+
+function runScript(argv) {
+  return spawnSync(process.execPath, [EVAL_SCRIPT, ...argv], {
+    encoding: "utf8",
+    env: isolatedGitEnvironment(process.env),
+  });
+}
+
+function sweFor(caseId, repeat, change = {}) {
+  return sweLine({
+    session: `/r/${caseId}/${repeat}-1/session.jsonl`,
+    ...change,
+  });
+}
+
+function iterReport(
+  cases,
+  checks,
+  diagnoses,
+  parentChecks,
+  parentDiagnoses,
+  aspect,
+  reKeysDiffer = false,
+) {
+  const baseIter = { stage: 1, set: "held-out", set_commit: "c", repeats: 2 };
+  return buildReport({
+    evalId: "e",
+    iteration: {
+      ...baseIter,
+      parent: "p",
+      aspect: aspect ?? "A1",
+      hypothesis: "h",
+      replicate: null,
+    },
+    cases: cases.map((id) => ({ id, kind: "backend" })),
+    r: null,
+    judgeR: null,
+    earlier: 0,
+    checks,
+    results: [],
+    calls: [{ cap_usd: 15 }],
+    diagnoses,
+    parent: {
+      evalId: "p",
+      iteration: {
+        ...baseIter,
+        parent: null,
+        aspect: null,
+        hypothesis: null,
+        replicate: null,
+      },
+      cases: cases.map((id) => ({ id, kind: "backend" })),
+      r: null,
+      judgeR: null,
+      earlier: 0,
+      checks: parentChecks,
+      results: [],
+      calls: [],
+      diagnoses: parentDiagnoses,
+    },
+    reKeysDiffer,
+  });
+}
+
+test("L4-U7: goodOnRunNoise reads the check field for A1 to A4", () => {
+  for (const aspect of ["A1", "A2", "A3", "A4"]) {
+    const lc = aspect.toLowerCase();
+    assert.equal(
+      goodOnRunNoise({ [lc]: true }, undefined, aspect, false),
+      true,
+    );
+    assert.equal(
+      goodOnRunNoise({ [lc]: false }, undefined, aspect, false),
+      false,
+    );
+  }
+});
+
+test("L4-U7: an invalid diagnosis counts as good in the parent and not good in the new evaluation", () => {
+  const invalid = { valid: false, findings: [] };
+  for (const aspect of ["A5", "A6", "A7"]) {
+    assert.equal(goodOnRunNoise({}, invalid, aspect, true), true, aspect);
+    assert.equal(goodOnRunNoise({}, invalid, aspect, false), false, aspect);
+  }
+});
+
+test("L4-U7: a valid diagnosis with no high or medium finding of the aspect is good", () => {
+  const low = {
+    valid: true,
+    findings: [{ aspect: "A5", evidence: "e", severity: "low" }],
+  };
+  assert.equal(goodOnRunNoise({}, low, "A5", false), true);
+  const otherHigh = {
+    valid: true,
+    findings: [{ aspect: "A6", evidence: "e", severity: "high" }],
+  };
+  assert.equal(goodOnRunNoise({}, otherHigh, "A5", false), true);
+});
+
+test("L4-U7: a valid diagnosis with a high or medium finding of the aspect is not good", () => {
+  const high = {
+    valid: true,
+    findings: [{ aspect: "A5", evidence: "e", severity: "high" }],
+  };
+  assert.equal(goodOnRunNoise({}, high, "A5", false), false);
+  const medium = {
+    valid: true,
+    findings: [{ aspect: "A5", evidence: "e", severity: "medium" }],
+  };
+  assert.equal(goodOnRunNoise({}, medium, "A5", false), false);
+  assert.equal(goodOnRunNoise({}, medium, "A6", false), true);
+});
+
+test("L4-U7: flipsCountForAspect counts 0, 1, 2 and 3 flips", () => {
+  const none = [checkLine("c1", 1), checkLine("c1", 2)];
+  assert.equal(flipsCountForAspect(none, [], "A1", false), 0);
+  const one = [checkLine("c1", 1), checkLine("c1", 2, { a1: false })];
+  assert.equal(flipsCountForAspect(one, [], "A1", false), 1);
+  const two = [
+    checkLine("c1", 1),
+    checkLine("c1", 2, { a1: false }),
+    checkLine("c2", 1),
+    checkLine("c2", 2, { a1: false }),
+  ];
+  assert.equal(flipsCountForAspect(two, [], "A1", false), 2);
+  const three = [...two, checkLine("c3", 1), checkLine("c3", 2, { a1: false })];
+  assert.equal(flipsCountForAspect(three, [], "A1", false), 3);
+});
+
+test("L4-U7: passFlipsCount counts 0, 1 and 2 flips", () => {
+  assert.equal(passFlipsCount([checkLine("c1", 1), checkLine("c1", 2)]), 0);
+  const one = [checkLine("c1", 1), checkLine("c1", 2, { pass: false })];
+  assert.equal(passFlipsCount(one), 1);
+  const two = [
+    checkLine("c1", 1),
+    checkLine("c1", 2, { pass: false }),
+    checkLine("c2", 1),
+    checkLine("c2", 2, { pass: false }),
+  ];
+  assert.equal(passFlipsCount(two), 2);
+});
+
+test("L4-U7: the verdict is keep when the gain equals the noise", () => {
+  const parentChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1, { a1: false, pass: false }),
+    checkLine("c2", 2, { a1: false, pass: false }),
+  ];
+  const newChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1),
+    checkLine("c2", 2),
+  ];
+  const r = iterReport(["c1", "c2"], newChecks, [], parentChecks, [], "A1");
+  assert.match(r.text, /verdict keep/m);
+  assert.match(r.text, /good parent 2 new 4 noise 2/m);
+  assert.match(r.text, /passes parent 2 new 4 noise 2/m);
+});
+
+test("L4-U7: the verdict is revert when the gain is one below the noise", () => {
+  const parentChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1, { a1: false, pass: false }),
+    checkLine("c2", 2, { a1: false, pass: false }),
+  ];
+  const newChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1),
+    checkLine("c2", 2, { a1: false, pass: false }),
+  ];
+  const r = iterReport(["c1", "c2"], newChecks, [], parentChecks, [], "A1");
+  assert.match(r.text, /verdict revert/m);
+});
+
+test("L4-U7: a regression equal to the noise gives revert", () => {
+  const parentChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1),
+    checkLine("c2", 2),
+  ];
+  const newChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1, { a1: false, pass: false }),
+    checkLine("c2", 2, { a1: false, pass: false }),
+  ];
+  const r = iterReport(["c1", "c2"], newChecks, [], parentChecks, [], "A1");
+  assert.match(r.text, /verdict revert/m);
+});
+
+test("L4-U7: a breach gives revert before the noise check", () => {
+  const parentChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1),
+    checkLine("c2", 2),
+  ];
+  const newChecks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1),
+    checkLine("c2", 2, { breach: "credential" }),
+  ];
+  const r = iterReport(["c1", "c2"], newChecks, [], parentChecks, [], "A1");
+  assert.match(r.text, /verdict revert/m);
+});
+
+test("L4-U7: a planned diagnosis with no line gives no verdict", () => {
+  const checks = [checkLine("c1", 1), checkLine("c1", 2)];
+  const diagns = [diagnosisLine("c1", 1, []), diagnosisLine("c1", 2, [])];
+  const devIter = { stage: 1, set: "dev", set_commit: "c", repeats: 2 };
+  const r = buildReport({
+    evalId: "e",
+    iteration: {
+      ...devIter,
+      parent: "p",
+      aspect: "A5",
+      hypothesis: "h",
+      replicate: null,
+    },
+    cases: [{ id: "c1", kind: "backend" }],
+    r: null,
+    judgeR: null,
+    earlier: 0,
+    checks,
+    results: [],
+    calls: [{ cap_usd: 15 }],
+    diagnoses: [diagnosisLine("c1", 1, [])],
+    parent: {
+      evalId: "p",
+      iteration: {
+        ...devIter,
+        parent: null,
+        aspect: null,
+        hypothesis: null,
+        replicate: null,
+      },
+      cases: [{ id: "c1", kind: "backend" }],
+      r: null,
+      judgeR: null,
+      earlier: 0,
+      checks,
+      results: [],
+      calls: [],
+      diagnoses: diagns,
+    },
+    reKeysDiffer: false,
+  });
+  assert.match(r.text, /verdict no verdict/m);
+});
+
+test("L4-U7: re@1 key difference gives no verdict for A5 to A7", () => {
+  const checks = [checkLine("c1", 1), checkLine("c1", 2)];
+  for (const aspect of ["A5", "A6", "A7"]) {
+    const r = iterReport(["c1"], checks, [], checks, [], aspect, true);
+    assert.match(r.text, /verdict no verdict/m, aspect);
+  }
+});
+
+test("L4-U7: the A/A line shows goods, diffs, flips and passes for each aspect", () => {
+  const checks = [
+    checkLine("c1", 1),
+    checkLine("c1", 2),
+    checkLine("c2", 1, { a1: false, pass: false }),
+    checkLine("c2", 2, { a1: false, pass: false }),
+  ];
+  const baseIter = { stage: 1, set: "dev", set_commit: "c", repeats: 2 };
+  const r = buildReport({
+    evalId: "e",
+    iteration: {
+      ...baseIter,
+      parent: null,
+      aspect: null,
+      hypothesis: null,
+      replicate: "p",
+    },
+    cases: [
+      { id: "c1", kind: "backend" },
+      { id: "c2", kind: "backend" },
+    ],
+    r: null,
+    judgeR: null,
+    earlier: 0,
+    checks,
+    results: [],
+    calls: [{ cap_usd: 15 }],
+    diagnoses: [],
+    parent: {
+      evalId: "p",
+      iteration: {
+        ...baseIter,
+        parent: null,
+        aspect: null,
+        hypothesis: null,
+        replicate: null,
+      },
+      cases: [
+        { id: "c1", kind: "backend" },
+        { id: "c2", kind: "backend" },
+      ],
+      r: null,
+      judgeR: null,
+      earlier: 0,
+      checks,
+      results: [],
+      calls: [],
+      diagnoses: [],
+    },
+  });
+  assert.match(r.text, /^A\/A: A1 2 2 diff 0 flips 0, /m);
+  assert.match(r.text, /passes 2 2 diff 0$/m);
+});
+
+test("L4-U11: comparabilityError returns null for a valid iteration pair", () => {
+  const iter = { stage: 1, set: "dev", set_commit: "c" };
+  const results = [sweFor("c1", 1, { system_prompt_digest: "e" })];
+  const parentResults = [sweFor("c1", 1)];
+  assert.equal(
+    comparabilityError(
+      iter,
+      iter,
+      results,
+      parentResults,
+      [{ id: "c1" }],
+      false,
+    ),
+    null,
+  );
+});
+
+test("L4-U11: comparabilityError refuses a different set_commit", () => {
+  const iter = { stage: 1, set: "dev", set_commit: "c" };
+  const other = { ...iter, set_commit: "d" };
+  assert.equal(
+    comparabilityError(iter, other, [], [], [], false),
+    "set_commit",
+  );
+});
+
+test("L4-U11: comparabilityError refuses the same system_prompt_digest in an iteration pair", () => {
+  const iter = { stage: 1, set: "dev", set_commit: "c" };
+  const results = [sweFor("c1", 1)];
+  assert.equal(
+    comparabilityError(iter, iter, results, results, [{ id: "c1" }], false),
+    "system_prompt_digest",
+  );
+});
+
+test("L4-U11: comparabilityError accepts the same system_prompt_digest for a replicate pair", () => {
+  const iter = { stage: 1, set: "dev", set_commit: "c" };
+  const results = [sweFor("c1", 1)];
+  assert.equal(
+    comparabilityError(iter, iter, results, results, [{ id: "c1" }], true),
+    null,
+  );
+});
+
+test("L4-U11: comparabilityError refuses a different input_digest for a case", () => {
+  const iter = { stage: 1, set: "dev", set_commit: "c" };
+  const results = [sweFor("c1", 1, { input_digest: "j" })];
+  const parentResults = [sweFor("c1", 1)];
+  assert.equal(
+    comparabilityError(
+      iter,
+      iter,
+      results,
+      parentResults,
+      [{ id: "c1" }],
+      false,
+    ),
+    "input_digest",
+  );
+});
+
+test("L4-U11: reDigestError returns null when no re@1 line is present in one evaluation", () => {
+  assert.equal(reDigestError([], [reLine()]), null);
+  assert.equal(reDigestError([reLine()], []), null);
+});
+
+test("L4-U11: reDigestError returns null when the re@1 digests match", () => {
+  assert.equal(reDigestError([reLine()], [reLine()]), null);
+});
+
+test("L4-U11: reDigestError returns system_prompt_digest when the re@1 digests differ", () => {
+  assert.equal(
+    reDigestError([reLine()], [reLine({ system_prompt_digest: "other" })]),
+    "system_prompt_digest",
+  );
+});
+
+test("L4-U11: oneChangeError returns null for the same commit", (t) => {
+  const { engineRoot } = makeFixture(t);
+  const commit = git(engineRoot, ["rev-parse", "HEAD"]);
+  assert.equal(oneChangeError(engineRoot, commit, commit), null);
+});
+
+test("L4-U11: oneChangeError returns null for the two allowed files and an error for any other path", (t) => {
+  const { engineRoot } = makeFixture(t);
+  const parentCommit = git(engineRoot, ["rev-parse", "HEAD"]);
+  mkdirSync(join(engineRoot, "static", "prompt", "role"), { recursive: true });
+  writeFileSync(join(engineRoot, "static", "prompt", "role", "swe@1.md"), "v2");
+  writeFileSync(join(engineRoot, "static", "prompt", "swe@1.md"), "v2");
+  git(engineRoot, ["add", "."]);
+  git(engineRoot, ["commit", "-q", "-m", "change"]);
+  const newCommit = git(engineRoot, ["rev-parse", "HEAD"]);
+  assert.equal(oneChangeError(engineRoot, parentCommit, newCommit), null);
+  writeFileSync(join(engineRoot, "extra.txt"), "x");
+  git(engineRoot, ["add", "extra.txt"]);
+  git(engineRoot, ["commit", "-q", "-m", "extra"]);
+  const withExtra = git(engineRoot, ["rev-parse", "HEAD"]);
+  assert.match(
+    oneChangeError(engineRoot, parentCommit, withExtra),
+    /extra\.txt/,
+  );
+});
+
+test("L4-U13: a call refuses each broken rule of the new iteration options", async (t) => {
+  const fixture = makeDevFixture(t);
+  for (const [argv, pattern] of [
+    [devArgs("e").concat(["--parent", "p"]), /--parent requires --aspect/],
+    [
+      devArgs("e").concat(["--parent", "p", "--aspect", "A1"]),
+      /--parent requires --hypothesis/,
+    ],
+    [
+      [
+        "--evaluation",
+        "e",
+        "--stage",
+        "1",
+        "--set",
+        "held-out",
+        "--parent",
+        "p",
+        "--aspect",
+        "A1",
+        "--hypothesis",
+        "h",
+      ],
+      /--parent requires --set dev/,
+    ],
+    [
+      devArgs("e").concat([
+        "--parent",
+        "p",
+        "--aspect",
+        "A8",
+        "--hypothesis",
+        "h",
+      ]),
+      /--aspect is A1 to A7/,
+    ],
+    [devArgs("e").concat(["--aspect", "A1"]), /--aspect requires --parent/],
+    [
+      devArgs("e").concat(["--hypothesis", "h"]),
+      /--hypothesis requires --parent/,
+    ],
+    [
+      devArgs("e").concat([
+        "--parent",
+        "p",
+        "--aspect",
+        "A1",
+        "--hypothesis",
+        "h",
+        "--replicate",
+        "r",
+      ]),
+      /--replicate requires no --parent/,
+    ],
+    [
+      [
+        "--evaluation",
+        "e",
+        "--stage",
+        "1",
+        "--set",
+        "held-out",
+        "--replicate",
+        "r",
+      ],
+      /--replicate requires --set dev/,
+    ],
+  ]) {
+    const plan = await startRun(fixture.start(argv));
+    assert.match(plan.error, pattern, argv.join(" "));
+  }
+});
+
+test("L4-U13: a resumed call refuses --parent, --replicate, --aspect and --hypothesis that differ from iteration.json", async (t) => {
+  const fixture = makeDevFixture(t);
+  await startRun(fixture.start(devArgs("parent1")));
+  await startRun(fixture.start(devArgs("parent2")));
+  const iterArgv = devArgs("e").concat([
+    "--parent",
+    "parent1",
+    "--aspect",
+    "A1",
+    "--hypothesis",
+    "h1",
+  ]);
+  await startRun(fixture.start(iterArgv));
+  assert.match(
+    (
+      await startRun(
+        fixture.start(
+          devArgs("e").concat([
+            "--parent",
+            "parent2",
+            "--aspect",
+            "A1",
+            "--hypothesis",
+            "h1",
+          ]),
+        ),
+      )
+    ).error,
+    /--parent/,
+  );
+  assert.match(
+    (
+      await startRun(
+        fixture.start(
+          devArgs("e").concat([
+            "--parent",
+            "parent1",
+            "--aspect",
+            "A2",
+            "--hypothesis",
+            "h1",
+          ]),
+        ),
+      )
+    ).error,
+    /--aspect/,
+  );
+  assert.match(
+    (
+      await startRun(
+        fixture.start(
+          devArgs("e").concat([
+            "--parent",
+            "parent1",
+            "--aspect",
+            "A1",
+            "--hypothesis",
+            "h2",
+          ]),
+        ),
+      )
+    ).error,
+    /--hypothesis/,
+  );
+  await startRun(
+    fixture.start(devArgs("replic").concat(["--replicate", "parent1"])),
+  );
+  assert.match(
+    (await startRun(fixture.start(devArgs("replic")))).error,
+    /--replicate/,
+  );
+});
+
+test("L4-U17: scan exits 0 when no file matches a secret pattern", (t) => {
+  const root = tempDir(t);
+  const clean = join(root, "clean.txt");
+  writeFileSync(clean, "nothing here\n");
+  const result = runScript(["scan", clean]);
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout, "");
+});
+
+test("L4-U17: scan exits 1 and prints file, line and rule on a match", (t) => {
+  const root = tempDir(t);
+  const file = join(root, "file.txt");
+  writeFileSync(file, `${FAKE_LLM_KEY}\n`);
+  const result = runScript(["scan", file]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /^.*:1:llm_provider_key$/m);
+  assert.ok(result.stdout.startsWith(file), "output starts with file path");
+});
+
+test("L4-U17: scan never prints the matched secret value", (t) => {
+  const root = tempDir(t);
+  const file = join(root, "file.txt");
+  writeFileSync(file, `${FAKE_LLM_KEY}\n`);
+  const result = runScript(["scan", file]);
+  assert.equal(result.stdout.includes("sk-ant-"), false);
+});
+
+test("L4-U17: scan reports the correct line number for a match on line 2", (t) => {
+  const root = tempDir(t);
+  const file = join(root, "file.txt");
+  writeFileSync(file, `no secret here\n${FAKE_LLM_KEY}\n`);
+  const result = runScript(["scan", file]);
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /:2:llm_provider_key/);
+});
+
+test("L4-U18: validate exits 0 on a valid case folder", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1");
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test("L4-U18: validate refuses a protected string in a path of the checkout", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1", {
+    setup:
+      "mkdir -p evaluation/agent && echo x > evaluation/agent/x.txt\nexit 0\n",
+  });
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /evaluation\/agent/);
+});
+
+test("L4-U18: validate refuses a protected string in task.md", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1");
+  writeFileSync(join(folder, "task.md"), "see /check/something\n");
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /task\.md/);
+});
+
+test("L4-U18: validate refuses when fail_to_pass passes on C before the patch", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1", {
+    check:
+      'case "$2" in\n  fail_to_pass) exit 0;;\n  pass_to_pass) exit 0;;\n  conventions) exit 0;;\nesac\n',
+  });
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /fail_to_pass passes on C/);
+});
+
+test("L4-U18: validate refuses when reference.patch fails a mode", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeCase(root, "c1");
+  writeFileSync(join(folder, "check", "reference.patch"), "");
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /fails fail_to_pass/);
+});
+
+test("L4-U18: validate refuses a reference.patch with a scope violation", (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1");
+  writeFileSync(
+    join(folder, "check", "reference.patch"),
+    [
+      "diff --git a/not_allowed.txt b/not_allowed.txt",
+      "new file mode 100644",
+      "--- /dev/null",
+      "+++ b/not_allowed.txt",
+      "@@ -0,0 +1 @@",
+      "+x",
+      "",
+    ].join("\n"),
+  );
+  const result = runScript(["validate", folder]);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /scope/);
 });

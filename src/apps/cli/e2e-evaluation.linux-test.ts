@@ -116,6 +116,13 @@ const AC1_REPORT_LINES = [
   "cap_usd of each call: 15",
 ];
 const AC9_REPORT_LINES = ["invalid diagnoses: 4", "verdict complete"];
+const AC8_EVAL = "e8";
+const AC8B_EVAL = "e8b";
+const AC8_ASPECT = "A5";
+const AC8_HYPOTHESIS = "name the test command";
+const AC10_EVAL = "e10";
+const AC10B_EVAL = "e10b";
+const AC10B_REPLICATE = AC10_EVAL;
 const TEXT_FIXTURE = "fixture";
 const TEXT_BACKEND_FIXTURE = "backend fixture";
 const TEXT_FRONTEND_FIXTURE = "frontend fixture";
@@ -1011,5 +1018,133 @@ test(
     assert.equal(report.status, NO_VERDICT_EXIT, report.stderr);
 
     await assertReportLines(results, AC7_REPORT_LINES);
+  },
+);
+
+test(
+  "L4-AC8: report.sh refuses an iteration with no prompt change",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder(),
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    const resultsE8b = join(fixture.runs, "e8b");
+
+    const run1 = await runnerAsTestUser(fixture, {
+      script: RUN_SH,
+      args: devArgs(AC8_EVAL, "1"),
+      signal: t.signal,
+    });
+    assert.equal(run1.status, SUCCESS_EXIT, run1.stderr);
+
+    const run2 = await runnerAsTestUser(fixture, {
+      script: RUN_SH,
+      args: [
+        "--evaluation",
+        AC8B_EVAL,
+        "--stage",
+        "1",
+        "--set",
+        "dev",
+        "--parent",
+        AC8_EVAL,
+        "--aspect",
+        AC8_ASPECT,
+        "--hypothesis",
+        AC8_HYPOTHESIS,
+      ],
+      signal: t.signal,
+    });
+    assert.equal(run2.status, SUCCESS_EXIT, run2.stderr);
+
+    const iterationText = await asTestUser([
+      "cat",
+      join(resultsE8b, "iteration.json"),
+    ]);
+    const iteration = JSON.parse(iterationText) as {
+      parent: string;
+      aspect: string;
+      hypothesis: string;
+    };
+    assert.equal(iteration.parent, AC8_EVAL);
+    assert.equal(iteration.aspect, AC8_ASPECT);
+    assert.equal(iteration.hypothesis, AC8_HYPOTHESIS);
+
+    const report = await runnerAsTestUser(fixture, {
+      script: REPORT_SH,
+      args: ["--evaluation", AC8B_EVAL],
+      signal: t.signal,
+    });
+    assert.equal(report.status, BREACH_EXIT, report.stderr);
+    assert.match(report.stderr, /system_prompt_digest/);
+
+    const noReport = (
+      await asTestUser([
+        "find",
+        resultsE8b,
+        "-maxdepth",
+        "1",
+        "-name",
+        "report.md",
+      ])
+    ).trim();
+    assert.equal(noReport, NO_OUTPUT);
+  },
+);
+
+test(
+  "L4-AC10: an A/A pair gives the A/A line",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const stub = await llmStub(t, [], ENGINE_ROOT, {
+      responder: l4Responder(),
+    });
+    const fixture = await buildEvaluationSet(t, stub.baseUrl);
+    const resultsE10b = join(fixture.runs, AC10B_EVAL);
+
+    const run1 = await runnerAsTestUser(fixture, {
+      script: RUN_SH,
+      args: devArgs(AC10_EVAL, "1"),
+      signal: t.signal,
+    });
+    assert.equal(run1.status, SUCCESS_EXIT, run1.stderr);
+
+    const run2 = await runnerAsTestUser(fixture, {
+      script: RUN_SH,
+      args: [
+        "--evaluation",
+        AC10B_EVAL,
+        "--stage",
+        "1",
+        "--set",
+        "dev",
+        "--replicate",
+        AC10B_REPLICATE,
+      ],
+      signal: t.signal,
+    });
+    assert.equal(run2.status, SUCCESS_EXIT, run2.stderr);
+
+    const iterationText = await asTestUser([
+      "cat",
+      join(resultsE10b, "iteration.json"),
+    ]);
+    const iterationE10b = JSON.parse(iterationText) as { replicate: string };
+    assert.equal(iterationE10b.replicate, AC10B_REPLICATE);
+
+    const report = await runnerAsTestUser(fixture, {
+      script: REPORT_SH,
+      args: ["--evaluation", AC10B_EVAL],
+      signal: t.signal,
+    });
+    assert.equal(report.status, SUCCESS_EXIT, report.stderr);
+
+    const reportText = await asTestUser([
+      "cat",
+      join(resultsE10b, "report.md"),
+    ]);
+    assert.match(reportText, /^A\/A: A1 2 2 diff 0 flips 0, /m);
+    assert.match(reportText, /passes 2 2 diff 0$/m);
   },
 );
