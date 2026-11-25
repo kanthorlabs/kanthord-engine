@@ -13,6 +13,7 @@ import { join } from "node:path";
 
 const SIGNAL_KILL = "SIGKILL";
 const SIGNAL_STOP = "SIGSTOP";
+const SIGNAL_CONT = "SIGCONT";
 const SIGNAL_TERM = "SIGTERM";
 export const GROUP_GRACE_MS = 3000;
 export const GROUP_END_WARNING = "AgentProcessGroupEndWarning";
@@ -110,15 +111,33 @@ export function killProcessTree(
 ): void {
   assertLeader(leader);
   const stopped = new Set<number>();
+  const halted = new Set<number>();
   const failures: unknown[] = [];
   try {
-    freezeTree(leader, system, stopped, failures);
+    freezeTree(leader, system, { stopped, halted, failures });
   } catch (error) {
     failures.push(error);
   }
   const groups = stopped.size === NO_GROUPS ? [leader] : [...stopped];
-  failures.push(...signalGroups(groups, SIGNAL_KILL, system));
+  failures.push(...killOrResume(groups, halted, system));
   throwFailures(failures);
+}
+
+function killOrResume(
+  groups: readonly number[],
+  halted: ReadonlySet<number>,
+  system: ProcessSystem,
+): unknown[] {
+  const failures: unknown[] = [];
+  const unkilled: number[] = [];
+  for (const group of groups) {
+    const failed = signalGroups([group], SIGNAL_KILL, system);
+    if (failed.length === NO_GROUPS) continue;
+    failures.push(...failed);
+    if (halted.has(group)) unkilled.push(group);
+  }
+  failures.push(...signalGroups(unkilled, SIGNAL_CONT, system));
+  return failures;
 }
 
 export function markedGroups(
@@ -227,17 +246,22 @@ function assertLeader(leader: number): void {
   assert.ok(leader !== process.pid && leader !== process.ppid);
 }
 
+interface FrozenGroups {
+  stopped: Set<number>;
+  halted: Set<number>;
+  failures: unknown[];
+}
+
 function freezeTree(
   leader: number,
   system: ProcessSystem,
-  stopped: Set<number>,
-  failures: unknown[],
+  frozen: FrozenGroups,
 ): void {
+  const { stopped, failures } = frozen;
   for (let pass = 0; pass < FREEZE_PASSES_MAX; pass += 1) {
     const fresh = freshGroups(leader, system.readTable(), stopped);
     if (fresh.length === NO_GROUPS) return;
-    for (const group of fresh) stopped.add(group);
-    failures.push(...signalGroups(fresh, SIGNAL_STOP, system));
+    stopGroups(fresh, system, frozen);
   }
   const late = freshGroups(leader, system.readTable(), stopped);
   if (late.length === NO_GROUPS) return;
@@ -247,6 +271,19 @@ function freezeTree(
       `the process tree kept forking after ${FREEZE_PASSES_MAX} passes`,
     ),
   );
+}
+
+function stopGroups(
+  fresh: readonly number[],
+  system: ProcessSystem,
+  { stopped, halted, failures }: FrozenGroups,
+): void {
+  for (const group of fresh) {
+    stopped.add(group);
+    const failed = signalGroups([group], SIGNAL_STOP, system);
+    if (failed.length === NO_GROUPS) halted.add(group);
+    failures.push(...failed);
+  }
 }
 
 function freshGroups(

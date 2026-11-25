@@ -553,11 +553,6 @@
       "count": 1
     }
   },
-  "src/kernel/process-group.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/kernel/yaml.ts": {
     "kanthord/no-inline-param-type": {
       "count": 1
