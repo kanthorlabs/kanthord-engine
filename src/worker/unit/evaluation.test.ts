@@ -18,13 +18,21 @@ import { COMMAND_LIMIT_MS, ExecutionBudget } from "./budget.ts";
 import { EndReason, ExecutionRun, ExecutionStop } from "./execution-run.ts";
 import { executionBoundary } from "./native-method.ts";
 import { ExecutionIntent } from "../contract.ts";
+import type { ExecutionSetup } from "../contract.ts";
+import { openNativeAgent } from "./native-agent.ts";
 import {
   affectedCommand,
   anthropicSetup,
   commandLimitClock,
   everyBindingSshAccess,
+  fauxAssistantMessage,
+  fauxToolCall,
   transport as localTransport,
   repositorySetup,
+  scriptedModelRuntime,
+  scriptedProvider,
+  type ScriptedProvider,
+  unusedHostTools,
 } from "./test-support.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import { PoolClass } from "./tree-pool.ts";
@@ -54,11 +62,8 @@ import {
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { simpleGit } from "simple-git";
-import type {
-  ExtensionAPI,
-  ToolCallEvent,
-} from "@earendil-works/pi-coding-agent";
-import { checkoutConfinement } from "../../agent/hooks/checkout-confinement.ts";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import { SpanOperation } from "./telemetry.ts";
 import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
@@ -68,6 +73,8 @@ import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
+const READ_TOOL = "read";
+const TOOL_RESULT_ROLE = "toolResult";
 const SINGLE_BINDING = 1;
 const NO_BINDINGS = 0;
 const SECOND_ROUND = 2;
@@ -646,14 +653,8 @@ interface Submitted {
   }[];
 }
 
-interface ReviewTurn {
-  directory: string;
-  readRoots?: readonly string[];
-  instruction: string;
-}
-
 interface ReviewOptions {
-  turn?: (turn: ReviewTurn) => void;
+  provider?: ScriptedProvider;
   reply?: string;
   repository?: ReturnType<typeof repositorySetup>;
   snapshot?: string;
@@ -672,6 +673,50 @@ interface ReviewOptions {
   answer?: unknown;
   lifetimeMs?: number;
   observe?: (batch: readonly TelemetryRecord[]) => void;
+}
+
+async function nativeReviewAgent(
+  t: TestContext,
+  provider: ScriptedProvider,
+  input: {
+    setup: ExecutionSetup;
+    claim: ConstructorParameters<typeof ExecutionRun>[0]["claim"];
+    run: ExecutionRun;
+    budget: ExecutionBudget;
+    directory: string;
+    readRoots?: readonly string[];
+  },
+) {
+  const { setup, claim, run } = input;
+  const credentials = new InMemoryCredentialStore();
+  await credentials.modify("anthropic", async () => ({
+    type: "api_key",
+    key: "test_review-scripted-key",
+  }));
+  const agent = await openNativeAgent({
+    setup,
+    claim,
+    intent: setup.intent,
+    agent: setup.agents[0]!,
+    credential: {
+      credential_id: setup.agents[0]!.credential_id,
+      provider_id: "anthropic",
+      store: credentials,
+    },
+    knownSecrets: credentialSecrets(credentials, "anthropic"),
+    budget: input.budget,
+    workspace: input.directory,
+    readRoots: input.readRoots,
+    hostHome: temporary(t),
+    env: hostEnvironment(),
+    denyRead: [],
+    modelRuntimeFactory: scriptedModelRuntime(provider),
+    hostTools: unusedHostTools,
+    context: run.operationContext,
+    spans: run.spans,
+  });
+  stopAfter(t, () => agent.dispose());
+  return agent;
 }
 
 async function reviewOf(
@@ -854,11 +899,19 @@ async function reviewOf(
     readRoots?: readonly string[],
   ) => {
     opens++;
+    if (options.provider)
+      return nativeReviewAgent(t, options.provider, {
+        setup,
+        claim,
+        run,
+        budget,
+        directory,
+        readRoots,
+      });
     return {
       budget,
       instruct: async (_work: WorkPrompt, instruction: string) => {
         instructions.push(instruction);
-        options.turn?.({ directory, readRoots, instruction });
       },
       lastText: () =>
         options.reply ??
@@ -1556,44 +1609,36 @@ test("a round with a review base submits one patch evidence and the findings wit
   assert.deepEqual(attributes[EvaluationAttribute.UnmetIds], []);
 });
 
-test("regression: K194 a review turn reads patch_paths[0] through the confinement hook and gets the patch text", async (t) => {
+test("regression: K194 a review turn reads patch_paths[0] through the hook list of sessionHooks and gets the patch text", async (t) => {
   const binding = await roundSnapshot(t, REPOSITORY_NAME, "fixed");
-  const reads: string[] = [];
+  const patchPath = join(
+    "..",
+    "..",
+    "evidence",
+    `round-2-${REPOSITORY_NAME}.patch`,
+  );
+  const provider = scriptedProvider([
+    fauxAssistantMessage(fauxToolCall(READ_TOOL, { path: patchPath }), {
+      stopReason: "toolUse",
+    }),
+    fauxAssistantMessage(ROUND_SUCCESS),
+  ]);
   const review = await reviewOf(t, "true", undefined, {
     bindings: [binding],
     transport: localTransport,
     round: secondRound([binding], true),
-    reply: ROUND_SUCCESS,
-    turn: ({ directory, readRoots, instruction }) => {
-      const handlers: ((event: ToolCallEvent) => unknown)[] = [];
-      (checkoutConfinement(directory, readRoots) as (pi: ExtensionAPI) => void)(
-        {
-          on: (_name: string, handler: (event: ToolCallEvent) => unknown) =>
-            handlers.push(handler),
-        } as unknown as ExtensionAPI,
-      );
-      const bundle = JSON.parse(
-        instruction
-          .split("\n")
-          .find((line) => line.startsWith("Evidence: "))!
-          .slice("Evidence: ".length),
-      );
-      const path = bundle.patch_paths[0] as string;
-      assert.equal(
-        handlers[0]!({
-          type: "tool_call",
-          toolCallId: "call",
-          toolName: "read",
-          input: { path },
-        } as unknown as ToolCallEvent),
-        undefined,
-      );
-      reads.push(readFileSync(join(directory, path), "utf8"));
-    },
+    provider,
   });
   assert.deepEqual(review.end, { kind: "closed", outcomeId: "outcome" });
-  assert.equal(reads.length, SINGLE_RELEASE);
-  assert.match(reads[0]!, /\+\+\+ b\/fix/);
+  assert.ok(JSON.stringify(provider.calls[0]!.messages).includes(patchPath));
+  const [result] = provider.calls
+    .at(-1)!
+    .messages.filter(
+      (message) =>
+        message.role === TOOL_RESULT_ROLE && message.toolName === READ_TOOL,
+    ) as { isError: boolean; content: { text: string }[] }[];
+  assert.equal(result?.isError, false);
+  assert.match(result!.content[0]!.text, /\+\+\+ b\/fix/);
 });
 
 test("two bindings with patches over 5 MiB submit two patch evidences, each under the body limit", async (t) => {
