@@ -91,7 +91,8 @@ const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
-const REPORT_VERSION = 4;
+const REPORT_VERSION = 3;
+const REPORT_VERSION_WITH_RANGES = 4;
 const SECONDS_ROUNDING = 10;
 const NO_SECONDS = 0;
 const TEXT_MAX_BYTES = 1024;
@@ -754,7 +755,9 @@ function buildReport(root, selected, failed, flaky, floor) {
     .filter((id) => !failedKeys.has(idKey(id)))
     .map((id) => flakyEntry(root, selected.graph, id));
   return fitReport({
-    version: REPORT_VERSION,
+    version: entries.some(({ lines }) => lines !== undefined)
+      ? REPORT_VERSION_WITH_RANGES
+      : REPORT_VERSION,
     selection: selected.selection,
     reason: selected.reason,
     tests: cutPaths(selected.tests),
