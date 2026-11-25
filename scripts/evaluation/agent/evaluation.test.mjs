@@ -72,6 +72,7 @@ import {
   scaleUsdCents,
   startRun,
   validateCase,
+  validateCaseFolder,
   validateConfig,
   writeManifest,
   writeTranscript,
@@ -4513,4 +4514,115 @@ test("L4-U21: validate refuses a case of a set with no manifest", (t) => {
   const { folder, set } = makeValidateCase(root, "c1");
   rmSync(manifestPath(set));
   assert.equal(runValidate(root, folder).status, 1);
+});
+
+test("L4-U22: a check.sh that sleeps fails its mode with exit timeout and returns within seconds", (t) => {
+  const root = tempDir(t);
+  const entry = makeCase(root, "c1", {
+    check: 'case "$2" in\n  *) sleep 30;;\nesac\n',
+  });
+  const checkTxtPath = join(root, "check.txt");
+  const gradingDir = join(root, "grade", "g");
+  mkdirSync(join(root, "grade"));
+  writeFileSync(join(root, "diff.patch"), "");
+  const start = Date.now();
+  gradeRun({
+    caseFolder: entry.folder,
+    caseJson: entry.json,
+    gradingDir,
+    diffPath: join(root, "diff.patch"),
+    checkTxtPath,
+    limitMs: 200,
+  });
+  assert.ok(Date.now() - start < 5000);
+  const text = readFileSync(checkTxtPath, "utf8");
+  assert.match(text, /conventions \(exit timeout\)/);
+});
+
+test("L4-U22: after a check.sh call that starts a background sleep, the background process is gone", (t) => {
+  const root = tempDir(t);
+  const pidFile = join(root, "bg.pid");
+  const checkScript = `case "$2" in\n  *) sleep 30 & echo $! > ${pidFile}; exit 0;;\nesac\n`;
+  const entry = makeCase(root, "c1", {
+    check: checkScript,
+    setup: "exit 0\n",
+  });
+  writeFileSync(join(root, "diff.patch"), "");
+  const checkTxtPath = join(root, "check.txt");
+  const gradingDir = join(root, "grade", "g");
+  mkdirSync(join(root, "grade"));
+  gradeRun({
+    caseFolder: entry.folder,
+    caseJson: entry.json,
+    gradingDir,
+    diffPath: join(root, "diff.patch"),
+    checkTxtPath,
+    limitMs: 2000,
+  });
+  assert.ok(existsSync(pidFile));
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  assert.ok(pid > 0);
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch (e) {
+      if (e.code === "ESRCH") break;
+    }
+  }
+  assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+});
+
+test("L4-U22: a script whose background process ended does not stop the grading", (t) => {
+  const root = tempDir(t);
+  const entry = makeCase(root, "c1", {
+    check: "true &\nexit 0\n",
+    setup: "true &\nexit 0\n",
+  });
+  writeFileSync(join(root, "diff.patch"), "");
+  for (let attempt = 0; attempt < 15; attempt += 1) {
+    const graded = gradeRun({
+      caseFolder: entry.folder,
+      caseJson: entry.json,
+      gradingDir: join(root, `g${attempt}`),
+      diffPath: join(root, "diff.patch"),
+      checkTxtPath: join(root, `check${attempt}.txt`),
+    });
+    assert.equal(graded.stop, undefined);
+  }
+});
+
+test("L4-U22: a setup.sh that sleeps stops the evaluation with the stop exit code", async (t) => {
+  const fixture = makeFixture(t, { h1: { setup: "sleep 30\n" } });
+  const plan = await startRun(fixture.start(heldOut("stop-setup")));
+  plan.limitMs = 200;
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent();
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 1);
+});
+
+test("L4-U22: a check.sh that sleeps in a run fails its mode within the limit", async (t) => {
+  const fixture = makeFixture(t, {
+    h1: { check: 'case "$2" in\n  *) sleep 30;;\nesac\n' },
+  });
+  const plan = await startRun(fixture.start(heldOut("limit-check")));
+  plan.limitMs = 200;
+  const agent = fakeAgent();
+  const start = Date.now();
+  await captured(() => runPlan(plan, agent.deps));
+  assert.ok(Date.now() - start < 10000);
+  const checks = jsonLines(join(fixture.runs, "limit-check", "checks.jsonl"));
+  assert.equal(checks[0].a2, false);
+});
+
+test("L4-U22: validate with a hanging check.sh fails within the limit", async (t) => {
+  const root = tempDir(t);
+  const { folder } = makeValidateCase(root, "c1", {
+    check: 'case "$2" in\n  *) sleep 30;;\nesac\n',
+  });
+  const start = Date.now();
+  const error = await validateCaseFolder(folder, 200);
+  assert.ok(Date.now() - start < 5000);
+  assert.ok(error !== null);
 });

@@ -6,6 +6,7 @@ import {
   constants,
   copyFileSync,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -13,6 +14,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  readSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -202,6 +204,8 @@ const VERDICT_REVERT = "revert";
 const RE_COMPARE_KEYS = ["provider", "model", "reasoning_effort"];
 const NOISE_FLOOR = 2;
 const REFERENCE_TRIES = 3;
+const SCRIPT_LIMIT_MS = 10 * 60000;
+const EMPTY_GROUP_CODES = ["ESRCH", "EPERM"];
 const GITLINK_MODE = "160000";
 const STAGED_DIFF_ARGS = [
   "diff",
@@ -856,6 +860,24 @@ function gitOutput(cwd, args) {
   return result.status === 0 ? result.stdout.trim() : null;
 }
 
+function runCaseScript(output, args, { cwd, limitMs }) {
+  const result = spawnSync("sh", args, {
+    cwd,
+    detached: true,
+    timeout: limitMs,
+    killSignal: "SIGKILL",
+    stdio: ["ignore", output, output],
+  });
+  if (result.pid > 0) {
+    try {
+      process.kill(-result.pid, "SIGKILL");
+    } catch (e) {
+      if (!EMPTY_GROUP_CODES.includes(e.code)) throw e;
+    }
+  }
+  return result;
+}
+
 export function cloneSteps(bundlePath, destDir, commit) {
   const steps = [
     [undefined, ["clone", "--no-hardlinks", bundlePath, destDir]],
@@ -946,22 +968,39 @@ function appendCheckText(checkTxtPath, part) {
   appendFileSync(checkTxtPath, `${header}${part.text}\n`, { mode: FILE_MODE });
 }
 
+function readStart(fd, limit) {
+  const buffer = Buffer.alloc(Math.min(fstatSync(fd).size, limit));
+  const size = readSync(fd, buffer, 0, buffer.length, 0);
+  return buffer.toString("utf8", 0, size);
+}
+
 function runCheckMode(grade, mode) {
-  const result = spawnSync(
-    "sh",
-    [join(grade.caseFolder, "check", "check.sh"), grade.gradingDir, mode],
-    { cwd: grade.gradingDir, encoding: "utf8", maxBuffer: CHECK_OUTPUT_LIMIT },
-  );
-  const exit = result.status ?? EXIT_STOP;
-  const text = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  const limitMs = grade.limitMs ?? SCRIPT_LIMIT_MS;
+  const outPath = `${grade.checkTxtPath}.${mode}.tmp`;
+  const fd = openSync(outPath, "w+", FILE_MODE);
+  let result;
+  let text;
+  try {
+    result = runCaseScript(
+      fd,
+      [join(grade.caseFolder, "check", "check.sh"), grade.gradingDir, mode],
+      { cwd: grade.gradingDir, limitMs },
+    );
+    text = readStart(fd, CHECK_OUTPUT_LIMIT);
+  } finally {
+    closeSync(fd);
+    rmSync(outPath, { force: true });
+  }
+  const timedOut = result.error?.code === "ETIMEDOUT";
+  const exit = timedOut ? "timeout" : (result.status ?? EXIT_STOP);
   appendCheckText(grade.checkTxtPath, { mode, exit, text });
   return exit === EXIT_OK;
 }
 
-function runSetup(caseFolder, cwd) {
-  const result = spawnSync("sh", [join(caseFolder, "setup.sh")], {
+function runSetup(caseFolder, cwd, limitMs) {
+  const result = runCaseScript("ignore", [join(caseFolder, "setup.sh")], {
     cwd,
-    stdio: "ignore",
+    limitMs: limitMs ?? SCRIPT_LIMIT_MS,
   });
   return result.status === EXIT_OK;
 }
@@ -983,7 +1022,7 @@ export function gradeRun(grade) {
   const bundle = join(caseFolder, "repo.bundle");
   if (cloneSteps(bundle, gradingDir, caseJson.commit) === null)
     return { stop: "the grading clone failed" };
-  if (!runSetup(caseFolder, gradingDir))
+  if (!runSetup(caseFolder, gradingDir, grade.limitMs))
     return { stop: "setup.sh failed in the grading clone" };
   const diffText = readFileSync(grade.diffPath, "latin1");
   const a3 = checkScope(diffText, caseJson.allowed).pass;
@@ -1402,6 +1441,7 @@ function gradeDiff(run, gradingRoot) {
     gradingDir: join(gradingRoot, GRADING_NAME),
     diffPath: join(run.runDir, "diff.patch"),
     checkTxtPath: join(run.runDir, "check.txt"),
+    limitMs: run.limitMs,
   });
 }
 
@@ -1508,7 +1548,7 @@ async function evaluateInRoots(run, deps, roots) {
     const bundle = join(run.caseFolder, "repo.bundle");
     savedConfig = cloneSteps(bundle, workspace, run.caseJson.commit);
     if (savedConfig === null) return { stop: "the workspace clone failed" };
-    if (!runSetup(run.caseFolder, workspace))
+    if (!runSetup(run.caseFolder, workspace, run.limitMs))
       return { stop: "setup.sh failed in the workspace" };
     const called = await guardedAgentCall(currentRun, deps, {
       label: "run agent",
@@ -1836,6 +1876,7 @@ function planRun(plan, entry, repeat, runDirOverride) {
     judgeRatio: plan.judgeRatio,
     stage: plan.stage,
     set: plan.set,
+    limitMs: plan.limitMs,
   };
 }
 
@@ -2581,18 +2622,19 @@ function validatedTextError(caseFolder, kind, strings) {
   return null;
 }
 
-function validatedBaseError(caseFolder, caseJson, root) {
+function validatedBaseError(caseFolder, caseJson, { root, limitMs }) {
   const dir = join(root, "c");
   const grade = {
     caseFolder,
     gradingDir: dir,
     checkTxtPath: join(root, "c.txt"),
+    limitMs,
   };
   if (
     cloneSteps(join(caseFolder, "repo.bundle"), dir, caseJson.commit) === null
   )
     return "the clone failed";
-  if (!runSetup(caseFolder, dir)) return "setup.sh failed";
+  if (!runSetup(caseFolder, dir, limitMs)) return "setup.sh failed";
   const evalSetDir = resolve(caseFolder, "../../..");
   const strings = [evalSetDir, caseFolder, ...PROTECTED_PATH_PARTS];
   const held =
@@ -2609,7 +2651,7 @@ function validatedBaseError(caseFolder, caseJson, root) {
   return failed ? `rule 7: ${failed} fails on C` : null;
 }
 
-function validatedReferenceError(caseFolder, caseJson, root) {
+function validatedReferenceError(caseFolder, caseJson, { root, limitMs }) {
   const diffPath = join(caseFolder, "check", "reference.patch");
   const scope = checkScope(readFileSync(diffPath, "latin1"), caseJson.allowed);
   if (!scope.pass) return `rule 8: reference.patch breaks ${scope.reason}`;
@@ -2620,6 +2662,7 @@ function validatedReferenceError(caseFolder, caseJson, root) {
       diffPath,
       gradingDir: join(root, `g${attempt}`),
       checkTxtPath: join(root, `g${attempt}.txt`),
+      limitMs,
     });
     if (graded.stop) return graded.stop;
     const failed = Object.keys(graded.aspects).filter(
@@ -2631,7 +2674,7 @@ function validatedReferenceError(caseFolder, caseJson, root) {
   return null;
 }
 
-async function validateCaseFolder(caseFolder) {
+export async function validateCaseFolder(caseFolder, limitMs) {
   const caseJson = readJsonFile(join(caseFolder, "case.json"));
   const caseError = validateCase(caseJson);
   if (caseError) return caseError;
@@ -2646,8 +2689,8 @@ async function validateCaseFolder(caseFolder) {
   const root = mkdtempSync(join(tmpdir(), "kanthord-validate-"));
   try {
     return (
-      validatedBaseError(caseFolder, caseJson, root) ??
-      validatedReferenceError(caseFolder, caseJson, root)
+      validatedBaseError(caseFolder, caseJson, { root, limitMs }) ??
+      validatedReferenceError(caseFolder, caseJson, { root, limitMs })
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
