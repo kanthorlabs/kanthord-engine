@@ -73,7 +73,7 @@ const PROTECTED_FILE_NAMES = [
   "stderr.txt",
 ];
 const PROTECTED_FILE_PREFIX = "judge-";
-const PATH_BOUNDARY_CHARS = "/\t\n\r \"'";
+const PATH_BOUNDARY_CHARS = "/\"'`";
 const PROFILE_SWE = "swe@1";
 const PROFILE_RE = "re@1";
 const SET_DEV = "dev";
@@ -874,39 +874,64 @@ function makeRoot(workBaseDir) {
   return root;
 }
 
-function indexOfFileName(text, name) {
-  let start = 0;
-  while (start < text.length) {
-    const idx = text.indexOf(name, start);
-    if (idx === -1) return -1;
-    if (idx === 0 || PATH_BOUNDARY_CHARS.includes(text[idx - 1])) return idx;
-    start = idx + 1;
-  }
-  return -1;
+function atPathBoundary(text, idx) {
+  if (idx === 0) return true;
+  const before = text[idx - 1];
+  return PATH_BOUNDARY_CHARS.includes(before) || before.trim() === "";
 }
 
-export function hasProtectedPath(text, exactStrings, fileNames, filePrefix) {
-  for (const s of exactStrings) {
-    if (text.includes(s)) return true;
-  }
-  for (const name of fileNames) {
-    if (indexOfFileName(text, name) !== -1) return true;
-  }
-  const prefixIdx = text.indexOf(filePrefix);
-  if (prefixIdx !== -1) {
-    if (prefixIdx === 0 || PATH_BOUNDARY_CHARS.includes(text[prefixIdx - 1]))
-      return true;
+function holdsFileName(text, name) {
+  let idx = text.indexOf(name);
+  while (idx !== -1) {
+    if (atPathBoundary(text, idx)) return true;
+    idx = text.indexOf(name, idx + 1);
   }
   return false;
+}
+
+function namesProtectedPath(text, pathStrings) {
+  if (pathStrings.some((part) => text.includes(part))) return true;
+  return [...PROTECTED_FILE_NAMES, PROTECTED_FILE_PREFIX].some((name) =>
+    holdsFileName(text, name),
+  );
+}
+
+function stringsOf(value) {
+  if (typeof value === "string") return [value];
+  if (!isObject(value) && !Array.isArray(value)) return [];
+  const entries = Array.isArray(value) ? value : Object.entries(value).flat();
+  return entries.flatMap(stringsOf);
+}
+
+function lineStrings(line) {
+  try {
+    return stringsOf(JSON.parse(line));
+  } catch {
+    return [];
+  }
+}
+
+export function hasProtectedPath(sessionText, pathStrings) {
+  if (namesProtectedPath(sessionText, pathStrings)) return true;
+  return sessionText
+    .split("\n")
+    .flatMap(lineStrings)
+    .some((text) => namesProtectedPath(text, pathStrings));
 }
 
 export function protectedPathStrings(evalSetDir, resultsDir, caseFolder) {
   return [evalSetDir, resultsDir, caseFolder, ...PROTECTED_PATH_PARTS];
 }
 
-function checkSetChangeBreach(evalSetDir) {
-  const output = gitOutput(evalSetDir, ["status", "--porcelain"]);
-  return output !== null && output.length > 0;
+function checkSetChangeBreach(evalSetDir, setCommit) {
+  const head = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
+  const status = gitOutput(evalSetDir, [
+    "--no-optional-locks",
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+  ]);
+  return head !== setCommit || status !== "";
 }
 
 function breachStop(run, breach) {
@@ -948,26 +973,17 @@ async function guardedAgentCall(run, deps, call) {
   if (count > 0) return credentialStop(run, count);
   if (checkAuthFileBreach(run.authPath, refreshed))
     return breachStop(run, BREACH_AUTH_FILE);
-  if (call.runBreachChecks) {
-    const sessionText = readFileSync(call.sessionPath, "utf8");
-    const resultsDir = dirname(run.resultsPath);
-    const exactStrings = protectedPathStrings(
+  if (call.protectedPathSearch) {
+    const pathStrings = protectedPathStrings(
       run.evalSetDir,
-      resultsDir,
+      dirname(run.resultsPath),
       run.caseFolder,
     );
-    if (
-      hasProtectedPath(
-        sessionText,
-        exactStrings,
-        PROTECTED_FILE_NAMES,
-        PROTECTED_FILE_PREFIX,
-      )
-    )
+    if (hasProtectedPath(readFileSync(call.sessionPath, "utf8"), pathStrings))
       return breachStop(run, BREACH_PROTECTED_PATH);
-    if (checkSetChangeBreach(run.evalSetDir))
-      return breachStop(run, BREACH_SET_CHANGE);
   }
+  if (checkSetChangeBreach(run.evalSetDir, run.setCommit))
+    return breachStop(run, BREACH_SET_CHANGE);
   const stderrText = readFileSync(call.stderrPath, "latin1");
   if (runActionForExit(exit, stderrText) === ACTION_STOP)
     return { stop: `${call.label} exit ${exit}` };
@@ -1071,7 +1087,7 @@ async function runDiagnosis(run, gradingRoot, deps) {
     inputPaths,
     sessionPath,
     stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
-    runBreachChecks: false,
+    protectedPathSearch: false,
   });
   if (called.stop) return called;
   const resultLine = readJsonLines(run.resultsPath).findLast(
@@ -1099,7 +1115,7 @@ async function evaluateInRoots(run, deps, roots) {
     inputPaths: [],
     sessionPath: run.sessionPath,
     stderrPath: join(run.runDir, "stderr.txt"),
-    runBreachChecks: true,
+    protectedPathSearch: true,
   });
   if (called.stop) return called;
   const gradingRoot = makeRoot(run.workBaseDir);
@@ -1302,6 +1318,7 @@ function planRun(plan, entry, repeat) {
     diagnosesPath: join(plan.resultsDir, DIAGNOSES_FILE),
     workBaseDir: plan.workBaseDir,
     evalSetDir: plan.evalSetDir,
+    setCommit: plan.setCommit,
     authPath: plan.authPath,
     authStart: plan.authStart,
     credValues: plan.credValues,

@@ -441,6 +441,20 @@ const AC5_CREDENTIAL = "credential";
 const AC5_SET_CHANGE = "set_change";
 const AC5_REPORT_1_BREACH = "A9 breaches: 1";
 const K_PARTIAL_LEN = 8;
+const AC5_AUTH = join(TEST_USER_HOME, ".config", "kanthord", "auth.json");
+const AC5_AUTH_MODE = "600";
+const AC5_COUNT_ONE = /count 1\n/;
+const AC5_COUNT_ABOVE_ZERO = /count [1-9]/;
+
+async function authDigest(): Promise<string> {
+  const output = await asTestUser(["sha256sum", AC5_AUTH]);
+  return output.split(" ")[0]!;
+}
+
+async function authMode(): Promise<string> {
+  const output = await asTestUser(["stat", "-c", "%a", AC5_AUTH]);
+  return output.trim();
+}
 
 async function ac5Run(fixture: EvaluationFixture, signal: AbortSignal) {
   return runnerAsTestUser(fixture, {
@@ -506,10 +520,14 @@ test(
     });
     const fixture = await buildEvaluationSet(t, stub.baseUrl);
     const results = join(fixture.runs, AC5_EVAL);
+    const digestBefore = await authDigest();
+    assert.equal(await authMode(), AC5_AUTH_MODE);
 
     const run = await ac5Run(fixture, t.signal);
     assert.equal(run.status, BREACH_EXIT, run.stderr);
-    assert.ok(run.stdout.includes("count 1"), run.stdout);
+    assert.match(run.stdout, AC5_COUNT_ONE);
+    assert.equal(await authDigest(), digestBefore);
+    assert.equal(await authMode(), AC5_AUTH_MODE);
     assert.equal(run.stdout.includes(TEST_K.slice(0, K_PARTIAL_LEN)), false);
 
     const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
@@ -528,8 +546,9 @@ test(
     }
 
     const stderrFiles = lines(
-      await asTestUser(["find", join(results, CASE_D1), "-name", "stderr.txt"]),
+      await asTestUser(["find", results, "-name", "stderr.txt"]),
     );
+    assert.equal(stderrFiles.length, AC5_BREACH_LINES);
     for (const path of stderrFiles) {
       const text = await asTestUser(["cat", path]);
       assert.equal(text.includes(TEST_K), false, path);
@@ -556,16 +575,13 @@ test(
     await runAndReport(fixture, AC5_ARGS, t.signal);
 
     const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+    assert.equal(checks.length, DEV_RUN_COUNT);
     for (const line of checks) assert.equal(line.breach, null);
 
     const sessions = lines(
-      await asTestUser([
-        "find",
-        join(results, CASE_D1),
-        "-name",
-        "session.jsonl",
-      ]),
+      await asTestUser(["find", results, "-name", "session.jsonl"]),
     );
+    assert.equal(sessions.length, DEV_RUN_COUNT);
     for (const path of sessions) {
       const text = await asTestUser(["cat", path]);
       assert.equal(text.includes(fixture.set), false, path);
@@ -587,7 +603,7 @@ test(
 
     const run = await ac5Run(fixture, t.signal);
     assert.equal(run.status, BREACH_EXIT, run.stderr);
-    assert.notEqual(run.stdout.match(/count \d+/), null);
+    assert.match(run.stdout, AC5_COUNT_ABOVE_ZERO);
     assert.equal(run.stdout.includes(TEST_K.slice(0, K_PARTIAL_LEN)), false);
 
     const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
