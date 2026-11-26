@@ -4,10 +4,12 @@ import { createHash } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -17,7 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir, userInfo } from "node:os";
+import { platform, tmpdir, userInfo } from "node:os";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -39,6 +41,7 @@ import {
   computeBaseCost,
   computeGate,
   copyHiddenTests,
+  copyPromptArgs,
   countCredentialInText,
   diffArgs,
   diffSteps,
@@ -53,6 +56,7 @@ import {
   modelBlend,
   nextRunAttempt,
   oneChangeError,
+  osDenyWrapper,
   parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
@@ -294,7 +298,13 @@ function fakeAgent(options = {}) {
   const refresh = async (authPath, provider) => {
     refreshes.push(provider);
   };
-  return { calls, refreshes, deps: { refresh, runAgent } };
+  const makeWrapper =
+    options.makeWrapper ??
+    (() => ({
+      run: () => ({ status: 0 }),
+      probe: () => null,
+    }));
+  return { calls, refreshes, deps: { refresh, runAgent, makeWrapper } };
 }
 
 async function captured(fn) {
@@ -1046,14 +1056,329 @@ test("L4-U5: a new commit of the evaluation set is the breach set_change", async
   );
 });
 
-test("L4-U5: a failed status of the evaluation set is the breach set_change", async (t) => {
+test("L4-U5: a removed git directory of the evaluation set is the breach set_change", async (t) => {
   const run = await runBreach(t, (fixture) => ({
-    work: () => writeFileSync(join(fixture.set, ".git", "index"), "broken"),
+    work: () =>
+      rmSync(join(fixture.set, ".git"), { recursive: true, force: true }),
   }));
   assert.deepEqual(
     run.checks.map((line) => line.breach),
     ["set_change"],
   );
+});
+
+test("L4-U5: a change hidden by an exclude pattern is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      appendFileSync(join(fixture.set, ".git", "info", "exclude"), "new.txt\n");
+      writeFile(join(fixture.set, "new.txt"), "new\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a change hidden by --assume-unchanged is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      git(fixture.set, [
+        "update-index",
+        "--assume-unchanged",
+        "cases/held-out/h1/task.md",
+      ]);
+      writeFile(join(fixture.h1.folder, "task.md"), "changed\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a change hidden by --skip-worktree is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      git(fixture.set, [
+        "update-index",
+        "--skip-worktree",
+        "cases/held-out/h1/task.md",
+      ]);
+      writeFile(join(fixture.h1.folder, "task.md"), "changed\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a mode change of a set file is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => chmodSync(join(fixture.h1.folder, "task.md"), 0o755),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+const HIDDEN_SET_ENTRIES = {
+  "a FIFO": (fixture) => spawnSync("mkfifo", [join(fixture.set, "pipe")]),
+  "a nested .git directory": (fixture) =>
+    writeFile(join(fixture.set, "cases", ".git", "x.txt"), "x\n"),
+  "a nested config.json": (fixture) =>
+    writeFile(join(fixture.set, "cases", "config.json"), "{}\n"),
+  "a directory at the root config.json": (fixture) => {
+    rmSync(join(fixture.set, "config.json"));
+    writeFile(join(fixture.set, "config.json", "x.txt"), "x\n");
+  },
+  "a node_modules directory outside shared": (fixture) =>
+    writeFile(join(fixture.set, "cases", "x", "node_modules", "x.js"), "x\n"),
+  "a new link": (fixture) =>
+    symlinkSync("task.md", join(fixture.h1.folder, "link.md")),
+  "an unreadable file": (fixture) =>
+    chmodSync(join(fixture.h1.folder, "task.md"), 0o000),
+};
+
+for (const [name, work] of Object.entries(HIDDEN_SET_ENTRIES))
+  test(`L4-U5: ${name} in the set is the breach set_change`, async (t) => {
+    const run = await runBreach(t, (fixture) => ({
+      work: () => work(fixture),
+    }));
+    assert.deepEqual(
+      run.checks.map((line) => line.breach),
+      ["set_change"],
+    );
+  });
+
+function realWrapper(t, setRealPath, resultsBaseRealPath, workRootRealPath) {
+  const wrapper = osDenyWrapper(
+    setRealPath,
+    resultsBaseRealPath,
+    workRootRealPath,
+  );
+  if (wrapper !== null) return wrapper;
+  assert.notEqual(platform(), "darwin");
+  assert.equal(process.env.CI, undefined);
+  t.skip();
+  return null;
+}
+
+test("L4-U5: the OS deny wrapper denies a read of a set file", (t) => {
+  const fixture = makeFixture(t);
+  const setRealPath = realpathSync(fixture.set);
+  const resultsBase = join(tempDir(t), "runs");
+  const workRoot = join(tempDir(t), "work");
+  mkdirSync(resultsBase);
+  mkdirSync(workRoot);
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const setFile = join(setRealPath, ".git", "HEAD");
+  const result = wrapper.runScript(
+    process.execPath,
+    `try{require('fs').readFileSync(${JSON.stringify(setFile)});process.exit(0);}catch{process.exit(1);}`,
+  );
+  assert.notEqual(result.status, 0);
+});
+
+test("L4-U5: the OS deny wrapper allows a read outside the set", (t) => {
+  const fixture = makeFixture(t);
+  const setRealPath = realpathSync(fixture.set);
+  const resultsBase = join(tempDir(t), "runs");
+  const workRoot = join(tempDir(t), "work");
+  mkdirSync(resultsBase);
+  mkdirSync(workRoot);
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const result = wrapper.runScript(
+    process.execPath,
+    `require('fs').readFileSync('/dev/null');`,
+  );
+  assert.equal(result.status, 0);
+});
+
+test("L4-U5: the start probe passes for a set path with a quote and a backslash", (t) => {
+  const root = tempDir(t);
+  const set = join(root, 'se"t\\x');
+  writeFile(join(set, "file.txt"), "x\n");
+  const resultsBase = join(root, "runs");
+  const workRoot = join(root, "work");
+  mkdirSync(resultsBase);
+  mkdirSync(workRoot);
+  const wrapper = realWrapper(t, set, resultsBase, workRoot);
+  if (wrapper === null) return;
+  assert.equal(wrapper.probe(process.execPath, join(set, "file.txt")), null);
+});
+
+test("L4-U5: the start refuses with no agent call when the OS read-deny mechanism is absent", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent({ makeWrapper: () => null });
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 1);
+  assert.equal(agent.calls.length, 0);
+});
+
+test("L4-U5: the start refuses with no agent call when the start probe fails", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent({
+    makeWrapper: () => ({ probe: () => "the probe failed" }),
+  });
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 1);
+  assert.equal(agent.calls.length, 0);
+});
+
+test("L4-U5: the swe@1 call and the re@1 call each get the wrapper of the start probe", async (t) => {
+  const wrapper = { probe: () => null };
+  const run = await runDev(t, { makeWrapper: () => wrapper });
+  assert.equal(run.value, 0);
+  const profiles = new Set(run.agent.calls.map((args) => args[2]));
+  assert.deepEqual([...profiles].sort(), ["re@1", "swe@1"]);
+  for (const given of run.agent.wrappers) assert.equal(given, wrapper);
+});
+
+test("L4-U5: the prompt copies have mode 0600 and the other arguments stay", (t) => {
+  const root = tempDir(t);
+  const copies = join(root, "copies");
+  mkdirSync(copies);
+  writeFile(join(root, "task.md"), "task\n");
+  writeFile(join(root, "binding.md"), "binding\n");
+  const args = [
+    "--system-prompt",
+    join(root, "binding.md"),
+    "--workspace",
+    join(root, "w"),
+    "--prompt",
+    join(root, "task.md"),
+  ];
+  const copied = copyPromptArgs(args, copies);
+  assert.equal(copied[3], join(root, "w"));
+  for (const index of [1, 5]) {
+    assert.equal(dirname(copied[index]), copies);
+    assert.equal(lstatSync(copied[index]).mode & 0o777, 0o600);
+    assert.equal(
+      readFileSync(copied[index], "utf8"),
+      readFileSync(args[index], "utf8"),
+    );
+  }
+});
+
+test("L4-U5: the OS deny wrapper denies a read under the results base", (t) => {
+  const root = tempDir(t);
+  mkdirSync(join(root, "set"));
+  const setRealPath = realpathSync(join(root, "set"));
+  writeFile(join(setRealPath, ".git", "HEAD"), "ref: refs/heads/main\n");
+  mkdirSync(join(root, "runs"));
+  const resultsBase = realpathSync(join(root, "runs"));
+  mkdirSync(join(root, "work"));
+  const workRoot = realpathSync(join(root, "work"));
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const probeFile = join(resultsBase, "test.txt");
+  writeFileSync(probeFile, "x");
+  const result = wrapper.runScript(
+    process.execPath,
+    `try{require('fs').readFileSync(${JSON.stringify(probeFile)});process.exit(0);}catch{process.exit(1);}`,
+  );
+  assert.notEqual(result.status, 0);
+});
+
+test("L4-U5: the OS deny wrapper denies a read under the work root", (t) => {
+  const root = tempDir(t);
+  mkdirSync(join(root, "set"));
+  const setRealPath = realpathSync(join(root, "set"));
+  writeFile(join(setRealPath, ".git", "HEAD"), "ref: refs/heads/main\n");
+  mkdirSync(join(root, "runs"));
+  const resultsBase = realpathSync(join(root, "runs"));
+  mkdirSync(join(root, "work"));
+  const workRoot = realpathSync(join(root, "work"));
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const probeFile = join(workRoot, "test.txt");
+  writeFileSync(probeFile, "x");
+  const result = wrapper.runScript(
+    process.execPath,
+    `try{require('fs').readFileSync(${JSON.stringify(probeFile)});process.exit(0);}catch{process.exit(1);}`,
+  );
+  assert.notEqual(result.status, 0);
+});
+
+test("L4-U5: the OS deny wrapper allows reads in the allowed paths", (t) => {
+  const root = tempDir(t);
+  mkdirSync(join(root, "set"));
+  const setRealPath = realpathSync(join(root, "set"));
+  mkdirSync(join(root, "runs"));
+  const resultsBase = realpathSync(join(root, "runs"));
+  mkdirSync(join(root, "work"));
+  const workRoot = realpathSync(join(root, "work"));
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const runDir = join(resultsBase, "run1");
+  mkdirSync(runDir);
+  const workspace = join(workRoot, "ws1");
+  mkdirSync(workspace);
+  writeFileSync(join(runDir, "test.txt"), "x");
+  writeFileSync(join(workspace, "test.txt"), "x");
+  const script = [
+    `require('fs').readFileSync(${JSON.stringify(join(runDir, "test.txt"))});`,
+    `require('fs').readFileSync(${JSON.stringify(join(workspace, "test.txt"))});`,
+  ].join("");
+  const stderrFd = openSync(join(root, "stderr.txt"), "w");
+  try {
+    const result = wrapper.run(process.execPath, "-e", [script], stderrFd, [
+      runDir,
+      workspace,
+    ]);
+    assert.equal(result.status, 0);
+  } finally {
+    closeSync(stderrFd);
+  }
+});
+
+test("L4-U5: the OS deny wrapper denies a read of a sibling run folder", (t) => {
+  const root = tempDir(t);
+  mkdirSync(join(root, "set"));
+  const setRealPath = realpathSync(join(root, "set"));
+  mkdirSync(join(root, "runs"));
+  const resultsBase = realpathSync(join(root, "runs"));
+  mkdirSync(join(root, "work"));
+  const workRoot = realpathSync(join(root, "work"));
+  const wrapper = realWrapper(t, setRealPath, resultsBase, workRoot);
+  if (wrapper === null) return;
+  const runDir1 = join(resultsBase, "run1");
+  mkdirSync(runDir1);
+  const runDir2 = join(resultsBase, "run2");
+  mkdirSync(runDir2);
+  const siblingFile = join(runDir2, "secret.txt");
+  writeFileSync(siblingFile, "secret");
+  const script = `try{require('fs').readFileSync(${JSON.stringify(siblingFile)});process.exit(0);}catch{process.exit(1);}`;
+  const stderrFd = openSync(join(root, "stderr.txt"), "w");
+  try {
+    const result = wrapper.run(process.execPath, "-e", [script], stderrFd, [
+      runDir1,
+    ]);
+    assert.notEqual(result.status, 0);
+  } finally {
+    closeSync(stderrFd);
+  }
+});
+
+test("L4-U5: the result line in results.jsonl equals the call output file, and the output file is in the run folder", async (t) => {
+  const run = await runHeldOut(t, "e");
+  assert.equal(run.value, 0);
+  const resultLines = jsonLines(join(run.results, "results.jsonl"));
+  assert.equal(resultLines.length, 2);
+  const outputFile = option(run.agent.calls[0], "--output");
+  assert.equal(dirname(outputFile), run.runDir);
+  const outputLines = jsonLines(outputFile);
+  assert.equal(outputLines.length, 1);
+  assert.deepEqual(outputLines[0], resultLines[0]);
 });
 
 test("L4-U5: a change of the ignored config.json is no breach", async (t) => {
@@ -1260,6 +1585,7 @@ test("L4-U10: a run of a model with a price gets the scaled cost budget", () => 
     caseFolder: "/set/cases/dev/d1",
     sessionPath: "/r/session.jsonl",
     resultsPath: "/r/results.jsonl",
+    runDir: "/r/d1/1-1",
   };
   assert.deepEqual(runAgentArgs(run, "/w"), [
     "run",
@@ -1278,7 +1604,7 @@ test("L4-U10: a run of a model with a price gets the scaled cost budget", () => 
     "--session",
     "/r/session.jsonl",
     "--output",
-    "/r/results.jsonl",
+    "/r/d1/1-1/result.jsonl",
     "--prompt",
     "/set/cases/dev/d1/task.md",
   ]);
@@ -1506,6 +1832,7 @@ test("L4-U12: an exit 75 starts the run again with a new session file and a new 
     ],
   );
   assert.deepEqual(readdirSync(join(h1, "1-1")).sort(), [
+    "result.jsonl",
     "session.jsonl",
     "stderr.txt",
   ]);
@@ -2125,6 +2452,7 @@ test("a held-out evaluation gives the gate verdict pass and keeps no check.txt",
   for (const name of ["1-1", "2-1"])
     assert.deepEqual(readdirSync(join(run.results, "h1", name)).sort(), [
       "diff.patch",
+      "result.jsonl",
       "session.jsonl",
       "stderr.txt",
     ]);
@@ -2221,8 +2549,10 @@ function fakeDevAgent(options = {}) {
   const calls = [];
   let judgeCalls = 0;
   let sweCalls = 0;
-  const runAgent = (args, stderrPath) => {
+  const wrappers = [];
+  const runAgent = (args, stderrPath, wrapper) => {
     calls.push(args);
+    wrappers.push(wrapper);
     writeFileSync(stderrPath, "");
     const session = option(args, "--session");
     const output = option(args, "--output");
@@ -2242,7 +2572,9 @@ function fakeDevAgent(options = {}) {
     judgeCalls++;
     return options.judgeExits?.[judgeCalls - 1] ?? options.judgeExit ?? 0;
   };
-  return { calls, deps: { refresh: async () => {}, runAgent } };
+  const deps = { refresh: async () => {}, runAgent };
+  if (options.makeWrapper) deps.makeWrapper = options.makeWrapper;
+  return { calls, wrappers, deps };
 }
 
 async function runDev(t, agentOptions, overrides = {}) {
@@ -2550,7 +2882,12 @@ test("L4-U12: the diagnosis call has the options of the diagnosis command and no
     judgeRatio: { run: null, base: BASE_BLEND },
     resultsPath: "/r/results.jsonl",
   };
-  const args = runAgentArgsJudge(run, "/w/j", "/r/d1/1-1/judge-1.jsonl");
+  const args = runAgentArgsJudge(
+    run,
+    "/w/j",
+    "/r/d1/1-1/judge-1.jsonl",
+    "/r/d1/1-1/judge-1-result.jsonl",
+  );
   assert.deepEqual(args, [
     "run",
     "agent",
@@ -2566,7 +2903,7 @@ test("L4-U12: the diagnosis call has the options of the diagnosis command and no
     "--session",
     "/r/d1/1-1/judge-1.jsonl",
     "--output",
-    "/r/results.jsonl",
+    "/r/d1/1-1/judge-1-result.jsonl",
     "--prompt",
     join(RUNNER_DIR, "judge-task.md"),
   ]);
@@ -2581,7 +2918,12 @@ test("L4-U9: a diagnosis run of a model with a price gets the scaled judge_usd",
     judgeRatio: { run: HAIKU_BLEND, base: BASE_BLEND },
     resultsPath: "/r/results.jsonl",
   };
-  const args = runAgentArgsJudge(run, "/w/j", "/r/judge-1.jsonl");
+  const args = runAgentArgsJudge(
+    run,
+    "/w/j",
+    "/r/judge-1.jsonl",
+    "/r/judge-1-result.jsonl",
+  );
   assert.deepEqual(args.slice(5, 9), [
     "--budget",
     "15m",
@@ -2687,8 +3029,10 @@ test("a dev evaluation diagnoses each run in the judge workspace of the grading 
   assert.deepEqual(readdirSync(run.runDir).sort(), [
     "check.txt",
     "diff.patch",
+    "judge-1-result.jsonl",
     "judge-1-stderr.txt",
     "judge-1.jsonl",
+    "result.jsonl",
     "session.jsonl",
     "stderr.txt",
   ]);
@@ -2753,6 +3097,7 @@ test("L4-U12: the diagnosis of a run that started again reads the run directory 
   assert.equal(run.checks[0].session, join(last, "session.jsonl"));
   assert.equal(run.diagnoses[0].session, join(last, "judge-1.jsonl"));
   assert.deepEqual(readdirSync(run.runDir).sort(), [
+    "result.jsonl",
     "session.jsonl",
     "stderr.txt",
   ]);

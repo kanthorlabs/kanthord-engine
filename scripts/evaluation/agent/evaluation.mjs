@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { open } from "node:fs/promises";
-import { tmpdir, userInfo } from "node:os";
+import { platform, tmpdir, userInfo } from "node:os";
 import {
   basename,
   dirname,
@@ -207,6 +207,9 @@ const REFERENCE_TRIES = 3;
 const SCRIPT_LIMIT_MS = 10 * 60000;
 const EMPTY_GROUP_CODES = ["ESRCH", "EPERM"];
 const GITLINK_MODE = "160000";
+const SET_SYMLINK_MODE = "120000";
+const SET_EXEC_MODE = "100755";
+const SET_PLAIN_MODE = "100644";
 const STAGED_DIFF_ARGS = [
   "diff",
   "--cached",
@@ -805,7 +808,12 @@ export function parseDiagnosis(text, end) {
   return { valid: true, findings };
 }
 
-export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
+export function runAgentArgsJudge(
+  run,
+  judgeWorkspace,
+  judgeSessionPath,
+  outputPath,
+) {
   const runnerDir = dirname(SCRIPT_PATH);
   const args = ["run", "agent", PROFILE_RE, "--model", run.config.judge_model];
   args.push("--budget", JUDGE_WALL);
@@ -821,7 +829,7 @@ export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
   args.push("--system-prompt", join(runnerDir, "judge.md"));
   args.push("--workspace", judgeWorkspace);
   args.push("--session", judgeSessionPath);
-  args.push("--output", run.resultsPath);
+  args.push("--output", outputPath);
   args.push("--prompt", join(runnerDir, "judge-task.md"));
   return args;
 }
@@ -1051,18 +1059,208 @@ export function runAgentArgs(run, workspace) {
     args.push("--system-prompt", binding);
   }
   args.push("--workspace", workspace, "--session", run.sessionPath);
-  args.push("--output", run.resultsPath);
+  args.push("--output", join(run.runDir, "result.jsonl"));
   args.push("--prompt", join(run.caseFolder, "task.md"));
   return args;
 }
 
-function runAgentProcess(args, stderrPath) {
+function escSbpl(p) {
+  return p.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function ancestorsUnderRoots(path, roots) {
+  const result = [];
+  let cur = dirname(path);
+  while (roots.some((r) => cur === r || cur.startsWith(r + "/"))) {
+    result.push(cur);
+    const parent = dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return result;
+}
+
+export function osDenyWrapper(
+  setRealPath,
+  resultsBaseRealPath,
+  workRootRealPath,
+) {
+  const denied = [setRealPath, resultsBaseRealPath, workRootRealPath];
+  const plat = platform();
+  const readScript = (file) =>
+    `try{require('fs').readFileSync(${JSON.stringify(file)});process.exit(0);}catch{process.exit(1);}`;
+  const readOutsideScript = `require('fs').readFileSync('/dev/null');`;
+  if (plat === "darwin") {
+    const check = spawnSync(
+      "sandbox-exec",
+      ["-p", "(version 1)(allow default)", "true"],
+      { stdio: "ignore" },
+    );
+    if (check.error) return null;
+    const denyRules = denied
+      .map((p) => `(deny file-read* file-write* (subpath "${escSbpl(p)}"))`)
+      .join("");
+    function buildPolicy(allowed) {
+      const metaPaths = [
+        ...new Set([
+          ...denied,
+          ...allowed.flatMap((p) => ancestorsUnderRoots(p, denied)),
+        ]),
+      ];
+      const metaRules = metaPaths
+        .map((p) => `(allow file-read-metadata (literal "${escSbpl(p)}"))`)
+        .join("");
+      const allowRules = allowed
+        .map((p) => `(allow file-read* file-write* (subpath "${escSbpl(p)}"))`)
+        .join("");
+      return `(version 1)(allow default)${denyRules}${metaRules}${allowRules}`;
+    }
+    return {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
+        return spawnSync(
+          "sandbox-exec",
+          ["-p", buildPolicy(allowed), nodeExec, bin, ...cmdArgs],
+          { stdio: ["ignore", "ignore", stderrFd] },
+        );
+      },
+      runScript(nodeExec, scriptText) {
+        return spawnSync(
+          "sandbox-exec",
+          ["-p", buildPolicy([]), nodeExec, "-e", scriptText],
+          { stdio: "ignore" },
+        );
+      },
+      probe(nodeExec, setFile) {
+        const denySet = this.runScript(nodeExec, readScript(setFile));
+        if (denySet.status === 0)
+          return "sandbox: set file read was not denied";
+        const probeFiles = [];
+        try {
+          for (const root of [resultsBaseRealPath, workRootRealPath]) {
+            const f = join(root, `.eval-probe-${randomName()}`);
+            writeFileSync(f, "x", { mode: FILE_MODE });
+            probeFiles.push(f);
+          }
+          for (const [i, root] of [
+            resultsBaseRealPath,
+            workRootRealPath,
+          ].entries()) {
+            const deny = this.runScript(nodeExec, readScript(probeFiles[i]));
+            if (deny.status === 0)
+              return `sandbox: ${root} file read was not denied`;
+          }
+          const allow = this.runScript(nodeExec, readOutsideScript);
+          if (allow.status !== 0)
+            return "sandbox: file read outside the denied roots was denied";
+          return null;
+        } finally {
+          for (const f of probeFiles) rmSync(f, { force: true });
+        }
+      },
+    };
+  }
+  if (plat === "linux") {
+    const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
+    if (check.error) return null;
+    const bwrapDeny = [
+      "--dev-bind",
+      "/",
+      "/",
+      "--tmpfs",
+      setRealPath,
+      "--tmpfs",
+      resultsBaseRealPath,
+      "--tmpfs",
+      workRootRealPath,
+    ];
+    function bwrapArgs(allowed) {
+      return [
+        ...bwrapDeny,
+        ...allowed.flatMap((p) => ["--bind", p, p]),
+        "--die-with-parent",
+      ];
+    }
+    return {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
+        return spawnSync(
+          "bwrap",
+          [...bwrapArgs(allowed), nodeExec, bin, ...cmdArgs],
+          {
+            stdio: ["ignore", "ignore", stderrFd],
+          },
+        );
+      },
+      runScript(nodeExec, scriptText) {
+        return spawnSync(
+          "bwrap",
+          [...bwrapArgs([]), nodeExec, "-e", scriptText],
+          {
+            stdio: "ignore",
+          },
+        );
+      },
+      probe(nodeExec, setFile) {
+        const denySet = this.runScript(nodeExec, readScript(setFile));
+        if (denySet.status === 0) return "bwrap: set file read was not denied";
+        const probeFiles = [];
+        try {
+          for (const root of [resultsBaseRealPath, workRootRealPath]) {
+            const f = join(root, `.eval-probe-${randomName()}`);
+            writeFileSync(f, "x", { mode: FILE_MODE });
+            probeFiles.push(f);
+          }
+          for (const [i, root] of [
+            resultsBaseRealPath,
+            workRootRealPath,
+          ].entries()) {
+            const deny = this.runScript(nodeExec, readScript(probeFiles[i]));
+            if (deny.status === 0)
+              return `bwrap: ${root} file read was not denied`;
+          }
+          const allow = this.runScript(nodeExec, readOutsideScript);
+          if (allow.status !== 0)
+            return "bwrap: file read outside the denied roots was denied";
+          return null;
+        } finally {
+          for (const f of probeFiles) rmSync(f, { force: true });
+        }
+      },
+    };
+  }
+  return null;
+}
+
+export function copyPromptArgs(args, tmpDir) {
+  const copied = [...args];
+  let counter = 0;
+  for (let i = 0; i < copied.length - 1; i++) {
+    if (copied[i] === "--prompt" || copied[i] === "--system-prompt") {
+      const src = copied[i + 1];
+      const dest = join(tmpDir, `${counter++}-${basename(src)}`);
+      writeFileSync(dest, readFileSync(src), { mode: FILE_MODE, flag: "wx" });
+      copied[i + 1] = dest;
+    }
+  }
+  return copied;
+}
+
+function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
   const fd = openSync(stderrPath, "w", FILE_MODE);
   try {
-    const result = spawnSync(process.execPath, [BIN, ...args], {
-      stdio: ["ignore", "ignore", fd],
-    });
-    return result.status ?? EXIT_STOP;
+    const tmpDir = mkdtempSync(join(tmpdir(), "kanthord-eval-"));
+    try {
+      const copiedArgs = copyPromptArgs(args, tmpDir);
+      const result = wrapper.run(
+        process.execPath,
+        BIN,
+        copiedArgs,
+        fd,
+        allowedPaths,
+      );
+      return result.status ?? EXIT_STOP;
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
   } finally {
     closeSync(fd);
   }
@@ -1338,15 +1536,134 @@ export async function checkManifestDiff(evalSetDir) {
   return difference < refused ? difference : refused;
 }
 
+function setTreeOutput(evalSetDir, setCommit) {
+  const result = spawnSync("git", ["ls-tree", "-r", "-z", setCommit], {
+    cwd: evalSetDir,
+    env: isolatedGitEnvironment(process.env),
+    encoding: "utf8",
+    maxBuffer: CHECK_OUTPUT_LIMIT,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  return result.status === 0 ? result.stdout : null;
+}
+
+function hashObjectFiles(evalSetDir, absPaths) {
+  if (absPaths.length === 0) return [];
+  const result = spawnSync(
+    "git",
+    ["hash-object", "--no-filters", "--stdin-paths"],
+    {
+      cwd: evalSetDir,
+      env: isolatedGitEnvironment(process.env),
+      encoding: "utf8",
+      input: absPaths.join("\n") + "\n",
+      maxBuffer: CHECK_OUTPUT_LIMIT,
+      stdio: ["pipe", "pipe", "ignore"],
+    },
+  );
+  if (result.status !== 0) return null;
+  const hashes = result.stdout.split("\n").filter(Boolean);
+  return hashes.length === absPaths.length ? hashes : null;
+}
+
+function hashLinkBlob(evalSetDir, target) {
+  const result = spawnSync("git", ["hash-object", "--stdin"], {
+    cwd: evalSetDir,
+    env: isolatedGitEnvironment(process.env),
+    encoding: "utf8",
+    input: target,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  return result.status === 0 ? result.stdout.trim() : null;
+}
+
+function setChangeFromTree(evalSetDir, setCommit) {
+  const treeRaw = setTreeOutput(evalSetDir, setCommit);
+  if (treeRaw === null) return true;
+  const expected = new Map();
+  if (treeRaw !== "") {
+    for (const entry of treeRaw.split("\0").filter(Boolean)) {
+      const tab = entry.indexOf("\t");
+      if (tab === -1) return true;
+      const path = entry.slice(tab + 1);
+      const fields = entry.slice(0, tab).split(" ");
+      if (fields.length !== 3) return true;
+      expected.set(path, { mode: fields[0], blob: fields[2] });
+    }
+  }
+  const files = [];
+  const links = [];
+  function walk(relDir, absDir) {
+    let dirents;
+    try {
+      dirents = readdirSync(absDir, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const entry of dirents) {
+      if (!relDir && entry.name === ".git") continue;
+      if (!relDir && entry.name === "config.json" && entry.isFile()) continue;
+      const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
+      const absPath = join(absDir, entry.name);
+      if (entry.isSymbolicLink()) {
+        links.push({ relPath, absPath });
+      } else if (entry.isFile()) {
+        files.push({ relPath, absPath });
+      } else if (entry.isDirectory()) {
+        const parentParts = relDir.split("/");
+        if (
+          parentParts.length === 2 &&
+          parentParts[0] === "shared" &&
+          entry.name === "node_modules"
+        )
+          continue;
+        if (!walk(relPath, absPath)) return false;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (!walk("", evalSetDir)) return true;
+  const hashes = hashObjectFiles(
+    evalSetDir,
+    files.map((f) => f.absPath),
+  );
+  if (hashes === null) return true;
+  const actual = new Map();
+  for (let i = 0; i < files.length; i++) {
+    let st;
+    try {
+      st = lstatSync(files[i].absPath);
+    } catch {
+      return true;
+    }
+    const mode = st.mode & 0o100 ? SET_EXEC_MODE : SET_PLAIN_MODE;
+    actual.set(files[i].relPath, { mode, blob: hashes[i] });
+  }
+  for (const { relPath, absPath } of links) {
+    let target;
+    try {
+      target = readlinkSync(absPath);
+    } catch {
+      return true;
+    }
+    const hash = hashLinkBlob(evalSetDir, target);
+    if (hash === null) return true;
+    actual.set(relPath, { mode: SET_SYMLINK_MODE, blob: hash });
+  }
+  if (expected.size !== actual.size) return true;
+  for (const [path, e] of expected) {
+    const a = actual.get(path);
+    if (!a || a.mode !== e.mode || a.blob !== e.blob) return true;
+  }
+  return false;
+}
+
 async function checkSetChangeBreach(evalSetDir, setCommit) {
   const head = gitOutput(evalSetDir, ["rev-parse", "HEAD"]);
-  const status = gitOutput(evalSetDir, [
-    "--no-optional-locks",
-    "status",
-    "--porcelain",
-    "--untracked-files=all",
-  ]);
-  if (head !== setCommit || status !== "") return true;
+  if (head !== setCommit) return true;
+  if (setChangeFromTree(evalSetDir, setCommit)) return true;
   return (await checkManifestDiff(evalSetDir)) !== null;
 }
 
@@ -1388,7 +1705,12 @@ async function guardedAgentCall(run, deps, call) {
     inputCount += countCredentialInFile(path, run.credValues);
   if (inputCount > 0) return credentialStop(run, inputCount);
   mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const exit = deps.runAgent(call.args, call.stderrPath);
+  const exit = deps.runAgent(call.args, call.stderrPath, call.allowedPaths);
+  if (existsSync(call.outputPath)) {
+    const content = readFileSync(call.outputPath);
+    if (content.length > 0)
+      appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+  }
   const count = countCredentialInFile(call.sessionPath, run.credValues);
   if (count > 0) return credentialStop(run, count);
   if (checkAuthFileBreach(run.authPath, refreshed))
@@ -1513,14 +1835,22 @@ async function runDiagnosis(run, gradingRoot, deps) {
   for (;;) {
     const attempt = nextJudgeAttempt(run.runDir);
     judgeSessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
+    const judgeOutputPath = join(run.runDir, `judge-${attempt}-result.jsonl`);
     const called = await guardedAgentCall(run, deps, {
       label: "judge",
       model: run.config.judge_model,
       wall: JUDGE_WALL,
-      args: runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath),
+      args: runAgentArgsJudge(
+        run,
+        judgeWorkspace,
+        judgeSessionPath,
+        judgeOutputPath,
+      ),
       inputPaths,
       sessionPath: judgeSessionPath,
       stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+      outputPath: judgeOutputPath,
+      allowedPaths: [judgeWorkspace, run.runDir],
       protectedPathSearch: false,
     });
     if (called.stop) return called;
@@ -1550,6 +1880,7 @@ async function evaluateInRoots(run, deps, roots) {
     if (savedConfig === null) return { stop: "the workspace clone failed" };
     if (!runSetup(run.caseFolder, workspace, run.limitMs))
       return { stop: "setup.sh failed in the workspace" };
+    const sweOutputPath = join(currentRun.runDir, "result.jsonl");
     const called = await guardedAgentCall(currentRun, deps, {
       label: "run agent",
       model: run.config.model,
@@ -1558,6 +1889,8 @@ async function evaluateInRoots(run, deps, roots) {
       inputPaths: [],
       sessionPath: currentRun.sessionPath,
       stderrPath: join(currentRun.runDir, "stderr.txt"),
+      outputPath: sweOutputPath,
+      allowedPaths: [workspace, currentRun.runDir],
       protectedPathSearch: true,
     });
     if (called.stop) return called;
@@ -1922,7 +2255,40 @@ async function runPending(plan, deps) {
 }
 
 export async function runPlan(plan, deps) {
-  const result = await runPending(plan, deps);
+  const setRealPath = realpathSync(plan.evalSetDir);
+  mkdirSync(plan.resultsBaseDir, { recursive: true, mode: DIRECTORY_MODE });
+  mkdirSync(plan.workBaseDir, { recursive: true, mode: DIRECTORY_MODE });
+  const resultsBaseRealPath = realpathSync(plan.resultsBaseDir);
+  const workRootRealPath = realpathSync(plan.workBaseDir);
+  const makeWrapper = deps.makeWrapper ?? osDenyWrapper;
+  const wrapper = makeWrapper(
+    setRealPath,
+    resultsBaseRealPath,
+    workRootRealPath,
+  );
+  if (wrapper === null) {
+    process.stderr.write(
+      "evaluation: stop: OS read-deny mechanism is absent\n",
+    );
+    return EXIT_STOP;
+  }
+  const probeFile = join(setRealPath, ".git", "HEAD");
+  try {
+    readFileSync(probeFile);
+  } catch {
+    process.stderr.write(
+      "evaluation: stop: the runner cannot read the probe file of the set\n",
+    );
+    return EXIT_STOP;
+  }
+  const probeError = wrapper.probe(process.execPath, probeFile);
+  if (probeError !== null) {
+    process.stderr.write(`evaluation: stop: ${probeError}\n`);
+    return EXIT_STOP;
+  }
+  const runAgent = (args, stderrPath, allowedPaths) =>
+    deps.runAgent(args, stderrPath, wrapper, allowedPaths);
+  const result = await runPending(plan, { ...deps, runAgent });
   writeReport(plan);
   if (result.stop === null) return EXIT_OK;
   const reason = result.breach ? `breach ${result.breach}` : result.stop;
