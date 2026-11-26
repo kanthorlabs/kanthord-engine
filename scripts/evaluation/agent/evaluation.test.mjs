@@ -1376,6 +1376,17 @@ test("L4-U5: the OS deny wrapper denies a read of a sibling run folder", async (
   }
 });
 
+test("L4-U5: guardedAgentCall awaits a promise from runAgent", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent();
+  const syncRunAgent = agent.deps.runAgent;
+  agent.deps.runAgent = (...args) => Promise.resolve(syncRunAgent(...args));
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 0);
+});
+
 test("L4-U5: the result line in results.jsonl equals the call output file, and the output file is in the run folder", async (t) => {
   const run = await runHeldOut(t, "e");
   assert.equal(run.value, 0);

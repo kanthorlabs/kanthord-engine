@@ -1082,9 +1082,15 @@ function ancestorsUnderRoots(path, roots) {
 
 function spawnToPromise(cmd, args, stderrFd) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, {
-      stdio: ["ignore", "ignore", stderrFd],
-    });
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        stdio: ["ignore", "ignore", stderrFd],
+      });
+    } catch {
+      resolve({ status: null });
+      return;
+    }
     child.once("close", (code) => resolve({ status: code }));
     child.once("error", () => resolve({ status: null }));
   });
