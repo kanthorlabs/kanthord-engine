@@ -719,7 +719,9 @@ append/create `kanthord.log` in the state directory when `log.destination` is
 A Linux host that runs a Workbench agent with `bash` needs `bubblewrap`, `socat`
 and `ripgrep` on `PATH`, because the bash runs in a sandbox. A macOS host needs
 `ripgrep` (`rg`) on `PATH`. Without these packages every Workbench bash call
-fails.
+fails. The sandbox applies seccomp in a nested user namespace. On a Linux host
+with AppArmor, for example Ubuntu 24.04, set the kernel parameter
+`kernel.apparmor_restrict_unprivileged_userns` to `0`.
 The cache directory has no current server-owned output. The server writes
 neither its configuration nor `cli.yaml` and issues no JWT. Future file owners,
 including Tracking storage, need their own implemented lifecycle.
@@ -838,7 +840,9 @@ agent refuse a path outside the workspace and an absolute path, as the Workbench
 tools do. A review or examine agent also reads the evidence folder of its own
 evaluation with `read`, `grep`, `find` and `ls`, and it cannot edit or write
 there. A Linux host of a worker instance needs `bubblewrap`, `socat` and
-`ripgrep` on `PATH`. A macOS host needs `ripgrep` (`rg`). A container placement
+`ripgrep` on `PATH`, and with AppArmor it needs
+`kernel.apparmor_restrict_unprivileged_userns` set to `0`. A macOS host needs
+`ripgrep` (`rg`). A container placement
 does not support the coder bash. The sandbox needs bubblewrap, `socat`, `rg` and
 user namespaces, and the default seccomp profile of the slot container blocks
 user namespaces. A container slot fails at start with
