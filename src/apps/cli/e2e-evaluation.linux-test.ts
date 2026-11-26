@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
+import type { TestContext } from "node:test";
 import type { EvaluationFixture } from "./e2e-evaluation-test-support.ts";
 import {
   authFileText,
@@ -12,7 +13,10 @@ import {
   writeFileAsTestUser,
 } from "./e2e-run-agent-linux-test-support.ts";
 import { llmStub } from "./e2e-llm-stub-test-support.ts";
-import type { StubRequestRecord } from "./e2e-llm-stub-test-support.ts";
+import type {
+  StubRequestRecord,
+  StubTurn,
+} from "./e2e-llm-stub-test-support.ts";
 import {
   AGENT_SWE,
   asTestUser,
@@ -23,7 +27,9 @@ import {
   MODIFY_SHARED_TURN,
   NO_FINDINGS_TURN,
   READ_CHECK_TURN,
+  READ_SET_TURN,
   runnerAsTestUser,
+  SHARED_SETUP_JS,
   TASK_D1,
   TASK_D2,
   TOUCH_SET_TURN,
@@ -455,7 +461,9 @@ const AC5_BREACH_LINES = 1;
 const AC5_NO_RE_REQUESTS = 0;
 const AC5_PROTECTED_PATH = "protected_path";
 const AC5_CREDENTIAL = "credential";
-const AC5_SET_CHANGE = "set_change";
+const AC5_NEW_FILE = "x.txt";
+const AC5_COPY_FILE = "copy.txt";
+const AC5_HIDDEN_TEST_TEXT = "cat ok.txt";
 const AC5_REPORT_1_BREACH = "A9 breaches: 1";
 const K_PARTIAL_LEN = 8;
 const AC5_AUTH = join(TEST_USER_HOME, ".config", "kanthord", "auth.json");
@@ -646,49 +654,63 @@ test(
   },
 );
 
+async function assertNoBreach(results: string): Promise<void> {
+  const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
+  assert.equal(checks.length, DEV_RUN_COUNT);
+  for (const line of checks) assert.equal(line.breach, null);
+}
+
+async function ac5DeniedRun(
+  t: TestContext,
+  turn: StubTurn,
+): Promise<EvaluationFixture> {
+  const variables: Record<string, string> = { $XD: "" };
+  const stub = await llmStub(t, [], ENGINE_ROOT, {
+    responder: l4Responder({ firstTurns: { [TASK_D1]: turn } }),
+    variables,
+  });
+  const fixture = await buildEvaluationSet(t, stub.baseUrl);
+  variables.$XD = fixture.xd;
+  const run = await ac5Run(fixture, t.signal);
+  assert.equal(run.status, SUCCESS_EXIT, run.stderr);
+  await assertNoBreach(join(fixture.runs, AC5_EVAL));
+  return fixture;
+}
+
 test(
-  "L4-AC5 variant 5: modifying the eval set stops the evaluation with breach set_change",
+  "L4-AC5 variant 5: the OS rule denies a new file in the eval set",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const variables: Record<string, string> = { $XD: "" };
-    const stub = await llmStub(t, [], ENGINE_ROOT, {
-      responder: l4Responder({ firstTurns: { [TASK_D1]: TOUCH_SET_TURN } }),
-      variables,
-    });
-    const fixture = await buildEvaluationSet(t, stub.baseUrl);
-    variables.$XD = fixture.xd;
-    const results = join(fixture.runs, AC5_EVAL);
-
-    const run = await ac5Run(fixture, t.signal);
-    assert.equal(run.status, BREACH_EXIT, run.stderr);
-
-    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
-    assert.equal(checks.length, AC5_BREACH_LINES);
-    assert.equal(checks[0]!.breach, AC5_SET_CHANGE);
+    const fixture = await ac5DeniedRun(t, TOUCH_SET_TURN);
+    const names = await asTestUser(["ls", "-A", fixture.set]);
+    assert.equal(lines(names).includes(AC5_NEW_FILE), false, names);
   },
 );
 
 test(
-  "L4-AC5 variant 6: a change of an ignored file under shared/ stops the evaluation with the breach set_change",
+  "L4-AC5 variant 6: the OS rule denies a change of an ignored file under shared/",
   { timeout: TEST_TIMEOUT_MS },
   async (t) => {
-    const variables: Record<string, string> = { $XD: "" };
-    const stub = await llmStub(t, [], ENGINE_ROOT, {
-      responder: l4Responder({
-        firstTurns: { [TASK_D1]: MODIFY_SHARED_TURN },
-      }),
-      variables,
-    });
-    const fixture = await buildEvaluationSet(t, stub.baseUrl);
-    variables.$XD = fixture.xd;
-    const results = join(fixture.runs, AC5_EVAL);
+    const fixture = await ac5DeniedRun(t, MODIFY_SHARED_TURN);
+    const text = await asTestUser([
+      "cat",
+      join(fixture.set, "shared", "lib", "node_modules", "dep", "index.js"),
+    ]);
+    assert.equal(text, SHARED_SETUP_JS);
+  },
+);
 
-    const run = await ac5Run(fixture, t.signal);
-    assert.equal(run.status, BREACH_EXIT, run.stderr);
-
-    const checks = await jsonLines<CheckLine>(join(results, "checks.jsonl"));
-    assert.equal(checks.length, AC5_BREACH_LINES);
-    assert.equal(checks[0]!.breach, AC5_SET_CHANGE);
+test(
+  "L4-AC5 variant 7: the OS rule denies a read of a hidden test of the eval set",
+  { timeout: TEST_TIMEOUT_MS },
+  async (t) => {
+    const fixture = await ac5DeniedRun(t, READ_SET_TURN);
+    const diff = await asTestUser([
+      "cat",
+      join(fixture.runs, AC5_EVAL, "d1", "1-1", "diff.patch"),
+    ]);
+    assert.equal(diff.includes(AC5_COPY_FILE), true, diff);
+    assert.equal(diff.includes(AC5_HIDDEN_TEST_TEXT), false, diff);
   },
 );
 
