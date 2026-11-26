@@ -808,7 +808,12 @@ export function parseDiagnosis(text, end) {
   return { valid: true, findings };
 }
 
-export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
+export function runAgentArgsJudge(
+  run,
+  judgeWorkspace,
+  judgeSessionPath,
+  outputPath,
+) {
   const runnerDir = dirname(SCRIPT_PATH);
   const args = ["run", "agent", PROFILE_RE, "--model", run.config.judge_model];
   args.push("--budget", JUDGE_WALL);
@@ -824,7 +829,7 @@ export function runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath) {
   args.push("--system-prompt", join(runnerDir, "judge.md"));
   args.push("--workspace", judgeWorkspace);
   args.push("--session", judgeSessionPath);
-  args.push("--output", run.resultsPath);
+  args.push("--output", outputPath);
   args.push("--prompt", join(runnerDir, "judge-task.md"));
   return args;
 }
@@ -1054,32 +1059,132 @@ export function runAgentArgs(run, workspace) {
     args.push("--system-prompt", binding);
   }
   args.push("--workspace", workspace, "--session", run.sessionPath);
-  args.push("--output", run.resultsPath);
+  args.push("--output", join(run.runDir, "result.jsonl"));
   args.push("--prompt", join(run.caseFolder, "task.md"));
   return args;
 }
 
-export function osDenyWrapper(setRealPath) {
+function escSbpl(p) {
+  return p.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function ancestorsUnderRoots(path, roots) {
+  const result = [];
+  let cur = dirname(path);
+  while (roots.some((r) => cur === r || cur.startsWith(r + "/"))) {
+    result.push(cur);
+    const parent = dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return result;
+}
+
+export function osDenyWrapper(
+  setRealPath,
+  resultsBaseRealPath,
+  workRootRealPath,
+) {
+  const denied = [setRealPath, resultsBaseRealPath, workRootRealPath];
   const plat = platform();
-  const readSetScript = (setFile) =>
-    `try{require('fs').readFileSync(${JSON.stringify(setFile)});process.exit(0);}catch{process.exit(1);}`;
+  const readScript = (file) =>
+    `try{require('fs').readFileSync(${JSON.stringify(file)});process.exit(0);}catch{process.exit(1);}`;
   const readOutsideScript = `require('fs').readFileSync('/dev/null');`;
   if (plat === "darwin") {
     const check = spawnSync(
       "sandbox-exec",
       ["-p", "(version 1)(allow default)", "true"],
-      {
-        stdio: "ignore",
-      },
+      { stdio: "ignore" },
     );
     if (check.error) return null;
-    const subpath = setRealPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
-    const policy = `(version 1)(allow default)(deny file-read* file-write* (subpath "${subpath}"))`;
+    const denyRules = denied
+      .map((p) => `(deny file-read* file-write* (subpath "${escSbpl(p)}"))`)
+      .join("");
+    function buildPolicy(allowed) {
+      const metaPaths = [
+        ...new Set([
+          ...denied,
+          ...allowed.flatMap((p) => ancestorsUnderRoots(p, denied)),
+        ]),
+      ];
+      const metaRules = metaPaths
+        .map((p) => `(allow file-read-metadata (literal "${escSbpl(p)}"))`)
+        .join("");
+      const allowRules = allowed
+        .map((p) => `(allow file-read* file-write* (subpath "${escSbpl(p)}"))`)
+        .join("");
+      return `(version 1)(allow default)${denyRules}${metaRules}${allowRules}`;
+    }
     return {
-      run(nodeExec, bin, cmdArgs, stderrFd) {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
         return spawnSync(
           "sandbox-exec",
-          ["-p", policy, nodeExec, bin, ...cmdArgs],
+          ["-p", buildPolicy(allowed), nodeExec, bin, ...cmdArgs],
+          { stdio: ["ignore", "ignore", stderrFd] },
+        );
+      },
+      runScript(nodeExec, scriptText) {
+        return spawnSync(
+          "sandbox-exec",
+          ["-p", buildPolicy([]), nodeExec, "-e", scriptText],
+          { stdio: "ignore" },
+        );
+      },
+      probe(nodeExec, setFile) {
+        const denySet = this.runScript(nodeExec, readScript(setFile));
+        if (denySet.status === 0)
+          return "sandbox: set file read was not denied";
+        const probeFiles = [];
+        try {
+          for (const root of [resultsBaseRealPath, workRootRealPath]) {
+            const f = join(root, `.eval-probe-${randomName()}`);
+            writeFileSync(f, "x", { mode: FILE_MODE });
+            probeFiles.push(f);
+          }
+          for (const [i, root] of [
+            resultsBaseRealPath,
+            workRootRealPath,
+          ].entries()) {
+            const deny = this.runScript(nodeExec, readScript(probeFiles[i]));
+            if (deny.status === 0)
+              return `sandbox: ${root} file read was not denied`;
+          }
+          const allow = this.runScript(nodeExec, readOutsideScript);
+          if (allow.status !== 0)
+            return "sandbox: file read outside the denied roots was denied";
+          return null;
+        } finally {
+          for (const f of probeFiles) rmSync(f, { force: true });
+        }
+      },
+    };
+  }
+  if (plat === "linux") {
+    const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
+    if (check.error) return null;
+    const bwrapDeny = [
+      "--dev-bind",
+      "/",
+      "/",
+      "--tmpfs",
+      setRealPath,
+      "--tmpfs",
+      resultsBaseRealPath,
+      "--tmpfs",
+      workRootRealPath,
+    ];
+    function bwrapArgs(allowed) {
+      return [
+        ...bwrapDeny,
+        ...allowed.flatMap((p) => ["--bind", p, p]),
+        "--die-with-parent",
+      ];
+    }
+    return {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
+        return spawnSync(
+          "bwrap",
+          [...bwrapArgs(allowed), nodeExec, bin, ...cmdArgs],
           {
             stdio: ["ignore", "ignore", stderrFd],
           },
@@ -1087,52 +1192,38 @@ export function osDenyWrapper(setRealPath) {
       },
       runScript(nodeExec, scriptText) {
         return spawnSync(
-          "sandbox-exec",
-          ["-p", policy, nodeExec, "-e", scriptText],
+          "bwrap",
+          [...bwrapArgs([]), nodeExec, "-e", scriptText],
           {
             stdio: "ignore",
           },
         );
       },
       probe(nodeExec, setFile) {
-        const deny = this.runScript(nodeExec, readSetScript(setFile));
-        if (deny.status === 0) return "sandbox: set file read was not denied";
-        const allow = this.runScript(nodeExec, readOutsideScript);
-        if (allow.status !== 0)
-          return "sandbox: file read outside the set was denied";
-        return null;
-      },
-    };
-  }
-  if (plat === "linux") {
-    const check = spawnSync("bwrap", ["--version"], { stdio: "ignore" });
-    if (check.error) return null;
-    const bwrapBase = [
-      "--dev-bind",
-      "/",
-      "/",
-      "--tmpfs",
-      setRealPath,
-      "--die-with-parent",
-    ];
-    return {
-      run(nodeExec, bin, cmdArgs, stderrFd) {
-        return spawnSync("bwrap", [...bwrapBase, nodeExec, bin, ...cmdArgs], {
-          stdio: ["ignore", "ignore", stderrFd],
-        });
-      },
-      runScript(nodeExec, scriptText) {
-        return spawnSync("bwrap", [...bwrapBase, nodeExec, "-e", scriptText], {
-          stdio: "ignore",
-        });
-      },
-      probe(nodeExec, setFile) {
-        const deny = this.runScript(nodeExec, readSetScript(setFile));
-        if (deny.status === 0) return "bwrap: set file read was not denied";
-        const allow = this.runScript(nodeExec, readOutsideScript);
-        if (allow.status !== 0)
-          return "bwrap: file read outside the set was denied";
-        return null;
+        const denySet = this.runScript(nodeExec, readScript(setFile));
+        if (denySet.status === 0) return "bwrap: set file read was not denied";
+        const probeFiles = [];
+        try {
+          for (const root of [resultsBaseRealPath, workRootRealPath]) {
+            const f = join(root, `.eval-probe-${randomName()}`);
+            writeFileSync(f, "x", { mode: FILE_MODE });
+            probeFiles.push(f);
+          }
+          for (const [i, root] of [
+            resultsBaseRealPath,
+            workRootRealPath,
+          ].entries()) {
+            const deny = this.runScript(nodeExec, readScript(probeFiles[i]));
+            if (deny.status === 0)
+              return `bwrap: ${root} file read was not denied`;
+          }
+          const allow = this.runScript(nodeExec, readOutsideScript);
+          if (allow.status !== 0)
+            return "bwrap: file read outside the denied roots was denied";
+          return null;
+        } finally {
+          for (const f of probeFiles) rmSync(f, { force: true });
+        }
       },
     };
   }
@@ -1153,13 +1244,19 @@ export function copyPromptArgs(args, tmpDir) {
   return copied;
 }
 
-function runAgentProcess(args, stderrPath, wrapper) {
+function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
   const fd = openSync(stderrPath, "w", FILE_MODE);
   try {
     const tmpDir = mkdtempSync(join(tmpdir(), "kanthord-eval-"));
     try {
       const copiedArgs = copyPromptArgs(args, tmpDir);
-      const result = wrapper.run(process.execPath, BIN, copiedArgs, fd);
+      const result = wrapper.run(
+        process.execPath,
+        BIN,
+        copiedArgs,
+        fd,
+        allowedPaths,
+      );
       return result.status ?? EXIT_STOP;
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -1608,7 +1705,12 @@ async function guardedAgentCall(run, deps, call) {
     inputCount += countCredentialInFile(path, run.credValues);
   if (inputCount > 0) return credentialStop(run, inputCount);
   mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const exit = deps.runAgent(call.args, call.stderrPath);
+  const exit = deps.runAgent(call.args, call.stderrPath, call.allowedPaths);
+  if (existsSync(call.outputPath)) {
+    const content = readFileSync(call.outputPath);
+    if (content.length > 0)
+      appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+  }
   const count = countCredentialInFile(call.sessionPath, run.credValues);
   if (count > 0) return credentialStop(run, count);
   if (checkAuthFileBreach(run.authPath, refreshed))
@@ -1733,14 +1835,22 @@ async function runDiagnosis(run, gradingRoot, deps) {
   for (;;) {
     const attempt = nextJudgeAttempt(run.runDir);
     judgeSessionPath = join(run.runDir, `judge-${attempt}.jsonl`);
+    const judgeOutputPath = join(run.runDir, `judge-${attempt}-result.jsonl`);
     const called = await guardedAgentCall(run, deps, {
       label: "judge",
       model: run.config.judge_model,
       wall: JUDGE_WALL,
-      args: runAgentArgsJudge(run, judgeWorkspace, judgeSessionPath),
+      args: runAgentArgsJudge(
+        run,
+        judgeWorkspace,
+        judgeSessionPath,
+        judgeOutputPath,
+      ),
       inputPaths,
       sessionPath: judgeSessionPath,
       stderrPath: join(run.runDir, `judge-${attempt}-stderr.txt`),
+      outputPath: judgeOutputPath,
+      allowedPaths: [judgeWorkspace, run.runDir],
       protectedPathSearch: false,
     });
     if (called.stop) return called;
@@ -1770,6 +1880,7 @@ async function evaluateInRoots(run, deps, roots) {
     if (savedConfig === null) return { stop: "the workspace clone failed" };
     if (!runSetup(run.caseFolder, workspace, run.limitMs))
       return { stop: "setup.sh failed in the workspace" };
+    const sweOutputPath = join(currentRun.runDir, "result.jsonl");
     const called = await guardedAgentCall(currentRun, deps, {
       label: "run agent",
       model: run.config.model,
@@ -1778,6 +1889,8 @@ async function evaluateInRoots(run, deps, roots) {
       inputPaths: [],
       sessionPath: currentRun.sessionPath,
       stderrPath: join(currentRun.runDir, "stderr.txt"),
+      outputPath: sweOutputPath,
+      allowedPaths: [workspace, currentRun.runDir],
       protectedPathSearch: true,
     });
     if (called.stop) return called;
@@ -2143,8 +2256,16 @@ async function runPending(plan, deps) {
 
 export async function runPlan(plan, deps) {
   const setRealPath = realpathSync(plan.evalSetDir);
+  mkdirSync(plan.resultsBaseDir, { recursive: true, mode: DIRECTORY_MODE });
+  mkdirSync(plan.workBaseDir, { recursive: true, mode: DIRECTORY_MODE });
+  const resultsBaseRealPath = realpathSync(plan.resultsBaseDir);
+  const workRootRealPath = realpathSync(plan.workBaseDir);
   const makeWrapper = deps.makeWrapper ?? osDenyWrapper;
-  const wrapper = makeWrapper(setRealPath);
+  const wrapper = makeWrapper(
+    setRealPath,
+    resultsBaseRealPath,
+    workRootRealPath,
+  );
   if (wrapper === null) {
     process.stderr.write(
       "evaluation: stop: OS read-deny mechanism is absent\n",
@@ -2165,8 +2286,8 @@ export async function runPlan(plan, deps) {
     process.stderr.write(`evaluation: stop: ${probeError}\n`);
     return EXIT_STOP;
   }
-  const runAgent = (args, stderrPath) =>
-    deps.runAgent(args, stderrPath, wrapper);
+  const runAgent = (args, stderrPath, allowedPaths) =>
+    deps.runAgent(args, stderrPath, wrapper, allowedPaths);
   const result = await runPending(plan, { ...deps, runAgent });
   writeReport(plan);
   if (result.stop === null) return EXIT_OK;

@@ -94,8 +94,10 @@ const D2_CHECK = [false, true, true, true, false, null];
 const DEV_RUN_FILES = [
   "check.txt",
   "diff.patch",
+  "judge-1-result.jsonl",
   "judge-1-stderr.txt",
   "judge-1.jsonl",
+  "result.jsonl",
   "session.jsonl",
   "stderr.txt",
 ];
