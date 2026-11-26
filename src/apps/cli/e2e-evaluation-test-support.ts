@@ -123,7 +123,9 @@ export const TOUCH_SET_TURN: StubTurn = {
   calls: [
     {
       name: "bash",
-      args: { command: "touch '$XD/kanthord/evalu''ation/agent/x.txt'" },
+      args: {
+        command: "touch '$XD/kanthord/evalu''ation/agent/x.txt' 2>/dev/null",
+      },
     },
   ],
   usage: TURN_USAGE,
@@ -135,14 +137,27 @@ export const MODIFY_SHARED_TURN: StubTurn = {
       name: "bash",
       args: {
         command:
-          "echo x >> '$XD/kanthord/evalu''ation/agent/shared/lib/node_modules/dep/index.js'",
+          "{ echo x >> '$XD/kanthord/evalu''ation/agent/shared/lib/node_modules/dep/index.js'; } 2>/dev/null",
+      },
+    },
+  ],
+  usage: TURN_USAGE,
+};
+export const READ_SET_TURN: StubTurn = {
+  kind: "tool_calls",
+  calls: [
+    {
+      name: "bash",
+      args: {
+        command:
+          "{ cat '$XD/kanthord/evalu''ation/agent/cases/dev/d1/che''ck/tests/test/new.sh' > copy.txt; } 2>/dev/null",
       },
     },
   ],
   usage: TURN_USAGE,
 };
 
-const SHARED_SETUP_JS = "module.exports = {};\n";
+export const SHARED_SETUP_JS = "module.exports = {};\n";
 const SHARED_SETUP_SHA256 = createHash("sha256")
   .update(SHARED_SETUP_JS)
   .digest("hex");

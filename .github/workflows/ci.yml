@@ -124,6 +124,10 @@ jobs:
           path: .pi-tools
           key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
       - run: pnpm run build && pnpm run pi-tools:fetch
+      - name: Install bubblewrap
+        run: |
+          sudo sh -c 'command -v bwrap' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Install nft and setfacl
         run: |
           sudo sh -c 'command -v nft && command -v setfacl' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables acl; }

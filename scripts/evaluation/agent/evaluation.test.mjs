@@ -17,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir, userInfo } from "node:os";
+import { platform, tmpdir, userInfo } from "node:os";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
@@ -39,6 +39,7 @@ import {
   computeBaseCost,
   computeGate,
   copyHiddenTests,
+  copyPromptArgs,
   countCredentialInText,
   diffArgs,
   diffSteps,
@@ -1121,14 +1122,49 @@ test("L4-U5: a mode change of a set file is the breach set_change", async (t) =>
   );
 });
 
+const HIDDEN_SET_ENTRIES = {
+  "a FIFO": (fixture) => spawnSync("mkfifo", [join(fixture.set, "pipe")]),
+  "a nested .git directory": (fixture) =>
+    writeFile(join(fixture.set, "cases", ".git", "x.txt"), "x\n"),
+  "a nested config.json": (fixture) =>
+    writeFile(join(fixture.set, "cases", "config.json"), "{}\n"),
+  "a directory at the root config.json": (fixture) => {
+    rmSync(join(fixture.set, "config.json"));
+    writeFile(join(fixture.set, "config.json", "x.txt"), "x\n");
+  },
+  "a node_modules directory outside shared": (fixture) =>
+    writeFile(join(fixture.set, "cases", "x", "node_modules", "x.js"), "x\n"),
+  "a new link": (fixture) =>
+    symlinkSync("task.md", join(fixture.h1.folder, "link.md")),
+  "an unreadable file": (fixture) =>
+    chmodSync(join(fixture.h1.folder, "task.md"), 0o000),
+};
+
+for (const [name, work] of Object.entries(HIDDEN_SET_ENTRIES))
+  test(`L4-U5: ${name} in the set is the breach set_change`, async (t) => {
+    const run = await runBreach(t, (fixture) => ({
+      work: () => work(fixture),
+    }));
+    assert.deepEqual(
+      run.checks.map((line) => line.breach),
+      ["set_change"],
+    );
+  });
+
+function realWrapper(t, setRealPath) {
+  const wrapper = osDenyWrapper(setRealPath);
+  if (wrapper !== null) return wrapper;
+  assert.notEqual(platform(), "darwin");
+  assert.equal(process.env.CI, undefined);
+  t.skip();
+  return null;
+}
+
 test("L4-U5: the OS deny wrapper denies a read of a set file", (t) => {
   const fixture = makeFixture(t);
   const setRealPath = realpathSync(fixture.set);
-  const wrapper = osDenyWrapper(setRealPath);
-  if (!wrapper) {
-    t.skip();
-    return;
-  }
+  const wrapper = realWrapper(t, setRealPath);
+  if (wrapper === null) return;
   const setFile = join(setRealPath, ".git", "HEAD");
   const result = wrapper.runScript(
     process.execPath,
@@ -1140,11 +1176,8 @@ test("L4-U5: the OS deny wrapper denies a read of a set file", (t) => {
 test("L4-U5: the OS deny wrapper allows a read outside the set", (t) => {
   const fixture = makeFixture(t);
   const setRealPath = realpathSync(fixture.set);
-  const wrapper = osDenyWrapper(setRealPath);
-  if (!wrapper) {
-    t.skip();
-    return;
-  }
+  const wrapper = realWrapper(t, setRealPath);
+  if (wrapper === null) return;
   const result = wrapper.runScript(
     process.execPath,
     `require('fs').readFileSync('/dev/null');`,
@@ -1152,14 +1185,69 @@ test("L4-U5: the OS deny wrapper allows a read outside the set", (t) => {
   assert.equal(result.status, 0);
 });
 
-test("L4-U5: the start refuses when the OS read-deny mechanism is absent", async (t) => {
+test("L4-U5: the start probe passes for a set path with a quote and a backslash", (t) => {
+  const set = join(tempDir(t), 'se"t\\x');
+  writeFile(join(set, "file.txt"), "x\n");
+  const wrapper = realWrapper(t, set);
+  if (wrapper === null) return;
+  assert.equal(wrapper.probe(process.execPath, join(set, "file.txt")), null);
+});
+
+test("L4-U5: the start refuses with no agent call when the OS read-deny mechanism is absent", async (t) => {
   const fixture = makeFixture(t);
   const plan = await startRun(fixture.start(heldOut("e")));
   assert.equal(plan.error, undefined);
   const agent = fakeAgent({ makeWrapper: () => null });
   const output = await captured(() => runPlan(plan, agent.deps));
   assert.equal(output.value, 1);
-  assert.match(output.stderr, /mechanism is absent/);
+  assert.equal(agent.calls.length, 0);
+});
+
+test("L4-U5: the start refuses with no agent call when the start probe fails", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent({
+    makeWrapper: () => ({ probe: () => "the probe failed" }),
+  });
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 1);
+  assert.equal(agent.calls.length, 0);
+});
+
+test("L4-U5: the swe@1 call and the re@1 call each get the wrapper of the start probe", async (t) => {
+  const wrapper = { probe: () => null };
+  const run = await runDev(t, { makeWrapper: () => wrapper });
+  assert.equal(run.value, 0);
+  const profiles = new Set(run.agent.calls.map((args) => args[2]));
+  assert.deepEqual([...profiles].sort(), ["re@1", "swe@1"]);
+  for (const given of run.agent.wrappers) assert.equal(given, wrapper);
+});
+
+test("L4-U5: the prompt copies have mode 0600 and the other arguments stay", (t) => {
+  const root = tempDir(t);
+  const copies = join(root, "copies");
+  mkdirSync(copies);
+  writeFile(join(root, "task.md"), "task\n");
+  writeFile(join(root, "binding.md"), "binding\n");
+  const args = [
+    "--system-prompt",
+    join(root, "binding.md"),
+    "--workspace",
+    join(root, "w"),
+    "--prompt",
+    join(root, "task.md"),
+  ];
+  const copied = copyPromptArgs(args, copies);
+  assert.equal(copied[3], join(root, "w"));
+  for (const index of [1, 5]) {
+    assert.equal(dirname(copied[index]), copies);
+    assert.equal(lstatSync(copied[index]).mode & 0o777, 0o600);
+    assert.equal(
+      readFileSync(copied[index], "utf8"),
+      readFileSync(args[index], "utf8"),
+    );
+  }
 });
 
 test("L4-U5: a change of the ignored config.json is no breach", async (t) => {
@@ -2327,8 +2415,10 @@ function fakeDevAgent(options = {}) {
   const calls = [];
   let judgeCalls = 0;
   let sweCalls = 0;
-  const runAgent = (args, stderrPath) => {
+  const wrappers = [];
+  const runAgent = (args, stderrPath, wrapper) => {
     calls.push(args);
+    wrappers.push(wrapper);
     writeFileSync(stderrPath, "");
     const session = option(args, "--session");
     const output = option(args, "--output");
@@ -2348,7 +2438,9 @@ function fakeDevAgent(options = {}) {
     judgeCalls++;
     return options.judgeExits?.[judgeCalls - 1] ?? options.judgeExit ?? 0;
   };
-  return { calls, deps: { refresh: async () => {}, runAgent } };
+  const deps = { refresh: async () => {}, runAgent };
+  if (options.makeWrapper) deps.makeWrapper = options.makeWrapper;
+  return { calls, wrappers, deps };
 }
 
 async function runDev(t, agentOptions, overrides = {}) {

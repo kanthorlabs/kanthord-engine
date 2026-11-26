@@ -1073,7 +1073,8 @@ export function osDenyWrapper(setRealPath) {
       },
     );
     if (check.error) return null;
-    const policy = `(version 1)(allow default)(deny file-read* file-write* (subpath "${setRealPath}"))`;
+    const subpath = setRealPath.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+    const policy = `(version 1)(allow default)(deny file-read* file-write* (subpath "${subpath}"))`;
     return {
       run(nodeExec, bin, cmdArgs, stderrFd) {
         return spawnSync(
@@ -1138,14 +1139,14 @@ export function osDenyWrapper(setRealPath) {
   return null;
 }
 
-function copyPromptArgs(args, tmpDir) {
+export function copyPromptArgs(args, tmpDir) {
   const copied = [...args];
   let counter = 0;
   for (let i = 0; i < copied.length - 1; i++) {
     if (copied[i] === "--prompt" || copied[i] === "--system-prompt") {
       const src = copied[i + 1];
       const dest = join(tmpDir, `${counter++}-${basename(src)}`);
-      copyFileSync(src, dest);
+      writeFileSync(dest, readFileSync(src), { mode: FILE_MODE, flag: "wx" });
       copied[i + 1] = dest;
     }
   }
@@ -1504,7 +1505,7 @@ function setChangeFromTree(evalSetDir, setCommit) {
     }
     for (const entry of dirents) {
       if (!relDir && entry.name === ".git") continue;
-      if (!relDir && entry.name === "config.json") continue;
+      if (!relDir && entry.name === "config.json" && entry.isFile()) continue;
       const relPath = relDir ? `${relDir}/${entry.name}` : entry.name;
       const absPath = join(absDir, entry.name);
       if (entry.isSymbolicLink()) {
@@ -1520,6 +1521,8 @@ function setChangeFromTree(evalSetDir, setCommit) {
         )
           continue;
         if (!walk(relPath, absPath)) return false;
+      } else {
+        return false;
       }
     }
     return true;
@@ -2149,6 +2152,14 @@ export async function runPlan(plan, deps) {
     return EXIT_STOP;
   }
   const probeFile = join(setRealPath, ".git", "HEAD");
+  try {
+    readFileSync(probeFile);
+  } catch {
+    process.stderr.write(
+      "evaluation: stop: the runner cannot read the probe file of the set\n",
+    );
+    return EXIT_STOP;
+  }
   const probeError = wrapper.probe(process.execPath, probeFile);
   if (probeError !== null) {
     process.stderr.write(`evaluation: stop: ${probeError}\n`);
