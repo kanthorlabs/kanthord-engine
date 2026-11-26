@@ -1309,7 +1309,7 @@ test("L4-U5: the OS deny wrapper denies a read under the work root", (t) => {
   assert.notEqual(result.status, 0);
 });
 
-test("L4-U5: the OS deny wrapper allows reads in the allowed paths", (t) => {
+test("L4-U5: the OS deny wrapper allows reads in the allowed paths", async (t) => {
   const root = tempDir(t);
   mkdirSync(join(root, "set"));
   const setRealPath = realpathSync(join(root, "set"));
@@ -1331,17 +1331,20 @@ test("L4-U5: the OS deny wrapper allows reads in the allowed paths", (t) => {
   ].join("");
   const stderrFd = openSync(join(root, "stderr.txt"), "w");
   try {
-    const result = wrapper.run(process.execPath, "-e", [script], stderrFd, [
-      runDir,
-      workspace,
-    ]);
+    const result = await wrapper.run(
+      process.execPath,
+      "-e",
+      [script],
+      stderrFd,
+      [runDir, workspace],
+    );
     assert.equal(result.status, 0);
   } finally {
     closeSync(stderrFd);
   }
 });
 
-test("L4-U5: the OS deny wrapper denies a read of a sibling run folder", (t) => {
+test("L4-U5: the OS deny wrapper denies a read of a sibling run folder", async (t) => {
   const root = tempDir(t);
   mkdirSync(join(root, "set"));
   const setRealPath = realpathSync(join(root, "set"));
@@ -1360,9 +1363,13 @@ test("L4-U5: the OS deny wrapper denies a read of a sibling run folder", (t) => 
   const script = `try{require('fs').readFileSync(${JSON.stringify(siblingFile)});process.exit(0);}catch{process.exit(1);}`;
   const stderrFd = openSync(join(root, "stderr.txt"), "w");
   try {
-    const result = wrapper.run(process.execPath, "-e", [script], stderrFd, [
-      runDir1,
-    ]);
+    const result = await wrapper.run(
+      process.execPath,
+      "-e",
+      [script],
+      stderrFd,
+      [runDir1],
+    );
     assert.notEqual(result.status, 0);
   } finally {
     closeSync(stderrFd);
