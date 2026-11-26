@@ -53,6 +53,7 @@ import {
   modelBlend,
   nextRunAttempt,
   oneChangeError,
+  osDenyWrapper,
   parseDiagnosis,
   parseModelSelection,
   parseUsdCents,
@@ -294,7 +295,13 @@ function fakeAgent(options = {}) {
   const refresh = async (authPath, provider) => {
     refreshes.push(provider);
   };
-  return { calls, refreshes, deps: { refresh, runAgent } };
+  const makeWrapper =
+    options.makeWrapper ??
+    (() => ({
+      run: () => ({ status: 0 }),
+      probe: () => null,
+    }));
+  return { calls, refreshes, deps: { refresh, runAgent, makeWrapper } };
 }
 
 async function captured(fn) {
@@ -1046,14 +1053,113 @@ test("L4-U5: a new commit of the evaluation set is the breach set_change", async
   );
 });
 
-test("L4-U5: a failed status of the evaluation set is the breach set_change", async (t) => {
+test("L4-U5: a removed git directory of the evaluation set is the breach set_change", async (t) => {
   const run = await runBreach(t, (fixture) => ({
-    work: () => writeFileSync(join(fixture.set, ".git", "index"), "broken"),
+    work: () =>
+      rmSync(join(fixture.set, ".git"), { recursive: true, force: true }),
   }));
   assert.deepEqual(
     run.checks.map((line) => line.breach),
     ["set_change"],
   );
+});
+
+test("L4-U5: a change hidden by an exclude pattern is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      appendFileSync(join(fixture.set, ".git", "info", "exclude"), "new.txt\n");
+      writeFile(join(fixture.set, "new.txt"), "new\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a change hidden by --assume-unchanged is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      git(fixture.set, [
+        "update-index",
+        "--assume-unchanged",
+        "cases/held-out/h1/task.md",
+      ]);
+      writeFile(join(fixture.h1.folder, "task.md"), "changed\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a change hidden by --skip-worktree is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => {
+      git(fixture.set, [
+        "update-index",
+        "--skip-worktree",
+        "cases/held-out/h1/task.md",
+      ]);
+      writeFile(join(fixture.h1.folder, "task.md"), "changed\n");
+    },
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: a mode change of a set file is the breach set_change", async (t) => {
+  const run = await runBreach(t, (fixture) => ({
+    work: () => chmodSync(join(fixture.h1.folder, "task.md"), 0o755),
+  }));
+  assert.deepEqual(
+    run.checks.map((line) => line.breach),
+    ["set_change"],
+  );
+});
+
+test("L4-U5: the OS deny wrapper denies a read of a set file", (t) => {
+  const fixture = makeFixture(t);
+  const setRealPath = realpathSync(fixture.set);
+  const wrapper = osDenyWrapper(setRealPath);
+  if (!wrapper) {
+    t.skip();
+    return;
+  }
+  const setFile = join(setRealPath, ".git", "HEAD");
+  const result = wrapper.runScript(
+    process.execPath,
+    `try{require('fs').readFileSync(${JSON.stringify(setFile)});process.exit(0);}catch{process.exit(1);}`,
+  );
+  assert.notEqual(result.status, 0);
+});
+
+test("L4-U5: the OS deny wrapper allows a read outside the set", (t) => {
+  const fixture = makeFixture(t);
+  const setRealPath = realpathSync(fixture.set);
+  const wrapper = osDenyWrapper(setRealPath);
+  if (!wrapper) {
+    t.skip();
+    return;
+  }
+  const result = wrapper.runScript(
+    process.execPath,
+    `require('fs').readFileSync('/dev/null');`,
+  );
+  assert.equal(result.status, 0);
+});
+
+test("L4-U5: the start refuses when the OS read-deny mechanism is absent", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start(heldOut("e")));
+  assert.equal(plan.error, undefined);
+  const agent = fakeAgent({ makeWrapper: () => null });
+  const output = await captured(() => runPlan(plan, agent.deps));
+  assert.equal(output.value, 1);
+  assert.match(output.stderr, /mechanism is absent/);
 });
 
 test("L4-U5: a change of the ignored config.json is no breach", async (t) => {
