@@ -1,5 +1,5 @@
 import { createHash, randomInt } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   appendFileSync,
   closeSync,
@@ -1080,6 +1080,22 @@ function ancestorsUnderRoots(path, roots) {
   return result;
 }
 
+function spawnToPromise(cmd, args, stderrFd) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, {
+        stdio: ["ignore", "ignore", stderrFd],
+      });
+    } catch {
+      resolve({ status: null });
+      return;
+    }
+    child.once("close", (code) => resolve({ status: code }));
+    child.once("error", () => resolve({ status: null }));
+  });
+}
+
 export function osDenyWrapper(
   setRealPath,
   resultsBaseRealPath,
@@ -1117,10 +1133,10 @@ export function osDenyWrapper(
     }
     return {
       run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
-        return spawnSync(
+        return spawnToPromise(
           "sandbox-exec",
           ["-p", buildPolicy(allowed), nodeExec, bin, ...cmdArgs],
-          { stdio: ["ignore", "ignore", stderrFd] },
+          stderrFd,
         );
       },
       runScript(nodeExec, scriptText) {
@@ -1182,12 +1198,10 @@ export function osDenyWrapper(
     }
     return {
       run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
-        return spawnSync(
+        return spawnToPromise(
           "bwrap",
           [...bwrapArgs(allowed), nodeExec, bin, ...cmdArgs],
-          {
-            stdio: ["ignore", "ignore", stderrFd],
-          },
+          stderrFd,
         );
       },
       runScript(nodeExec, scriptText) {
@@ -1244,13 +1258,13 @@ export function copyPromptArgs(args, tmpDir) {
   return copied;
 }
 
-function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
+async function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
   const fd = openSync(stderrPath, "w", FILE_MODE);
   try {
     const tmpDir = mkdtempSync(join(tmpdir(), "kanthord-eval-"));
     try {
       const copiedArgs = copyPromptArgs(args, tmpDir);
-      const result = wrapper.run(
+      const result = await wrapper.run(
         process.execPath,
         BIN,
         copiedArgs,
@@ -1705,7 +1719,11 @@ async function guardedAgentCall(run, deps, call) {
     inputCount += countCredentialInFile(path, run.credValues);
   if (inputCount > 0) return credentialStop(run, inputCount);
   mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const exit = deps.runAgent(call.args, call.stderrPath, call.allowedPaths);
+  const exit = await deps.runAgent(
+    call.args,
+    call.stderrPath,
+    call.allowedPaths,
+  );
   if (existsSync(call.outputPath)) {
     const content = readFileSync(call.outputPath);
     if (content.length > 0)
