@@ -10,6 +10,7 @@
     "package.json",
     "scripts/affected-tests.mjs",
     "scripts/affected-reporter.mjs",
+    "scripts/progress-reporter.mjs",
     "scripts/test-reporter.mjs",
     "scripts/test-path.mjs",
     "scripts/pi-tools.mjs",

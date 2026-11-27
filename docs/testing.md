@@ -37,6 +37,7 @@ node scripts/suite-pass.mjs run --job <name> [--write] [--full] --concurrency <n
 - With `--write`, the script writes one record for each passed file. It refuses the run with exit 2 when `git status --porcelain --untracked-files=all` prints a line before or after the tests.
 - Without `--write`, a dirty or untracked work tree reads no record. The script runs every argument file and writes no record.
 - `--full` runs every argument file and still writes records.
+- The run writes `start: <file>` and `end: <file> <seconds> s` to stderr for each run file. A file with a start line and no end line still runs.
 
 CI runs the `check` job and the `e2e` job through the script with `--write`. `actions/cache/restore` restores the newest record store of the job after `pnpm install --frozen-lockfile`. `actions/cache/save` saves the store after the tests, also when the tests fail. Each job keeps its own store. Each job uploads the store as the artifact `suite-pass-records-<job>-<attempt>`, also when the tests fail. `<attempt>` is the run attempt number. GitHub keeps the artifact for 7 days.
 

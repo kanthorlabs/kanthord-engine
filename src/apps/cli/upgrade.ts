@@ -151,12 +151,17 @@ function writeConfig(
 interface UpgradeSettings {
   now?: Date;
   resetChanged?: boolean;
+  serverMigrations?: Migrations;
 }
 
 export async function upgrade(
   path: string,
   write: (text: string) => void,
-  { now = new Date(), resetChanged = false }: UpgradeSettings = {},
+  {
+    now = new Date(),
+    resetChanged = false,
+    serverMigrations: overriddenMigrations,
+  }: UpgradeSettings = {},
 ): Promise<void> {
   const row: RowWriter = (name, value) =>
     write(formatRows([[name, value]], [], UPGRADE_ROW_WIDTH));
@@ -164,12 +169,13 @@ export async function upgrade(
   const { parseMapping } = await import("../../kernel/yaml.ts");
   const { upgradeConfig } = await import("../../config/upgrade.ts");
   const {
-    serverMigrations,
+    serverMigrations: importedMigrations,
     trackingDatabaseMigrations,
     DATABASE_FILE,
     TRACKING_DATABASE_FILE,
     verifyMasterKey,
   } = await import("../server/index.ts");
+  const serverMigrations = overriddenMigrations ?? importedMigrations;
   const original = readConfig(path);
   const config = upgradeConfig(original);
   const targets: Target[] = [];

@@ -51,6 +51,7 @@ const DECLARATION_VERSION = 1;
 const REPORT_VERSION_ONE = 1;
 const REPORT_VERSION_TWO = 2;
 const REPORT_VERSION_THREE = 3;
+const REPORT_VERSION_FOUR = 4;
 const FIRST_LINE = 1;
 const DEFAULT_TIME_LIMIT_S = COMMAND_LIMIT_MS / MS_PER_SECOND;
 const MIN_TIME_LIMIT_S = 60;
@@ -141,7 +142,12 @@ const lineRangeSchema = z.strictObject({
 });
 
 const flakyIdSchema = testIdSchema.extend({
-  lines: lineRangeSchema.optional(),
+  lines: z
+    .union([
+      lineRangeSchema,
+      z.array(lineRangeSchema).min(ONE_ENTRY).max(LIST_MAX_ENTRIES),
+    ])
+    .optional(),
   imports: z
     .array(boundedString(STRING_MAX_BYTES))
     .max(LIST_MAX_ENTRIES)
@@ -159,6 +165,7 @@ const affectedReportBase = z.strictObject({
     z.literal(REPORT_VERSION_ONE),
     z.literal(REPORT_VERSION_TWO),
     z.literal(REPORT_VERSION_THREE),
+    z.literal(REPORT_VERSION_FOUR),
   ]),
   selection: z.enum(AffectedSelection),
   reason: boundedString(REASON_MAX_BYTES)
@@ -172,6 +179,7 @@ const affectedReportBase = z.strictObject({
 });
 type ReportFields = z.infer<typeof affectedReportBase>;
 type IssueRaiser = (path: string, message: string) => void;
+type FlakyLines = NonNullable<ReportFields["flaky"][number]["lines"]>;
 
 function checkFloor(report: ReportFields, issue: IssueRaiser): void {
   if (report.floor !== undefined && report.version === REPORT_VERSION_ONE)
@@ -204,13 +212,26 @@ function checkResultLists(report: ReportFields, issue: IssueRaiser): void {
     issue("flaky", "holds an id of failed");
 }
 
+function rangesOf(lines: FlakyLines): readonly LineRange[] {
+  return Array.isArray(lines) ? lines : [lines];
+}
+
 function checkFlaky(report: ReportFields, issue: IssueRaiser): void {
   for (const id of report.flaky) {
     if ((id.lines === undefined) !== (id.imports === undefined))
       issue("flaky", "holds lines and imports together or neither");
-    if (id.lines !== undefined && report.version !== REPORT_VERSION_THREE)
-      issue("flaky", "holds lines and imports only in a version 3 report");
-    if (id.lines !== undefined && id.lines.end < id.lines.start)
+    if (id.lines === undefined) continue;
+    if (
+      report.version !== REPORT_VERSION_THREE &&
+      report.version !== REPORT_VERSION_FOUR
+    )
+      issue("flaky", "holds lines and imports only in a version 3 or 4 report");
+    if (Array.isArray(id.lines) !== (report.version === REPORT_VERSION_FOUR))
+      issue(
+        "flaky",
+        "holds one range of lines in version 3 and a list in version 4",
+      );
+    if (rangesOf(id.lines).some(({ start, end }) => end < start))
       issue("flaky", "holds lines that end before they start");
   }
 }
@@ -362,11 +383,11 @@ function flakyTouched(
 ): boolean {
   if (id.lines === undefined || id.imports === undefined)
     return changed.has(id.file);
-  const { start, end } = id.lines;
+  const ranges = rangesOf(id.lines);
   return (
     id.imports.some((path) => changed.has(path)) ||
-    (lines.get(id.file) ?? []).some(
-      (range) => range.start <= end && range.end >= start,
+    (lines.get(id.file) ?? []).some((range) =>
+      ranges.some(({ start, end }) => range.start <= end && range.end >= start),
     )
   );
 }

@@ -9,7 +9,7 @@ import {
   loadConfig,
 } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { type Migrations, Store } from "../../kernel/store.ts";
+import { type Migration, type Migrations, Store } from "../../kernel/store.ts";
 import {
   requirePiTools,
   stopAfter,
@@ -428,6 +428,10 @@ test("upgrade keeps a missing tracking.db missing", async (t) => {
 
 const GATEWAY_STARTED_MESSAGE = "Gateway Service started";
 const WORKBENCH_SERVICE = "workbench";
+const PROJECT_SERVICE = "project";
+const TABLE_FIELD = "table";
+const REFERENCING_TABLE = "project_reference";
+const FOREIGN_KEY_REFUSED_CODE = "system.database.reset.foreign_key";
 const STORED_CREDENTIAL_COUNT = 1;
 const RESET_FLAG = "--reset-changed";
 const CUSTODY_REFUSED = /system\.database\.reset\.custody_refused/;
@@ -622,6 +626,49 @@ test("upgrade --reset-changed refuses a table that references a dropped table an
   assert.match(refused.stderr, FOREIGN_KEY_REFUSED);
   assert.match(refused.stderr, /unowned_reference/);
   assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
+test("upgrade --reset-changed refuses a migration of an unchanged service that references a table of the changed service", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const referencing: Migration = (database) =>
+    database.exec(
+      `CREATE TABLE ${REFERENCING_TABLE} (invite TEXT REFERENCES workbench_invite(id))`,
+    );
+  const withReference = serverMigrations.map((entry) =>
+    entry.service === PROJECT_SERVICE
+      ? { ...entry, migrations: [...entry.migrations, referencing] }
+      : entry,
+  );
+  const store = createDatabase(paths.database, withReference);
+  store.database.exec(CREDENTIAL_ROW);
+  store.database.exec(PROJECT_ROW);
+  store.close();
+  const before = keptRows(paths.database, /^$/);
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
+  stopAfter(t, () => {
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
+  });
+  const written: string[] = [];
+  await assert.rejects(
+    upgrade(paths.config, (text) => written.push(text), {
+      resetChanged: true,
+      serverMigrations: withExtraText(withReference, WORKBENCH_SERVICE),
+    }),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === FOREIGN_KEY_REFUSED_CODE &&
+      error.fields.some(
+        ([name, value]) => name === TABLE_FIELD && value === REFERENCING_TABLE,
+      ),
+  );
+  assert.deepEqual(written, []);
   assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
     DATABASE_FILE,
   ]);

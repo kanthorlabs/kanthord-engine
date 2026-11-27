@@ -22,6 +22,9 @@ const ENTRY_POINT = fileURLToPath(new URL("./suite-pass.mjs", import.meta.url));
 const AFFECTED_REPORTER = fileURLToPath(
   new URL("./affected-reporter.mjs", import.meta.url),
 );
+const PROGRESS_REPORTER = fileURLToPath(
+  new URL("./progress-reporter.mjs", import.meta.url),
+);
 const TEST_REPORTER = fileURLToPath(
   new URL("./test-reporter.mjs", import.meta.url),
 );
@@ -88,6 +91,10 @@ async function fixture(t, files = {}) {
   await copyFile(
     AFFECTED_REPORTER,
     join(root, "scripts/affected-reporter.mjs"),
+  );
+  await copyFile(
+    PROGRESS_REPORTER,
+    join(root, "scripts/progress-reporter.mjs"),
   );
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   commitAll(root);
@@ -350,4 +357,60 @@ test("the store keeps the 20000 newest records", async (t) => {
     Object.values(kept).filter(({ file }) => TEST_FILES.includes(file)).length,
     TEST_FILES.length,
   );
+});
+
+function progressLines(stderr) {
+  return stderr.split("\n").filter((line) => /^(start|end): /.test(line));
+}
+
+function endLine(file) {
+  return new RegExp(`^end: ${file.replace(".", "\\.")} \\d+(\\.\\d+)? s$`);
+}
+
+test("a run writes a start line and an end line for each test file", async (t) => {
+  const root = await fixture(t);
+  const result = runSuitePass(root);
+  assert.equal(result.status, SUCCESS, result.stderr);
+  const lines = progressLines(result.stderr);
+  assert.equal(lines.length, 4);
+  for (const file of TEST_FILES) {
+    const start = lines.indexOf(`start: ${file}`);
+    const end = lines.findIndex((line) => endLine(file).test(line));
+    assert.ok(start >= 0, result.stderr);
+    assert.ok(end > start, result.stderr);
+  }
+});
+
+test("a failed test file still writes its end line", async (t) => {
+  const root = await fixture(t, {
+    "src/b.test.ts": loggedTest("src/b.test.ts", 'throw new Error("boom");'),
+  });
+  const result = runSuitePass(root);
+  assert.equal(result.status, FAILED);
+  const lines = progressLines(result.stderr);
+  const start = lines.indexOf("start: src/b.test.ts");
+  const end = lines.findIndex((line) => endLine("src/b.test.ts").test(line));
+  assert.ok(start >= 0, result.stderr);
+  assert.ok(end > start, result.stderr);
+});
+
+test("a file skipped through a matching record writes no progress line", async (t) => {
+  const root = await fixture(t, {
+    ".kanthord/suite-pass.json": configuration(["src/b.test.ts"]),
+  });
+  assert.equal(runSuitePass(root, ["--write"]).status, SUCCESS);
+  const second = runSuitePass(root, ["--write"]);
+  assert.equal(second.status, SUCCESS, second.stderr);
+  const lines = progressLines(second.stderr);
+  assert.equal(lines.length, 2);
+  assert.ok(lines.every((line) => line.includes("src/b.test.ts")));
+});
+
+test("stdout holds only the summary lines", async (t) => {
+  const root = await fixture(t);
+  const result = runSuitePass(root);
+  assert.equal(result.status, SUCCESS, result.stderr);
+  assert.doesNotMatch(result.stdout, /^(start|end): /m);
+  assert.match(result.stdout, /^### Suite pass: test$/m);
+  assert.match(result.stdout, /Ran: 2 test files/);
 });
