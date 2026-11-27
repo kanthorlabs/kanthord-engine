@@ -4,7 +4,6 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, suite, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
-import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -65,8 +64,6 @@ import {
   gatewayFixture,
   instanceNames,
 } from "./test-support.ts";
-
-const nestedSandbox = await nestedSandboxSkip();
 
 after(() => bashSandbox.dispose());
 
@@ -481,7 +478,7 @@ async function methodsFixture(t: TestContext) {
 suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
   test(
     "E08 native methods execute, checkpoint, assess and request actions over HTTP",
-    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
+    { timeout: JOURNEY_TIMEOUT_MS },
     async (t) => {
       const {
         gitHub,
@@ -707,7 +704,7 @@ suite("native methods", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test(
     "EF09b.1-EF09b.5 an implement node with two repository bindings runs, reviews and lands over HTTP",
-    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
+    { timeout: JOURNEY_TIMEOUT_MS },
     async (t) => {
       const h = await methodsFixture(t);
       const api = h.bindingSet.bindings.api!.id;

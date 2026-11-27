@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
-import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import {
@@ -56,8 +55,6 @@ import {
   workerAcceptance,
 } from "./worker-acceptance-test-support.ts";
 import { fixture as hostFixture } from "./worker-host-test-support.ts";
-
-const nestedSandbox = await nestedSandboxSkip();
 
 after(() => bashSandbox.dispose());
 
@@ -181,7 +178,7 @@ async function finished(
 
 test(
   "E09.11–16 worker hosts offline execution, object upload and live failure boundaries",
-  { timeout: JOURNEY_TIMEOUT, skip: nestedSandbox },
+  { timeout: JOURNEY_TIMEOUT },
   async (t) => {
     const executionSetup = await fixture(t);
     await t.test(
@@ -1013,7 +1010,7 @@ function racingCoder() {
 
 test(
   "E09.17 two nodes from two workspace roots land on one base, one after a rework, with a linear history",
-  { timeout: RACE_TIMEOUT, skip: nestedSandbox },
+  { timeout: RACE_TIMEOUT },
   async (t) => {
     const gate = landGate();
     const remote = await raceRemote(t, gate);

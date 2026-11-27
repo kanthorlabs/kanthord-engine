@@ -13,12 +13,9 @@ import { createBashSandbox, hostDenyRead } from "./bash-sandbox.ts";
 const execFileAsync = promisify(execFile);
 
 const SANDBOX_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux"];
-const DARWIN: NodeJS.Platform = "darwin";
-const BLOCKED_ON_DARWIN = platform() === DARWIN;
 const SUCCESS = 0;
 const COMMAND_TIMEOUT_MS = 100_000;
 const CASE_TIMEOUT_MS = 120_000;
-const FOLLOW_ON = { todo: "s2 S2: task 02" };
 const SECRET_TEXT = "credential text of the deny list";
 const SCRIPT_VARIABLE = "KANTHORD_SUITES_SCRIPT";
 const AGENT_SUITE = "src/worker/unit/native-agent.test.ts";
@@ -176,12 +173,11 @@ test(
   {
     skip: unavailable,
     timeout: CASE_TIMEOUT_MS,
-    ...(BLOCKED_ON_DARWIN ? FOLLOW_ON : {}),
   },
   async (t) => {
     const h = host(t, LOOPBACK_SCRIPT);
     const command = `node -e "$${SCRIPT_VARIABLE}"`;
-    assertBlocked(t, command, await inSandbox(h, command), BLOCKED_ON_DARWIN);
+    assertBlocked(t, command, await inSandbox(h, command), false);
   },
 );
 
@@ -191,7 +187,7 @@ test(
   async (t) => {
     const h = host(t, undefined, process.cwd());
     const command = `node --test ${AGENT_SUITE}`;
-    assertBlocked(t, command, await inSandbox(h, command), true);
+    assertBlocked(t, command, await inSandbox(h, command), false);
   },
 );
 

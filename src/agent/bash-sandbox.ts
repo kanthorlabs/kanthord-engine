@@ -84,6 +84,7 @@ const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
     ...platformNetworkHosts(),
   ],
   deniedDomains: [],
+  allowLocalBinding: true,
 };
 
 const CREDENTIAL_DIRECTORIES = ["~/.ssh", "~/.aws", "~/.gnupg"];

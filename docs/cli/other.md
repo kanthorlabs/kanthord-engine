@@ -864,7 +864,7 @@ cases run without the sandbox:
 
 A sandbox cannot start inside another sandbox. A verification command that
 starts the sandbox, for example a test that runs the bash wrap, fails inside the
-verification sandbox. On macOS a verification command cannot bind or reach a
+verification sandbox. On macOS a verification command binds and reaches a
 loopback port, as in the Workbench bash. The local git of the worker runs
 outside the sandbox. The wrap denies writes to `config` and `hooks` of each
 `.git` directory in the workspace or at most 3 levels below it, so a

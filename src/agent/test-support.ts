@@ -1,7 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
 import type { TestContext } from "node:test";
-import { promisify } from "node:util";
 import {
   createFauxCore,
   createProvider,
@@ -21,7 +19,6 @@ import type {
 } from "../custody/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/test-support.ts";
-import { bashSandbox } from "./bash-sandbox.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -188,25 +185,4 @@ export async function survivingProcesses(
     await new Promise((resolve) => setTimeout(resolve, GONE_POLL_MS));
   }
   return pids.filter(alive);
-}
-
-const NESTED_SANDBOX_REASON = "a nested sandbox cannot start";
-const PROBE_TIMEOUT_MS = 30_000;
-
-export async function nestedSandboxSkip(): Promise<string | false> {
-  try {
-    const wrapped = await bashSandbox.wrap("true", process.cwd(), {
-      env: process.env,
-      denyRead: [],
-    });
-    await promisify(execFile)("bash", ["-c", wrapped], {
-      timeout: PROBE_TIMEOUT_MS,
-    });
-    return false;
-  } catch {
-    return NESTED_SANDBOX_REASON;
-  } finally {
-    bashSandbox.cleanup();
-    await bashSandbox.dispose();
-  }
 }

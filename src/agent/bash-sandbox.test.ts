@@ -400,10 +400,11 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
       "api.bitbucket.org",
     ],
     deniedDomains: [],
+    allowLocalBinding: true,
   });
 });
 
-test("initialize gets the network allowlist and no Unix socket allowance", async (t) => {
+test("initialize gets the network allowlist, the local binding and no Unix socket allowance", async (t) => {
   const fake = fakeRuntime();
   await createBashSandbox(fake.runtime, "linux").wrap(
     "true",
@@ -415,9 +416,11 @@ test("initialize gets the network allowlist and no Unix socket allowance", async
   }[];
   assert.ok(initial);
   assert.deepEqual(Object.keys(initial.network).sort(), [
+    "allowLocalBinding",
     "allowedDomains",
     "deniedDomains",
   ]);
+  assert.equal(initial.network.allowLocalBinding, true);
   assert.equal("allowAllUnixSockets" in initial.network, false);
   assert.equal("allowUnixSockets" in initial.network, false);
 });
