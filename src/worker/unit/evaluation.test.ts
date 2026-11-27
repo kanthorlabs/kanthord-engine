@@ -102,7 +102,6 @@ const PROPOSAL = {
     name: "Repair",
     requirement: "Change the code",
     criterion: "The test passes",
-    tags: [SSHD_TAG],
     verifications: ["npm test"],
   },
 };
