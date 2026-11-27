@@ -80,6 +80,7 @@ const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
   const [bash] = builtinTools(await loadPi(), "swe@1", {
     cwd: temporary(t),
   }).customTools;
@@ -104,6 +105,7 @@ test("a workbench bash call that times out leaves no process of its tree", async
   assert.match(failure.message, /Command timed out after 20 seconds/);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
+  assert.equal(cleanup.mock.callCount(), ONE_OPERATION);
 });
 
 test("a background child of a Workbench bash call lives after the call", async (t) => {
@@ -138,6 +140,7 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
     "wrap",
     async (command: string) => `echo wrapped; ${command}`,
   );
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
   const [bash] = builtinTools(await loadPi(), "swe@1", {
     cwd: directory,
   }).customTools;
@@ -159,6 +162,7 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
     .map((item) => ("text" in item ? item.text : ""))
     .join("");
   assert.match(text, /^wrapped\nseen=unset\n/);
+  assert.equal(cleanup.mock.callCount(), ONE_OPERATION);
 });
 
 test("(invariant) the workbench bash passes the config file of serve to the wrap in the denyRead list", async (t) => {
@@ -192,6 +196,7 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
   const wrap = t.mock.method(bashSandbox, "wrap", async () => {
     throw new Error("the bash sandbox is not available: probe");
   });
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
   const [bash] = builtinTools(await loadPi(), "swe@1", {
     cwd: directory,
   }).customTools;
@@ -208,6 +213,7 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
   );
   assert.equal(wrap.mock.callCount(), ONE_OPERATION);
   assert.equal(existsSync(marker), false);
+  assert.equal(cleanup.mock.callCount(), NO_OPERATIONS);
 });
 
 test("(security) a workbench bash call that reads tracking.db fails under the denyRead list", async (t) => {

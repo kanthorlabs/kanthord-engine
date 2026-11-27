@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   realpathSync,
   symlinkSync,
@@ -23,6 +24,8 @@ const ONCE = 1;
 const COMMAND = "echo hi";
 const ABSENT_HOME = "/kanthord-absent-home";
 const LONG_TEMPORARY = 90;
+const ARM64 = "arm64";
+const X64 = "x64";
 const SECCOMP_HELPER = join(
   dirname(
     dirname(
@@ -699,6 +702,8 @@ test("(invariant) the allow list keeps the seccomp helper directory of the sandb
   };
   const allowed = await allowReadOf(host, cwd);
   assert.ok(allowed.includes(SECCOMP_HELPER), `${allowed}`);
+  const architecture = process.arch === ARM64 ? ARM64 : X64;
+  assert.ok(existsSync(join(SECCOMP_HELPER, architecture, "apply-seccomp")));
 });
 
 test("(invariant guard) a PATH entry inside a host deny entry leaves that entry in the list", (t) => {

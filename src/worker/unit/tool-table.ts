@@ -129,14 +129,14 @@ export function sessionTools(
           ...sandbox,
           env: childEnv,
         });
-        processes.recordTimeout(toolCallId, {
-          requestedMs:
-            execOptions.timeout === undefined
-              ? null
-              : execOptions.timeout * MILLISECONDS_PER_SECOND,
-          appliedMs: applied * MILLISECONDS_PER_SECOND,
-        });
         try {
+          processes.recordTimeout(toolCallId, {
+            requestedMs:
+              execOptions.timeout === undefined
+                ? null
+                : execOptions.timeout * MILLISECONDS_PER_SECOND,
+            appliedMs: applied * MILLISECONDS_PER_SECOND,
+          });
           return await operations.exec(wrapped, directory, {
             ...execOptions,
             timeout: applied,

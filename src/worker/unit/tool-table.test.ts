@@ -37,6 +37,7 @@ const TOOL_CALL = "call_bash";
 const TEMPORARY_FALLBACK = "/tmp";
 const COMMAND = "echo coder";
 const SINGLE_CALL = 1;
+const NO_CALLS = 0;
 
 class RecordingProcesses extends ToolProcesses {
   timeout: number | undefined;
@@ -67,6 +68,17 @@ class CallRecordingProcesses extends ToolProcesses {
       exec: async (command, cwd, options) => {
         this.calls.push({ command, cwd, env: options.env });
         return { exitCode: 0 };
+      },
+    };
+  }
+}
+
+class RejectingProcesses extends ToolProcesses {
+  override operations(toolCallId: string): BashOperations {
+    assert.ok(toolCallId);
+    return {
+      exec: async () => {
+        throw new Error("the spawn failed");
       },
     };
   }
@@ -364,6 +376,7 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
   const fake = fakeSandboxRuntime();
   const sandbox = createBashSandbox(fake.runtime, "linux");
   t.mock.method(bashSandbox, "wrap", sandbox.wrap);
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
   const processes = new CallRecordingProcesses(pi.getShellConfig());
   const cwd = temporary(t);
   const tmp = hostEnvironment().TMPDIR ?? TEMPORARY_FALLBACK;
@@ -386,6 +399,23 @@ test("the swe@1 bash runs the wrapped command in the workspace with the TMPDIR o
     ...denyRead,
     hostEnvironment().HOME,
   ]);
+  assert.equal(cleanup.mock.callCount(), SINGLE_CALL);
+});
+
+test("a sandboxed exec that rejects cleans up the sandbox once and records its timeout", async (t) => {
+  const pi = await loadPi();
+  t.mock.method(bashSandbox, "wrap", async (command: string) => command);
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
+  const processes = new RejectingProcesses(pi.getShellConfig());
+  const tools = sandboxedTools(pi, {
+    processes,
+    cwd: temporary(t),
+    env: hostEnvironment(),
+    denyRead: [],
+  });
+  await assert.rejects(runBash(tools, COMMAND), /the spawn failed/);
+  assert.equal(cleanup.mock.callCount(), SINGLE_CALL);
+  assert.ok(processes.takeTimeout(TOOL_CALL));
 });
 
 test("the swe@1 bash exports the package store and the package cache under the TMPDIR of the environment in the wrapped command", async (t) => {
@@ -427,6 +457,7 @@ test("(security) a rejected wrap rejects the bash call, spawns no process and re
   t.mock.method(bashSandbox, "wrap", async () => {
     throw new Error("the bash sandbox is not available: bubblewrap is missing");
   });
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
   const processes = new CallRecordingProcesses(pi.getShellConfig());
   const tools = sandboxedTools(pi, {
     processes,
@@ -440,6 +471,7 @@ test("(security) a rejected wrap rejects the bash call, spawns no process and re
   );
   assert.deepEqual(processes.calls, []);
   assert.equal(processes.takeTimeout(TOOL_CALL), undefined);
+  assert.equal(cleanup.mock.callCount(), NO_CALLS);
 });
 
 const TREE_TIMEOUT_SECONDS = 20;
