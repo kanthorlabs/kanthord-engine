@@ -314,8 +314,10 @@ async function captured(fn) {
     stderr: process.stderr.write,
   };
   for (const name of ["stdout", "stderr"]) {
-    process[name].write = (chunk) => {
-      chunks[name] += String(chunk);
+    process[name].write = (chunk, ...rest) => {
+      if (typeof chunk !== "string")
+        return originals[name].call(process[name], chunk, ...rest);
+      chunks[name] += chunk;
       return true;
     };
   }
@@ -2084,6 +2086,7 @@ test("L4-U13: a call that passes its start checks writes iteration.json and its 
     set_commit: git(fixture.set, ["rev-parse", "HEAD"]),
     engine_commit: git(fixture.engineRoot, ["rev-parse", "HEAD"]),
     repeats: 2,
+    jobs: 4,
     gate_share: 0.5,
     parent: null,
     replicate: null,
@@ -4988,4 +4991,181 @@ test("L4-U22: validate with a hanging check.sh fails within the limit", async (t
   const error = await validateCaseFolder(folder, 200);
   assert.ok(Date.now() - start < 5000);
   assert.ok(error !== null);
+});
+
+test("L4-U23: --jobs 0 and --jobs 9 give exit 2", async (t) => {
+  for (const n of ["0", "9"]) {
+    const fixture = makeFixture(t);
+    const plan = await startRun(fixture.start([...heldOut("e"), "--jobs", n]));
+    assert.match(plan.error, /--jobs/);
+    assert.equal(plan.usageError, true);
+  }
+});
+
+test("L4-U23: pool runs at most jobs calls at a time", async (t) => {
+  const fixture = makeDevFixture(t);
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "2"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const agent = fakeAgent({});
+  const runAgent = async (args) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.ok(maxConcurrent <= 2);
+  assert.ok(maxConcurrent >= 2);
+});
+
+test("L4-U23: two repeats of one case never overlap", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start([...heldOut("e"), "--jobs", "4"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let overlap = false;
+  const agent = fakeAgent({});
+  const runAgent = async (args, stderrPath) => {
+    if (concurrent > 0) overlap = true;
+    concurrent++;
+    writeFileSync(stderrPath, "");
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.equal(overlap, false);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.equal(checks.length, 2);
+});
+
+test("L4-U24: a refresh that can write waits until no call is in flight", async (t) => {
+  const fixture = makeDevFixture(t);
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  const authPath = makeAuthFile(
+    fixture.root,
+    JSON.stringify({
+      "openai-compatible": {
+        type: "oauth",
+        access: "access-value",
+        refresh: "refresh-value",
+        expires: Date.now() + 60000,
+      },
+    }),
+  );
+  const plan = await startRun({ ...fixture.start(devArgs("e")), authPath });
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const agent = fakeAgent({});
+  const refresh = async () => {};
+  const runAgent = async (args) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, refresh, runAgent }));
+  assert.equal(maxConcurrent, 1);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.ok(checks.length > 0);
+});
+
+test("L4-U25: the start gate counts the in-flight reserves", async (t) => {
+  const fixture = makeDevFixture(t, { config: { cap_usd: 0.6 } });
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "4"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const agent = fakeAgent({});
+  const runAgent = async (args) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.equal(maxConcurrent, 1);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.ok(checks.length > 0);
+});
+
+test("L4-U27: a breach kills the in-flight calls and starts no new call", async (t) => {
+  const fixture = makeDevFixture(t);
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "2"]));
+  assert.equal(plan.error, undefined);
+
+  let refreshCount = 0;
+  const refresh = async () => {
+    refreshCount++;
+    if (refreshCount === 2) throw new Error("test: refresh failure");
+  };
+  const runAgent = async (args, stderrPath, wrapper, allowedPaths, signal) => {
+    await new Promise((resolve) =>
+      signal.addEventListener("abort", resolve, { once: true }),
+    );
+    return null;
+  };
+  const makeWrapper = () => ({ run: () => ({ status: 0 }), probe: () => null });
+  await captured(() => runPlan(plan, { refresh, runAgent, makeWrapper }));
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.equal(checks.length, 0);
+});
+
+test("L4-U28: report.sh refuses a parent or an A/A pair with another jobs", async (t) => {
+  const pair = await runDevPair(t, [
+    "--parent",
+    "p",
+    "--aspect",
+    "A1",
+    "--hypothesis",
+    "h",
+    "--jobs",
+    "2",
+  ]);
+  pair.setDigest("swe@1", "d2");
+  const report = await pair.report();
+  assert.match(report.error, /jobs/);
+  const fixture = makeFixture(t);
+  await startRun(fixture.start(heldOut("e")));
+  const resumed = await startRun(
+    fixture.start([...heldOut("e"), "--jobs", "2"]),
+  );
+  assert.match(resumed.error, /--jobs/);
 });
