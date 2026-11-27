@@ -109,6 +109,7 @@ const EVAL_ID_RE = /^[a-zA-Z0-9_-]+$/;
 const HEX_COMMIT_RE = /^[0-9a-f]{40}$/;
 const EXIT_OK = 0;
 const EXIT_STOP = 1;
+const EXIT_USAGE = 2;
 const EXIT_NO_VERDICT = 3;
 const EXIT_CAP = 4;
 const GRADED_RUN_EXITS = [0, 4, 5];
@@ -123,6 +124,9 @@ const VERDICT_FAIL = "fail";
 const VERDICT_NONE = "no verdict";
 const STOP_BREACH = "breach";
 const STOP_CAP = "cap";
+const MIN_JOBS = 1;
+const MAX_JOBS = 8;
+const DEFAULT_JOBS = 4;
 const NONE_TEXT = "none";
 const WORKSPACE_NAME = "w";
 const GRADING_NAME = "g";
@@ -1080,21 +1084,92 @@ function ancestorsUnderRoots(path, roots) {
   return result;
 }
 
-function spawnToPromise(cmd, args, stderrFd) {
+function killGroup(pid) {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (e) {
+    if (!EMPTY_GROUP_CODES.includes(e.code)) throw e;
+  }
+}
+
+export function spawnToPromise(cmd, args, stderrFd, signal) {
   return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve({ status: null });
+      return;
+    }
     let child;
     try {
       child = spawn(cmd, args, {
         stdio: ["ignore", "ignore", stderrFd],
+        detached: true,
       });
     } catch {
       resolve({ status: null });
       return;
     }
-    child.once("close", (code) => resolve({ status: code }));
+    const onAbort = () => {
+      if (child.pid !== undefined) killGroup(child.pid);
+    };
+    signal?.addEventListener("abort", onAbort);
+    child.once("close", (code) => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve({ status: code });
+    });
     child.once("error", () => resolve({ status: null }));
   });
 }
+
+function createAuthGate() {
+  let readers = 0;
+  let writing = false;
+  let writerWaiting = 0;
+  const readersDone = [];
+  const writerDone = [];
+  const readersBlocked = [];
+  return {
+    async enterCall() {
+      while (writing || writerWaiting > 0) {
+        await new Promise((resolve) => readersBlocked.push(resolve));
+      }
+      readers++;
+    },
+    leaveCall() {
+      readers--;
+      if (readers === 0) {
+        for (const resolve of readersDone.splice(0)) resolve();
+      }
+    },
+    async exclusive(fn) {
+      writerWaiting++;
+      while (writing) {
+        await new Promise((resolve) => writerDone.push(resolve));
+      }
+      writerWaiting--;
+      writing = true;
+      while (readers > 0) {
+        await new Promise((resolve) => readersDone.push(resolve));
+      }
+      try {
+        await fn();
+      } finally {
+        writing = false;
+        const nextWriters = writerDone.splice(0);
+        if (nextWriters.length > 0) {
+          for (const resolve of nextWriters) resolve();
+        } else {
+          for (const resolve of readersBlocked.splice(0)) resolve();
+        }
+      }
+    },
+  };
+}
+
+const NO_OP_GATE = {
+  enterCall: () => Promise.resolve(),
+  leaveCall: () => {},
+  exclusive: (fn) => fn(),
+};
 
 export function osDenyWrapper(
   setRealPath,
@@ -1132,11 +1207,12 @@ export function osDenyWrapper(
       return `(version 1)(allow default)${denyRules}${metaRules}${allowRules}`;
     }
     return {
-      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed, signal) {
         return spawnToPromise(
           "sandbox-exec",
           ["-p", buildPolicy(allowed), nodeExec, bin, ...cmdArgs],
           stderrFd,
+          signal,
         );
       },
       runScript(nodeExec, scriptText) {
@@ -1197,11 +1273,12 @@ export function osDenyWrapper(
       ];
     }
     return {
-      run(nodeExec, bin, cmdArgs, stderrFd, allowed) {
+      run(nodeExec, bin, cmdArgs, stderrFd, allowed, signal) {
         return spawnToPromise(
           "bwrap",
           [...bwrapArgs(allowed), nodeExec, bin, ...cmdArgs],
           stderrFd,
+          signal,
         );
       },
       runScript(nodeExec, scriptText) {
@@ -1258,7 +1335,13 @@ export function copyPromptArgs(args, tmpDir) {
   return copied;
 }
 
-async function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
+async function runAgentProcess(
+  args,
+  stderrPath,
+  wrapper,
+  allowedPaths,
+  signal,
+) {
   const fd = openSync(stderrPath, "w", FILE_MODE);
   try {
     const tmpDir = mkdtempSync(join(tmpdir(), "kanthord-eval-"));
@@ -1270,6 +1353,7 @@ async function runAgentProcess(args, stderrPath, wrapper, allowedPaths) {
         copiedArgs,
         fd,
         allowedPaths,
+        signal,
       );
       return result.status ?? EXIT_STOP;
     } finally {
@@ -1707,32 +1791,43 @@ async function refreshForCall(run, deps, call) {
 }
 
 async function guardedAgentCall(run, deps, call) {
+  if (deps.signal?.aborted) return { stop: "killed" };
   if (!(await refreshForCall(run, deps, call)))
     return { stop: "the credential refresh failed" };
-  const refreshed = captureAuthState(run.authPath);
-  if (refreshedAuthBreach(refreshed, run.authStart))
-    return breachStop(run, BREACH_AUTH_FILE);
-  for (const value of extractCredentialValues(run.authPath))
-    run.credValues.add(value);
-  let inputCount = 0;
-  for (const path of call.inputPaths)
-    inputCount += countCredentialInFile(path, run.credValues);
-  if (inputCount > 0) return credentialStop(run, inputCount);
-  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const exit = await deps.runAgent(
-    call.args,
-    call.stderrPath,
-    call.allowedPaths,
-  );
-  if (existsSync(call.outputPath)) {
-    const content = readFileSync(call.outputPath);
-    if (content.length > 0)
-      appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+  const gate = deps.gate ?? NO_OP_GATE;
+  await gate.enterCall();
+  let exit;
+  try {
+    const refreshed = captureAuthState(run.authPath);
+    if (refreshedAuthBreach(refreshed, run.authStart))
+      return breachStop(run, BREACH_AUTH_FILE);
+    for (const value of extractCredentialValues(run.authPath))
+      run.credValues.add(value);
+    let inputCount = 0;
+    for (const path of call.inputPaths)
+      inputCount += countCredentialInFile(path, run.credValues);
+    if (inputCount > 0) return credentialStop(run, inputCount);
+    if (deps.signal?.aborted) return { stop: "killed" };
+    mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
+    exit = await deps.runAgent(
+      call.args,
+      call.stderrPath,
+      call.allowedPaths,
+      deps.signal,
+    );
+    if (deps.signal?.aborted) return { stop: "killed" };
+    if (existsSync(call.outputPath)) {
+      const content = readFileSync(call.outputPath);
+      if (content.length > 0)
+        appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+    }
+    const count = countCredentialInFile(call.sessionPath, run.credValues);
+    if (count > 0) return credentialStop(run, count);
+    if (checkAuthFileBreach(run.authPath, refreshed))
+      return breachStop(run, BREACH_AUTH_FILE);
+  } finally {
+    gate.leaveCall();
   }
-  const count = countCredentialInFile(call.sessionPath, run.credValues);
-  if (count > 0) return credentialStop(run, count);
-  if (checkAuthFileBreach(run.authPath, refreshed))
-    return breachStop(run, BREACH_AUTH_FILE);
   if (call.protectedPathSearch) {
     const pathStrings = protectedPathStrings(
       run.evalSetDir,
@@ -1838,14 +1933,15 @@ function writeJudgeWorkspace(run, judgeWorkspace) {
   return readdirSync(judgeWorkspace).map((name) => join(judgeWorkspace, name));
 }
 
-function startGateOpen(run, usd) {
+function startGateOpen(run, usd, inFlightReserveSum = 0) {
   const sum = baseCostSum(run.resultsPath, run.ratio.r, run.judgeRatio.r);
   const reserve = parseUsdCents(usd) / CENTS_PER_DOLLAR;
-  return checkStartGate(sum, reserve, run.config.cap_usd);
+  return checkStartGate(sum + inFlightReserveSum, reserve, run.config.cap_usd);
 }
 
 async function runDiagnosis(run, gradingRoot, deps) {
-  if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
+  if (!startGateOpen(run, run.config.judge_usd, deps.inFlightReserveSum))
+    return { stop: STOP_CAP };
   const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
   const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
   let exit75Count = 0;
@@ -1875,7 +1971,8 @@ async function runDiagnosis(run, gradingRoot, deps) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
-    if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
+    if (!startGateOpen(run, run.config.judge_usd, deps.inFlightReserveSum))
+      return { stop: STOP_CAP };
   }
   const resultLine = readJsonLines(run.resultsPath).findLast(
     (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
@@ -1915,7 +2012,8 @@ async function evaluateInRoots(run, deps, roots) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
-    if (!startGateOpen(run, run.caseJson.usd)) return { stop: STOP_CAP };
+    if (!startGateOpen(run, run.caseJson.usd, deps.inFlightReserveSum))
+      return { stop: STOP_CAP };
     const resultsDir = dirname(run.checksPath);
     const nextAttempt = nextRunAttempt(resultsDir, run.caseId, run.repeat);
     const nextRunDir = join(
@@ -2004,6 +2102,7 @@ function parseRunOptions(argv) {
         evaluation: { type: "string" },
         stage: { type: "string" },
         set: { type: "string" },
+        jobs: { type: "string" },
         parent: { type: "string" },
         aspect: { type: "string" },
         hypothesis: { type: "string" },
@@ -2020,6 +2119,16 @@ function parseRunOptions(argv) {
     return { error: "--stage is 1 or 2" };
   if (!SET_VALUES.includes(values.set))
     return { error: "--set is dev or held-out" };
+  let jobs = DEFAULT_JOBS;
+  if (values.jobs !== undefined) {
+    const parsed = Number(values.jobs);
+    if (!Number.isInteger(parsed) || parsed < MIN_JOBS || parsed > MAX_JOBS)
+      return {
+        error: `--jobs is an integer from ${MIN_JOBS} to ${MAX_JOBS}`,
+        usageError: true,
+      };
+    jobs = parsed;
+  }
   const hasParent = values.parent !== undefined;
   const hasReplicate = values.replicate !== undefined;
   if (hasParent && values.set !== SET_DEV)
@@ -2057,6 +2166,7 @@ function parseRunOptions(argv) {
     evalId: values.evaluation,
     stage: Number(values.stage),
     set: values.set,
+    jobs,
     parent: values.parent ?? null,
     aspect: values.aspect ?? null,
     hypothesis: values.hypothesis ?? null,
@@ -2082,6 +2192,8 @@ function iterationError(plan, existing) {
   if (existing.set !== plan.set) return "--set differs from iteration";
   if (existing.set_commit !== plan.setCommit)
     return "set_commit differs from the HEAD of the evaluation set";
+  if ((existing.jobs ?? 1) !== plan.jobs)
+    return "--jobs differs from iteration";
   if ((existing.parent ?? null) !== (plan.parent ?? null))
     return "--parent differs from iteration";
   if ((existing.replicate ?? null) !== (plan.replicate ?? null))
@@ -2100,6 +2212,7 @@ function newIteration(plan) {
     set_commit: plan.setCommit,
     engine_commit: plan.engineCommit,
     repeats: plan.config.repeats,
+    jobs: plan.jobs,
     gate_share: plan.set === SET_HELD_OUT ? plan.config.gate_share : null,
     parent: plan.parent ?? null,
     replicate: plan.replicate ?? null,
@@ -2261,14 +2374,126 @@ function pendingRuns(plan) {
   return runs;
 }
 
+function refreshCanWrite(authPath, provider, validityMs) {
+  let raw;
+  try {
+    raw = JSON.parse(readFileSync(authPath, "utf8"));
+  } catch {
+    return true;
+  }
+  const entry = raw?.[provider];
+  if (!entry || entry.type !== OAUTH_TYPE) return false;
+  const expires = entry.expires;
+  if (typeof expires !== "number") return true;
+  const minValidity = Math.max(5 * 60000, validityMs);
+  return Date.now() + minValidity >= expires;
+}
+
 async function runPending(plan, deps) {
   plan.credValues = new Set(extractCredentialValues(plan.authPath));
-  for (const run of pendingRuns(plan)) {
-    if (!run.diagnosisOnly && !startGateOpen(run, run.caseJson.usd))
-      return { stop: STOP_CAP };
-    const result = await evaluateRun(run, deps);
-    if (result.stop) return result;
+  const jobs = plan.iteration.jobs ?? 1;
+  const controller = deps._controller;
+  const signal = controller?.signal;
+  const origRefresh = deps.refresh;
+
+  let inFlight = 0;
+  let inFlightReserveSum = 0;
+  const inFlightCases = new Set();
+  const gate = createAuthGate();
+
+  let firstStop = null;
+  let taskError = null;
+  let resolvePool;
+  const poolDone = new Promise((r) => {
+    resolvePool = r;
+  });
+
+  const pending = pendingRuns(plan);
+  let activeTasks = 0;
+
+  function tryResolvePool() {
+    if (activeTasks === 0) resolvePool();
   }
+
+  function tryStartNext() {
+    if (firstStop || signal?.aborted) return;
+    for (let i = 0; i < pending.length && inFlight < jobs; i++) {
+      const run = pending[i];
+      if (!run.diagnosisOnly && inFlightCases.has(run.caseId)) continue;
+      const usd = run.diagnosisOnly ? run.config.judge_usd : run.caseJson.usd;
+      if (!startGateOpen(run, usd, inFlightReserveSum)) break;
+      pending.splice(i, 1);
+      i--;
+      runTask(run);
+    }
+  }
+
+  const poolDeps = {
+    ...deps,
+    signal,
+    gate,
+    get inFlightReserveSum() {
+      return inFlightReserveSum;
+    },
+    refresh: async (authPath, provider, validityMs) => {
+      if (refreshCanWrite(authPath, provider, validityMs)) {
+        await gate.exclusive(async () => {
+          if (refreshCanWrite(authPath, provider, validityMs)) {
+            await origRefresh(authPath, provider, validityMs);
+          }
+        });
+      } else {
+        await origRefresh(authPath, provider, validityMs);
+      }
+    },
+  };
+
+  async function runTask(run) {
+    activeTasks++;
+    try {
+      const reserve = run.diagnosisOnly
+        ? parseUsdCents(run.config.judge_usd) / CENTS_PER_DOLLAR
+        : parseUsdCents(run.caseJson.usd) / CENTS_PER_DOLLAR;
+      inFlight++;
+      inFlightReserveSum += reserve;
+      if (!run.diagnosisOnly) inFlightCases.add(run.caseId);
+      const taskDeps = {
+        ...poolDeps,
+        get inFlightReserveSum() {
+          return poolDeps.inFlightReserveSum - reserve;
+        },
+      };
+      try {
+        const result = await evaluateRun(run, taskDeps);
+        if (result.stop && !firstStop) {
+          firstStop = result;
+          controller?.abort();
+        }
+      } catch (err) {
+        if (!taskError) {
+          taskError = err;
+          firstStop = firstStop ?? { stop: "error" };
+          controller?.abort();
+        }
+      } finally {
+        inFlight--;
+        inFlightReserveSum -= reserve;
+        if (!run.diagnosisOnly) inFlightCases.delete(run.caseId);
+      }
+    } finally {
+      activeTasks--;
+      tryStartNext();
+      tryResolvePool();
+    }
+  }
+
+  tryStartNext();
+  if (activeTasks === 0) resolvePool();
+  await poolDone;
+
+  if (taskError) throw taskError;
+  if (firstStop) return firstStop;
+  if (pending.length > 0) return { stop: STOP_CAP };
   return { stop: null };
 }
 
@@ -2304,9 +2529,14 @@ export async function runPlan(plan, deps) {
     process.stderr.write(`evaluation: stop: ${probeError}\n`);
     return EXIT_STOP;
   }
-  const runAgent = (args, stderrPath, allowedPaths) =>
-    deps.runAgent(args, stderrPath, wrapper, allowedPaths);
-  const result = await runPending(plan, { ...deps, runAgent });
+  const controller = new AbortController();
+  const runAgent = (args, stderrPath, allowedPaths, signal) =>
+    deps.runAgent(args, stderrPath, wrapper, allowedPaths, signal);
+  const result = await runPending(plan, {
+    ...deps,
+    runAgent,
+    _controller: controller,
+  });
   writeReport(plan);
   if (result.stop === null) return EXIT_OK;
   const reason = result.breach ? `breach ${result.breach}` : result.stop;
@@ -2757,6 +2987,10 @@ function pairError(pair) {
   const { iteration, parentIteration, results, parentResults } = pair;
   const comparability = comparabilityError(pair);
   if (comparability) return `comparability: ${comparability}`;
+  const parentJobs = parentIteration.jobs ?? 1;
+  const thisJobs = iteration.jobs ?? 1;
+  if (parentJobs !== thisJobs)
+    return `jobs: parent has ${parentJobs}, this evaluation has ${thisJobs}`;
   const digest = reDigestError(results, parentResults);
   if (digest) return `re@1: ${digest}`;
   if (iteration.replicate) return null;
@@ -2874,7 +3108,13 @@ async function runCommand(argv) {
     authPath: join(userInfo().homedir, ".config", "kanthord", "auth.json"),
     readPrices: readModelPrices,
   });
-  if (plan.error) return refuse(plan.error);
+  if (plan.error) {
+    if (plan.usageError) {
+      process.stderr.write(`evaluation: ${plan.error}\n`);
+      return EXIT_USAGE;
+    }
+    return refuse(plan.error);
+  }
   return runPlan(plan, { refresh: refreshAuth, runAgent: runAgentProcess });
 }
 

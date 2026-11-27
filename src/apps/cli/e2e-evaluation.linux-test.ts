@@ -458,7 +458,16 @@ test(
 );
 
 const AC5_EVAL = "e5";
-const AC5_ARGS = ["--evaluation", AC5_EVAL, "--stage", "1", "--set", SET_DEV];
+const AC5_ARGS = [
+  "--evaluation",
+  AC5_EVAL,
+  "--stage",
+  "1",
+  "--set",
+  SET_DEV,
+  "--jobs",
+  "1",
+];
 const AC5_BREACH_LINES = 1;
 const AC5_NO_RE_REQUESTS = 0;
 const AC5_PROTECTED_PATH = "protected_path";
@@ -730,6 +739,8 @@ const AC6_HELD_OUT_ARGS = [
   "1",
   "--set",
   "held-out",
+  "--jobs",
+  "1",
 ];
 const AC6_REPORT_ARGS = ["--evaluation", "e6"];
 const AC6_RETRY_COUNT = 3;
@@ -894,6 +905,8 @@ test(
       "1",
       "--set",
       "held-out",
+      "--jobs",
+      "1",
     ];
 
     await writeFileAsTestUser(
@@ -945,6 +958,8 @@ test(
       "1",
       "--set",
       "held-out",
+      "--jobs",
+      "1",
     ];
 
     await writeFileAsTestUser(

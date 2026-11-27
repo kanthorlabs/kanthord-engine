@@ -74,6 +74,7 @@ import {
   runAgentArgsJudge,
   runPlan,
   scaleUsdCents,
+  spawnToPromise,
   startRun,
   validateCase,
   validateCaseFolder,
@@ -314,8 +315,10 @@ async function captured(fn) {
     stderr: process.stderr.write,
   };
   for (const name of ["stdout", "stderr"]) {
-    process[name].write = (chunk) => {
-      chunks[name] += String(chunk);
+    process[name].write = (chunk, ...rest) => {
+      if (typeof chunk !== "string")
+        return originals[name].call(process[name], chunk, ...rest);
+      chunks[name] += chunk;
       return true;
     };
   }
@@ -2084,6 +2087,7 @@ test("L4-U13: a call that passes its start checks writes iteration.json and its 
     set_commit: git(fixture.set, ["rev-parse", "HEAD"]),
     engine_commit: git(fixture.engineRoot, ["rev-parse", "HEAD"]),
     repeats: 2,
+    jobs: 4,
     gate_share: 0.5,
     parent: null,
     replicate: null,
@@ -4988,4 +4992,274 @@ test("L4-U22: validate with a hanging check.sh fails within the limit", async (t
   const error = await validateCaseFolder(folder, 200);
   assert.ok(Date.now() - start < 5000);
   assert.ok(error !== null);
+});
+
+test("L4-U23: --jobs 0 and --jobs 9 give exit 2", async (t) => {
+  for (const n of ["0", "9"]) {
+    const fixture = makeFixture(t);
+    const plan = await startRun(fixture.start([...heldOut("e"), "--jobs", n]));
+    assert.match(plan.error, /--jobs/);
+    assert.equal(plan.usageError, true);
+  }
+});
+
+test("L4-U23: pool runs at most jobs calls at a time", async (t) => {
+  const fixture = makeDevFixture(t);
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  makeCase(join(fixture.set, "cases", "dev"), "d3");
+  rmSync(join(fixture.set, "cases", "dev", "d3-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "2"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const agent = fakeAgent({});
+  const runAgent = async (args) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.ok(maxConcurrent <= 2);
+  assert.ok(maxConcurrent >= 2);
+});
+
+test("L4-U23: two repeats of one case never overlap", async (t) => {
+  const fixture = makeFixture(t);
+  const plan = await startRun(fixture.start([...heldOut("e"), "--jobs", "4"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let overlap = false;
+  const agent = fakeAgent({});
+  const runAgent = async (args, stderrPath) => {
+    if (concurrent > 0) overlap = true;
+    concurrent++;
+    writeFileSync(stderrPath, "");
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.equal(overlap, false);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.equal(checks.length, 2);
+});
+
+test(
+  "L4-U24: a refresh that can write waits until no call is in flight",
+  async (t) => {
+    const fixture = makeDevFixture(t);
+    makeCase(join(fixture.set, "cases", "dev"), "d2");
+    rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+    git(fixture.set, ["add", "."]);
+    git(fixture.set, ["commit", "-q", "-m", "add d2"]);
+    const authPath = makeAuthFile(
+      fixture.root,
+      JSON.stringify({
+        "openai-compatible": {
+          type: "oauth",
+          access: "access-value",
+          refresh: "refresh-value",
+          expires: Date.now() + 60000,
+        },
+      }),
+    );
+    const plan = await startRun({
+      ...fixture.start([...devArgs("e"), "--jobs", "2"]),
+      authPath,
+    });
+    assert.equal(plan.error, undefined);
+
+    let concurrent = 0;
+    let overlapDuringWrite = false;
+    const refresh = async () => {
+      if (concurrent > 0) overlapDuringWrite = true;
+    };
+    const makeWrapper = () => ({
+      run: () => ({ status: 0 }),
+      probe: () => null,
+    });
+    const runAgent = async (args, stderrPath) => {
+      concurrent++;
+      writeFileSync(stderrPath, "");
+      const isSwe = args[2] === "swe@1";
+      writeFileSync(option(args, "--session"), "{}\n");
+      appendFileSync(
+        option(args, "--output"),
+        `${JSON.stringify(isSwe ? resultLine(args, "completed") : judgeLine(args, {}))}\n`,
+      );
+      await new Promise((r) => setImmediate(r));
+      concurrent--;
+      return 0;
+    };
+    await captured(() => runPlan(plan, { refresh, runAgent, makeWrapper }));
+    assert.equal(overlapDuringWrite, false);
+    const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+    assert.ok(checks.length >= 2);
+  },
+  { timeout: 5000 },
+);
+
+test("L4-U26: an unexpected throw in a task makes runPlan reject", async (t) => {
+  const fixture = makeDevFixture(t);
+  const plan = await startRun(fixture.start(devArgs("e")));
+  assert.equal(plan.error, undefined);
+  const err = new Error("test: unexpected task error");
+  const runAgent = async () => {
+    throw err;
+  };
+  const makeWrapper = () => ({ run: () => ({ status: 0 }), probe: () => null });
+  await assert.rejects(
+    () =>
+      captured(() =>
+        runPlan(plan, { refresh: async () => {}, runAgent, makeWrapper }),
+      ),
+    (thrown) => thrown === err,
+  );
+});
+
+test("L4-U25: the start gate counts the in-flight reserves", async (t) => {
+  const fixture = makeDevFixture(t, { config: { cap_usd: 0.6 } });
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "4"]));
+  assert.equal(plan.error, undefined);
+
+  let concurrent = 0;
+  let maxConcurrent = 0;
+  const agent = fakeAgent({});
+  const runAgent = async (args) => {
+    concurrent++;
+    maxConcurrent = Math.max(maxConcurrent, concurrent);
+    writeFileSync(option(args, "--session"), "{}\n");
+    appendFileSync(
+      option(args, "--output"),
+      `${JSON.stringify(resultLine(args, "completed"))}\n`,
+    );
+    await new Promise((r) => setImmediate(r));
+    concurrent--;
+    return 0;
+  };
+  await captured(() => runPlan(plan, { ...agent.deps, runAgent }));
+  assert.equal(maxConcurrent, 1);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.ok(checks.length > 0);
+});
+
+test("L4-U27: a breach kills the in-flight calls and starts no new call", async (t) => {
+  const fixture = makeDevFixture(t);
+  makeCase(join(fixture.set, "cases", "dev"), "d2");
+  rmSync(join(fixture.set, "cases", "dev", "d2-repo"), { recursive: true });
+  makeCase(join(fixture.set, "cases", "dev"), "d3");
+  rmSync(join(fixture.set, "cases", "dev", "d3-repo"), { recursive: true });
+  const plan = await startRun(fixture.start([...devArgs("e"), "--jobs", "2"]));
+  assert.equal(plan.error, undefined);
+
+  let refreshCount = 0;
+  let callCount = 0;
+  const refresh = async () => {
+    refreshCount++;
+    if (refreshCount === 2) throw new Error("test: refresh failure");
+  };
+  const runAgent = async (args, stderrPath, wrapper, allowedPaths, signal) => {
+    callCount++;
+    await new Promise((resolve) =>
+      signal.addEventListener("abort", resolve, { once: true }),
+    );
+    return null;
+  };
+  const makeWrapper = () => ({ run: () => ({ status: 0 }), probe: () => null });
+  await captured(() => runPlan(plan, { refresh, runAgent, makeWrapper }));
+  assert.ok(callCount < 3);
+  const checks = jsonLines(join(fixture.runs, "e", "checks.jsonl"));
+  assert.equal(checks.length, 0);
+});
+
+test("L4-U28: report.sh refuses a parent or an A/A pair with another jobs", async (t) => {
+  const pair = await runDevPair(t, [
+    "--parent",
+    "p",
+    "--aspect",
+    "A1",
+    "--hypothesis",
+    "h",
+    "--jobs",
+    "2",
+  ]);
+  pair.setDigest("swe@1", "d2");
+  const report = await pair.report();
+  assert.match(report.error, /jobs/);
+  const fixture = makeFixture(t);
+  await startRun(fixture.start(heldOut("e")));
+  const resumed = await startRun(
+    fixture.start([...heldOut("e"), "--jobs", "2"]),
+  );
+  assert.match(resumed.error, /--jobs/);
+  const fixture2 = makeFixture(t);
+  await startRun(fixture2.start(heldOut("e")));
+  const iterPath = join(fixture2.runs, "e", "iteration.json");
+  const iter = JSON.parse(readFileSync(iterPath, "utf8"));
+  delete iter.jobs;
+  writeFileSync(iterPath, `${JSON.stringify(iter)}\n`);
+  const refusedFour = await startRun(
+    fixture2.start([...heldOut("e"), "--jobs", "4"]),
+  );
+  assert.match(refusedFour.error, /jobs/);
+  const resumedOne = await startRun(
+    fixture2.start([...heldOut("e"), "--jobs", "1"]),
+  );
+  assert.equal(resumedOne.error, undefined);
+});
+
+test("L4-U29: spawnToPromise kills the child group on abort", async (t) => {
+  const root = tempDir(t);
+  const stderrPath = join(root, "stderr.txt");
+  const fd = openSync(stderrPath, "w", 0o600);
+  const controller = new AbortController();
+  const p = spawnToPromise(
+    "sh",
+    ["-c", "echo $$ >&2; sleep 300 & echo $! >&2; wait"],
+    fd,
+    controller.signal,
+  );
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    const lines = readFileSync(stderrPath, "utf8").trim().split("\n");
+    if (lines.length >= 2 && Number(lines[1]) > 0) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  closeSync(fd);
+  const lines = readFileSync(stderrPath, "utf8").trim().split("\n");
+  const shellPid = Number(lines[0]);
+  const sleepPid = Number(lines[1]);
+  assert.ok(shellPid > 0);
+  assert.ok(sleepPid > 0);
+  controller.abort();
+  await p;
+  for (const pid of [shellPid, sleepPid]) {
+    const deadline2 = Date.now() + 2000;
+    while (Date.now() < deadline2) {
+      try {
+        process.kill(pid, 0);
+      } catch (e) {
+        if (e.code === "ESRCH") break;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  }
 });
