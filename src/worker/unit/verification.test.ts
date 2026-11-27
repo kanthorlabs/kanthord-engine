@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { suite, test } from "node:test";
+import { suite, test, type TestContext } from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { join } from "node:path";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { background, CancellationContext } from "../../kernel/context.ts";
 import type { ProcessRow, ProcessSystem } from "../../kernel/process-group.ts";
 import {
@@ -19,10 +20,12 @@ import {
   infrastructureStop,
   runVerifications,
   runVerificationsWithOutput,
+  SSHD_TAG,
   VERIFICATION_INFRASTRUCTURE_FAILED,
   VerificationClass,
   type VerificationInput,
   verificationPassed,
+  verificationSandbox,
 } from "./verification.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { VerificationContext } from "./method-telemetry.ts";
@@ -47,6 +50,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
     };
     const failed = await runVerifications(input);
     assert.deepEqual(
@@ -130,6 +134,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
         deadline: Date.now() + (timedOut ? 3000 : 10000),
         context,
         env: hostEnvironment(),
+        sandbox: null,
       });
       try {
         await observe(
@@ -173,6 +178,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: { ...hostEnvironment(), ANTHROPIC_API_KEY: "secret" },
+      sandbox: null,
     });
     assert.equal(verificationPassed(result, commands), true);
     assert.equal(result.results.length, commands.length);
@@ -190,6 +196,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: { ...hostEnvironment(), SHARED_VARIABLE: "original" },
+      sandbox: null,
       variables: { EXTRA_VARIABLE: "extra", SHARED_VARIABLE: "replaced" },
     });
     assert.equal(verificationPassed(result, commands), true);
@@ -208,6 +215,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
     });
     assert.deepEqual(
       run.verification.results.map(({ exit_code: exitCode }) => exitCode),
@@ -229,6 +237,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 60000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       commandLimitMs: TREE_LIMIT_MS,
     });
     const spawned = spawnedPids(t, [{ type: "text", text: run.outputs[0] }]);
@@ -260,6 +269,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       reruns: 2,
     };
     const run = await runVerificationsWithOutput(input);
@@ -286,6 +296,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       reruns: 2,
     });
     assert.equal(run.outcome, VerificationClass.CodeFailure);
@@ -317,6 +328,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       ...(copyRepeated === undefined ? {} : { copyRepeated }),
     };
     return {
@@ -368,6 +380,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       reruns: 2,
     };
     return { input, runs };
@@ -775,6 +788,7 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
     });
     const spawned = spawnedPids(t, [{ type: "text", text: run.outputs[0] }]);
     assert.equal(run.outcome, VerificationClass.Pass);
@@ -800,10 +814,145 @@ suite("verification commands", { concurrency: SUITE_CONCURRENCY }, () => {
       deadline: Date.now() + 10000,
       context: background,
       env: hostEnvironment(),
+      sandbox: null,
       processes: processes.system,
     });
     assert.equal(run.outcome, VerificationClass.Pass);
     assert.ok(processes.reads() > NO_READS);
     assert.deepEqual(processes.signals, []);
+  });
+
+  const ONE_WRAP = 1;
+  const NO_WRAPS = 0;
+  const RAN_COMMAND = "echo ran";
+  const EXTRA_VALUE = "extra";
+  const REPLACED_VALUE = "replaced";
+  const SCOPE = { denyRead: ["/denied/credentials"], root: "/instance/root" };
+
+  function wrapRecorded(
+    t: TestContext,
+    wrapped = (command: string) => command,
+  ) {
+    return t.mock.method(
+      bashSandbox,
+      "wrap",
+      async (...call: Parameters<typeof bashSandbox.wrap>) => wrapped(call[0]),
+    );
+  }
+
+  test("a verification command with a sandbox scope runs the wrapped command with the cwd, the deny list and the root", async (t) => {
+    const directory = temporary(t);
+    const wrap = wrapRecorded(t, (command) => `echo wrapped; ${command}`);
+    const run = await runVerificationsWithOutput({
+      directory,
+      commands: [RAN_COMMAND],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      sandbox: SCOPE,
+    });
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.deepEqual(run.outputs, ["wrapped\nran\n"]);
+    assert.equal(wrap.mock.callCount(), ONE_WRAP);
+    const [command, cwd, host] = wrap.mock.calls[0]!.arguments;
+    assert.equal(command, RAN_COMMAND);
+    assert.equal(cwd, directory);
+    assert.deepEqual(
+      { denyRead: host.denyRead, root: host.root },
+      { denyRead: SCOPE.denyRead, root: SCOPE.root },
+    );
+  });
+
+  test("a rejected wrap starts no process and answers infrastructure with no exit code", async (t) => {
+    const directory = temporary(t);
+    t.mock.method(bashSandbox, "wrap", async () => {
+      throw new Error("the bash sandbox is not available: rejected");
+    });
+    const run = await runVerificationsWithOutput({
+      directory,
+      commands: ["touch started"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      sandbox: SCOPE,
+    });
+    assert.equal(run.outcome, VerificationClass.Infrastructure);
+    assert.deepEqual(run.verification.results, [
+      {
+        command: "touch started",
+        exit_code: null,
+        signal: null,
+        timed_out: false,
+      },
+    ]);
+    assert.match(
+      run.outputs[0]!,
+      /the bash sandbox is not available: rejected/,
+    );
+    assert.equal(existsSync(join(directory, "started")), false);
+  });
+
+  test("the environment of the wrap holds the variables and no variable that childEnvironment removes", async (t) => {
+    const wrap = wrapRecorded(t);
+    await runVerificationsWithOutput({
+      directory: temporary(t),
+      commands: ["true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: {
+        ...hostEnvironment(),
+        ANTHROPIC_API_KEY: "secret",
+        SSH_AUTH_SOCK: "/agent.sock",
+        SHARED_VARIABLE: "original",
+      },
+      variables: {
+        EXTRA_VARIABLE: EXTRA_VALUE,
+        SHARED_VARIABLE: REPLACED_VALUE,
+      },
+      sandbox: SCOPE,
+    });
+    const { env } = wrap.mock.calls[0]!.arguments[2];
+    assert.equal(env.EXTRA_VARIABLE, EXTRA_VALUE);
+    assert.equal(env.SHARED_VARIABLE, REPLACED_VALUE);
+    assert.equal(env.ANTHROPIC_API_KEY, undefined);
+    assert.equal(env.SSH_AUTH_SOCK, undefined);
+  });
+
+  test("verificationSandbox answers the scope for tags without sshd and the verification of that node runs wrapped", async (t) => {
+    const wrap = wrapRecorded(t);
+    const sandbox = verificationSandbox(["backend", "api"], SCOPE);
+    assert.equal(sandbox, SCOPE);
+    const run = await runVerificationsWithOutput({
+      directory: temporary(t),
+      commands: ["true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      sandbox,
+    });
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.equal(wrap.mock.callCount(), ONE_WRAP);
+  });
+
+  test("verificationSandbox answers null for tags with sshd and the verification of that node runs without the wrap", async (t) => {
+    const wrap = wrapRecorded(t);
+    const sandbox = verificationSandbox(["backend", SSHD_TAG], SCOPE);
+    assert.equal(sandbox, null);
+    assert.equal(verificationSandbox([], SCOPE), SCOPE);
+    const run = await runVerificationsWithOutput({
+      directory: temporary(t),
+      commands: ["true"],
+      tested_input: { kind: "produced", sha256: "hash" },
+      deadline: Date.now() + 10000,
+      context: background,
+      env: hostEnvironment(),
+      sandbox,
+    });
+    assert.equal(run.outcome, VerificationClass.Pass);
+    assert.equal(wrap.mock.callCount(), NO_WRAPS);
   });
 });

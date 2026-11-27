@@ -21,7 +21,7 @@ import {
 import type { StepsInput } from "./steps-implement.ts";
 import type { ExecutionBudget } from "./budget.ts";
 import { ContextCancelled, DeadlineExceeded } from "../../kernel/context.ts";
-import { runVerifications } from "./verification.ts";
+import { runVerifications, verificationSandbox } from "./verification.ts";
 import { reportFacts } from "./report-facts.ts";
 import {
   environmentDigestsOf,
@@ -92,6 +92,10 @@ async function examineVerification(
           deadline: budget.wallDeadline(),
           context: run.operationContext,
           env: input.env,
+          sandbox: verificationSandbox(revision.content.tags, {
+            denyRead: input.denyRead,
+            root: input.sandboxRoot,
+          }),
         });
   run.noteVerification(verification?.results.at(-1)?.timed_out ?? false);
   return verification;

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { VERIFICATION_RERUNS } from "./verification.ts";
+import { SSHD_TAG, VERIFICATION_RERUNS } from "./verification.ts";
 import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,
@@ -232,6 +232,7 @@ suite("steps implement task loop", { concurrency: SUITE_CONCURRENCY }, () => {
         name: "node",
         requirement: "node",
         criterion: "node",
+        tags: [SSHD_TAG],
         verifications: ["test -f revised"],
         bindings: [],
       },

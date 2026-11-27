@@ -187,7 +187,7 @@ test(
 
 test(
   `(edge) H3: a sandboxed node --test ${AGENT_SUITE}`,
-  { skip: unavailable, timeout: CASE_TIMEOUT_MS, ...FOLLOW_ON },
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = host(t, undefined, process.cwd());
     const command = `node --test ${AGENT_SUITE}`;
@@ -197,7 +197,7 @@ test(
 
 test(
   "(edge) H3: a nested wrap of true inside the sandbox",
-  { skip: unavailable, timeout: CASE_TIMEOUT_MS, ...FOLLOW_ON },
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = host(t, NESTED_SCRIPT, process.cwd());
     const command = `node --input-type=module -e "$${SCRIPT_VARIABLE}"`;

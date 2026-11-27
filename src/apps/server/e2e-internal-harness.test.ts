@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { setTimeout as delay } from "node:timers/promises";
 import {
   createJourneyNode,
@@ -42,6 +43,8 @@ import {
 } from "../../mission/contract.ts";
 import { ClaimState, type ExecutionRecord } from "../../scheduler/contract.ts";
 import { InstancePlacement } from "../../worker/contract.ts";
+
+const nestedSandbox = await nestedSandboxSkip();
 
 after(() => bashSandbox.dispose());
 
@@ -324,7 +327,7 @@ async function finishedExecutions(
 
 test(
   "EI10.1–7 internal harness completes local work, verification and external action",
-  { timeout: JOURNEY_TIMEOUT_MS },
+  { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
   async (t) => {
     const f = await setupInternal(t);
     const repo = await bareRepository(t, "test_repo");

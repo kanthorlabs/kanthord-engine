@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, suite, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -65,6 +66,8 @@ import {
   gatewayFixture,
   instanceNames,
 } from "./test-support.ts";
+
+const nestedSandbox = await nestedSandboxSkip();
 
 after(() => bashSandbox.dispose());
 
@@ -454,7 +457,7 @@ const RELEASED = { kind: "released", furtherWork: false };
 suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
   test(
     "E11 three review rounds fix the action items and report the last unlisted item",
-    { timeout: JOURNEY_TIMEOUT_MS },
+    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
     async (t) => {
       const f = await roundsFixture(t);
       assert.deepEqual(
@@ -561,7 +564,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test(
     "E11.2 a rework limit of 0 gives one final round with report-only findings",
-    { timeout: JOURNEY_TIMEOUT_MS },
+    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
     async (t) => {
       const f = await roundsFixture(t, NO_REWORK);
       assert.deepEqual(
@@ -590,7 +593,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test(
     "E11.3 a person blocker blocks the node with no coder round and waits for a decision",
-    { timeout: JOURNEY_TIMEOUT_MS },
+    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
     async (t) => {
       const f = await roundsFixture(t);
       assert.deepEqual(
@@ -617,7 +620,7 @@ suite("review rounds", { concurrency: SUITE_CONCURRENCY }, () => {
 
   test(
     "E11.4 a coder rework with no commit leads to one evaluation with no verification and a pass",
-    { timeout: JOURNEY_TIMEOUT_MS },
+    { timeout: JOURNEY_TIMEOUT_MS, skip: nestedSandbox },
     async (t) => {
       const f = await roundsFixture(t);
       assert.deepEqual(

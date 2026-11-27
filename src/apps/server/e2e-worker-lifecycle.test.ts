@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { simpleGit } from "simple-git";
 import {
   hostEnvironment,
@@ -19,6 +20,8 @@ import {
 import { until } from "./cli-test-support.ts";
 import { inProcessWorker } from "./test-support.ts";
 import { fixture } from "./worker-host-test-support.ts";
+
+const nestedSandbox = await nestedSandboxSkip();
 
 after(() => bashSandbox.dispose());
 
@@ -83,7 +86,7 @@ const nodeStateOf = async (setup: Setup) =>
 
 test(
   "E09.18 a worker restarts with the correct secret after a refused setup and claims the next execution of the node",
-  { timeout: SCENARIO_TIMEOUT },
+  { timeout: SCENARIO_TIMEOUT, skip: nestedSandbox },
   async (t) => {
     const setup = await fixture(t, await startTestSshd(t));
     const wrongSecret = await setup.machine("general-b");

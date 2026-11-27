@@ -842,8 +842,33 @@ call, so a later instance root is also denied. `denyWrite` holds `.env`,
 with an error tool result when the sandbox cannot start. The bash has no
 unsandboxed fallback.
 
-The node verification commands and the local git of the worker run outside the
-sandbox. The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
+Each verification command runs in the same sandbox, through the same wrap as the
+coder bash of the execution: the node and task verification, the examine
+verification, the release gate, the evaluation, the affected tests and the runs
+of a verification command on the base head. The deny list, the instance root and
+the network allowlist of a verification are those of the coder bash of the same
+execution. A rejected wrap starts no process. The command ends as an
+infrastructure failure and the output holds the rejection message. A
+verification has no unsandboxed fallback. The sandbox allows no Unix socket. Two
+cases run without the sandbox:
+
+- A node with the tag `sshd` runs its verification commands outside the sandbox.
+  The engine `pnpm test` runs every `src/**/*.test.ts` file, the suites that
+  start `sshd` included, and these suites need Unix sockets. So each engine node
+  that runs `pnpm run verify` carries the tag `sshd`. The sandbox protects the
+  verification of the other repositories. An engine suite that runs inside the
+  sandbox is a later follow-on.
+- The setup scripts of a binding environment run outside the sandbox. The
+  operator declares them in the binding, and they need the network and the
+  persistent store.
+
+A sandbox cannot start inside another sandbox. A verification command that
+starts the sandbox, for example a test that runs the bash wrap, fails inside the
+verification sandbox. On macOS a verification command cannot bind or reach a
+loopback port, as in the Workbench bash. The local git of the worker runs
+outside the sandbox. The wrap denies writes to `config` and `hooks` of each
+`.git` directory in the workspace or at most 3 levels below it, so a
+verification cannot plant a git filter driver for that git. The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
 agent refuse a path outside the workspace and an absolute path, as the Workbench
 tools do. A review or examine agent also reads the evidence folder of its own
 evaluation with `read`, `grep`, `find` and `ls`, and it cannot edit or write

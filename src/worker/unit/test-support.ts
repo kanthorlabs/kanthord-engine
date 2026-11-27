@@ -61,7 +61,7 @@ import { ExecutionRun, type MethodClaim } from "./execution-run.ts";
 import type { MethodClients } from "./method-clients.ts";
 import { WorkspaceRoot } from "./workspace.ts";
 import type { BaseHead } from "./environment-setup.ts";
-import type { BaseResult } from "./verification.ts";
+import { type BaseResult, SSHD_TAG } from "./verification.ts";
 import { PoolClass } from "./tree-pool.ts";
 import { prepareStepsWorkspace } from "./steps-implement.ts";
 import type { RefreshResult } from "./base-refresh.ts";
@@ -365,6 +365,7 @@ async function openExecution(
     transport,
     sshAccess: testSshAccess(setup.repositories),
     env: hostEnvironment(),
+    denyRead: [],
   };
   const run = new ExecutionRun({
     claim,
@@ -382,7 +383,7 @@ async function openExecution(
     secrets: async () => [STEPS_KEY],
   });
   stopAfter(t, () => run.dispose());
-  const workspace = await prepareStepsWorkspace(input, run);
+  const workspace = await prepareStepsWorkspace(input, run, null);
   passingBase(t, workspace);
   for (const checkout of workspace.checkouts)
     appendFileSync(join(checkout.directory, ".git", "config"), USER_CONFIG);
@@ -400,6 +401,7 @@ async function openExecution(
       criterion: "implement",
       verifications: ["true"],
       bindings: [],
+      tags: [SSHD_TAG],
     },
     tasks,
   } as unknown as Revision;

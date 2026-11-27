@@ -13,6 +13,7 @@ import { redactReason } from "../../kernel/probe.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { childEnvironment } from "./tool-table.ts";
+import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
 import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./stop-codes.ts";
 import type { WorkspaceCheckout } from "./workspace.ts";
@@ -109,6 +110,7 @@ export interface BaseResult {
   last_line: string;
 }
 export const VERIFICATION_RERUNS = 2;
+export const SSHD_TAG = "sshd";
 const FIRST_RUN = 1;
 const FIRST_RERUN = 2;
 export interface VerificationInput {
@@ -119,6 +121,7 @@ export interface VerificationInput {
   deadline: number;
   context: Context;
   env: NodeJS.ProcessEnv;
+  sandbox: SandboxScope | null;
   variables?: Readonly<Record<string, string>>;
   commandLimitMs?: number;
   copyRepeated?: boolean;
@@ -184,8 +187,53 @@ function endRunGroups(input: RunInput): void {
     if (!leaders.has(group)) killProcessTree(group, system);
 }
 
-function runCommand(command: string, input: RunInput): Promise<CommandRun> {
+export function verificationSandbox(
+  tags: readonly string[],
+  scope: SandboxScope,
+): SandboxScope | null {
+  return tags.includes(SSHD_TAG) ? null : scope;
+}
+
+async function runCommand(
+  command: string,
+  input: RunInput,
+): Promise<CommandRun> {
   assert.ok(command);
+  const env = { ...childEnvironment(input.env), ...input.variables };
+  if (input.sandbox === null)
+    return spawnCommand(command, { script: command, env }, input);
+  let wrapped: string;
+  try {
+    wrapped = await bashSandbox.wrap(command, input.directory, {
+      ...input.sandbox,
+      env,
+    });
+  } catch (error) {
+    return {
+      result: { command, exit_code: null, signal: null, timed_out: false },
+      output: redactReason(
+        error instanceof Error ? error.message : String(error),
+      ),
+      end: CommandEnd.SpawnError,
+    };
+  }
+  try {
+    return await spawnCommand(command, { script: wrapped, env }, input);
+  } finally {
+    bashSandbox.cleanup();
+  }
+}
+
+interface Launch {
+  script: string;
+  env: NodeJS.ProcessEnv;
+}
+
+function spawnCommand(
+  command: string,
+  { script, env }: Launch,
+  input: RunInput,
+): Promise<CommandRun> {
   assert.ok(Number.isSafeInteger(input.deadline));
   const deadline = Math.min(
     input.deadline,
@@ -196,9 +244,9 @@ function runCommand(command: string, input: RunInput): Promise<CommandRun> {
       ? CommandEnd.WallDeadline
       : CommandEnd.CommandLimit;
   return new Promise((resolve, reject) => {
-    const child = spawn("bash", ["-c", command], {
+    const child = spawn("bash", ["-c", script], {
       cwd: input.directory,
-      env: { ...childEnvironment(input.env), ...input.variables },
+      env,
       stdio: ["ignore", "pipe", "pipe"],
       detached: true,
     });

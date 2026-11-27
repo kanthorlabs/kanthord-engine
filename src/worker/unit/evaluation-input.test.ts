@@ -169,11 +169,13 @@ test("B3 review bundle places all supporting assets in the evidence directory ou
           transport,
           sshAccess: everyBindingSshAccess,
           env: hostEnvironment(),
+          denyRead: [],
         },
         run,
         ExecutionIntent.Examine,
         evidence,
         FIRST_ROUND,
+        null,
       );
       if (mode !== SUCCESS) {
         await assert.rejects(pending);
@@ -276,11 +278,13 @@ test("an examine node with no binding places the produced evidence privately and
       transport: {} as RepositoryTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
+      denyRead: [],
     },
     run,
     ExecutionIntent.Examine,
     evidence,
     FIRST_ROUND,
+    null,
   );
   assert.deepEqual(prepared.tested_input, address);
   const REPORT = "report";
@@ -426,11 +430,13 @@ test("an implement snapshot evaluation places only the latest coder report outsi
       transport: localTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
+      denyRead: [],
     },
     run,
     ExecutionIntent.Implement,
     evidence,
     FIRST_ROUND,
+    null,
   );
   assert.equal(
     prepared.directory,
@@ -564,11 +570,13 @@ async function twoBindingEvaluation(t: test.TestContext, names: string[]) {
       transport: localTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
+      denyRead: [],
     },
     run,
     ExecutionIntent.Implement,
     evidence,
     FIRST_ROUND,
+    null,
   );
   return { pending, workspaces, claim, checkouts: [api, web] };
 }
@@ -755,11 +763,13 @@ async function roundEvaluation(
       transport: localTransport,
       sshAccess: everyBindingSshAccess,
       env: hostEnvironment(),
+      denyRead: [],
     },
     run,
     ExecutionIntent.Implement,
     evidence,
     round,
+    null,
   );
   stopAfter(t, () => workspaces.release(prepared.key, prepared.kind));
   return { prepared, logs, round };

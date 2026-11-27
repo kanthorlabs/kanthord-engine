@@ -403,6 +403,25 @@ test("a wrap passes the whole filesystem object and the network allowlist", asyn
   });
 });
 
+test("initialize gets the network allowlist and no Unix socket allowance", async (t) => {
+  const fake = fakeRuntime();
+  await createBashSandbox(fake.runtime, "linux").wrap(
+    "true",
+    temporary(t),
+    hostOf(),
+  );
+  const [initial] = fake.initialized as {
+    network: Record<string, unknown>;
+  }[];
+  assert.ok(initial);
+  assert.deepEqual(Object.keys(initial.network).sort(), [
+    "allowedDomains",
+    "deniedDomains",
+  ]);
+  assert.equal("allowAllUnixSockets" in initial.network, false);
+  assert.equal("allowUnixSockets" in initial.network, false);
+});
+
 function instanceLayout(t: TestContext) {
   const home = temporary(t);
   const env: NodeJS.ProcessEnv = {

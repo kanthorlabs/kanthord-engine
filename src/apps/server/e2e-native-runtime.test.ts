@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import { nestedSandboxSkip } from "../../agent/test-support.ts";
 import { simpleGit } from "simple-git";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
@@ -78,6 +79,8 @@ import {
 } from "./test-support.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
 
+const nestedSandbox = await nestedSandboxSkip();
+
 after(() => bashSandbox.dispose());
 
 const SUCCESSFUL_EXIT = 0;
@@ -125,7 +128,7 @@ function completed<T>(result: OperationResult<T>): T {
 
 test(
   "E07 native runtime proves setup, inference, verification, push, budget and the kept workspaces in order",
-  { timeout: 180000 },
+  { timeout: 180000, skip: nestedSandbox },
   async (t) => {
     const f = await gatewayFixture(t, {
       fakeSlots: true,
@@ -560,6 +563,7 @@ test(
         deadline: agent.budget.wallDeadline(),
         context: background,
         env: hostEnvironment(),
+        sandbox: null,
       });
       assert.deepEqual(verification.results, [
         {

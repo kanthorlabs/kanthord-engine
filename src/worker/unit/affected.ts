@@ -8,6 +8,7 @@ import {
   FILE_NOT_FOUND,
   writePrivate,
 } from "../../kernel/files.ts";
+import type { SandboxScope } from "../../agent/bash-sandbox.ts";
 import { redactReason } from "../../kernel/probe.ts";
 import { EnvironmentFailure } from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
@@ -495,6 +496,7 @@ export interface AffectedInput {
   checkout: AffectedCheckout;
   digests: readonly string[];
   base: BaseHead;
+  sandbox: SandboxScope | null;
   commandLimitMs?: number;
 }
 
@@ -606,6 +608,7 @@ async function runHead(
     deadline: input.deadline,
     context: input.context,
     env: input.env,
+    sandbox: input.sandbox,
     exhausted: input.exhausted,
     variables: variablesOf(prepared, REPORT_FILE),
     commandLimitMs: prepared.commandLimitMs,

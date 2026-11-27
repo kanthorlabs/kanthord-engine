@@ -44,6 +44,7 @@ import {
   VerificationClass,
   verificationPassed,
   type VerificationRun,
+  verificationSandbox,
 } from "./verification.ts";
 import { verificationFactsOf } from "./progress-rule.ts";
 import { CHECKOUTS_DIRECTORY, RELEASE_DIRECTORY } from "./workspace.ts";
@@ -330,6 +331,10 @@ async function verifyInReleaseClones(
       deadline: state.agent.budget.wallDeadline(),
       context: state.run.operationContext,
       env: state.input.env,
+      sandbox: verificationSandbox(state.revision.content.tags, {
+        denyRead: state.input.denyRead,
+        root: state.input.sandboxRoot,
+      }),
       exhausted: () => state.agent.budget.exhausted(),
       baseline: (command) => state.base.runOf(command),
       memo: await memoScopeOf(state, VerificationContext.Release, commands),
@@ -377,6 +382,10 @@ async function runAffectedChecks(
       },
       digests: environmentDigestsOf(state.input.setup.repositories),
       base: state.base,
+      sandbox: verificationSandbox(state.revision.content.tags, {
+        denyRead: state.input.denyRead,
+        root: state.input.sandboxRoot,
+      }),
     });
     if ("budgetEnd" in result) return null;
     results.push(result);

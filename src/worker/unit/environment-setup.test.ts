@@ -35,6 +35,7 @@ import {
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
 import { VerificationClass } from "./verification.ts";
+import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -51,6 +52,9 @@ const FAILED_EXIT = 1;
 const COMMAND_ABSENT_EXIT = 127;
 const SETUP_OUTPUT = "update\ncreate\n";
 const ONE_RUN = "run\n";
+const UPDATE_ONLY = "update\n";
+const NO_WRAPS = 0;
+const PASS_EXIT = 0;
 const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
@@ -123,7 +127,7 @@ async function prepared(checkout: SetupCheckout, root: string) {
   const entries = await setupEntries(input(), [checkout]);
   const base = new BaseHead(
     input(),
-    { directory: join(root, "base") },
+    { directory: join(root, "base"), sandbox: null },
     entries,
   );
   const head = await headCommit(env, checkout.directory, background, 10000);
@@ -352,6 +356,32 @@ test("setup runs the commands of a stored environment in the checkout", async (t
   );
 });
 
+test("a setup script of a binding environment runs without the wrap and a base run with a sandbox scope runs wrapped", async (t) => {
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (...call: Parameters<typeof bashSandbox.wrap>) => call[0],
+  );
+  const { root, checkout } = await repository(t, { file: "base" });
+  const entry = setupCheckout(
+    checkout,
+    stored({ updateContentCommand: `echo update > ${SETUP_MARKER}` }),
+  );
+  const entries = await setupEntries(input(), [entry]);
+  assert.deepEqual(await runSetup(input(), entries), { end: SetupEnd.Pass });
+  assert.equal(readFileSync(join(checkout, SETUP_MARKER), "utf8"), UPDATE_ONLY);
+  assert.equal(wrap.mock.callCount(), NO_WRAPS);
+  const sandbox = { denyRead: ["/denied/credentials"] };
+  const base = new BaseHead(
+    input(),
+    { directory: join(root, "base"), sandbox },
+    entries,
+  );
+  assert.equal((await base.runOf("true"))?.exit_code, PASS_EXIT);
+  assert.deepEqual(wrap.mock.calls[0]?.arguments.slice(0, 1), ["true"]);
+  assert.deepEqual(wrap.mock.calls[0]?.arguments[2].denyRead, sandbox.denyRead);
+});
+
 test("setup reads the devcontainer file of the base head for a repository source", async (t) => {
   const { checkout } = await repository(t, {
     ".devcontainer/devcontainer.json": `{
@@ -515,7 +545,7 @@ test("the base rerun answers no exit when the budget ends in the base setup", as
   const entries = await setupEntries(exhausted, [entry]);
   const base = new BaseHead(
     exhausted,
-    { directory: join(root, "base") },
+    { directory: join(root, "base"), sandbox: null },
     entries,
   );
   assert.equal(await base.runOf("command-absent-x"), null);
@@ -628,6 +658,7 @@ async function poolFixture(t: TestContext) {
       input(),
       {
         directory: join(workspaces.nodeKey(nodeId), BASE_DIRECTORY),
+        sandbox: null,
         trees: {
           workspaces,
           nodeId,

@@ -312,7 +312,11 @@ async function fixture(
   return {
     checkout,
     head: await headCommit(env, checkout, background, DEADLINE_MS),
-    base: new BaseHead(setup, { directory: join(root, "base") }, entries),
+    base: new BaseHead(
+      setup,
+      { directory: join(root, "base"), sandbox: null },
+      entries,
+    ),
     key: join(root, "workspace"),
     probe,
     records,
@@ -345,6 +349,7 @@ function runOf(f: Fixture, overrides: Partial<AffectedInput> = {}) {
     },
     digests: [],
     base: f.base,
+    sandbox: null,
     ...overrides,
   });
 }

@@ -1,3 +1,4 @@
+import { SSHD_TAG } from "./verification.ts";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -160,6 +161,7 @@ test("examine reports its dependencies once and gives its tree back to the pool"
         transport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       {
@@ -167,6 +169,7 @@ test("examine reports its dependencies once and gives its tree back to the pool"
           name: "examine",
           requirement: "report",
           criterion: "report",
+          tags: [SSHD_TAG],
           verifications: [],
         },
       } as unknown as Revision,
@@ -256,6 +259,7 @@ test("B4 examine releases when reads or agent opening consume the wall budget", 
           transport: {} as RepositoryTransport,
           sshAccess: everyBindingSshAccess,
           env: hostEnvironment(),
+          denyRead: [],
         },
         run,
         {} as Revision,
@@ -336,6 +340,7 @@ test("an examine node that its agent deadline cuts releases with further work an
         transport: {} as RepositoryTransport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       {
@@ -343,6 +348,7 @@ test("an examine node that its agent deadline cuts releases with further work an
           name: "examine",
           requirement: "report",
           criterion: "report",
+          tags: [SSHD_TAG],
           verifications: [],
         },
       } as unknown as Revision,
@@ -429,6 +435,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
         transport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       {
@@ -436,6 +443,7 @@ test("an examine node with two repository bindings runs from checkouts/ and list
           name: "examine",
           requirement: "examine",
           criterion: "examine",
+          tags: [SSHD_TAG],
           verifications: [`pwd > ${output}`],
         },
       } as unknown as Revision,
@@ -527,6 +535,7 @@ test("an examine verification that the wall deadline cuts gives a later assessme
         transport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       {
@@ -534,6 +543,7 @@ test("an examine verification that the wall deadline cuts gives a later assessme
           name: "examine",
           requirement: "examine",
           criterion: "examine",
+          tags: [SSHD_TAG],
           verifications: ["sleep 30"],
         },
       } as unknown as Revision,

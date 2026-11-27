@@ -503,7 +503,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     ]);
     mkdirSync(join(releaseKey(h), LEFTOVER), { recursive: true });
     h.input.workspaces.release(key, WorkspaceKind.Node);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.equal(freeCommandTrees(h).length, ONE_TREE);
   });
@@ -515,7 +515,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await simpleGit().clone(h.root, tree);
     await simpleGit(tree).remote(["set-url", "origin", temporary(t)]);
     h.input.workspaces.release(key, WorkspaceKind.Node);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
@@ -527,7 +527,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     mkdirSync(tree, { recursive: true });
     writeFileSync(join(tree, ".git"), `gitdir: ${join(h.root, ".git")}\n`);
     h.input.workspaces.release(key, WorkspaceKind.Node);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
   });
@@ -880,7 +880,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     assert.equal(existsSync(releaseKey(h)), false);
     const key = h.input.workspaces.nodeKey(h.input.claim.node_id);
     h.input.workspaces.release(key, WorkspaceKind.Node);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
   });
 
   test("the next prepare deletes a crash leftover whose .git mode is open, and the prepare passes", async (t) => {
@@ -896,7 +896,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     chmodSync(join(tree, ".git"), Number.parseInt(OPEN_MODE, 8));
     h.input.workspaces.release(key, WorkspaceKind.Node);
     const deleted = treesDeleted(t, h);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
     assert.deepEqual(deleted(), [{ path: tree, code: INVALID_PERMISSIONS }]);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
@@ -915,7 +915,7 @@ suite("release gate", { concurrency: SUITE_CONCURRENCY }, () => {
     mkdirSync(releaseKey(h), { recursive: true });
     symlinkSync(outside, join(releaseKey(h), h.checkouts[0]!.name));
     h.input.workspaces.release(key, WorkspaceKind.Node);
-    await prepareStepsWorkspace(h.input, h.run);
+    await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(releaseKey(h)), false);
     assert.deepEqual(h.input.workspaces.pool.trees(), []);
     assert.equal(existsSync(join(outside, ".git")), true);

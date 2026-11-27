@@ -52,6 +52,7 @@ import {
   VerificationClass,
   verificationPassed,
   type VerificationRun,
+  verificationSandbox,
 } from "./verification.ts";
 import {
   affectedFailureReport,
@@ -428,6 +429,7 @@ async function runAffectedStep(
       },
       digests: environmentDigestsOf(input.setup.repositories),
       base: prepared.base,
+      sandbox: prepared.sandbox,
     });
     if ("budgetEnd" in result) return run.stop(EndReason.AssessmentAbsent);
     results.push(result);
@@ -488,6 +490,7 @@ async function verifyEvaluation(context: EvaluateContext) {
     deadline: budget.wallDeadline(),
     context: run.operationContext,
     env: input.env,
+    sandbox: prepared.sandbox,
     reruns: VERIFICATION_RERUNS,
     exhausted: () => budget.exhausted(),
     ...baselineOf(prepared.base),
@@ -709,6 +712,10 @@ export async function runEvaluation(
     input.setup.intent,
     evidence,
     round,
+    verificationSandbox(revision.content.tags, {
+      denyRead: input.denyRead,
+      root: input.sandboxRoot,
+    }),
   );
   try {
     const unchanged = await unchangedAssessmentOf(run, prepared.tested_input);

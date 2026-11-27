@@ -1,3 +1,4 @@
+import { SSHD_TAG } from "./verification.ts";
 import assert from "node:assert/strict";
 import { test, type TestContext } from "node:test";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -44,6 +45,7 @@ const NODE_CONTENT = {
   name: "node",
   requirement: "node",
   criterion: "node",
+  tags: [SSHD_TAG],
   verifications: ["true"],
   bindings: [],
 };
