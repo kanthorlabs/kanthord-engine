@@ -854,6 +854,11 @@ that git. A verification command whose wrap fails ends as an infrastructure
 failure, the output holds the rejection message, and no process starts. A
 verification has no unsandboxed fallback.
 
+The affected-test command also writes to its report directory
+`<workspaceKey>/affected/<checkout name>`, in the head run and in the base-head
+run. The wrap adds that exact directory to `allowWrite`. The command writes to
+no other path outside the cwd and `TMPDIR`.
+
 The sandbox sets `allowLocalBinding`, which allows bind, inbound and outbound on
 `localhost`, because the suites without `sshd` bind a loopback port on macOS. The
 runtime reads this flag once at `initialize`, so the coder bash and the
