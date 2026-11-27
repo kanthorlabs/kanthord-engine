@@ -652,7 +652,7 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
   assert.doesNotMatch(result.stderr, /^(start|end): /m);
   assert.doesNotMatch(result.stdout, /^(start|end): /m);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
@@ -794,7 +794,7 @@ test("a flaky id whose first name part matches no top-level call is a plain entr
     KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
   });
   assert.equal(result.status, SUCCESS);
-  assert.equal(result.report.version, 3);
+  assert.equal(result.report.version, 4);
   assert.deepEqual(result.report.flaky, [
     { file: "src/a.test.ts", name: "fails once" },
   ]);
@@ -952,7 +952,7 @@ test("the none selection gives empty lists and the exit code 0", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "none",
     reason: null,
     tests: [],
@@ -975,7 +975,7 @@ test("a global input gives the all selection with a reason", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "all",
     reason: "global input: package.json",
     tests: ["src/a.test.ts"],
@@ -1040,12 +1040,12 @@ test("a template head that is not a directory counts in the closure", async (t) 
   assert.ok(closureOf(buildGraph(root), "src/main.ts").includes("src/w.ts"));
 });
 
-test("a selection all writes version 3 with the floor and the total test time", async (t) => {
+test("a selection all writes version 4 with the floor and the total test time", async (t) => {
   const root = await fixture(t, FLOOR_FILES);
   const report = outsideTestContext(() =>
     affectedReport(root, [change("package.json")]),
   );
-  assert.equal(report.version, 3);
+  assert.equal(report.version, 4);
   assert.equal(report.floor.tests, 1);
   assert.ok(report.floor.seconds > 0);
   assert.ok(report.floor.total_seconds >= report.floor.seconds);
