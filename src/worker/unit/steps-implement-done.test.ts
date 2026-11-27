@@ -5,7 +5,11 @@ import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  isolateHome,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import type { Revision } from "../../mission/contract.ts";
 import { executionBoundary } from "./native-method.ts";
 import { JUDGEMENT_MARKER } from "./judgement.ts";
@@ -26,6 +30,7 @@ import {
   task,
 } from "./test-support.ts";
 
+isolateHome();
 after(() => bashSandbox.dispose());
 
 type Harness = Awaited<ReturnType<typeof fixture>>;

@@ -18,7 +18,7 @@ import {
 import { createIdentity } from "../kernel/identity.ts";
 import { canonicalJSON } from "../kernel/json.ts";
 import { directories } from "../kernel/xdg.ts";
-import { temporary } from "../kernel/test-support.ts";
+import { overrideEnvironment, temporary } from "../kernel/test-support.ts";
 import {
   testHumanIdentity,
   testReadOnlyIdentity,
@@ -80,11 +80,10 @@ const ONE_OPERATION = 1;
 
 test("a workbench bash call that times out leaves no process of its tree", async (t) => {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
-  const [bash] = builtinTools(
-    await loadPi(),
-    "swe@1",
-    temporary(t),
-  ).customTools;
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: temporary(t),
+  }).customTools;
   assert.ok(bash);
   let ready = false;
   const failure: Error = await bash
@@ -106,15 +105,14 @@ test("a workbench bash call that times out leaves no process of its tree", async
   assert.match(failure.message, /Command timed out after 20 seconds/);
   assert.equal(spawned.length, PROCESS_TREE_PIDS);
   assert.deepEqual(await survivingProcesses(spawned), []);
+  assert.equal(cleanup.mock.callCount(), ONE_OPERATION);
 });
 
 test("a background child of a Workbench bash call lives after the call", async (t) => {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
-  const [bash] = builtinTools(
-    await loadPi(),
-    "swe@1",
-    temporary(t),
-  ).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: temporary(t),
+  }).customTools;
   assert.ok(bash);
   const result = await bash.execute(
     "call_bash",
@@ -142,7 +140,10 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
     "wrap",
     async (command: string) => `echo wrapped; ${command}`,
   );
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   const command = `echo "seen=\${${name}-unset}"`;
   const result = await bash.execute(
@@ -161,6 +162,32 @@ test("the swe@1 bash runs the wrapped command with the child environment", async
     .map((item) => ("text" in item ? item.text : ""))
     .join("");
   assert.match(text, /^wrapped\nseen=unset\n/);
+  assert.equal(cleanup.mock.callCount(), ONE_OPERATION);
+});
+
+test("(invariant) the workbench bash passes the config file of serve to the wrap in the denyRead list", async (t) => {
+  const directory = temporary(t);
+  const configFile = join(temporary(t), "serve", "kanthord.yaml");
+  const wrap = t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string) => command,
+  );
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+    config: configFile,
+  }).customTools;
+  assert.ok(bash);
+  await bash.execute(
+    "call_bash",
+    { command: "true" },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const [call] = wrap.mock.calls;
+  assert.ok(call);
+  assert.ok(call.arguments[2]?.denyRead.includes(configFile));
 });
 
 test("a workbench bash call fails and spawns no process when the wrap rejects", async (t) => {
@@ -169,7 +196,10 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
   const wrap = t.mock.method(bashSandbox, "wrap", async () => {
     throw new Error("the bash sandbox is not available: probe");
   });
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const cleanup = t.mock.method(bashSandbox, "cleanup", () => {});
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   await assert.rejects(
     bash.execute(
@@ -183,25 +213,29 @@ test("a workbench bash call fails and spawns no process when the wrap rejects", 
   );
   assert.equal(wrap.mock.callCount(), ONE_OPERATION);
   assert.equal(existsSync(marker), false);
+  assert.equal(cleanup.mock.callCount(), NO_OPERATIONS);
 });
 
 test("(security) a workbench bash call that reads tracking.db fails under the denyRead list", async (t) => {
   const directory = temporary(t);
+  overrideEnvironment(t, { HOME: temporary(t) });
   const emulated = createBashSandbox(
     {
       initialize: async () => undefined,
       reset: async () => undefined,
+      cleanupAfterCommand: () => undefined,
       wrapWithSandbox: async (command, _shell, customConfig) => {
         const denied = customConfig?.filesystem?.denyRead ?? [];
-        return denied.some((path) => command.includes(path))
-          ? "echo denied >&2; exit 1"
-          : command;
+        const paths = denied.map((path) => `'${path}'`).join(" ");
+        return `for path in ${paths}; do case "$KANTHORD_BASH_COMMAND" in *"$path"*) echo denied >&2; exit 1;; esac; done; ${command}`;
       },
     },
     "linux",
   );
   t.mock.method(bashSandbox, "wrap", emulated.wrap);
-  const [bash] = builtinTools(await loadPi(), "swe@1", directory).customTools;
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
   assert.ok(bash);
   const tracking = join(directories(process.env).data, "tracking.db");
   const denied = await bash.execute(
@@ -221,6 +255,43 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
     undefined as never,
   );
   assert.match(JSON.stringify(ran.content), /inside/);
+});
+
+test("the workbench bash exports the package store and the package cache under TMPDIR to the command", async (t) => {
+  const directory = temporary(t);
+  const tmp = temporary(t);
+  overrideEnvironment(t, { HOME: temporary(t), TMPDIR: tmp });
+  const recording = createBashSandbox(
+    {
+      initialize: async () => undefined,
+      reset: async () => undefined,
+      cleanupAfterCommand: () => undefined,
+      wrapWithSandbox: async (command) => command,
+    },
+    "linux",
+  );
+  t.mock.method(bashSandbox, "wrap", recording.wrap);
+  const [bash] = builtinTools(await loadPi(), "swe@1", {
+    cwd: directory,
+  }).customTools;
+  assert.ok(bash);
+  const result = await bash.execute(
+    "call_bash",
+    {
+      command:
+        'echo "$pnpm_config_store_dir $pnpm_config_cache_dir $npm_config_cache"',
+    },
+    undefined,
+    undefined,
+    undefined as never,
+  );
+  const text = result.content
+    .map((item) => ("text" in item ? item.text : ""))
+    .join("");
+  assert.ok(
+    text.includes(`${tmp}/pnpm-store ${tmp}/pnpm-cache ${tmp}/npm-cache`),
+    text,
+  );
 });
 
 const HUMAN_ACCESS: readonly AccessPolicy[] = [

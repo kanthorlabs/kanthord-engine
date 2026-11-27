@@ -57,7 +57,7 @@ const SLEEP_MIN_SECONDS = 70000;
 const SLEEP_MAX_SECONDS = 80000;
 const PS_PATH = "/bin/ps";
 const BASE64URL = "base64url";
-const TREE_PROCESSES = 4;
+const TREE_PROCESSES = 3;
 const CONFIGURATION = {
   agent_provider: "default",
   model_identifier: "claude-sonnet-4-5",

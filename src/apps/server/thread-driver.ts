@@ -76,12 +76,16 @@ function threadEntries(entries: readonly SlotEntry[]): ThreadEntry[] {
   }));
 }
 
-export function slotThreadData(launch: SlotLaunch): ThreadData {
+export function slotThreadData(
+  launch: SlotLaunch,
+  config?: string,
+): ThreadData {
   return {
     entries: threadEntries(launch.entries),
     log: LogDestination.File,
     deny_read: hostDenyRead(launch.environment, {
       pi: piDirectory(threadEnvironment(launch.environment, launch.root)),
+      config,
     }),
   };
 }
@@ -125,6 +129,12 @@ export class ThreadDriver implements SlotDriver {
   readonly placement = PoolPlacement.Server;
   private readonly threads = new Map<string, Worker>();
 
+  private readonly configFile?: string;
+
+  constructor(configFile?: string) {
+    this.configFile = configFile;
+  }
+
   check(): Promise<PlacementStatus> {
     return Promise.resolve({
       placement: this.placement,
@@ -150,7 +160,7 @@ export class ThreadDriver implements SlotDriver {
   launch(launch: SlotLaunch): SlotInstance {
     const name = launch.instance.name;
     const worker = startThread(
-      slotThreadData(launch),
+      slotThreadData(launch, this.configFile),
       launchEnvironment(launch.environment, launch.root),
     );
     worker.stdout.pipe(launch.output, { end: false });

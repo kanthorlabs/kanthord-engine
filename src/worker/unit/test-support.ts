@@ -422,7 +422,7 @@ async function openExecution(
     }),
     workspace: workspace.root,
     hostHome: temporary(t),
-    env: hostEnvironment(),
+    env: { ...hostEnvironment(), HOME: temporary(t) },
     denyRead: [],
     modelRuntimeFactory: scriptedModelRuntime(provider),
     context: run.operationContext,
