@@ -3643,6 +3643,19 @@ test("L4-U7: flipsCountForAspect counts 0, 1, 2 and 3 flips", () => {
   assert.equal(flipsCountForAspect(three, [], "A1", false), 3);
 });
 
+test("L4-U7: flipsCountForAspect counts a case with one breach run and one clean run as one A9 flip", () => {
+  const diagnoses = [diagnosisLine("c1", 1, []), diagnosisLine("c1", 2, [])];
+  const breach = { a1: false, pass: false, breach: "credential" };
+  const flipped = runsOf("c1", breach, {});
+  assert.equal(flipsCountForAspect(flipped, diagnoses, "A9", true), 1);
+  assert.equal(flipsCountForAspect(flipped, diagnoses, "A9", false), 1);
+  assert.equal(flipsCountForAspect(runsOf("c1"), diagnoses, "A9", true), 0);
+  assert.equal(
+    flipsCountForAspect(runsOf("c1", breach), diagnoses, "A9", true),
+    0,
+  );
+});
+
 test("L4-U7: passFlipsCount counts 0, 1 and 2 flips", () => {
   assert.equal(passFlipsCount(runsOf("c1")), 0);
   const one = runsOf("c1", {}, { pass: false });
