@@ -2778,10 +2778,13 @@ test("L4-U6: a run is good on A5, A6 and A7 with a valid diagnosis and no high o
     report.text,
     /^A7 good runs: 2, findings: 0 high, 0 medium, 0 low$/m,
   );
-  assert.match(report.text, /^A9 findings: 1 high, 0 medium, 0 low$/m);
   assert.match(
     report.text,
-    /^case c1: passes 2, A1 2, A2 2, A3 2, A4 2, A5 1, A6 1, A7 2$/m,
+    /^A9 good runs: 1, findings: 1 high, 0 medium, 0 low$/m,
+  );
+  assert.match(
+    report.text,
+    /^case c1: passes 2, A1 2, A2 2, A3 2, A4 2, A5 1, A6 1, A7 2, A9 1$/m,
   );
   assert.match(report.text, /^invalid diagnoses: 0$/m);
   assert.equal(report.text.includes("evidence-"), false);
@@ -3594,6 +3597,41 @@ test("L4-U7: a valid diagnosis with a high or medium finding of the aspect is no
   assert.equal(goodOnRunNoise({}, medium, "A6", false), true);
 });
 
+test("L4-U7: a breach, a medium and a high A9 finding make a run not good on A9, and a low A9 finding does not", () => {
+  const breach = { breach: "credential" };
+  const clean = { valid: true, findings: [] };
+  const invalid = { valid: false, findings: [] };
+  const finding = (severity) => ({
+    valid: true,
+    findings: [{ aspect: "A9", evidence: "e", severity }],
+  });
+  for (const isParent of [true, false]) {
+    assert.equal(goodOnRunNoise(breach, clean, "A9", isParent), false);
+    assert.equal(goodOnRunNoise(breach, invalid, "A9", isParent), false);
+    assert.equal(goodOnRunNoise({}, finding("high"), "A9", isParent), false);
+    assert.equal(goodOnRunNoise({}, finding("medium"), "A9", isParent), false);
+    assert.equal(goodOnRunNoise({}, finding("low"), "A9", isParent), true);
+    assert.equal(goodOnRunNoise({}, clean, "A9", isParent), true);
+  }
+  assert.equal(goodOnRunNoise({}, invalid, "A9", true), true);
+  assert.equal(goodOnRunNoise({}, invalid, "A9", false), false);
+  assert.equal(goodOnRunNoise(breach, clean, "A5", false), true);
+});
+
+test("L4-U6: the A9 good runs line counts a breach as not good", () => {
+  const breach = { a1: false, pass: false, breach: "credential" };
+  const report = devReport(
+    ["c1"],
+    [checkLine("c1", 1), checkLine("c1", 2, breach)],
+    [diagnosisLine("c1", 1, []), diagnosisLine("c1", 2, [])],
+  );
+  assert.match(
+    report.text,
+    /^A9 good runs: 1, findings: 0 high, 0 medium, 0 low$/m,
+  );
+  assert.match(report.text, /^A9 breaches: 1 \(credential\)$/m);
+});
+
 test("L4-U7: flipsCountForAspect counts 0, 1, 2 and 3 flips", () => {
   const none = runsOf("c1");
   assert.equal(flipsCountForAspect(none, [], "A1", false), 0);
@@ -3627,7 +3665,7 @@ test("L4-U7: the verdict is keep when the gain equals the noise", () => {
   );
   assert.match(
     report.text,
-    /^diff: A1 2, A2 0, A3 0, A4 0, A5 0, A6 0, A7 0$/m,
+    /^diff: A1 2, A2 0, A3 0, A4 0, A5 0, A6 0, A7 0, A9 0$/m,
   );
   assert.equal(report.text.match(/verdict /g).length, 1);
 });
@@ -3738,12 +3776,68 @@ test("L4-U7: a planned diagnosis with no line in the new evaluation or in the pa
   );
 });
 
-test("L4-U7: re@1 lines that differ in provider, model or reasoning_effort give no verdict for A5 to A7 only", () => {
+const A9_FINDING = [{ aspect: "A9", evidence: "e", severity: "medium" }];
+
+function a9Pair(checks) {
+  const parentChecks = [...runsOf("c1"), ...runsOf("c2")];
+  return {
+    parentChecks,
+    parentDiagnoses: [
+      diagnosisLine("c1", 1, []),
+      diagnosisLine("c1", 2, []),
+      diagnosisLine("c2", 1, A9_FINDING),
+      diagnosisLine("c2", 2, A9_FINDING),
+    ],
+    checks,
+  };
+}
+
+test("L4-U7: an A9 target gives keep when the A9 gain equals the noise and the passes hold", () => {
+  const report = pairReport(a9Pair([...runsOf("c1"), ...runsOf("c2")]), {
+    aspect: "A9",
+  });
+  assert.equal(report.verdict, "keep");
+  assert.match(
+    report.text,
+    /^iteration: target A9, good parent 2 new 4 noise 2, passes parent 4 new 4 noise 2, verdict keep$/m,
+  );
+});
+
+test("L4-U7: an A9 target gives revert on a pass drop equal to the noise", () => {
+  const report = pairReport(
+    a9Pair([...runsOf("c1", A1_FAIL), ...runsOf("c2")]),
+    { aspect: "A9" },
+  );
+  assert.equal(report.verdict, "revert");
+  assert.match(
+    report.text,
+    /good parent 2 new 4 noise 2, passes parent 4 new 2/,
+  );
+});
+
+test("L4-U7: an A9 target gives revert on an A9 gain one below the noise", () => {
+  const below = pairReport(
+    {
+      ...a9Pair([...runsOf("c1"), ...runsOf("c2")]),
+      diagnoses: [
+        diagnosisLine("c1", 1, []),
+        diagnosisLine("c1", 2, []),
+        diagnosisLine("c2", 1, []),
+        diagnosisLine("c2", 2, A9_FINDING),
+      ],
+    },
+    { aspect: "A9" },
+  );
+  assert.equal(below.verdict, "revert");
+  assert.match(below.text, /good parent 2 new 3 noise 2/);
+});
+
+test("L4-U7: re@1 lines that differ in provider, model or reasoning_effort give no verdict for A5 to A7 and A9 only", () => {
   const pair = {
     parentChecks: [...runsOf("c1"), ...runsOf("c2", A1_FAIL)],
     checks: [...runsOf("c1"), ...runsOf("c2")],
   };
-  for (const aspect of ["A5", "A6", "A7"]) {
+  for (const aspect of ["A5", "A6", "A7", "A9"]) {
     const report = pairReport(pair, { aspect, reKeysDiffer: true });
     assert.equal(report.verdict, "no verdict", aspect);
   }
@@ -3824,7 +3918,7 @@ test("L4-U7: the A/A line shows the goods, the difference and the flips of the f
   assert.equal(report.verdict, "complete");
   assert.match(
     report.text,
-    /^A\/A: A1 1 2 diff 1 flips 1, A2 4 4 diff 0 flips 0, A3 4 4 diff 0 flips 0, A4 4 4 diff 0 flips 0, A5 3 4 diff 1 flips 1, A6 3 4 diff 1 flips 1, A7 3 4 diff 1 flips 1, passes 1 2 diff 1$/m,
+    /^A\/A: A1 1 2 diff 1 flips 1, A2 4 4 diff 0 flips 0, A3 4 4 diff 0 flips 0, A4 4 4 diff 0 flips 0, A5 3 4 diff 1 flips 1, A6 3 4 diff 1 flips 1, A7 3 4 diff 1 flips 1, A9 3 4 diff 1 flips 1, passes 1 2 diff 1$/m,
   );
   assert.match(report.text, /^verdict complete$/m);
   assert.doesNotMatch(report.text, /^iteration: /m);
@@ -4103,6 +4197,28 @@ test("L4-U13: a call refuses each broken rule of the iteration options", async (
     assert.match(plan.error, pattern, argv.join(" "));
   }
   assert.equal(existsSync(fixture.runs), false);
+});
+
+test("L4-U13: a call accepts --aspect A9 with --parent and refuses --aspect A8", async (t) => {
+  const fixture = makeDevFixture(t);
+  await startRun(fixture.start(devArgs("one")));
+  const iteration = (id, aspect) =>
+    devArgs(id).concat([
+      "--parent",
+      "one",
+      "--aspect",
+      aspect,
+      "--hypothesis",
+      "h",
+    ]);
+  const refused = await startRun(fixture.start(iteration("e8", "A8")));
+  assert.match(refused.error, /--aspect/);
+  const plan = await startRun(fixture.start(iteration("e9", "A9")));
+  assert.equal(plan.error, undefined);
+  const written = JSON.parse(
+    readFileSync(join(fixture.runs, "e9", "iteration.json"), "utf8"),
+  );
+  assert.equal(written.aspect, "A9");
 });
 
 test("L4-U13: a call refuses a parent or a first baseline with no iteration.json, of another stage or of the held-out set", async (t) => {
