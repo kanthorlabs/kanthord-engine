@@ -83,6 +83,7 @@ export interface BaseRunInput {
   command: string;
   variables: Readonly<Record<string, string>>;
   commandLimitMs: number;
+  writeRoots?: readonly string[];
   observe?: CommandObserver;
 }
 
@@ -449,6 +450,12 @@ export class BaseHead {
     return commits[index]!;
   }
 
+  private sandboxWith(
+    writeRoots: readonly string[] | undefined,
+  ): SandboxScope | null {
+    return this.sandbox && { ...this.sandbox, writeRoots };
+  }
+
   async runIn(
     name: string,
     input: BaseRunInput,
@@ -474,7 +481,7 @@ export class BaseHead {
       deadline: this.input.deadline,
       context: this.input.context,
       env: this.input.env,
-      sandbox: this.sandbox,
+      sandbox: this.sandboxWith(input.writeRoots),
       exhausted: this.input.exhausted,
     });
     return run.outcome === VerificationClass.BudgetEnd ? null : run;

@@ -224,6 +224,27 @@ test("the temporary directory falls back to /tmp", async (t) => {
   ]);
 });
 
+test("a wrap with writeRoots puts each entry in allowWrite after the cwd and TMPDIR", async (t) => {
+  const cwd = temporary(t);
+  const fake = fakeRuntime();
+  const sandbox = createBashSandbox(fake.runtime, "linux");
+  await sandbox.wrap("true", cwd, {
+    ...hostOf({ TMPDIR: "/var/probe" }),
+    writeRoots: ["/var/report", "/var/other"],
+  });
+  await sandbox.wrap("true", cwd, hostOf({ TMPDIR: "/var/probe" }));
+  assert.deepEqual(fake.calls[0]?.customConfig.filesystem?.allowWrite, [
+    cwd,
+    "/var/probe",
+    "/var/report",
+    "/var/other",
+  ]);
+  assert.deepEqual(fake.calls[1]?.customConfig.filesystem?.allowWrite, [
+    cwd,
+    "/var/probe",
+  ]);
+});
+
 test("denyRead holds the pi directory and names no ancestor of the cwd", async () => {
   const place = directories(process.env);
   const cwd = join(place.state, "workbench", "swe@1");

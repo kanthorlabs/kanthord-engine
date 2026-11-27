@@ -138,6 +138,7 @@ function evalAuthFile(env: NodeJS.ProcessEnv): string[] {
 export interface SandboxScope {
   denyRead: readonly string[];
   root?: string;
+  writeRoots?: readonly string[];
 }
 
 export interface SandboxHost extends SandboxScope {
@@ -312,6 +313,7 @@ function keptReadPaths(host: SandboxHost, cwd: string): string[] {
     ...new Set([
       cwd,
       host.env.TMPDIR ?? TEMPORARY_FALLBACK,
+      ...(host.writeRoots ?? []),
       ...instanceRoots(host),
       seccompHelperDirectory(),
       ...toolRoots(host.env, home).filter((root) =>
@@ -469,7 +471,7 @@ export function createBashSandbox(
           filesystem: filesystemOf({
             denyRead: denied,
             allowRead: keptReadPaths(host, cwd),
-            allowWrite: [cwd, temporary],
+            allowWrite: [cwd, temporary, ...(host.writeRoots ?? [])],
             denyWrite: [...defaultDenyWrite(cwd), ...gitDenied],
           }),
           network: BASH_NETWORK,

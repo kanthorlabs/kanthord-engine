@@ -608,7 +608,10 @@ async function runHead(
     deadline: input.deadline,
     context: input.context,
     env: input.env,
-    sandbox: input.sandbox,
+    sandbox: input.sandbox && {
+      ...input.sandbox,
+      writeRoots: [prepared.directory],
+    },
     exhausted: input.exhausted,
     variables: variablesOf(prepared, REPORT_FILE),
     commandLimitMs: prepared.commandLimitMs,
@@ -645,6 +648,7 @@ async function runBase(
         command,
         variables: variablesOf(prepared, BASE_REPORT_FILE),
         commandLimitMs: prepared.commandLimitMs,
+        writeRoots: [prepared.directory],
         observe: tracker.observe,
       });
       return run === null ? null : { run, end: tracker.end() };
