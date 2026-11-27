@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { dirname, join, sep } from "node:path";
 import { test, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { directories } from "../kernel/xdg.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
@@ -22,6 +23,17 @@ const ONCE = 1;
 const COMMAND = "echo hi";
 const ABSENT_HOME = "/kanthord-absent-home";
 const LONG_TEMPORARY = 90;
+const SECCOMP_HELPER = join(
+  dirname(
+    dirname(
+      realpathSync(
+        fileURLToPath(import.meta.resolve("@anthropic-ai/sandbox-runtime")),
+      ),
+    ),
+  ),
+  "vendor",
+  "seccomp",
+);
 
 function hostOf(env: NodeJS.ProcessEnv = {}) {
   return {
@@ -65,11 +77,16 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
   }[] = [];
   const initialized: unknown[] = [];
   const resets: boolean[] = [];
+  const cleanups: boolean[] = [];
   return {
     calls,
     initialized,
     resets,
+    cleanups,
     runtime: {
+      cleanupAfterCommand: () => {
+        cleanups.push(true);
+      },
       initialize: async (config: unknown) => {
         initialized.push(config);
         await options.initialize?.();
@@ -88,6 +105,13 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
     },
   };
 }
+
+test("a cleanup calls the runtime cleanup once and starts no sandbox", () => {
+  const fake = fakeRuntime();
+  createBashSandbox(fake.runtime, "linux").cleanup();
+  assert.equal(fake.cleanups.length, ONCE);
+  assert.deepEqual(fake.initialized, []);
+});
 
 test("a wrap passes the cwd and the temporary directory as allowWrite and the denyRead list", async (t) => {
   const cwd = temporary(t);
@@ -130,6 +154,7 @@ test("a wrap passes the cwd and the temporary directory as allowWrite and the de
   assert.deepEqual(call.customConfig.filesystem?.allowRead, [
     cwd,
     "/var/probe",
+    SECCOMP_HELPER,
     join(ABSENT_HOME, ".gitconfig"),
     join(ABSENT_HOME, ".config", "git", "config"),
     join(ABSENT_HOME, ".config", "git", "ignore"),
@@ -666,6 +691,16 @@ test("(edge) a node prefix that is a direct child of the home is no tool root", 
   assert.ok(!allowed.includes(join(home, ".local")));
 });
 
+test("(invariant) the allow list keeps the seccomp helper directory of the sandbox runtime", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: "/usr/bin" },
+    denyRead: [],
+  };
+  const allowed = await allowReadOf(host, cwd);
+  assert.ok(allowed.includes(SECCOMP_HELPER), `${allowed}`);
+});
+
 test("(invariant guard) a PATH entry inside a host deny entry leaves that entry in the list", (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   const env: NodeJS.ProcessEnv = {
@@ -765,6 +800,7 @@ test("(edge) a cwd outside the home directory leaves the home denied and the too
   assert.deepEqual(await allowReadOf(host, cwd), [
     cwd,
     tmp,
+    SECCOMP_HELPER,
     join(home, ".local", "bin"),
     join(home, ".gitconfig"),
     join(home, ".config", "git", "config"),

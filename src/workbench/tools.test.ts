@@ -217,6 +217,7 @@ test("(security) a workbench bash call that reads tracking.db fails under the de
     {
       initialize: async () => undefined,
       reset: async () => undefined,
+      cleanupAfterCommand: () => undefined,
       wrapWithSandbox: async (command, _shell, customConfig) => {
         const denied = customConfig?.filesystem?.denyRead ?? [];
         const paths = denied.map((path) => `'${path}'`).join(" ");
@@ -258,6 +259,7 @@ test("the workbench bash exports the package store and the package cache under T
     {
       initialize: async () => undefined,
       reset: async () => undefined,
+      cleanupAfterCommand: () => undefined,
       wrapWithSandbox: async (command) => command,
     },
     "linux",

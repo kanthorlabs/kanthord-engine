@@ -348,7 +348,11 @@ export function builtinTools(
           env,
           denyRead: hostDenyRead(process.env, { config }),
         });
-        return local.exec(wrapped, directory, { ...options, env });
+        try {
+          return await local.exec(wrapped, directory, { ...options, env });
+        } finally {
+          bashSandbox.cleanup();
+        }
       },
     },
   });

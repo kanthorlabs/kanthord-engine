@@ -4,6 +4,7 @@ import {
   accessSync,
   chmodSync,
   constants,
+  existsSync,
   mkdirSync,
   realpathSync,
   writeFileSync,
@@ -182,7 +183,11 @@ async function inSandbox(
     env: h.env,
     denyRead,
   });
-  return execute(wrapped, h.cwd, h.env);
+  try {
+    return await execute(wrapped, h.cwd, h.env);
+  } finally {
+    sandbox.cleanup();
+  }
 }
 
 async function sandboxUnavailable(): Promise<string | false> {
@@ -193,7 +198,9 @@ async function sandboxUnavailable(): Promise<string | false> {
       env: process.env,
       denyRead: [],
     });
-    const probe = await execute(wrapped, process.cwd(), process.env);
+    const probe = await execute(wrapped, process.cwd(), process.env).finally(
+      () => sandbox.cleanup(),
+    );
     return probe.status === SUCCESS
       ? false
       : `the sandbox cannot run a command: ${probe.output.trim()}`;
@@ -234,6 +241,17 @@ test(
       );
       assert.notEqual(outcome.status, SUCCESS, command);
     }
+  },
+);
+
+test(
+  "(invariant) a cleanup after the command leaves no protected file in a cwd that had none",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t);
+    const outcome = await inSandbox(h, "true");
+    assertOutcome("true", outcome, false);
+    assert.equal(existsSync(join(h.cwd, ".env")), false);
   },
 );
 

@@ -48,10 +48,7 @@ jobs:
       - name: Allow the nested user namespace of the bash sandbox
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          ls /etc/apparmor.d | grep -i -E "bwrap|unpriv" || true
-          sudo aa-status | grep -i -E "bwrap|unpriv" || true
           if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
-          sudo aa-status | grep -i -E "bwrap|unpriv" || true
       - name: Test without sshd
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
@@ -96,10 +93,7 @@ jobs:
       - name: Allow the nested user namespace of the bash sandbox
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          ls /etc/apparmor.d | grep -i -E "bwrap|unpriv" || true
-          sudo aa-status | grep -i -E "bwrap|unpriv" || true
           if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
-          sudo aa-status | grep -i -E "bwrap|unpriv" || true
       - name: Install sshd
         run: |
           test -x /usr/sbin/sshd || { sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server; }

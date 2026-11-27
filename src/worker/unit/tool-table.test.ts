@@ -319,6 +319,7 @@ function fakeSandboxRuntime() {
     runtime: {
       initialize: async () => {},
       reset: async () => {},
+      cleanupAfterCommand: () => {},
       wrapWithSandbox: async (
         command: string,
         _binShell?: string,

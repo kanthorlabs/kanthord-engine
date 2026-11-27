@@ -18,6 +18,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   SandboxManager,
   type SandboxRuntimeConfig,
@@ -27,6 +28,8 @@ import { directories } from "../kernel/xdg.ts";
 import { piDirectory } from "./pi.ts";
 
 const NPM_REGISTRY_HOST = "registry.npmjs.org";
+const SANDBOX_RUNTIME_PACKAGE = "@anthropic-ai/sandbox-runtime";
+const SECCOMP_HELPER_DIRECTORY = join("vendor", "seccomp");
 const TEMPORARY_FALLBACK = "/tmp";
 const SUPPORTED_PLATFORMS: readonly NodeJS.Platform[] = ["darwin", "linux"];
 const UNAVAILABLE = "the bash sandbox is not available";
@@ -97,7 +100,7 @@ const DEFAULT_CONFIG: SandboxRuntimeConfig = {
 
 type Runtime = Pick<
   typeof SandboxManager,
-  "initialize" | "wrapWithSandbox" | "reset"
+  "initialize" | "wrapWithSandbox" | "reset" | "cleanupAfterCommand"
 >;
 
 function overriddenConfigFile(env: NodeJS.ProcessEnv): string[] {
@@ -279,6 +282,13 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
   ];
 }
 
+function seccompHelperDirectory(): string {
+  const entry = realpathSync(
+    fileURLToPath(import.meta.resolve(SANDBOX_RUNTIME_PACKAGE)),
+  );
+  return join(dirname(dirname(entry)), SECCOMP_HELPER_DIRECTORY);
+}
+
 function instanceRoots(host: SandboxHost): string[] {
   return host.root === undefined ? [] : [host.root];
 }
@@ -302,6 +312,7 @@ function keptReadPaths(host: SandboxHost, cwd: string): string[] {
       cwd,
       host.env.TMPDIR ?? TEMPORARY_FALLBACK,
       ...instanceRoots(host),
+      seccompHelperDirectory(),
       ...toolRoots(host.env, home).filter((root) =>
         outsideHostDeny(host, home, root),
       ),
@@ -464,6 +475,9 @@ export function createBashSandbox(
         },
       );
       return `export ${COMMAND_VARIABLE}=${shellQuoted(command)} ${TEMPORARY_VARIABLE}=${shellQuoted(temporary)} TMPDIR=${shellQuoted(temporary)} ${packageCacheExports(temporary)}; ${sandboxed}`;
+    },
+    cleanup(): void {
+      runtime.cleanupAfterCommand();
     },
     async dispose(): Promise<void> {
       await runtime.reset();

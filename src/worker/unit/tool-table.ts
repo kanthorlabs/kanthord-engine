@@ -136,11 +136,15 @@ export function sessionTools(
               : execOptions.timeout * MILLISECONDS_PER_SECOND,
           appliedMs: applied * MILLISECONDS_PER_SECOND,
         });
-        return operations.exec(wrapped, directory, {
-          ...execOptions,
-          timeout: applied,
-          env: childEnv,
-        });
+        try {
+          return await operations.exec(wrapped, directory, {
+            ...execOptions,
+            timeout: applied,
+            env: childEnv,
+          });
+        } finally {
+          bashSandbox.cleanup();
+        }
       },
     },
   });
