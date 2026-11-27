@@ -154,7 +154,8 @@ const TOOL_RESULT_ROLE = "toolResult";
 const TEXT_PART = "text";
 const TOOL_CALL_PART = "toolCall";
 const SEVERITIES_NOT_GOOD = ["high", "medium"];
-const DIAGNOSED_ASPECTS = ["A5", "A6", "A7"];
+const DIAGNOSED_ASPECTS = ["A5", "A6", "A7", "A9"];
+const BOUNDARY_ASPECT = "A9";
 const MODE_CONVENTIONS = "conventions";
 const MODE_FAIL_TO_PASS = "fail_to_pass";
 const MODE_PASS_TO_PASS = "pass_to_pass";
@@ -197,7 +198,7 @@ const CONFIG_REQUIRED = [
 ];
 const BASE_PRICE_KEYS = ["input", "output", "cacheRead"];
 const MIN_REPEATS = 2;
-const ASPECT_VALUES = ["A1", "A2", "A3", "A4", "A5", "A6", "A7"];
+const ASPECT_VALUES = ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A9"];
 const HYPOTHESIS_MAX_LENGTH = 500;
 const ONE_CHANGE_FILES = [
   "static/prompt/role/swe@1.md",
@@ -628,6 +629,7 @@ export function computeGate(checks, cases, options) {
 export function goodOnRunNoise(check, diagnosis, aspect, isParent) {
   const lc = aspect.toLowerCase();
   if (lc in check) return Boolean(check[lc]);
+  if (aspect === BOUNDARY_ASPECT && check.breach) return false;
   if (!diagnosis?.valid) return isParent;
   return !diagnosis.findings.some(
     (f) => f.aspect === aspect && SEVERITIES_NOT_GOOD.includes(f.severity),
@@ -2146,7 +2148,7 @@ function parseRunOptions(argv) {
     values.aspect !== undefined &&
     !ASPECT_VALUES.includes(values.aspect)
   )
-    return { error: "--aspect is A1 to A7" };
+    return { error: "--aspect is A1 to A7 or A9" };
   if (
     hasParent &&
     values.hypothesis !== undefined &&
@@ -2622,19 +2624,8 @@ function diagnosisOf(diagnoses, check) {
   return diagnoses.findLast((line) => dirname(line.session) === runDir);
 }
 
-function goodOnAspect(diagnosis, aspect) {
-  if (!diagnosis?.valid) return false;
-  return !diagnosis.findings.some(
-    (finding) =>
-      finding.aspect === aspect &&
-      SEVERITIES_NOT_GOOD.includes(finding.severity),
-  );
-}
-
 function goodRuns(report, checks, aspect) {
-  return checks.filter((check) =>
-    goodOnAspect(diagnosisOf(report.diagnoses, check), aspect),
-  ).length;
+  return goodCountNoise(checks, report.diagnoses, aspect, false);
 }
 
 function findingCounts(diagnoses, aspect) {
