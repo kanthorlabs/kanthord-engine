@@ -1092,7 +1092,7 @@ function killGroup(pid) {
   }
 }
 
-function spawnToPromise(cmd, args, stderrFd, signal) {
+export function spawnToPromise(cmd, args, stderrFd, signal) {
   return new Promise((resolve) => {
     if (signal?.aborted) {
       resolve({ status: null });
@@ -1119,6 +1119,57 @@ function spawnToPromise(cmd, args, stderrFd, signal) {
     child.once("error", () => resolve({ status: null }));
   });
 }
+
+function createAuthGate() {
+  let readers = 0;
+  let writing = false;
+  let writerWaiting = 0;
+  const readersDone = [];
+  const writerDone = [];
+  const readersBlocked = [];
+  return {
+    async enterCall() {
+      while (writing || writerWaiting > 0) {
+        await new Promise((resolve) => readersBlocked.push(resolve));
+      }
+      readers++;
+    },
+    leaveCall() {
+      readers--;
+      if (readers === 0) {
+        for (const resolve of readersDone.splice(0)) resolve();
+      }
+    },
+    async exclusive(fn) {
+      writerWaiting++;
+      while (writing) {
+        await new Promise((resolve) => writerDone.push(resolve));
+      }
+      writerWaiting--;
+      writing = true;
+      while (readers > 0) {
+        await new Promise((resolve) => readersDone.push(resolve));
+      }
+      try {
+        await fn();
+      } finally {
+        writing = false;
+        const nextWriters = writerDone.splice(0);
+        if (nextWriters.length > 0) {
+          for (const resolve of nextWriters) resolve();
+        } else {
+          for (const resolve of readersBlocked.splice(0)) resolve();
+        }
+      }
+    },
+  };
+}
+
+const NO_OP_GATE = {
+  enterCall: () => Promise.resolve(),
+  leaveCall: () => {},
+  exclusive: (fn) => fn(),
+};
 
 export function osDenyWrapper(
   setRealPath,
@@ -1743,33 +1794,40 @@ async function guardedAgentCall(run, deps, call) {
   if (deps.signal?.aborted) return { stop: "killed" };
   if (!(await refreshForCall(run, deps, call)))
     return { stop: "the credential refresh failed" };
-  const refreshed = captureAuthState(run.authPath);
-  if (refreshedAuthBreach(refreshed, run.authStart))
-    return breachStop(run, BREACH_AUTH_FILE);
-  for (const value of extractCredentialValues(run.authPath))
-    run.credValues.add(value);
-  let inputCount = 0;
-  for (const path of call.inputPaths)
-    inputCount += countCredentialInFile(path, run.credValues);
-  if (inputCount > 0) return credentialStop(run, inputCount);
-  if (deps.signal?.aborted) return { stop: "killed" };
-  mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
-  const exit = await deps.runAgent(
-    call.args,
-    call.stderrPath,
-    call.allowedPaths,
-    deps.signal,
-  );
-  if (deps.signal?.aborted) return { stop: "killed" };
-  if (existsSync(call.outputPath)) {
-    const content = readFileSync(call.outputPath);
-    if (content.length > 0)
-      appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+  const gate = deps.gate ?? NO_OP_GATE;
+  await gate.enterCall();
+  let exit;
+  try {
+    const refreshed = captureAuthState(run.authPath);
+    if (refreshedAuthBreach(refreshed, run.authStart))
+      return breachStop(run, BREACH_AUTH_FILE);
+    for (const value of extractCredentialValues(run.authPath))
+      run.credValues.add(value);
+    let inputCount = 0;
+    for (const path of call.inputPaths)
+      inputCount += countCredentialInFile(path, run.credValues);
+    if (inputCount > 0) return credentialStop(run, inputCount);
+    if (deps.signal?.aborted) return { stop: "killed" };
+    mkdirSync(run.runDir, { recursive: true, mode: DIRECTORY_MODE });
+    exit = await deps.runAgent(
+      call.args,
+      call.stderrPath,
+      call.allowedPaths,
+      deps.signal,
+    );
+    if (deps.signal?.aborted) return { stop: "killed" };
+    if (existsSync(call.outputPath)) {
+      const content = readFileSync(call.outputPath);
+      if (content.length > 0)
+        appendFileSync(run.resultsPath, content, { mode: FILE_MODE });
+    }
+    const count = countCredentialInFile(call.sessionPath, run.credValues);
+    if (count > 0) return credentialStop(run, count);
+    if (checkAuthFileBreach(run.authPath, refreshed))
+      return breachStop(run, BREACH_AUTH_FILE);
+  } finally {
+    gate.leaveCall();
   }
-  const count = countCredentialInFile(call.sessionPath, run.credValues);
-  if (count > 0) return credentialStop(run, count);
-  if (checkAuthFileBreach(run.authPath, refreshed))
-    return breachStop(run, BREACH_AUTH_FILE);
   if (call.protectedPathSearch) {
     const pathStrings = protectedPathStrings(
       run.evalSetDir,
@@ -1882,7 +1940,8 @@ function startGateOpen(run, usd, inFlightReserveSum = 0) {
 }
 
 async function runDiagnosis(run, gradingRoot, deps) {
-  if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
+  if (!startGateOpen(run, run.config.judge_usd, deps.inFlightReserveSum))
+    return { stop: STOP_CAP };
   const judgeWorkspace = join(gradingRoot, JUDGE_DIR);
   const inputPaths = writeJudgeWorkspace(run, judgeWorkspace);
   let exit75Count = 0;
@@ -1912,7 +1971,8 @@ async function runDiagnosis(run, gradingRoot, deps) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
-    if (!startGateOpen(run, run.config.judge_usd)) return { stop: STOP_CAP };
+    if (!startGateOpen(run, run.config.judge_usd, deps.inFlightReserveSum))
+      return { stop: STOP_CAP };
   }
   const resultLine = readJsonLines(run.resultsPath).findLast(
     (line) => line.agent === PROFILE_RE && line.session === judgeSessionPath,
@@ -1952,7 +2012,8 @@ async function evaluateInRoots(run, deps, roots) {
     if (!called.retry) break;
     exit75Count++;
     if (exit75Count >= MAX_RETRYABLE) return { stop: "third exit 75" };
-    if (!startGateOpen(run, run.caseJson.usd)) return { stop: STOP_CAP };
+    if (!startGateOpen(run, run.caseJson.usd, deps.inFlightReserveSum))
+      return { stop: STOP_CAP };
     const resultsDir = dirname(run.checksPath);
     const nextAttempt = nextRunAttempt(resultsDir, run.caseId, run.repeat);
     const nextRunDir = join(
@@ -2338,10 +2399,10 @@ async function runPending(plan, deps) {
   let inFlight = 0;
   let inFlightReserveSum = 0;
   const inFlightCases = new Set();
-  let draining = false;
-  const drainWaiters = [];
+  const gate = createAuthGate();
 
   let firstStop = null;
+  let taskError = null;
   let resolvePool;
   const poolDone = new Promise((r) => {
     resolvePool = r;
@@ -2355,7 +2416,7 @@ async function runPending(plan, deps) {
   }
 
   function tryStartNext() {
-    if (firstStop || signal?.aborted || draining) return;
+    if (firstStop || signal?.aborted) return;
     for (let i = 0; i < pending.length && inFlight < jobs; i++) {
       const run = pending[i];
       if (!run.diagnosisOnly && inFlightCases.has(run.caseId)) continue;
@@ -2370,15 +2431,17 @@ async function runPending(plan, deps) {
   const poolDeps = {
     ...deps,
     signal,
+    gate,
+    get inFlightReserveSum() {
+      return inFlightReserveSum;
+    },
     refresh: async (authPath, provider, validityMs) => {
       if (refreshCanWrite(authPath, provider, validityMs)) {
-        draining = true;
-        while (inFlight > 1) {
-          await new Promise((resolve) => drainWaiters.push(resolve));
-        }
-        await origRefresh(authPath, provider, validityMs);
-        draining = false;
-        tryStartNext();
+        await gate.exclusive(async () => {
+          if (refreshCanWrite(authPath, provider, validityMs)) {
+            await origRefresh(authPath, provider, validityMs);
+          }
+        });
       } else {
         await origRefresh(authPath, provider, validityMs);
       }
@@ -2394,17 +2457,28 @@ async function runPending(plan, deps) {
       inFlight++;
       inFlightReserveSum += reserve;
       if (!run.diagnosisOnly) inFlightCases.add(run.caseId);
+      const taskDeps = {
+        ...poolDeps,
+        get inFlightReserveSum() {
+          return poolDeps.inFlightReserveSum - reserve;
+        },
+      };
       try {
-        const result = await evaluateRun(run, poolDeps);
+        const result = await evaluateRun(run, taskDeps);
         if (result.stop && !firstStop) {
           firstStop = result;
+          controller?.abort();
+        }
+      } catch (err) {
+        if (!taskError) {
+          taskError = err;
+          firstStop = firstStop ?? { stop: "error" };
           controller?.abort();
         }
       } finally {
         inFlight--;
         inFlightReserveSum -= reserve;
         if (!run.diagnosisOnly) inFlightCases.delete(run.caseId);
-        for (const resolve of drainWaiters.splice(0)) resolve();
       }
     } finally {
       activeTasks--;
@@ -2417,6 +2491,7 @@ async function runPending(plan, deps) {
   if (activeTasks === 0) resolvePool();
   await poolDone;
 
+  if (taskError) throw taskError;
   if (firstStop) return firstStop;
   if (pending.length > 0) return { stop: STOP_CAP };
   return { stop: null };
