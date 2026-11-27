@@ -11,7 +11,11 @@ import {
 import { join } from "node:path";
 import { simpleGit } from "simple-git";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
-import { SUITE_CONCURRENCY, temporary } from "../../kernel/test-support.ts";
+import {
+  isolateHome,
+  SUITE_CONCURRENCY,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { CauseCategory, unattributed } from "../../kernel/cause.ts";
 import { background } from "../../kernel/context.ts";
 import {
@@ -52,6 +56,7 @@ import {
   TEST_SSH_ACCESS,
 } from "./test-support.ts";
 
+isolateHome();
 after(() => bashSandbox.dispose());
 
 const FIXED = "fixed";

@@ -6,6 +6,8 @@
 allowBuilds:
   "@google/genai": false
   esbuild: true
+  koffi: false
+  node-pty: false
   protobufjs: false
 # Refuse package versions published less than three days ago (in minutes).
 minimumReleaseAge: 4320

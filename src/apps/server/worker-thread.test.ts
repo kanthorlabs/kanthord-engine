@@ -159,6 +159,20 @@ test("the directories of a slot thread name the slot root, not the directories o
   }
 });
 
+test("(invariant) a slot thread deny_read list holds the config file outside the home directory", (t) => {
+  const root = temporary(t);
+  const configFile = join(root, "serve", "kanthord.yaml");
+  const slotRoot = join(root, "slot");
+  const launch = {
+    instance: {},
+    entries: [],
+    root: slotRoot,
+    output: new PassThrough(),
+    environment: { PATH: hostEnvironment().PATH, HOME: join(root, "home") },
+  } as unknown as SlotLaunch;
+  assert.ok(slotThreadData(launch, configFile).deny_read.includes(configFile));
+});
+
 test("(security) a slot thread gets a deny_read list of the server environment that names no ancestor of the slot workspace or TMPDIR", (t) => {
   const serverRoot = temporary(t);
   const serverEnv: NodeJS.ProcessEnv = {
@@ -187,7 +201,11 @@ test("(security) a slot thread gets a deny_read list of the server environment t
   const tmp = join(slotRoot, "tmp");
   assert.ok(data.deny_read.includes(join(slot.state, "pi")));
   const denied = scopedDenyRead(
-    { env: { TMPDIR: tmp }, denyRead: data.deny_read, root: slotRoot },
+    {
+      env: { HOME: join(serverRoot, "home"), TMPDIR: tmp },
+      denyRead: data.deny_read,
+      root: slotRoot,
+    },
     workspace,
   );
   assert.ok(denied.includes(server.config));

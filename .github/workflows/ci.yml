@@ -45,6 +45,10 @@ jobs:
       - run: pnpm run pi-tools:fetch
       - name: Install the bash sandbox tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+      - name: Allow the nested user namespace of the bash sandbox
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
       - name: Test without sshd
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
@@ -86,6 +90,10 @@ jobs:
       - run: pnpm run pi-tools:fetch
       - name: Install the bash sandbox tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap socat ripgrep
+      - name: Allow the nested user namespace of the bash sandbox
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then sudo apparmor_parser -R /etc/apparmor.d/bwrap-userns-restrict; fi
       - name: Install sshd
         run: |
           test -x /usr/sbin/sshd || { sudo apt-get update && sudo apt-get install -y --no-install-recommends openssh-server; }

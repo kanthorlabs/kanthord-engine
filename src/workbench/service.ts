@@ -325,6 +325,7 @@ export interface Dependencies {
   logger: Logger;
   stateDirectory: string;
   hostHome?: string;
+  configFile?: string;
   agentVariant: (tx: Transaction, variantId: string) => AgentVariant | null;
   agentVariants: (tx: Transaction) => readonly AgentVariantItem[];
   agentPrompt: {
@@ -1612,11 +1613,10 @@ export class WorkbenchService implements Service {
       const parts = isPhase ? withoutOfferAction(composed) : composed;
       const templates = await this.dependencies.agentPrompt.templates(context);
       const prompt = systemPrompt(parts, PromptConsumer.Workbench, templates);
-      const builtin = builtinTools(
-        await loadPi(),
-        session.agentName,
-        session.place.cwd,
-      );
+      const builtin = builtinTools(await loadPi(), session.agentName, {
+        cwd: session.place.cwd,
+        config: this.dependencies.configFile,
+      });
       const toolOperationsByName = new Map<string, Operation>();
       const operations = toolOperations(
         this.dependencies.operations(),
