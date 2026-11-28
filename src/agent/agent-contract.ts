@@ -20,7 +20,11 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  type Context,
+} from "../kernel/context.ts";
 import { getProfile, type Profile, type ProfileName } from "./catalog.ts";
 import {
   checkPreconditions,
@@ -546,7 +550,7 @@ async function openSteps(input: AgentInput): Promise<AgentOpen> {
     extensionFailure,
     cleanupCtx: () =>
       new CancellationContext(
-        inputContext,
+        background,
         Date.now() + RUNTIME_SETUP_DEADLINE_MS,
       ),
   });

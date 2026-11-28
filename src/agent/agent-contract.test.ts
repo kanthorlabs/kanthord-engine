@@ -748,3 +748,24 @@ test("forceStop after the wall end returns budget_end with wall", async (t) => {
   await sending;
   await run.close();
 });
+
+test("close after the wall end completes without deadlock", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () =>
+            resolve(fauxAssistantMessage("", { stopReason: "aborted" })),
+          );
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  const result = await run.send("hello", { work: null });
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+  await run.close();
+});
