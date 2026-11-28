@@ -12,9 +12,12 @@ import {
 import { type DiskSpace, freeDiskOf } from "../../kernel/disk.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
-import { redactReason } from "../../kernel/probe.ts";
+import { redactReason, redactText } from "../../kernel/probe.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  EnvironmentFailure,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
@@ -66,6 +69,8 @@ const TREE_DELETED = "tree deleted";
 const BASE_PURPOSE = "base";
 const UNKNOWN_ERROR = "unknown";
 const NO_REFS: readonly string[] = [];
+const SETUP_OUTPUT_TAIL_LENGTH = 1500;
+const NO_LENGTH = 0;
 
 export interface SetupRepository {
   binding_id: string;
@@ -134,26 +139,73 @@ export type SetupFailure = Extract<
   { end: typeof SetupEnd.Failed }
 >;
 
+type CommandResult = VerificationRun["verification"]["results"][number];
+
+interface SetupDetailParts {
+  last: CommandResult;
+  command: string;
+  files: readonly string[] | undefined;
+  omitted: number;
+  tail: string;
+}
+
+function setupDetail(parts: SetupDetailParts): string {
+  return JSON.stringify({
+    exit_code: parts.last.exit_code,
+    signal: parts.last.signal,
+    timed_out: parts.last.timed_out,
+    command: parts.command,
+    output_tail: parts.tail,
+    ...(parts.files === undefined
+      ? {}
+      : { changed_tracked_files: parts.files }),
+    ...(parts.omitted > NO_LENGTH
+      ? { changed_tracked_files_omitted: parts.omitted }
+      : {}),
+  });
+}
+
+function fits(detail: string): boolean {
+  return detail.length <= STOP_DETAIL_MAX_LENGTH;
+}
+
+function fitFiles(parts: SetupDetailParts, files: readonly string[]): void {
+  for (let kept = files.length; kept >= NO_LENGTH; kept -= 1) {
+    parts.files = files.slice(0, kept);
+    parts.omitted = files.length - kept;
+    if (fits(setupDetail(parts))) return;
+  }
+}
+
+function fittedSetupDetail(result: SetupFailure, last: CommandResult) {
+  const files = result.changed?.map((file) => redactText(file));
+  const parts: SetupDetailParts = {
+    last,
+    command: redactReason(last.command),
+    files,
+    omitted: NO_LENGTH,
+    tail: "",
+  };
+  if (files !== undefined) fitFiles(parts, files);
+  parts.tail = redactText(result.run.outputs.at(-1) ?? "").slice(
+    -SETUP_OUTPUT_TAIL_LENGTH,
+  );
+  let detail = setupDetail(parts);
+  while (!fits(detail) && parts.tail.length > NO_LENGTH) {
+    parts.tail = parts.tail.slice(detail.length - STOP_DETAIL_MAX_LENGTH);
+    detail = setupDetail(parts);
+  }
+  return detail;
+}
+
 export function setupStop(result: SetupFailure): ExecutionStop {
   const last = result.run.verification.results.at(-1);
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(
-      JSON.stringify(
-        last === undefined
-          ? { commands: result.commands }
-          : {
-              exit_code: last.exit_code,
-              signal: last.signal,
-              timed_out: last.timed_out,
-              command: last.command,
-              ...(result.changed === undefined
-                ? {}
-                : { changed_tracked_files: result.changed }),
-            },
-      ),
-    ),
+    last === undefined
+      ? redactReason(JSON.stringify({ commands: result.commands }))
+      : fittedSetupDetail(result, last),
   );
 }
 

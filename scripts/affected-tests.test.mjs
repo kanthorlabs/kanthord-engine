@@ -60,7 +60,7 @@ const FIXTURE_PACKAGE = {
   type: "module",
   scripts: {
     "test:files":
-      "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000",
+      "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000 --test-force-exit",
   },
 };
 const PASSING_TEST =
@@ -649,8 +649,10 @@ test("a failed test gives the report, the report file and the exit code 1", asyn
     PATH: HOST_PATH,
   });
   assert.equal(result.status, FAILED);
+  assert.doesNotMatch(result.stderr, /^(start|end): /m);
+  assert.doesNotMatch(result.stdout, /^(start|end): /m);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "related",
     reason: null,
     tests: ["src/a.test.ts"],
@@ -674,14 +676,112 @@ test("a test that fails once and passes on the rerun is flaky", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(result.report.failed, []);
-  assert.equal(result.report.version, 3);
+  assert.equal(result.report.version, 4);
   assert.deepEqual(result.report.flaky, [
     {
       file: "src/a.test.ts",
       name: "fails once",
-      lines: { start: 4, end: 8 },
+      lines: [{ start: 4, end: 8 }],
       imports: ["src/a.ts"],
     },
+  ]);
+});
+
+const HELPER_HEADER = `import "./a.ts";
+import test from "node:test";
+import { existsSync, writeFileSync } from "node:fs";
+`;
+const HELPER_TEST = `test("fails once", () => {
+  if (seen()) return;
+  writeFileSync("marker", "");
+  throw new Error("first run");
+});
+`;
+
+async function flakyLinesOf(t, source) {
+  const root = await fixture(t, {
+    "src/a.ts": EMPTY_MODULE,
+    "src/a.test.ts": source,
+  });
+  const result = runEntry(root, [], {
+    KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
+  });
+  assert.equal(result.status, SUCCESS);
+  assert.equal(result.report.version, 4);
+  const [entry] = result.report.flaky;
+  return entry.lines;
+}
+
+test("a flaky test that calls a top-level helper reports the helper range sorted by start line", async (t) => {
+  const lines = await flakyLinesOf(
+    t,
+    `${HELPER_HEADER}function seen() {
+  return existsSync("marker");
+}
+${HELPER_TEST}`,
+  );
+  assert.deepEqual(lines, [
+    { start: 4, end: 6 },
+    { start: 7, end: 11 },
+  ]);
+});
+
+test("a helper that calls a second top-level helper adds the second range", async (t) => {
+  const lines = await flakyLinesOf(
+    t,
+    `${HELPER_HEADER}const MARKER = "marker";
+function exists() {
+  return existsSync(MARKER);
+}
+function seen() {
+  return exists();
+}
+${HELPER_TEST}`,
+  );
+  assert.deepEqual(lines, [
+    { start: 4, end: 4 },
+    { start: 5, end: 7 },
+    { start: 8, end: 10 },
+    { start: 11, end: 15 },
+  ]);
+});
+
+test("a top-level beforeEach call adds its range", async (t) => {
+  const lines = await flakyLinesOf(
+    t,
+    `import "./a.ts";
+import test, { beforeEach } from "node:test";
+import { existsSync, writeFileSync } from "node:fs";
+function seen() {
+  return existsSync("marker");
+}
+beforeEach(() => {
+  writeFileSync("other", "");
+});
+${HELPER_TEST}`,
+  );
+  assert.deepEqual(lines, [
+    { start: 4, end: 6 },
+    { start: 7, end: 9 },
+    { start: 10, end: 14 },
+  ]);
+});
+
+test("a top-level statement that the test does not read adds no range", async (t) => {
+  const lines = await flakyLinesOf(
+    t,
+    `${HELPER_HEADER}function seen() {
+  return existsSync("marker");
+}
+function unused() {
+  return 1;
+}
+const UNUSED = 2;
+${HELPER_TEST}`,
+  );
+  assert.deepEqual(lines, [
+    { start: 4, end: 6 },
+    { start: 11, end: 15 },
   ]);
 });
 
@@ -694,7 +794,7 @@ test("a flaky id whose first name part matches no top-level call is a plain entr
     KANTHORD_CHANGES: await changesFile(root, [change("src/a.ts")]),
   });
   assert.equal(result.status, SUCCESS);
-  assert.equal(result.report.version, 3);
+  assert.equal(result.report.version, 4);
   assert.deepEqual(result.report.flaky, [
     { file: "src/a.test.ts", name: "fails once" },
   ]);
@@ -722,11 +822,11 @@ test("a report over the size limit drops the lines and imports of each flaky ent
   const flaky = Array.from({ length: OVERSIZE_FLAKY }, (_, index) => ({
     file: `src/t${index}.test.ts`,
     name: "fails once",
-    lines: { start: 1, end: 2 },
+    lines: [{ start: 1, end: 2 }],
     imports,
   }));
   const report = fitReport({
-    version: 3,
+    version: 4,
     selection: "related",
     reason: null,
     tests: flaky.map(({ file }) => file),
@@ -852,7 +952,7 @@ test("the none selection gives empty lists and the exit code 0", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "none",
     reason: null,
     tests: [],
@@ -875,7 +975,7 @@ test("a global input gives the all selection with a reason", async (t) => {
   });
   assert.equal(result.status, SUCCESS);
   assert.deepEqual(withoutFloor(result.report), {
-    version: 3,
+    version: 4,
     selection: "all",
     reason: "global input: package.json",
     tests: ["src/a.test.ts"],
@@ -940,12 +1040,12 @@ test("a template head that is not a directory counts in the closure", async (t) 
   assert.ok(closureOf(buildGraph(root), "src/main.ts").includes("src/w.ts"));
 });
 
-test("a selection all writes version 3 with the floor and the total test time", async (t) => {
+test("a selection all writes version 4 with the floor and the total test time", async (t) => {
   const root = await fixture(t, FLOOR_FILES);
   const report = outsideTestContext(() =>
     affectedReport(root, [change("package.json")]),
   );
-  assert.equal(report.version, 3);
+  assert.equal(report.version, 4);
   assert.equal(report.floor.tests, 1);
   assert.ok(report.floor.seconds > 0);
   assert.ok(report.floor.total_seconds >= report.floor.seconds);

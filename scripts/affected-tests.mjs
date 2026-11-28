@@ -91,7 +91,7 @@ const SELECTION = { all: "all", none: "none", related: "related" };
 const GLOBAL_REASON = "global input: ";
 const UNKNOWN_REASON = "unknown path: ";
 const REASON_MAX_BYTES = 256;
-const REPORT_VERSION = 3;
+const REPORT_VERSION = 4;
 const SECONDS_ROUNDING = 10;
 const NO_SECONDS = 0;
 const TEXT_MAX_BYTES = 1024;
@@ -136,6 +136,8 @@ const RENAMED_PATH_OFFSET = 2;
 const HALVING_DIVISOR = 2;
 const NAME_SEPARATOR = " > ";
 const FIRST_NAME_PART = 0;
+const HOOK_NAMES = ["before", "beforeEach", "after", "afterEach"];
+const NO_PENDING = 0;
 const LINE_NUMBER_OFFSET = 1;
 const FAILED_RUN_MESSAGE = "the test run failed without a failed test";
 const UNKNOWN_STATUS_MESSAGE = "unknown git status: ";
@@ -164,6 +166,8 @@ const RERUN_FILE_LIMIT = 8;
 const RUN_TEMPORARY_PREFIX = "kanthord-affected-";
 const FAILED_FILE_NAME = "failed.jsonl";
 const AFFECTED_REPORTER = "./scripts/affected-reporter.mjs";
+const PROGRESS_REPORTER = "./scripts/progress-reporter.mjs";
+const STDERR_DESTINATION = "--test-reporter-destination=stderr";
 const PNPM = "pnpm";
 const CHANGES_ENVIRONMENT = "KANTHORD_CHANGES";
 const REPORT_ENVIRONMENT = "KANTHORD_AFFECTED_REPORT";
@@ -503,7 +507,7 @@ export function computeChanges(root, base) {
   return [...tracked, ...untracked];
 }
 
-export function runTests(root, files, concurrency) {
+export function runTests(root, files, concurrency, { progress = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), RUN_TEMPORARY_PREFIX));
   try {
     const destination = join(directory, FAILED_FILE_NAME);
@@ -515,6 +519,9 @@ export function runTests(root, files, concurrency) {
         `${REPORTER_OPTION}${AFFECTED_REPORTER}`,
         STDOUT_DESTINATION,
         `${DESTINATION_OPTION}${destination}`,
+        ...(progress
+          ? [`${REPORTER_OPTION}${PROGRESS_REPORTER}`, STDERR_DESTINATION]
+          : []),
         ...files,
       ],
       { cwd: root, stdio: STDIO_INHERIT },
@@ -648,6 +655,80 @@ function lineOf(tree, position) {
   return tree.getLineAndCharacterOfPosition(position).line + LINE_NUMBER_OFFSET;
 }
 
+function bindingNames(name) {
+  if (ts.isIdentifier(name)) return [name.text];
+  return name.elements.flatMap((element) =>
+    ts.isOmittedExpression(element) ? [] : bindingNames(element.name),
+  );
+}
+
+function declaredNames(statement) {
+  if (ts.isVariableStatement(statement))
+    return statement.declarationList.declarations.flatMap(({ name }) =>
+      bindingNames(name),
+    );
+  const declaresName =
+    ts.isFunctionDeclaration(statement) ||
+    ts.isClassDeclaration(statement) ||
+    ts.isEnumDeclaration(statement);
+  return declaresName && statement.name !== undefined
+    ? [statement.name.text]
+    : [];
+}
+
+function readNames(node) {
+  const names = new Set();
+  const visit = (child) => {
+    if (ts.isIdentifier(child)) names.add(child.text);
+    ts.forEachChild(child, visit);
+  };
+  visit(node);
+  return names;
+}
+
+function isHookCall(statement) {
+  return (
+    ts.isExpressionStatement(statement) &&
+    ts.isCallExpression(statement.expression) &&
+    ts.isIdentifier(statement.expression.expression) &&
+    HOOK_NAMES.includes(statement.expression.expression.text)
+  );
+}
+
+function unseenDeclarations(declarations, included, statement) {
+  return [...readNames(statement)]
+    .flatMap((name) => declarations.get(name) ?? [])
+    .filter((declared) => !included.has(declared));
+}
+
+function helperStatements(tree, call) {
+  const declarations = new Map();
+  for (const statement of tree.statements)
+    for (const name of declaredNames(statement))
+      declarations.set(name, [...(declarations.get(name) ?? []), statement]);
+  const included = new Set([call, ...tree.statements.filter(isHookCall)]);
+  const pending = [...included];
+  while (pending.length > NO_PENDING) {
+    for (const statement of unseenDeclarations(
+      declarations,
+      included,
+      pending.pop(),
+    )) {
+      included.add(statement);
+      pending.push(statement);
+    }
+  }
+  included.delete(call);
+  return [...included];
+}
+
+function rangeOf(tree, statement) {
+  return {
+    start: lineOf(tree, statement.getStart(tree)),
+    end: lineOf(tree, statement.getEnd()),
+  };
+}
+
 function testLines(root, { file, name }) {
   const source = readFileSync(join(root, file), "utf8");
   const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest);
@@ -657,10 +738,9 @@ function testLines(root, { file, name }) {
   );
   if (calls.length !== SINGLE_MATCH) return null;
   const [call] = calls;
-  return {
-    start: lineOf(tree, call.getStart(tree)),
-    end: lineOf(tree, call.getEnd()),
-  };
+  return [call, ...helperStatements(tree, call)]
+    .map((statement) => rangeOf(tree, statement))
+    .sort((left, right) => left.start - right.start);
 }
 
 function flakyEntry(root, graph, id) {

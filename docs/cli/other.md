@@ -605,12 +605,18 @@ directory to the versions of this binary. Stop the server before this command.
   `src/config/steps.ts`. Step 1 renames `mission.consecutive_loss_limit`,
   `gateway.token_version` and `gateway.token_lifetime`.
 - The database version is the migration history of each service.
-- `--reset-changed` is a dev reset. It drops and rebuilds only the services
-  whose live schema differs from their migration text. Every other service
-  keeps its rows. The reset never drops a custody table: a changed `custody`
+- `--reset-changed` is a dev reset. It drops and rebuilds only the changed
+  services. A changed service is a service with a changed own object: an
+  expected object is absent or has other SQL, or a live object on an expected
+  table differs. A table with the prefix of a service that no migration text of
+  the service creates is no change. Every other service keeps its rows. The
+  reset never drops a custody table: a changed `custody`
   migration text fails with `system.database.reset.custody_refused`. A table
   outside the reset services that references a dropped table fails with
-  `system.database.reset.foreign_key` and names each dependent table. Without
+  `system.database.reset.foreign_key` and names each dependent table. A
+  prefixed table that no migration text of an unchanged service creates fails
+  with `system.database.reset.unowned_table` and names each table. Drop the
+  table or restore the migration text, then run the command again. Without
   `--reset-changed`, the command keeps the steps below and refuses a changed
   migration text with `system.database.migration.schema_mismatch`.
 
@@ -628,7 +634,8 @@ The command runs in this order:
    `system.database.migration.incompatible_history`. A database
    of another migration text fails with `system.database.migration.schema_mismatch`.
    With `--reset-changed`, the command finds the changed services of each file
-   instead, and checks the reset refusals of each file with a changed service.
+   instead, and checks the unowned tables of each file, then the reset refusals
+   of each file with a changed service.
    A `master_key` that differs from the one in `kanthord.db` fails with
    `system.config.master_key_mismatch`. The command checks both files and the
    master key before it writes a backup or a change.
@@ -812,6 +819,11 @@ absolute path, `denyRead` holds that file and its symlink target.
 Every sandboxed bash, the coder bash and the Workbench bash, exports `TMPDIR`
 inside the sandbox, and also `pnpm_config_store_dir`, `pnpm_config_cache_dir` and
 `npm_config_cache` as directories under that `TMPDIR`.
+
+A worker keeps one pnpm store, one pnpm cache and one npm cache under its
+temporary directory: `pnpm-store`, `pnpm-cache` and `npm-cache`. The setup, the
+verification commands and the sandboxed bash use them, so a kept `node_modules`
+names the same store in each of them.
 
 `denyRead` also holds the home directory as one entry. The home directory is
 `HOME` when it is absolute, else the home directory of the user. `allowRead`
@@ -1513,6 +1525,7 @@ implement them. Help is not an extra root name or a reason to load secrets.
 | local           | `system.database.migration.pending`              | A database with a recorded migration has a pending migration. Run `kanthord upgrade`.                                                                                                                                                                                                                                                                              | serve server                                                               |
 | local           | `system.database.reset.custody_refused`          | The migration text of the `custody` service changed. The reset never drops a custody table.                                                                                                                                                                                                                                                                        | upgrade                                                                    |
 | local           | `system.database.reset.foreign_key`              | A table outside the reset services references a table that the reset drops. The error names each dependent table.                                                                                                                                                                                                                                                  | upgrade                                                                    |
+| local           | `system.database.reset.unowned_table`            | A table with the prefix of an unchanged service is in no migration text of that service. Drop each table named in the error or restore the migration text, then run the command again.                                                                                                                                                                             | upgrade                                                                    |
 | local           | `system.config.master_key_mismatch`              | `master_key` does not match the database. Restore the configuration file that created it, or the matching backup.                                                                                                                                                                                                                                                  | serve server                                                               |
 | local           | `system.database.open_failed`                    | The operational SQLite store cannot open.                                                                                                                                                                                                                                                                                                                          | serve server                                                               |
 | local           | `system.files.create_failed`                     | A private state or configuration directory cannot be created.                                                                                                                                                                                                                                                                                                      | config init, serve server, auth jwt generate --output                      |

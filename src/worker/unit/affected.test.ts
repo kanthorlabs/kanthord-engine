@@ -127,6 +127,19 @@ test("a report that breaks a rule answers an error", () => {
       version: 2,
       flaky: [{ ...ID_TWO, lines: { start: 1, end: 2 }, imports: [] }],
     },
+    {
+      version: 3,
+      flaky: [{ ...ID_TWO, lines: [{ start: 1, end: 2 }], imports: [] }],
+    },
+    {
+      version: 4,
+      flaky: [{ ...ID_TWO, lines: { start: 1, end: 2 }, imports: [] }],
+    },
+    { version: 4, flaky: [{ ...ID_TWO, lines: [], imports: [] }] },
+    {
+      version: 4,
+      flaky: [{ ...ID_TWO, lines: [{ start: 3, end: 2 }], imports: [] }],
+    },
   ];
   for (const overrides of invalid)
     assert.ok("error" in parsedReport(overrides), JSON.stringify(overrides));
@@ -205,6 +218,36 @@ const SCRIPT_REPORTS: Record<string, AffectedReport> = {
     tests: [A_TEST],
     flaky: [
       { file: A_TEST, name: "one", lines: { start: 1, end: 1 }, imports: [] },
+    ],
+  }),
+  flaky_second_range_met: report({
+    version: 4,
+    tests: [A_TEST],
+    flaky: [
+      {
+        file: A_TEST,
+        name: "one",
+        lines: [
+          { start: 5, end: 9 },
+          { start: 1, end: 1 },
+        ],
+        imports: [],
+      },
+    ],
+  }),
+  flaky_ranges_untouched: report({
+    version: 4,
+    tests: [A_TEST],
+    flaky: [
+      {
+        file: A_TEST,
+        name: "one",
+        lines: [
+          { start: 5, end: 9 },
+          { start: 12, end: 15 },
+        ],
+        imports: ["helper.ts"],
+      },
     ],
   }),
   flaky_import_changed: report({
@@ -498,6 +541,22 @@ test("a version 3 flaky test that imports a changed path answers failed", async 
 
 test("a version 3 flaky test in a changed file with no changed line and no changed import answers passed", async (t) => {
   const f = await fixture(t, { base: "pass", head: "flaky_untouched" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Passed);
+  assert.deepEqual(result.promoted_flaky, []);
+  assert.equal(result.base_run, null);
+});
+
+test("a version 4 flaky test whose second range meets a changed range answers failed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "flaky_second_range_met" });
+  const result = await ran(f);
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  assert.deepEqual(result.promoted_flaky, [{ file: A_TEST, name: "one" }]);
+  assert.deepEqual(result.failed, [{ file: A_TEST, name: "one" }]);
+});
+
+test("a version 4 flaky test in a changed file with no met range and no changed import answers passed", async (t) => {
+  const f = await fixture(t, { base: "pass", head: "flaky_ranges_untouched" });
   const result = await ran(f);
   assert.equal(result.verdict, AffectedVerdict.Passed);
   assert.deepEqual(result.promoted_flaky, []);

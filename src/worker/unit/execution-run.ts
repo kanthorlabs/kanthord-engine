@@ -21,6 +21,7 @@ import {
   ClaimState,
   ExecutionStopReason,
   type ReleaseStop,
+  STOP_DETAIL_MAX_LENGTH,
 } from "../../scheduler/contract.ts";
 import { createIdempotencyKey } from "../../kernel/identity.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
@@ -88,6 +89,10 @@ export const EXECUTION_NOT_RUNNING = "scheduler.execution.not_running";
 const NO_TELEMETRY_FAULTS = 0;
 const TELEMETRY_FLUSH_MS = 5000;
 const UNNAMED_WORKER = "unnamed";
+const NO_OVERFLOW = 0;
+const OUTPUT_TAIL_FIELD = "output_tail";
+const CHANGED_FILES_FIELD = "changed_tracked_files";
+const CHANGED_FILES_OMITTED_FIELD = "changed_tracked_files_omitted";
 
 export interface MethodClaim {
   execution_id: string;
@@ -156,7 +161,32 @@ function detailWithDigests(
   detail: string | null,
   digests: Readonly<Record<string, string>>,
 ): string {
-  return JSON.stringify({ ...detailFactsOf(detail), digests });
+  const facts: Record<string, unknown> = {
+    ...detailFactsOf(detail),
+    digests,
+  };
+  const overflow = JSON.stringify(facts).length - STOP_DETAIL_MAX_LENGTH;
+  const tail = facts[OUTPUT_TAIL_FIELD];
+  if (overflow > NO_OVERFLOW && z.string().safeParse(tail).success)
+    facts[OUTPUT_TAIL_FIELD] = String(tail).slice(overflow);
+  dropChangedFiles(facts);
+  return JSON.stringify(facts);
+}
+
+function dropChangedFiles(facts: Record<string, unknown>): void {
+  const files = z.array(z.string()).safeParse(facts[CHANGED_FILES_FIELD]);
+  if (!files.success) return;
+  const omitted = z.number().safeParse(facts[CHANGED_FILES_OMITTED_FIELD]);
+  const already = omitted.success ? omitted.data : NO_OVERFLOW;
+  let kept = files.data.length;
+  while (
+    kept > NO_OVERFLOW &&
+    JSON.stringify(facts).length > STOP_DETAIL_MAX_LENGTH
+  ) {
+    kept -= 1;
+    facts[CHANGED_FILES_FIELD] = files.data.slice(NO_OVERFLOW, kept);
+    facts[CHANGED_FILES_OMITTED_FIELD] = already + files.data.length - kept;
+  }
 }
 
 export class ExecutionRun {

@@ -1,7 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Worker } from "node:worker_threads";
-import { hostDenyRead } from "../../agent/bash-sandbox.ts";
+import {
+  hostDenyRead,
+  packageCacheEnvironment,
+} from "../../agent/bash-sandbox.ts";
 import { piDirectory } from "../../agent/pi.ts";
 import { LogDestination } from "../../kernel/log.ts";
 import { type PlacementStatus, PoolPlacement } from "../../worker/contract.ts";
@@ -64,7 +67,11 @@ export function launchEnvironment(
 ): NodeJS.ProcessEnv {
   const temporary = join(root, TEMPORARY_DIRECTORY);
   mkdirSync(temporary, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  return { ...threadEnvironment(source, root), TMPDIR: temporary };
+  return {
+    ...threadEnvironment(source, root),
+    TMPDIR: temporary,
+    ...packageCacheEnvironment(temporary),
+  };
 }
 
 function threadEntries(entries: readonly SlotEntry[]): ThreadEntry[] {

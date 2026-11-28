@@ -23,8 +23,12 @@ import {
   CauseSubcategory,
   unattributed,
 } from "../../kernel/cause.ts";
-import { BudgetLimit } from "../../scheduler/contract.ts";
+import {
+  BudgetLimit,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
+import { SetupEnd, type SetupFailure, setupStop } from "./environment-setup.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { GitStage, GitWriteError } from "../../repository/connector.ts";
 import { stopAfter } from "../../kernel/stop-test-support.ts";
@@ -32,6 +36,7 @@ import { stopAfter } from "../../kernel/stop-test-support.ts";
 const SETTLE_CALL_COUNT = 1;
 const CALLS = 2;
 const NO_CALLS = 0;
+const NO_FILES = 0;
 const VALUE = "value";
 const ERROR = "test.operation.failed";
 const CLAIM = {
@@ -571,6 +576,55 @@ test("an environment failure stop detail holds the digests of the environments o
     command: "exit 3",
     digests: DIGESTS,
   });
+});
+
+test("an environment failure stop detail with an output tail stays within the detail limit after the digests join", async (t) => {
+  const run = fixture(async () => {}, undefined, DIGESTS);
+  stopAfter(t, () => run.dispose());
+  const tail = "x".repeat(STOP_DETAIL_MAX_LENGTH);
+  const stop = await releasedStop(
+    run,
+    new ExecutionStop(
+      EndReason.EnvironmentFailed,
+      "setup_failed",
+      JSON.stringify({ exit_code: 3, output_tail: tail.slice(-1500) }),
+    ),
+  );
+  const detail = JSON.parse(stop.detail!);
+  assert.ok(stop.detail!.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.deepEqual(detail.digests, DIGESTS);
+  assert.ok(tail.endsWith(detail.output_tail));
+});
+
+test("an environment failure stop detail with many changed files stays within the detail limit after the digests join", async (t) => {
+  const run = fixture(async () => {}, undefined, DIGESTS);
+  stopAfter(t, () => run.dispose());
+  const files = Array.from(
+    { length: 120 },
+    (_, index) => `packages/service/src/module-${index}/deeply/nested/file.ts`,
+  );
+  const setup = setupStop({
+    end: SetupEnd.Failed,
+    run: {
+      verification: {
+        results: [
+          { command: "exit 1", exit_code: 1, signal: null, timed_out: false },
+        ],
+      },
+      outputs: ["output"],
+    },
+    commands: ["exit 1"],
+    changed: files,
+  } as unknown as SetupFailure);
+  const stop = await releasedStop(run, setup);
+  const detail = JSON.parse(stop.detail!);
+  assert.ok(stop.detail!.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.deepEqual(detail.digests, DIGESTS);
+  assert.ok(detail.changed_tracked_files_omitted > NO_FILES);
+  assert.equal(
+    detail.changed_tracked_files.length + detail.changed_tracked_files_omitted,
+    files.length,
+  );
 });
 
 function capture(run: ExecutionRun) {

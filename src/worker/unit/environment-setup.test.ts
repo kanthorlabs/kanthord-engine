@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
@@ -20,7 +21,10 @@ import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { digest } from "../../kernel/json.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  EnvironmentFailure,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
@@ -31,11 +35,15 @@ import {
   setupEntries,
   setUpHeads,
   type SetupInput,
+  setupStop,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
 import { VerificationClass } from "./verification.ts";
-import { bashSandbox } from "../../agent/bash-sandbox.ts";
+import {
+  bashSandbox,
+  packageCacheEnvironment,
+} from "../../agent/bash-sandbox.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -59,6 +67,11 @@ const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
 const ONE_CHILD = 1;
+const LONG_OUTPUT_LINES = 500;
+const CHANGED_FILE_COUNT = 120;
+const SHORT_TOKEN_LENGTH = 31;
+const PNPM_OK_EXIT = 0;
+const NO_LENGTH = 0;
 const DIGEST = "d".repeat(64);
 
 async function commit(directory: string, path: string, content: string) {
@@ -382,6 +395,81 @@ test("a setup script of a binding environment runs without the wrap and a base r
   assert.deepEqual(wrap.mock.calls[0]?.arguments[2].denyRead, sandbox.denyRead);
 });
 
+const LOCKFILE = "pnpm-lock.yaml";
+const PNPM_OFFLINE_INSTALL = "pnpm install --offline";
+const PNPM_TIMEOUT_MS = 60000;
+
+function packageOf(name: string, dependencies: readonly string[]): string {
+  return JSON.stringify({
+    name,
+    version: "1.0.0",
+    dependencies: Object.fromEntries(
+      dependencies.map((dependency) => [dependency, `file:./${dependency}`]),
+    ),
+  });
+}
+
+function pnpm(env: NodeJS.ProcessEnv, directory: string, command: string) {
+  const result = spawnSync(command, {
+    cwd: directory,
+    env,
+    shell: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: PNPM_TIMEOUT_MS,
+  });
+  assert.equal(
+    result.status,
+    PNPM_OK_EXIT,
+    `${command}: ${result.stdout}${result.stderr}`,
+  );
+}
+
+test("a setup over a kept node_modules passes after a lockfile change with no TTY and keeps the worker store", async (t) => {
+  const { checkout } = await repository(t, {
+    "package.json": packageOf("host", ["first"]),
+    "first/package.json": packageOf("first", []),
+    "second/package.json": packageOf("second", []),
+  });
+  const worker = temporary(t);
+  const workerEnv: NodeJS.ProcessEnv = {
+    ...env,
+    CI: undefined,
+    TMPDIR: worker,
+    ...packageCacheEnvironment(worker),
+  };
+  pnpm(workerEnv, checkout, PNPM_OFFLINE_INSTALL);
+  await commit(
+    checkout,
+    "package.json",
+    packageOf("host", ["first", "second"]),
+  );
+  pnpm(workerEnv, checkout, `${PNPM_OFFLINE_INSTALL} --lockfile-only`);
+  await commit(
+    checkout,
+    LOCKFILE,
+    readFileSync(join(checkout, LOCKFILE), "utf8"),
+  );
+  const result = await runSetup(
+    input({ env: workerEnv }),
+    await setupEntries(input({ env: workerEnv }), [
+      setupCheckout(
+        checkout,
+        stored({
+          updateContentCommand: `${PNPM_OFFLINE_INSTALL} --frozen-lockfile`,
+        }),
+      ),
+    ]),
+  );
+  assert.deepEqual(result, { end: SetupEnd.Pass });
+  const modules = readFileSync(
+    join(checkout, "node_modules", ".modules.yaml"),
+    "utf8",
+  );
+  assert.ok(modules.includes(join(worker, "pnpm-store")));
+  assert.ok(existsSync(join(checkout, "node_modules", "second")));
+});
+
 test("setup reads the devcontainer file of the base head for a repository source", async (t) => {
   const { checkout } = await repository(t, {
     ".devcontainer/devcontainer.json": `{
@@ -569,6 +657,97 @@ test("a setup that changes a tracked file only on the node head is a code failur
   assert.deepEqual(result.changed, ["package-lock.json"]);
   assert.equal(result.run.verification.results.at(-1)?.exit_code, FAILED_EXIT);
   assert.equal(result.commands.length, result.run.verification.results.length);
+});
+
+async function failedSetupDetail(
+  t: TestContext,
+  command: string,
+): Promise<string> {
+  const { checkout } = await repository(t, { file: "base" });
+  const result = await setUp(checkout, { postCreateCommand: command });
+  assert.ok(result.end === SetupEnd.Failed);
+  const stop = setupStop(result);
+  assert.equal(stop.code, EnvironmentFailure.SetupFailed);
+  assert.ok(stop.detail);
+  return stop.detail;
+}
+
+test("a failed setup command stop detail holds the output tail with the printed line", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    `echo "download failed: 504"; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.equal(parsed.exit_code, FAILED_EXIT);
+  assert.ok(parsed.output_tail.includes("download failed: 504"));
+});
+
+test("a failed setup command with a long output keeps a detail within the limit that ends with the last output characters", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    `i=0; while [ $i -lt ${LONG_OUTPUT_LINES} ]; do printf 'abcdefghi\\n'; i=$((i+1)); done; echo END-OF-OUTPUT; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.ok(parsed.output_tail.length > NO_LENGTH);
+  assert.ok(parsed.output_tail.trimEnd().endsWith("END-OF-OUTPUT"));
+});
+
+test("(security) a failed setup command stop detail holds no token text of the output", async (t) => {
+  const token = "A".repeat(40);
+  const detail = await failedSetupDetail(
+    t,
+    `echo "Bearer ${token}"; echo "key ${token}"; exit ${FAILED_EXIT}`,
+  );
+  assert.ok(!detail.includes(token));
+  assert.ok(JSON.parse(detail).output_tail.includes("[redacted]"));
+});
+
+test("a failed setup output with a newline before a short jwt keeps a parseable detail without the token", async (t) => {
+  const token = ["eyJhbGciOi", "abcdefghij", "klmnopqrs"].join(".");
+  assert.equal(token.length, SHORT_TOKEN_LENGTH);
+  const detail = await failedSetupDetail(
+    t,
+    `printf 'line\\n${token}\\n'; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.ok(parsed.output_tail.includes("line"));
+  assert.ok(!detail.includes(token));
+});
+
+test("a failed setup command that ends with a bearer header keeps a parseable detail without the secret", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    "false -H 'Authorization: Bearer abc'",
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.equal(parsed.exit_code, FAILED_EXIT);
+  assert.ok(!detail.includes("abc"));
+});
+
+test("a failed setup with many changed tracked files keeps a detail within the limit that counts the omitted files", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const result = await setUp(checkout, { postCreateCommand: "exit 1" });
+  assert.ok(result.end === SetupEnd.Failed);
+  const changed = Array.from(
+    { length: CHANGED_FILE_COUNT },
+    (_, index) => `packages/service/src/module-${index}/deeply/nested/file.ts`,
+  );
+  const detail = setupStop({ ...result, changed }).detail;
+  assert.ok(detail);
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.deepEqual(
+    parsed.changed_tracked_files,
+    changed.slice(0, parsed.changed_tracked_files.length),
+  );
+  assert.equal(
+    parsed.changed_tracked_files.length + parsed.changed_tracked_files_omitted,
+    CHANGED_FILE_COUNT,
+  );
+  assert.ok(parsed.changed_tracked_files_omitted > NO_LENGTH);
 });
 
 async function stagedAfterSetup(checkout: string): Promise<string[]> {

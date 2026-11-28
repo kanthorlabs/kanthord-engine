@@ -242,7 +242,9 @@ function execute(root, { job, write, full, concurrency }, files) {
   const skipped = files.filter((file) => !selected.includes(file));
   const writtenAt = new Date().toISOString();
   const run =
-    selected.length === 0 ? EMPTY_RUN : runTests(root, selected, concurrency);
+    selected.length === 0
+      ? EMPTY_RUN
+      : runTests(root, selected, concurrency, { progress: true });
   const unfailed = unfailedFiles(run, selected);
   const passed = unfailed.filter((file) => !run.skipped.has(file));
   if (write) {

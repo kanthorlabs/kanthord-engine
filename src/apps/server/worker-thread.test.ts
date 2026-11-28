@@ -70,6 +70,14 @@ function threadEnvironment(root: string): NodeJS.ProcessEnv {
   };
 }
 
+test("launchEnvironment answers the package cache variables under its TMPDIR", (t) => {
+  const env = launchEnvironment(hostEnvironment(), temporary(t));
+  assert.ok(env.TMPDIR);
+  assert.equal(env.pnpm_config_store_dir, join(env.TMPDIR, "pnpm-store"));
+  assert.equal(env.pnpm_config_cache_dir, join(env.TMPDIR, "pnpm-cache"));
+  assert.equal(env.npm_config_cache, join(env.TMPDIR, "npm-cache"));
+});
+
 function entryOf(
   port: MessageChannel["port2"] | null,
   clientId = "client_identity_a",

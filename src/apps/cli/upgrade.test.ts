@@ -9,7 +9,7 @@ import {
   loadConfig,
 } from "../../config/index.ts";
 import { writePrivate } from "../../kernel/files.ts";
-import { type Migrations, Store } from "../../kernel/store.ts";
+import { type Migration, type Migrations, Store } from "../../kernel/store.ts";
 import {
   requirePiTools,
   stopAfter,
@@ -428,6 +428,10 @@ test("upgrade keeps a missing tracking.db missing", async (t) => {
 
 const GATEWAY_STARTED_MESSAGE = "Gateway Service started";
 const WORKBENCH_SERVICE = "workbench";
+const PROJECT_SERVICE = "project";
+const TABLE_FIELD = "table";
+const REFERENCING_TABLE = "project_reference";
+const FOREIGN_KEY_REFUSED_CODE = "system.database.reset.foreign_key";
 const STORED_CREDENTIAL_COUNT = 1;
 const RESET_FLAG = "--reset-changed";
 const CUSTODY_REFUSED = /system\.database\.reset\.custody_refused/;
@@ -447,9 +451,18 @@ function withExtraText(migrations: Migrations, service: string): Migrations {
           service,
           migrations: [
             (database) => {
+              const tables = () =>
+                database
+                  .prepare(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY rowid",
+                  )
+                  .all()
+                  .map((row) => String(row.name));
+              const existing = new Set(tables());
               entry.migrations[0]!(database);
+              const first = tables().find((name) => !existing.has(name))!;
               database.exec(
-                `CREATE TABLE ${service}_scratch_extra (value TEXT)`,
+                `ALTER TABLE ${first} ADD COLUMN scratch_extra TEXT`,
               );
             },
           ],
@@ -561,7 +574,6 @@ test("upgrade --reset-changed rebuilds the changed workbench service and keeps t
     new RegExp(
       `^backup: +${paths.database}\\.bak-\\d{8}T\\d{6}\\n` +
         "dropped: +workbench_invite\\n" +
-        "dropped: +workbench_scratch_extra\\n" +
         `migrated: +workbench 0 -> ${workbench.migrations.length}\\n$`,
     ),
   );
@@ -628,6 +640,110 @@ test("upgrade --reset-changed refuses a table that references a dropped table an
   assert.deepEqual(keptRows(paths.database, /^$/), before);
 });
 
+const UNOWNED_TABLE_REFUSED = /system\.database\.reset\.unowned_table/;
+const STRAY_TABLE_SQL = `CREATE TABLE ${REFERENCING_TABLE} (value TEXT)`;
+
+test("upgrade --reset-changed refuses an unowned prefixed table of an unchanged service and writes nothing", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const store = createDatabase(paths.database, serverMigrations);
+  store.database.exec(STRAY_TABLE_SQL);
+  store.close();
+  const before = keptRows(paths.database, /^$/);
+
+  const refused = await resetRun(paths.env, t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, UNOWNED_TABLE_REFUSED);
+  assert.match(refused.stderr, new RegExp(REFERENCING_TABLE));
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
+test("upgrade --reset-changed refuses an unowned prefixed table before it backs up or drops a changed service", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const store = createDatabase(
+    paths.database,
+    withExtraText(serverMigrations, WORKBENCH_SERVICE),
+  );
+  store.database.exec(STRAY_TABLE_SQL);
+  store.close();
+  const before = keptRows(paths.database, /^$/);
+
+  const refused = await resetRun(paths.env, t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, UNOWNED_TABLE_REFUSED);
+  assert.match(refused.stderr, new RegExp(REFERENCING_TABLE));
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
+test("upgrade without --reset-changed refuses an unowned prefixed table with schema_mismatch", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const store = createDatabase(paths.database, serverMigrations);
+  store.database.exec(STRAY_TABLE_SQL);
+  store.close();
+
+  const refused = await run(paths.env, "upgrade", t.signal);
+  assert.equal(refused.status, ExitCode.Failure);
+  assert.match(refused.stderr, SCHEMA_MISMATCH);
+  assert.match(refused.stderr, new RegExp(REFERENCING_TABLE));
+  assert.equal(refused.stdout, NO_OUTPUT);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+});
+
+test("upgrade --reset-changed refuses a migration of an unchanged service that references a table of the changed service", async (t) => {
+  const paths = layout(temporary(t));
+  writePrivate(paths.config, currentConfig());
+  const referencing: Migration = (database) =>
+    database.exec(
+      `CREATE TABLE ${REFERENCING_TABLE} (invite TEXT REFERENCES workbench_invite(id))`,
+    );
+  const withReference = serverMigrations.map((entry) =>
+    entry.service === PROJECT_SERVICE
+      ? { ...entry, migrations: [...entry.migrations, referencing] }
+      : entry,
+  );
+  const store = createDatabase(paths.database, withReference);
+  store.database.exec(CREDENTIAL_ROW);
+  store.database.exec(PROJECT_ROW);
+  store.close();
+  const before = keptRows(paths.database, /^$/);
+  const previous = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = paths.env.XDG_DATA_HOME;
+  stopAfter(t, () => {
+    if (previous === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = previous;
+  });
+  const written: string[] = [];
+  await assert.rejects(
+    upgrade(paths.config, (text) => written.push(text), {
+      resetChanged: true,
+      serverMigrations: withExtraText(withReference, WORKBENCH_SERVICE),
+    }),
+    (error) =>
+      error instanceof Diagnostic &&
+      error.code === FOREIGN_KEY_REFUSED_CODE &&
+      error.fields.some(
+        ([name, value]) => name === TABLE_FIELD && value === REFERENCING_TABLE,
+      ),
+  );
+  assert.deepEqual(written, []);
+  assert.deepEqual(readdirSync(join(paths.env.XDG_DATA_HOME!, "kanthord")), [
+    DATABASE_FILE,
+  ]);
+  assert.deepEqual(keptRows(paths.database, /^$/), before);
+});
+
 test("upgrade without --reset-changed refuses a changed migration text and names the reset option", async (t) => {
   const paths = layout(temporary(t));
   writePrivate(paths.config, currentConfig());
@@ -675,7 +791,7 @@ test("upgrade --reset-changed resets only tracking.db when its migration text ch
   );
   assert.equal(backups.length, TRACKING_BACKUP_ONLY);
   assert.match(backups[0]!, new RegExp(`${TRACKING_DATABASE_FILE}\\.bak-`));
-  assert.match(reset.stdout, /^dropped: +tracking_scratch_extra$/m);
+  assert.match(reset.stdout, /^dropped: +tracking_trace$/m);
   assert.match(reset.stdout, /^migrated: +tracking 0 -> 1$/m);
   assert.doesNotMatch(reset.stdout, new RegExp(DATABASE_FILE));
   assert.deepEqual(

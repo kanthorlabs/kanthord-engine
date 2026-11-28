@@ -21,6 +21,7 @@ const STATEMENT_KEEPING_CONTROLS: ReadonlySet<string> = new Set([
 const DATABASE_PROBE_OK = 1;
 const NO_RECORDED_MIGRATION = 0;
 const NO_DEPENDENT_TABLE = 0;
+const NO_UNOWNED_SERVICE = 0;
 const SCHEMA_KEY_SEPARATOR = "\u0000";
 const SCHEMA_TABLE_TYPE = "table";
 const SCHEMA_OBJECT_TYPE = 0;
@@ -30,6 +31,7 @@ const SCHEMA_MISMATCH_MESSAGE =
   "the schema of this service differs from its migration text; stop the server and run kanthord upgrade --reset-changed; the command rebuilds only the changed services and keeps the credentials and the unchanged services";
 const EXPECTED_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name`;
 const LIVE_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND (name IN (SELECT value FROM json_each(?)) OR tbl_name IN (SELECT value FROM json_each(?)) OR substr(name, 1, length(?) + 1) = ? || '_') ORDER BY type, name`;
+const OWN_SCHEMA_SQL = `SELECT ${SCHEMA_OBJECT_COLUMNS.join(", ")} FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND (name IN (SELECT value FROM json_each(?)) OR tbl_name IN (SELECT value FROM json_each(?))) ORDER BY type, name`;
 
 export interface Transaction {
   readonly database: DatabaseSync;
@@ -90,6 +92,18 @@ function expectedSchema(
   }
 }
 
+function expectedNames(expected: readonly SchemaObject[]): string {
+  return JSON.stringify(expected.map((object) => object[SCHEMA_OBJECT_NAME]));
+}
+
+function expectedTableNames(expected: readonly SchemaObject[]): string {
+  return JSON.stringify(
+    expected
+      .filter((object) => object[SCHEMA_OBJECT_TYPE] === SCHEMA_TABLE_TYPE)
+      .map((object) => object[SCHEMA_OBJECT_NAME]),
+  );
+}
+
 function liveSchema(
   database: DatabaseSync,
   service: string,
@@ -98,14 +112,22 @@ function liveSchema(
   return schemaObjects(
     database,
     LIVE_SCHEMA_SQL,
-    JSON.stringify(expected.map((object) => object[SCHEMA_OBJECT_NAME])),
-    JSON.stringify(
-      expected
-        .filter((object) => object[SCHEMA_OBJECT_TYPE] === SCHEMA_TABLE_TYPE)
-        .map((object) => object[SCHEMA_OBJECT_NAME]),
-    ),
+    expectedNames(expected),
+    expectedTableNames(expected),
     service,
     service,
+  );
+}
+
+function ownSchema(
+  database: DatabaseSync,
+  expected: readonly SchemaObject[],
+): SchemaObject[] {
+  return schemaObjects(
+    database,
+    OWN_SCHEMA_SQL,
+    expectedNames(expected),
+    expectedTableNames(expected),
   );
 }
 
@@ -341,10 +363,51 @@ export class Store {
         return (
           firstSchemaDifference(
             expected,
-            liveSchema(this.database, service, expected),
+            ownSchema(this.database, expected),
           ) !== null
         );
       });
+  }
+
+  assertOwnedTables(services: Migrations): void {
+    const { known, versions } = this.history(services);
+    const changed = new Set(this.changedServices(services));
+    const unowned = new Map<string, string[]>();
+    for (const { service } of services) {
+      if (!versions.has(service) || changed.has(service)) continue;
+      const expected = expectedSchema(
+        known.get(service)!,
+        versions.get(service)!,
+      );
+      const named = new Set(
+        expected.map((object) => object[SCHEMA_OBJECT_NAME]),
+      );
+      const tables = liveSchema(this.database, service, expected)
+        .filter(
+          (object) =>
+            object[SCHEMA_OBJECT_TYPE] === SCHEMA_TABLE_TYPE &&
+            !named.has(object[SCHEMA_OBJECT_NAME]),
+        )
+        .map((object) => object[SCHEMA_OBJECT_NAME]);
+      if (tables.length) unowned.set(service, tables);
+    }
+    if (unowned.size === NO_UNOWNED_SERVICE) return;
+    throw new Diagnostic(
+      "system.database.reset.unowned_table",
+      "the reset refuses: a table with the prefix of an unchanged service is in no migration text of that service; drop each table or restore the migration text, then run the command again",
+      {
+        fields: [
+          ["path", this.path],
+          ...[...unowned.keys()].map((service): [string, string] => [
+            "service",
+            service,
+          ]),
+          ...[...unowned.values()]
+            .flat()
+            .map((table): [string, string] => ["table", table]),
+        ],
+      },
+    );
   }
 
   private liveTables(

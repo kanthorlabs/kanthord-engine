@@ -29,7 +29,7 @@ function tokenOrPath(match: string): string {
   return path ? match : REDACTED;
 }
 
-export function redactReason(
+export function redactText(
   text: string,
   secrets: readonly string[] = [],
 ): string {
@@ -40,8 +40,14 @@ export function redactReason(
   return result
     .replace(BEARER_PATTERN, REDACTED)
     .replace(JWT_PATTERN, REDACTED)
-    .replace(TOKEN_PATTERN, tokenOrPath)
-    .slice(0, REASON_MAX_LENGTH);
+    .replace(TOKEN_PATTERN, tokenOrPath);
+}
+
+export function redactReason(
+  text: string,
+  secrets: readonly string[] = [],
+): string {
+  return redactText(text, secrets).slice(0, REASON_MAX_LENGTH);
 }
 
 export function headerSecrets(

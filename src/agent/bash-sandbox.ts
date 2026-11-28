@@ -397,12 +397,20 @@ function filesystemOf(
   return { ...DEFAULT_CONFIG.filesystem, ...rules };
 }
 
+export function packageCacheEnvironment(
+  temporary: string,
+): Record<string, string> {
+  return {
+    pnpm_config_store_dir: join(temporary, PNPM_STORE_DIRECTORY),
+    pnpm_config_cache_dir: join(temporary, PNPM_CACHE_DIRECTORY),
+    npm_config_cache: join(temporary, NPM_CACHE_DIRECTORY),
+  };
+}
+
 function packageCacheExports(temporary: string): string {
-  return [
-    `pnpm_config_store_dir=${shellQuoted(join(temporary, PNPM_STORE_DIRECTORY))}`,
-    `pnpm_config_cache_dir=${shellQuoted(join(temporary, PNPM_CACHE_DIRECTORY))}`,
-    `npm_config_cache=${shellQuoted(join(temporary, NPM_CACHE_DIRECTORY))}`,
-  ].join(" ");
+  return Object.entries(packageCacheEnvironment(temporary))
+    .map(([name, value]) => `${name}=${shellQuoted(value)}`)
+    .join(" ");
 }
 
 async function initializeWithShortTemporary(
