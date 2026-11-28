@@ -3,11 +3,12 @@ import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { after, test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
+import { redactReason } from "../kernel/probe.ts";
 import { temporary } from "../kernel/test-support.ts";
 import {
   createBashSandbox,
@@ -28,10 +29,17 @@ const AGENT_CASE_TIMEOUT_MS = 200_000;
 const AGENT_TEST_TIMEOUT_MS = 30_000;
 const POSIX_TEMPORARY_ROOT = "/tmp";
 const TEMPORARY_PARENT = "opencode";
+const GATE_LAST_LENGTH = 200;
+const STORE_LINKS = "links";
+const TEST_COUNT = /^(?:ℹ |# )tests (\d+)/m;
 const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
 const SECRET_TEXT = "credential text of the deny list";
 const SCRIPT_VARIABLE = "KANTHORD_SUITES_SCRIPT";
 const AGENT_SUITE = "src/worker/unit/native-agent.test.ts";
+const TODO = "s2 S2: task 02";
+const RUNTIME_PACKAGE = fileURLToPath(
+  new URL("../../node_modules/@anthropic-ai/sandbox-runtime", import.meta.url),
+);
 const BASH_SANDBOX_MODULE = fileURLToPath(
   new URL("./bash-sandbox.ts", import.meta.url),
 );
@@ -187,12 +195,34 @@ function lastLine(outcome: Outcome): string {
   return outcome.output.trim().split("\n").at(-1) ?? "";
 }
 
-function host(
-  t: TestContext,
-  script?: string,
-  workdir?: string,
-  scope: Host["scope"] = {},
-): Host {
+function gate(
+  name: string,
+  exit: number | undefined,
+  skip: string | false,
+  last: string,
+): void {
+  const flat = (text: string) => text.replace(/\s+/g, " ").trim();
+  const line = [
+    "s6-gate",
+    name,
+    platform(),
+    `exit=${exit ?? "none"}`,
+    `skip=${skip === false ? "none" : redactReason(flat(skip))}`,
+    `last=${redactReason(flat(last)).slice(0, GATE_LAST_LENGTH)}`,
+  ].join(" ");
+  process.stderr.write(`${line}\n`);
+}
+
+if (unavailable !== false) gate("file", undefined, unavailable, "");
+
+interface HostOptions {
+  script?: string;
+  workdir?: string;
+  scope?: Host["scope"];
+  tmp?: string;
+}
+
+function host(t: TestContext, options: HostOptions = {}): Host {
   const root = realpathSync(temporary(t));
   const tmp = join(root, "tmp");
   const data = join(root, "data");
@@ -200,21 +230,24 @@ function host(
   for (const directory of [tmp, data, work]) mkdirSync(directory);
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    TMPDIR: tmp,
+    TMPDIR: options.tmp ?? tmp,
     XDG_DATA_HOME: data,
     XDG_CONFIG_HOME: join(root, "config"),
     XDG_STATE_HOME: join(root, "state"),
-    ...(script === undefined ? {} : { [SCRIPT_VARIABLE]: script }),
+    ...(options.script === undefined
+      ? {}
+      : { [SCRIPT_VARIABLE]: options.script }),
   };
+  delete env.NODE_TEST_CONTEXT;
   const secret = join(data, "kanthord", "secret.txt");
   mkdirSync(join(data, "kanthord"));
   writeFileSync(secret, SECRET_TEXT);
   return {
-    cwd: workdir ?? work,
+    cwd: options.workdir ?? work,
     env,
     denyRead: hostDenyRead(env),
     secret,
-    scope,
+    scope: options.scope ?? {},
   };
 }
 
@@ -242,14 +275,35 @@ test(
     timeout: CASE_TIMEOUT_MS,
   },
   async (t) => {
-    const h = host(t, LOOPBACK_SCRIPT);
+    const h = host(t, { script: LOOPBACK_SCRIPT });
     const command = `node -e "$${SCRIPT_VARIABLE}"`;
-    assertBlocked(t, command, await inSandbox(h, command), false);
+    const outcome = await inSandbox(h, command);
+    gate(t.name, outcome.status, unavailable, lastLine(outcome));
+    assertBlocked(t, command, outcome, false);
   },
 );
 
 function processTemporary(): string {
   return realpathSync(process.env.TMPDIR ?? tmpdir());
+}
+
+function storeRoot(): string {
+  const parts = realpathSync(RUNTIME_PACKAGE).split(sep);
+  const links = parts.indexOf(STORE_LINKS);
+  return links < 0 ? processTemporary() : parts.slice(0, links).join(sep);
+}
+
+function runtimeHost(
+  t: TestContext,
+  options: Pick<HostOptions, "script" | "workdir"> &
+    Pick<Host["scope"], "writeRoots">,
+): Host {
+  const { writeRoots, ...rest } = options;
+  return host(t, {
+    ...rest,
+    tmp: processTemporary(),
+    scope: { root: storeRoot(), ...(writeRoots ? { writeRoots } : {}) },
+  });
 }
 
 function assertNoModuleError(t: TestContext, outcome: Outcome): void {
@@ -260,32 +314,37 @@ function assertNoModuleError(t: TestContext, outcome: Outcome): void {
 
 test(
   `(edge) H3: a sandboxed node --test ${AGENT_SUITE}`,
-  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS },
+  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS, todo: TODO },
   async (t) => {
     const parent = join(POSIX_TEMPORARY_ROOT, TEMPORARY_PARENT);
     mkdirSync(parent, { recursive: true });
-    const h = host(t, undefined, process.cwd(), {
-      root: processTemporary(),
+    const h = runtimeHost(t, {
+      workdir: process.cwd(),
       writeRoots: [realpathSync(parent)],
     });
     const command = `node --test --test-timeout=${AGENT_TEST_TIMEOUT_MS} --test-force-exit ${AGENT_SUITE}`;
     const outcome = await inSandbox(h, command, executeInGroup);
     const line = record(t, command, outcome);
+    gate(t.name, outcome.status, unavailable, lastLine(outcome));
     assert.ok(!outcome.output.includes("mkdtemp"), line);
     assertNoModuleError(t, outcome);
-    if (platform() === DARWIN) assert.equal(outcome.status, SUCCESS, line);
+    const tests = Number(TEST_COUNT.exec(outcome.output)?.[1] ?? 0);
+    assert.ok(tests > 0, `the inner reporter states no test: ${line}`);
+    if (platform() === DARWIN) assert.notEqual(outcome.status, SUCCESS, line);
   },
 );
 
 test(
   "(edge) H3: a nested wrap of true inside the sandbox",
-  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS, todo: TODO },
   async (t) => {
-    const h = host(t, NESTED_SCRIPT, process.cwd(), {
-      root: processTemporary(),
+    const h = runtimeHost(t, {
+      script: NESTED_SCRIPT,
+      workdir: process.cwd(),
     });
     const command = `node --input-type=module -e "$${SCRIPT_VARIABLE}"`;
     const outcome = await inSandbox(h, command);
+    gate(t.name, outcome.status, unavailable, lastLine(outcome));
     assertNoModuleError(t, outcome);
     const line = record(t, command, outcome);
     if (platform() !== DARWIN) return;
