@@ -46,6 +46,7 @@ const LOOPBACK_SCRIPT = [
   "  client.on('data', (data) => { console.log(`connected ${data}`); client.destroy(); server.close(); });",
   "});",
 ].join("\n");
+const NESTED_RAN = "nested wrap of true ran";
 const NESTED_SCRIPT = [
   'import { execFileSync } from "node:child_process";',
   'import { SandboxManager } from "@anthropic-ai/sandbox-runtime";',
@@ -54,7 +55,7 @@ const NESTED_SCRIPT = [
   "try {",
   '  const wrapped = await sandbox.wrap("true", process.cwd(), { env: process.env, denyRead: [] });',
   '  execFileSync("bash", ["-c", wrapped], { stdio: "inherit" });',
-  '  console.log("nested wrap of true ran");',
+  `  console.log(${JSON.stringify(NESTED_RAN)});`,
   "} finally {",
   "  await sandbox.dispose();",
   "}",
@@ -287,7 +288,10 @@ test(
     const outcome = await inSandbox(h, command);
     assertNoModuleError(t, outcome);
     const line = record(t, command, outcome);
-    if (platform() === DARWIN) assert.notEqual(outcome.status, SUCCESS, line);
+    if (platform() !== DARWIN) return;
+    assert.notEqual(outcome.status, SUCCESS, line);
+    assert.ok(!outcome.output.includes(NESTED_RAN), line);
+    t.diagnostic(`nested sandbox refusal: ${lastLine(outcome)}`);
   },
 );
 

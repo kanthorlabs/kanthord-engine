@@ -192,9 +192,9 @@ export async function survivingProcesses(
 
 const execFileAsync = promisify(execFile);
 const REAL_WRAP_TIMEOUT_MS = 30_000;
-export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
+const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
 
-async function probeRealWrap(): Promise<boolean> {
+async function probeRealWrap(): Promise<string | false> {
   try {
     const wrapped = await bashSandbox.wrap("true", process.cwd(), {
       env: process.env,
@@ -203,21 +203,17 @@ async function probeRealWrap(): Promise<boolean> {
     await execFileAsync("bash", ["-c", wrapped], {
       timeout: REAL_WRAP_TIMEOUT_MS,
     });
-    return true;
-  } catch {
     return false;
+  } catch (error) {
+    return `${NESTED_SANDBOX_SKIP}: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
     bashSandbox.cleanup();
   }
 }
 
-let realWrap: Promise<boolean> | undefined;
+let realWrap: Promise<string | false> | undefined;
 
-export function realWrapRuns(): Promise<boolean> {
+export function realWrapSkip(): Promise<string | false> {
   realWrap ??= probeRealWrap();
   return realWrap;
-}
-
-export async function realWrapSkip(): Promise<string | false> {
-  return (await realWrapRuns()) ? false : NESTED_SANDBOX_SKIP;
 }
