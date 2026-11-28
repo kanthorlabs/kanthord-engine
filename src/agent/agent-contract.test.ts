@@ -386,6 +386,7 @@ test("RunFailure.reason holds K zero times when the provider returns an error co
   assert.equal(result.end, RunEnd.Failed);
   assert.ok(result.failure !== null);
   assert.ok(!result.failure!.reason.includes(K));
+  assert.deepEqual(result.warnings, []);
   await run.close();
 });
 
@@ -749,7 +750,35 @@ test("forceStop after the wall end returns budget_end with wall", async (t) => {
   await run.close();
 });
 
-test("close after the wall end completes without deadlock", async (t) => {
+test("close after the wall end waits for the abort of the send in progress", async (t) => {
+  let settled = false;
+  const aborted = Promise.withResolvers<void>();
+  const { agentInput } = await makeInput(t, {
+    script: [
+      (_context, options) =>
+        new Promise((resolve) => {
+          options?.signal?.addEventListener("abort", () => {
+            aborted.resolve();
+            setTimeout(() => {
+              settled = true;
+              resolve(fauxAssistantMessage("", { stopReason: "aborted" }));
+            }, WALL_MS);
+          });
+        }),
+    ],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  const sending = run.send("hello", { work: null });
+  await aborted.promise;
+  await run.close();
+  assert.equal(settled, true);
+  await sending;
+});
+
+test("L3-U6 first limit: an extension error that comes before the limit ends failed with the failure internal", async (t) => {
   const { agentInput } = await makeInput(t, {
     script: [
       (_context, options) =>
@@ -760,12 +789,18 @@ test("close after the wall end completes without deadlock", async (t) => {
         }),
     ],
   });
+  agentInput.hostHome = {
+    [Symbol.toPrimitive]: () => {
+      throw new Error("home");
+    },
+  } as unknown as string;
   agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
   const opened = await openAgent(agentInput);
   assert.equal(opened.kind, AgentOpenKind.Opened);
   const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
   const result = await run.send("hello", { work: null });
-  assert.equal(result.end, RunEnd.BudgetEnd);
-  assert.equal(result.budgetReached, BudgetLimit.Wall);
-  await run.close();
+  assert.equal(result.end, RunEnd.Failed);
+  assert.equal(result.failure?.kind, InternalFailure.Internal);
+  assert.equal(result.budgetReached, null);
 });

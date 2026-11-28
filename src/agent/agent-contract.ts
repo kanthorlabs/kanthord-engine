@@ -316,7 +316,7 @@ function buildRun(ctx: RunContext): AgentRun {
 
   function internalEnd(reason: string): TurnEnd {
     return buildTurnEnd({
-      budgetReached,
+      budgetReached: null,
       stopped: false,
       failure: { internal: true, reason: redaction.exitText(reason) },
       text: currentText(),
