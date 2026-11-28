@@ -274,6 +274,10 @@ export function sensitiveTextRedaction(
       matcher.add({ value: span.value, rule: span.rule });
   };
 
+  const learnAll = (spans: readonly SensitiveSpan[]) => {
+    for (const span of spans) learn(span);
+  };
+
   const markerOf = (text: string, span: SensitiveSpan) => {
     const exact = text.slice(span.start, span.end);
     const entry = exact === span.value ? remember(exact, span.rule) : undefined;
@@ -317,7 +321,7 @@ export function sensitiveTextRedaction(
       if (firstPass.has(text)) continue;
       try {
         const spans = findPatternText(text);
-        for (const span of spans) learn(span);
+        learnAll(spans);
         firstPass.set(text, spans);
       } catch {
         firstPass.set(text, undefined);
@@ -352,7 +356,7 @@ export function sensitiveTextRedaction(
     for (const text of stringsOf([block.thinking, block.thinkingSignature]))
       try {
         const pattern = findPatternText(text);
-        for (const span of pattern) learn(span);
+        learnAll(pattern);
         counts.thinking_kept += mergeSpans(
           text,
           findKnownText(text, matcher),

@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,31 +37,57 @@ async function namesOf(directory: string): Promise<string[]> {
   }
 }
 
+function firstLink(stats: BigIntStats, seen: Set<string>): boolean {
+  if (stats.nlink <= SINGLE_LINK) return true;
+  const identity = `${stats.dev}:${stats.ino}`;
+  if (seen.has(identity)) return false;
+  seen.add(identity);
+  return true;
+}
+
+interface SessionWalk {
+  pending: string[];
+  seen: Set<string>;
+  items: MeasuredItem[];
+}
+
+async function visitSessionDirectory(
+  directory: string,
+  walk: SessionWalk,
+): Promise<void> {
+  for (const name of await namesOf(directory)) {
+    const path = join(directory, name);
+    const stats = await lstat(path, { bigint: true });
+    if (stats.isDirectory()) {
+      walk.pending.push(path);
+      continue;
+    }
+    if (!stats.isFile()) continue;
+    if (!firstLink(stats, walk.seen)) continue;
+    walk.items.push({ bytes: Number(stats.size), at: Number(stats.mtimeMs) });
+  }
+}
+
 async function sessionFiles(
   root: string,
   seen: Set<string>,
   signal: AbortSignal,
 ): Promise<MeasuredItem[]> {
-  const items: MeasuredItem[] = [];
-  const pending = [root];
-  while (pending.length) {
+  const walk: SessionWalk = { pending: [root], seen, items: [] };
+  while (walk.pending.length) {
     signal.throwIfAborted();
-    const directory = pending.pop()!;
-    for (const name of await namesOf(directory)) {
-      const path = join(directory, name);
-      const stats = await lstat(path, { bigint: true });
-      if (stats.isDirectory()) {
-        pending.push(path);
-        continue;
-      }
-      if (!stats.isFile()) continue;
-      if (stats.nlink > SINGLE_LINK) {
-        const identity = `${stats.dev}:${stats.ino}`;
-        if (seen.has(identity)) continue;
-        seen.add(identity);
-      }
-      items.push({ bytes: Number(stats.size), at: Number(stats.mtimeMs) });
-    }
+    await visitSessionDirectory(walk.pending.pop()!, walk);
+  }
+  return walk.items;
+}
+
+async function toolOutputItems(directory: string): Promise<MeasuredItem[]> {
+  const items: MeasuredItem[] = [];
+  for (const name of await namesOf(directory)) {
+    if (!TOOL_OUTPUT_NAME_PATTERN.test(name)) continue;
+    const stats = await lstat(join(directory, name));
+    if (!stats.isFile()) continue;
+    items.push({ bytes: stats.size, at: Math.floor(stats.mtimeMs) });
   }
   return items;
 }
@@ -97,12 +124,7 @@ export class WorkbenchFootprint implements FootprintOwner {
         items.push({ bytes: total.bytes, at: total.newest_at ?? now });
       }
       const temporary = this.dependencies.temporaryDirectory ?? tmpdir();
-      for (const name of await namesOf(temporary)) {
-        if (!TOOL_OUTPUT_NAME_PATTERN.test(name)) continue;
-        const stats = await lstat(join(temporary, name));
-        if (!stats.isFile()) continue;
-        items.push({ bytes: stats.size, at: Math.floor(stats.mtimeMs) });
-      }
+      items.push(...(await toolOutputItems(temporary)));
       return [
         itemsMeasure(FootprintKind.Workbench, items, now, {
           device: await this.dependencies.device(),

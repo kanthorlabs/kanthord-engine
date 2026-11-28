@@ -511,7 +511,7 @@ function relayItems(member: RelayMember, input: RelayInput): RelayItems {
     authorName: input.authorName,
     forkEntry: forkEntryOf(input.members),
   };
-  for (const author of input.members) {
+  const collect = (author: RelayMember) => {
     const own = author.id === member.id;
     const opening = openingIds(author.entries);
     const marks = guestRunMarks(author.entries);
@@ -522,7 +522,8 @@ function relayItems(member: RelayMember, input: RelayInput): RelayItems {
       if (line === null) continue;
       (line.summary ? summaries : items).push({ at, text: line.text });
     }
-  }
+  };
+  for (const author of input.members) collect(author);
   return {
     summary: summaries[NO_CHARACTERS]?.text ?? null,
     items: items
@@ -597,12 +598,11 @@ function isActionResult(entry: SessionEntry): boolean {
 
 function settledCards(members: readonly RelayMember[]): Set<string> {
   const settled = new Set<string>();
-  for (const { entries } of members)
-    for (const entry of entries) {
-      const details = entry.details as { tool_call_id?: unknown } | undefined;
-      if (isActionResult(entry) && isString(details?.tool_call_id))
-        settled.add(details.tool_call_id);
-    }
+  for (const entry of members.flatMap(({ entries }) => entries)) {
+    const details = entry.details as { tool_call_id?: unknown } | undefined;
+    if (isActionResult(entry) && isString(details?.tool_call_id))
+      settled.add(details.tool_call_id);
+  }
   return settled;
 }
 
@@ -675,7 +675,7 @@ function forkItems(conversation: ForkConversation): ForkItem[] {
   const settled = settledCards(conversation.members);
   const forkEntry = forkEntryOf(conversation.members);
   const items: ForkItem[] = [];
-  for (const author of conversation.members) {
+  const collect = (author: RelayMember) => {
     const { hidden } = openingIds(author.entries);
     const marks = guestRunMarks(author.entries);
     for (const entry of author.entries) {
@@ -689,7 +689,8 @@ function forkItems(conversation: ForkConversation): ForkItem[] {
       if (item !== null)
         items.push({ ...item, at: Date.parse(entry.timestamp) });
     }
-  }
+  };
+  for (const author of conversation.members) collect(author);
   return items.sort((left, right) => left.at - right.at);
 }
 
@@ -759,6 +760,23 @@ export function parseCursor(
   return cursor;
 }
 
+function earliestQueue(
+  queues: readonly MemberEntry[][],
+  heads: readonly number[],
+): number {
+  let next = NOT_FOUND;
+  let earliest = Number.POSITIVE_INFINITY;
+  for (const [member, queue] of queues.entries()) {
+    const head = queue[heads[member]!];
+    if (head === undefined) continue;
+    const at = Date.parse(head.timestamp);
+    if (next !== NOT_FOUND && at >= earliest) continue;
+    earliest = at;
+    next = member;
+  }
+  return next;
+}
+
 export function mergeEntries(
   members: readonly MergeMember[],
   after: ReadonlyMap<string, string> = new Map(),
@@ -791,16 +809,7 @@ export function mergeEntries(
   );
   const merged: MemberEntry[] = [];
   while (merged.length < total) {
-    let next = NOT_FOUND;
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const [member, queue] of queues.entries()) {
-      const head = queue[heads[member]!];
-      if (head === undefined) continue;
-      const at = Date.parse(head.timestamp);
-      if (next !== NOT_FOUND && at >= earliest) continue;
-      earliest = at;
-      next = member;
-    }
+    const next = earliestQueue(queues, heads);
     merged.push(queues[next]![heads[next]!++]!);
   }
   return merged;

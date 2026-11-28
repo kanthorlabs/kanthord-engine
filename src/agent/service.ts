@@ -1107,8 +1107,8 @@ export class AgentComponent {
     let cursor: string | null = null;
     do {
       const page = listEnablements(tx, LIST_LIMIT_DEFAULT, cursor);
-      for (const row of page.items) {
-        const dependent = this.dependencies
+      const dependents = page.items.filter((row) =>
+        this.dependencies
           .entriesOfAgent(tx, row.agent_name)
           .some(({ entry }) => {
             if (entry === null) return false;
@@ -1125,9 +1125,10 @@ export class AgentComponent {
                     item.credential === credentialName,
                 ),
             );
-          });
-        if (dependent) matches.set(row.agent_name, wireRecord(row));
-      }
+          }),
+      );
+      for (const row of dependents)
+        matches.set(row.agent_name, wireRecord(row));
       assert.notEqual(
         page.next_cursor,
         cursor === null ? undefined : cursor,

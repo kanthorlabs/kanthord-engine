@@ -786,6 +786,11 @@ interface SessionFields {
   autoMode: boolean;
 }
 
+function removeSessionFile(session: OpenSession): void {
+  const file = session.manager.getSessionFile();
+  if (file) rmSync(file, { force: true });
+}
+
 function newOpenSession(fields: SessionFields): OpenSession {
   return {
     ...fields,
@@ -2891,8 +2896,7 @@ export class WorkbenchService implements Service {
         this.closeAgent(participant);
         this.sessions.delete(id);
         host.members.splice(host.members.indexOf(participant), 1);
-        const file = participant.manager.getSessionFile();
-        if (file) rmSync(file, { force: true });
+        removeSessionFile(participant);
       }
       throw error;
     }
@@ -3580,8 +3584,7 @@ export class WorkbenchService implements Service {
       if (session) {
         this.closeAgent(session);
         this.sessions.delete(id);
-        const file = session.manager.getSessionFile();
-        if (file) rmSync(file, { force: true });
+        removeSessionFile(session);
       }
       throw error;
     }
