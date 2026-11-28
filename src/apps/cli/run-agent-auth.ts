@@ -497,7 +497,7 @@ export function checkAuthExpiry(
   if (credential.expires < wallDeadlineMs + PI_OAUTH_REFRESH_WINDOW_MS)
     throw new Diagnostic(
       CREDENTIAL_EXPIRING,
-      "run agent: the OAuth credential expires within the refresh window of the wall deadline.",
+      "run agent: the OAuth credential expires before the wall deadline plus 5 minutes.",
       {
         fields: [["path", absolute]],
       },
