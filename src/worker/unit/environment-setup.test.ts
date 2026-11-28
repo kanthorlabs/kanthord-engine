@@ -62,6 +62,7 @@ const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
 const ONE_CHILD = 1;
 const LONG_OUTPUT_LINES = 500;
+const CHANGED_FILE_COUNT = 120;
 const PNPM_OK_EXIT = 0;
 const NO_LENGTH = 0;
 const DIGEST = "d".repeat(64);
@@ -667,6 +668,53 @@ test("(security) a failed setup command stop detail holds no token text of the o
   );
   assert.ok(!detail.includes(token));
   assert.ok(JSON.parse(detail).output_tail.includes("[redacted]"));
+});
+
+test("a failed setup output with a newline before a short jwt keeps a parseable detail without the token", async (t) => {
+  const token = ["eyJhbGciOi", "abcdefghij", "klmnopqrs"].join(".");
+  assert.equal(token.length, 31);
+  const detail = await failedSetupDetail(
+    t,
+    `printf 'line\\n${token}\\n'; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.ok(parsed.output_tail.includes("line"));
+  assert.ok(!detail.includes(token));
+});
+
+test("a failed setup command that ends with a bearer header keeps a parseable detail without the secret", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    "false -H 'Authorization: Bearer abc'",
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.equal(parsed.exit_code, FAILED_EXIT);
+  assert.ok(!detail.includes("abc"));
+});
+
+test("a failed setup with many changed tracked files keeps a detail within the limit that counts the omitted files", async (t) => {
+  const { checkout } = await repository(t, { file: "base" });
+  const result = await setUp(checkout, { postCreateCommand: "exit 1" });
+  assert.ok(result.end === SetupEnd.Failed);
+  const changed = Array.from(
+    { length: CHANGED_FILE_COUNT },
+    (_, index) => `packages/service/src/module-${index}/deeply/nested/file.ts`,
+  );
+  const detail = setupStop({ ...result, changed }).detail;
+  assert.ok(detail);
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.deepEqual(
+    parsed.changed_tracked_files,
+    changed.slice(0, parsed.changed_tracked_files.length),
+  );
+  assert.equal(
+    parsed.changed_tracked_files.length + parsed.changed_tracked_files_omitted,
+    CHANGED_FILE_COUNT,
+  );
+  assert.ok(parsed.changed_tracked_files_omitted > NO_LENGTH);
 });
 
 async function stagedAfterSetup(checkout: string): Promise<string[]> {

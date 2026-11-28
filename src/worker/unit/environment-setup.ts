@@ -138,33 +138,59 @@ export type SetupFailure = Extract<
 
 type CommandResult = VerificationRun["verification"]["results"][number];
 
-function setupDetail(
-  result: SetupFailure,
-  last: CommandResult,
-  outputTail: string,
-): string {
-  return redactText(
-    JSON.stringify({
-      exit_code: last.exit_code,
-      signal: last.signal,
-      timed_out: last.timed_out,
-      command: last.command,
-      output_tail: outputTail,
-      ...(result.changed === undefined
-        ? {}
-        : { changed_tracked_files: result.changed }),
-    }),
-  );
+interface SetupDetailParts {
+  last: CommandResult;
+  command: string;
+  files: readonly string[] | undefined;
+  omitted: number;
+  tail: string;
+}
+
+function setupDetail(parts: SetupDetailParts): string {
+  return JSON.stringify({
+    exit_code: parts.last.exit_code,
+    signal: parts.last.signal,
+    timed_out: parts.last.timed_out,
+    command: parts.command,
+    output_tail: parts.tail,
+    ...(parts.files === undefined
+      ? {}
+      : { changed_tracked_files: parts.files }),
+    ...(parts.omitted > NO_LENGTH
+      ? { changed_tracked_files_omitted: parts.omitted }
+      : {}),
+  });
+}
+
+function fits(detail: string): boolean {
+  return detail.length <= STOP_DETAIL_MAX_LENGTH;
+}
+
+function fitFiles(parts: SetupDetailParts, files: readonly string[]): void {
+  for (let kept = files.length; kept >= NO_LENGTH; kept -= 1) {
+    parts.files = files.slice(0, kept);
+    parts.omitted = files.length - kept;
+    if (fits(setupDetail(parts))) return;
+  }
 }
 
 function fittedSetupDetail(result: SetupFailure, last: CommandResult) {
-  let tail = redactText(result.run.outputs.at(-1) ?? "").slice(
+  const files = result.changed?.map((file) => redactText(file));
+  const parts: SetupDetailParts = {
+    last,
+    command: redactReason(last.command),
+    files,
+    omitted: NO_LENGTH,
+    tail: "",
+  };
+  if (files !== undefined) fitFiles(parts, files);
+  parts.tail = redactText(result.run.outputs.at(-1) ?? "").slice(
     -SETUP_OUTPUT_TAIL_LENGTH,
   );
-  let detail = setupDetail(result, last, tail);
-  while (detail.length > STOP_DETAIL_MAX_LENGTH && tail.length > NO_LENGTH) {
-    tail = tail.slice(detail.length - STOP_DETAIL_MAX_LENGTH);
-    detail = setupDetail(result, last, tail);
+  let detail = setupDetail(parts);
+  while (!fits(detail) && parts.tail.length > NO_LENGTH) {
+    parts.tail = parts.tail.slice(detail.length - STOP_DETAIL_MAX_LENGTH);
+    detail = setupDetail(parts);
   }
   return detail;
 }
