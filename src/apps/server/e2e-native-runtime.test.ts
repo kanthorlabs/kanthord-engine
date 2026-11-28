@@ -560,6 +560,7 @@ test(
         deadline: agent.budget.wallDeadline(),
         context: background,
         env: hostEnvironment(),
+        sandbox: null,
       });
       assert.deepEqual(verification.results, [
         {

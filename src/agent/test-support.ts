@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { platform } from "node:os";
+import { promisify } from "node:util";
 import type { TestContext } from "node:test";
 import {
   createFauxCore,
@@ -19,6 +22,7 @@ import type {
 } from "../custody/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/test-support.ts";
+import { bashSandbox } from "./bash-sandbox.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -185,4 +189,60 @@ export async function survivingProcesses(
     await new Promise((resolve) => setTimeout(resolve, GONE_POLL_MS));
   }
   return pids.filter(alive);
+}
+
+const execFileAsync = promisify(execFile);
+const REAL_WRAP_TIMEOUT_MS = 30_000;
+const DARWIN: NodeJS.Platform = "darwin";
+const LINUX: NodeJS.Platform = "linux";
+const DARWIN_REFUSAL = "sandbox_apply: Operation not permitted";
+const DARWIN_START_REFUSAL = /listen EPERM.*srt-mux-\d+-\w+\.sock/;
+const LINUX_REFUSAL_PREFIX = "bwrap:";
+export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
+
+export function isNestedRefusal(output: string, os: NodeJS.Platform): boolean {
+  if (os === DARWIN)
+    return output.includes(DARWIN_REFUSAL) || DARWIN_START_REFUSAL.test(output);
+  if (os === LINUX) return output.startsWith(LINUX_REFUSAL_PREFIX);
+  return false;
+}
+
+function errorOutput(error: unknown): string {
+  if (!(error instanceof Error) || !("stderr" in error)) return "";
+  return String(error.stderr);
+}
+
+export async function nestedSandboxSkip(
+  run: () => Promise<unknown>,
+  os: NodeJS.Platform = platform(),
+): Promise<string | false> {
+  try {
+    await run();
+    return false;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!isNestedRefusal(`${errorOutput(error)}\n${message}`, os)) throw error;
+    return NESTED_SANDBOX_SKIP;
+  }
+}
+
+async function runRealWrap(): Promise<void> {
+  try {
+    const wrapped = await bashSandbox.wrap("true", process.cwd(), {
+      env: process.env,
+      denyRead: [],
+    });
+    await execFileAsync("bash", ["-c", wrapped], {
+      timeout: REAL_WRAP_TIMEOUT_MS,
+    });
+  } finally {
+    bashSandbox.cleanup();
+  }
+}
+
+let realWrap: Promise<string | false> | undefined;
+
+export function realWrapSkip(): Promise<string | false> {
+  realWrap ??= nestedSandboxSkip(runRealWrap);
+  return realWrap;
 }

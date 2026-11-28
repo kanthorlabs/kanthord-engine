@@ -40,6 +40,7 @@ import { readPinnedRevision, readPrior } from "./node-reads.ts";
 import { prepareStepsWorkspace, runStepsImplement } from "./steps-implement.ts";
 import { runStepsExamine } from "./steps-examine.ts";
 import { runEvaluation } from "./evaluation.ts";
+import { verificationSandbox } from "./verification.ts";
 import { phaseSpan } from "./method-telemetry.ts";
 
 export type { ExecutionEnd } from "./execution-run.ts";
@@ -161,7 +162,15 @@ export async function runNativeExecution(
       const prior = await readPrior(run, input.setup.repositories);
       const workspace = await run.spans.within(
         phaseSpan(Phase.Prepare),
-        () => prepareStepsWorkspace(input, run),
+        () =>
+          prepareStepsWorkspace(
+            input,
+            run,
+            verificationSandbox(revision.content.tags, {
+              denyRead: input.denyRead,
+              root: input.sandboxRoot,
+            }),
+          ),
         () => nodeShapeEnd(revision),
       );
       let working: NativeAgent;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
+import type { SandboxScope } from "../../agent/bash-sandbox.ts";
 import type { Context } from "../../kernel/context.ts";
 import {
   DEVCONTAINER_FILE,
@@ -87,6 +88,7 @@ export interface BaseRunInput {
   command: string;
   variables: Readonly<Record<string, string>>;
   commandLimitMs: number;
+  writeRoots?: readonly string[];
   observe?: CommandObserver;
 }
 
@@ -99,6 +101,7 @@ export interface BaseTrees {
 
 export interface BasePlace {
   directory: string;
+  sandbox: SandboxScope | null;
   trees?: BaseTrees;
 }
 
@@ -404,6 +407,7 @@ async function setUpEntries(
       deadline: input.deadline,
       context: input.context,
       env: input.env,
+      sandbox: null,
       commandLimitMs: SETUP_COMMAND_LIMIT_MS,
       exhausted: input.exhausted,
     });
@@ -450,6 +454,7 @@ async function setUpEntries(
 export class BaseHead {
   private readonly input: SetupInput;
   private readonly directory: string;
+  private readonly sandbox: SandboxScope | null;
   private readonly checkouts: readonly SetupEntry[];
   private commitsRead: Promise<string[]> | null = null;
   private prepared: Promise<SetupResult> | null = null;
@@ -464,6 +469,7 @@ export class BaseHead {
     assert.ok(checkouts.length);
     this.input = input;
     this.directory = place.directory;
+    this.sandbox = place.sandbox;
     this.checkouts = checkouts;
     this.trees = place.trees ?? null;
   }
@@ -496,6 +502,12 @@ export class BaseHead {
     return commits[index]!;
   }
 
+  private sandboxWith(
+    writeRoots: readonly string[] | undefined,
+  ): SandboxScope | null {
+    return this.sandbox && { ...this.sandbox, writeRoots };
+  }
+
   async runIn(
     name: string,
     input: BaseRunInput,
@@ -521,6 +533,7 @@ export class BaseHead {
       deadline: this.input.deadline,
       context: this.input.context,
       env: this.input.env,
+      sandbox: this.sandboxWith(input.writeRoots),
       exhausted: this.input.exhausted,
     });
     return run.outcome === VerificationClass.BudgetEnd ? null : run;
@@ -554,6 +567,7 @@ export class BaseHead {
       deadline: this.input.deadline,
       context: this.input.context,
       env: this.input.env,
+      sandbox: this.sandbox,
       exhausted: this.input.exhausted,
     });
     if (run.outcome === VerificationClass.BudgetEnd) return null;

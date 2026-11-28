@@ -69,7 +69,10 @@ import { EvaluationAttribute } from "./method-telemetry.ts";
 import { EvaluationStage } from "./evaluation.ts";
 import { JUDGEMENT_MARKER, repairInstruction } from "./judgement.ts";
 import { SHIPPED_TEMPLATES } from "../../agent/prompt-templates.ts";
-import { VERIFICATION_INFRASTRUCTURE_FAILED } from "./verification.ts";
+import {
+  SSHD_TAG,
+  VERIFICATION_INFRASTRUCTURE_FAILED,
+} from "./verification.ts";
 
 const NO_RELEASES = 0;
 const SINGLE_RELEASE = 1;
@@ -328,6 +331,7 @@ test("evaluation writes failed-verification assessments without inference and ga
               name: "node",
               requirement: "work",
               criterion: "met",
+              tags: [SSHD_TAG],
               verifications: [scenario.command],
               bindings: scenario.examine ? [] : [repository.binding_id],
             },
@@ -472,6 +476,7 @@ test("evaluation writes failed-verification assessments without inference and ga
         transport: {} as RepositoryTransport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       new ExecutionBudget({
@@ -553,6 +558,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
             name: "node",
             requirement: "work",
             criterion: "met",
+            tags: [SSHD_TAG],
             verifications: ["true"],
             bindings: [repository.binding_id],
           },
@@ -623,6 +629,7 @@ test("an evaluation that its agent deadline cuts ends with no assessment and no 
         transport: {} as RepositoryTransport,
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       budget,
@@ -796,6 +803,7 @@ async function reviewOf(
             name: "node",
             requirement: "work",
             criterion: "met",
+            tags: [SSHD_TAG],
             verifications: [command],
             bindings: repositories.map((entry) => entry.binding_id),
           },
@@ -810,6 +818,7 @@ async function reviewOf(
                       name: "task",
                       requirement: "work",
                       criterion: "met",
+                      tags: [SSHD_TAG],
                       verifications: [options.taskCommand],
                       bindings: [repository.binding_id],
                     },
@@ -929,6 +938,7 @@ async function reviewOf(
         transport: options.transport ?? ({} as RepositoryTransport),
         sshAccess: everyBindingSshAccess,
         env: hostEnvironment(),
+        denyRead: [],
       },
       run,
       budget,

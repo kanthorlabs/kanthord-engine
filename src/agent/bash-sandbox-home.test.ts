@@ -7,6 +7,7 @@ import {
   existsSync,
   mkdirSync,
   realpathSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { platform } from "node:os";
@@ -31,6 +32,13 @@ const PNPM_FALLBACK_PATH = ["/opt/homebrew/bin", "/usr/local/bin"];
 const PNPM = "pnpm";
 const SCRIPT_NAME = "home-path-tool";
 const SCRIPT_OUTPUT = "ran from the home PATH entry";
+const LINKED_SCRIPT_NAME = "linked-path-tool";
+const LINKED_ENTRY = "a/current/bin";
+const LINKED_SPAWN = [
+  `const run = require("node:child_process").spawnSync("${LINKED_SCRIPT_NAME}", { encoding: "utf8" });`,
+  "if (run.error) { console.log(run.error.code); process.exit(1); }",
+  "console.log(run.stdout.trim());",
+].join(" ");
 const GIT_USER_NAME = "Probe";
 const INCLUDED_MARKER = "included";
 const GIT_CONFIG = [
@@ -357,5 +365,30 @@ test(
     const outcome = await inSandbox(h, SCRIPT_NAME);
     assertOutcome(SCRIPT_NAME, outcome, false);
     assert.equal(lastLine(outcome), SCRIPT_OUTPUT);
+  },
+);
+
+function linkedPathTool(h: Home): void {
+  const release = join(h.home, "a", "releases", "1");
+  mkdirSync(join(release, "bin"), { recursive: true });
+  symlinkSync(release, join(h.home, "a", "current"));
+  const script = join(release, "bin", LINKED_SCRIPT_NAME);
+  writeFileSync(script, `#!/bin/sh\necho '${SCRIPT_OUTPUT}'\n`);
+  chmodSync(script, SCRIPT_MODE);
+}
+
+test(
+  "(edge) a command in a PATH entry through a symlink under the home runs by name and from node",
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
+  async (t) => {
+    const h = fakeHome(t, [LINKED_ENTRY]);
+    linkedPathTool(h);
+    const byName = await inSandbox(h, LINKED_SCRIPT_NAME);
+    assertOutcome(LINKED_SCRIPT_NAME, byName, false);
+    assert.equal(lastLine(byName), SCRIPT_OUTPUT);
+    const command = `node -e '${LINKED_SPAWN}'`;
+    const spawned = await inSandbox(h, command);
+    assertOutcome(command, spawned, false);
+    assert.equal(lastLine(spawned), SCRIPT_OUTPUT);
   },
 );

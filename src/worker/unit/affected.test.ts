@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
+import { bashSandbox, type SandboxScope } from "../../agent/bash-sandbox.ts";
 import { background } from "../../kernel/context.ts";
 import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import {
@@ -162,6 +163,7 @@ const IDENTITY = [
 ];
 const PROBE_LINES = 7;
 const THREE_RUNS = 3;
+const HEAD_AND_BASE_RUNS = 2;
 const NO_SPANS = 0;
 const CHANGED_COUNT = 2;
 const EXIT_ABSENT = 127;
@@ -296,6 +298,7 @@ async function fixture(
     base: string;
     head: string;
     declaration?: string | null;
+    sandbox?: SandboxScope;
   },
 ): Promise<Fixture> {
   const root = temporary(t);
@@ -355,7 +358,11 @@ async function fixture(
   return {
     checkout,
     head: await headCommit(env, checkout, background, DEADLINE_MS),
-    base: new BaseHead(setup, { directory: join(root, "base") }, entries),
+    base: new BaseHead(
+      setup,
+      { directory: join(root, "base"), sandbox: modes.sandbox ?? null },
+      entries,
+    ),
     key: join(root, "workspace"),
     probe,
     records,
@@ -388,6 +395,7 @@ function runOf(f: Fixture, overrides: Partial<AffectedInput> = {}) {
     },
     digests: [],
     base: f.base,
+    sandbox: null,
     ...overrides,
   });
 }
@@ -466,6 +474,29 @@ test("a failed test that the base passes answers failed", async (t) => {
   });
   assert.equal(result.head.exit_code, EXIT_FAILED);
   assert.notEqual(result.failure_text, null);
+});
+
+test("a sandboxed run passes the report directory as the only write root of the head run and the base run", async (t) => {
+  const scope: SandboxScope = { denyRead: ["/denied"], root: "/instance" };
+  const f = await fixture(t, { base: "pass", head: "fail", sandbox: scope });
+  const hosts: SandboxScope[] = [];
+  t.mock.method(
+    bashSandbox,
+    "wrap",
+    async (command: string, _cwd: string, host: SandboxScope) => {
+      hosts.push(host);
+      return command;
+    },
+  );
+  const result = await ran(f, { sandbox: scope });
+  assert.equal(result.verdict, AffectedVerdict.Failed);
+  const directory = join(f.key, "affected", "repo");
+  assert.equal(hosts.length, HEAD_AND_BASE_RUNS);
+  for (const host of hosts) {
+    assert.deepEqual(host.writeRoots, [directory]);
+    assert.deepEqual(host.denyRead, scope.denyRead);
+    assert.equal(host.root, scope.root);
+  }
 });
 
 test("a failed test that the base also fails answers base_red", async (t) => {

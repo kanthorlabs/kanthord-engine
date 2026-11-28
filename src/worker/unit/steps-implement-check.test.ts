@@ -1,3 +1,4 @@
+import { SSHD_TAG } from "./verification.ts";
 import { VerdictSource } from "./node-reads.ts";
 import assert from "node:assert/strict";
 import { suite, test, type TestContext } from "node:test";
@@ -148,6 +149,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
     name: "node",
     requirement: "node",
     criterion: "node",
+    tags: [SSHD_TAG],
     verifications: ["true"],
     bindings: [],
   };
@@ -212,7 +214,7 @@ suite("steps implement start check", { concurrency: SUITE_CONCURRENCY }, () => {
       context: background,
     });
     stopAfter(t, () => run.dispose());
-    const error = await prepareStepsWorkspace(h.input, run).then(
+    const error = await prepareStepsWorkspace(h.input, run, null).then(
       () => assert.fail("The preparation must stop."),
       (error: unknown) => error,
     );

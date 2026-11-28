@@ -42,6 +42,7 @@ import {
   type AffectedTest,
   renderWorkPrompt,
 } from "../../agent/prompt-composer.ts";
+import type { SandboxScope } from "../../agent/bash-sandbox.ts";
 import { readDeclaration } from "./affected.ts";
 import { headCommit } from "./local-git.ts";
 import { readPushRecord, writePushRecord } from "./push-record.ts";
@@ -53,6 +54,7 @@ import {
   VerificationClass,
   verificationPassed,
   type VerificationRun,
+  verificationSandbox,
 } from "./verification.ts";
 import {
   BaseHead,
@@ -685,6 +687,8 @@ export interface StepsInput {
   transport: RepositoryTransport;
   sshAccess: ReadonlyMap<string, SshAccess>;
   env: NodeJS.ProcessEnv;
+  denyRead: readonly string[];
+  sandboxRoot?: string;
 }
 export interface StepsState {
   input: StepsInput;
@@ -740,6 +744,7 @@ async function affectedTestsOf(
 export async function prepareStepsWorkspace(
   input: StepsInput,
   run: ExecutionRun,
+  sandbox: SandboxScope | null,
 ) {
   assert.ok(input.setup.repositories.length > NO_CHECKOUTS);
   assert.equal(input.claim.execution_id, input.setup.execution_id);
@@ -802,6 +807,7 @@ export async function prepareStepsWorkspace(
       setupInput,
       {
         directory: join(key, BASE_DIRECTORY),
+        sandbox,
         trees: {
           workspaces: input.workspaces,
           nodeId: input.claim.node_id,
@@ -959,6 +965,10 @@ async function verifyCommands(
     deadline: state.agent.budget.wallDeadline(),
     context: state.run.operationContext,
     env: state.input.env,
+    sandbox: verificationSandbox(state.revision.content.tags, {
+      denyRead: state.input.denyRead,
+      root: state.input.sandboxRoot,
+    }),
     exhausted: () => state.agent.budget.exhausted(),
     baseline: (command) => state.base.runOf(command),
   });

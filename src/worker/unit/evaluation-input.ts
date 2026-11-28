@@ -27,6 +27,7 @@ import {
   type ExamineCheckout,
   WorkspaceKind,
 } from "./workspace.ts";
+import type { SandboxScope } from "../../agent/bash-sandbox.ts";
 import type { StepsInput } from "./steps-implement.ts";
 import type { TestedInput } from "./verification.ts";
 import {
@@ -448,6 +449,7 @@ async function setUpReview(
   workspace: { key: string; checkouts: readonly ExamineCheckout[] },
   testedInput: TestedInput,
   deadline: number,
+  sandbox: SandboxScope | null,
 ): Promise<{ base: BaseHead | null; setupFailure: SetupFailure | null }> {
   if (!workspace.checkouts.length) return { base: null, setupFailure: null };
   const setupInput = {
@@ -463,7 +465,7 @@ async function setUpReview(
   );
   const base = new BaseHead(
     setupInput,
-    { directory: join(workspace.key, BASE_DIRECTORY) },
+    { directory: join(workspace.key, BASE_DIRECTORY), sandbox },
     setup,
   );
   const result = await setUpHeads(
@@ -492,6 +494,7 @@ export async function prepareEvaluation(
   intent: ExecutionIntent,
   evidence: readonly Evidence[],
   round: ReviewRound,
+  sandbox: SandboxScope | null,
 ) {
   const workspace = await prepareWorkspace(input, run, intent, evidence, round);
   try {
@@ -521,6 +524,7 @@ export async function prepareEvaluation(
       workspace,
       testedInput,
       deadline,
+      sandbox,
     );
     const placement =
       workspace.key === workspace.directory
@@ -547,6 +551,7 @@ export async function prepareEvaluation(
       tested_input: testedInput,
       base,
       setupFailure,
+      sandbox,
       evidenceIds: [...evidenceIds],
       patches: patches.filter((patch) => patch.text.length > NO_PATCH_BYTES),
       reviewBundle: {

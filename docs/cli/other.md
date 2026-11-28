@@ -854,8 +854,45 @@ call, so a later instance root is also denied. `denyWrite` holds `.env`,
 with an error tool result when the sandbox cannot start. The bash has no
 unsandboxed fallback.
 
-The node verification commands and the local git of the worker run outside the
-sandbox. The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
+Each verification command of a node runs in the sandbox of the coder bash: the
+node and task verification, the examine verification, the release gate, the
+evaluation, the affected tests and the runs of a verification command on the
+base head. A verification uses the same deny list, `allowWrite`, `TMPDIR`,
+package cache variables and network allowlist as the coder bash of the same
+execution. The local git of the worker runs outside the sandbox. The wrap denies
+writes to `config` and `hooks` of each `.git` directory in the workspace or at
+most 3 levels below it, so a verification cannot plant a git filter driver for
+that git. A verification command whose wrap fails ends as an infrastructure
+failure, the output holds the rejection message, and no process starts. A
+verification has no unsandboxed fallback.
+
+The affected-test command also writes to its report directory
+`<workspaceKey>/affected/<checkout name>`, in the head run and in the base-head
+run. The wrap adds that exact directory to `allowWrite`. The command writes to
+no other path outside the cwd and `TMPDIR`.
+
+The sandbox sets `allowLocalBinding`, which allows bind, inbound and outbound on
+`localhost`, because the suites without `sshd` bind a loopback port on macOS. The
+runtime reads this flag once at `initialize`, so the coder bash and the
+Workbench bash share it. The sandbox allows no Unix socket. On macOS, a
+verification command that starts the bash wrap fails, because a sandbox cannot
+start inside another sandbox.
+
+Two cases run without the sandbox:
+
+- A node with the tag `sshd` runs its verification commands outside the sandbox.
+  Its suites need `sshd` and Unix sockets, and the sandbox allows no Unix socket.
+  The tag `sshd` does two jobs: it matches a worker instance, and it turns off
+  the verification sandbox. A user-project node with the tag runs its
+  verifications outside the sandbox. The engine `pnpm test` runs the
+  `startTestSshd` suites, so each engine node with `pnpm run verify` carries the
+  tag `sshd`. The sandbox protects the verification of the other repositories.
+  An engine suite that runs inside the sandbox is a later follow-on.
+- The setup scripts of a binding environment run outside the sandbox. The
+  operator declares them in the binding, and they need the network and the
+  persistent store.
+
+The `read`, `grep`, `find`, `ls`, `edit` and `write` tools of a worker
 agent refuse a path outside the workspace and an absolute path, as the Workbench
 tools do. A review or examine agent also reads the evidence folder of its own
 evaluation with `read`, `grep`, `find` and `ls`, and it cannot edit or write

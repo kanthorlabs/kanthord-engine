@@ -747,7 +747,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
       h.input.workspaces.nodeKey(h.input.claim.node_id),
       WorkspaceKind.Node,
     );
-    const prepared = await prepareStepsWorkspace(h.input, h.run);
+    const prepared = await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(gitPath(h, "rebase-merge")), false);
     const state = { ...h, ...prepared };
     assert.deepEqual(await runTask(state, current), {
@@ -908,7 +908,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await git.commit("attributes");
     await pushNodeBranch(h);
     releaseWorkspace(h);
-    const prepared = await prepareStepsWorkspace(h.input, h.run);
+    const prepared = await prepareStepsWorkspace(h.input, h.run, null);
     passingBase(t, prepared);
     const before = prepared.checkouts[0]!.head;
     const state = { ...h, ...prepared };
@@ -949,7 +949,7 @@ suite("turn gate", { concurrency: SUITE_CONCURRENCY }, () => {
     await assert.rejects(git.raw(["am", patch]));
     assert.ok(existsSync(gitPath(h, "rebase-apply/applying")));
     releaseWorkspace(h);
-    const prepared = await prepareStepsWorkspace(h.input, h.run);
+    const prepared = await prepareStepsWorkspace(h.input, h.run, null);
     assert.equal(existsSync(gitPath(h, "rebase-apply")), false);
     assert.equal(prepared.checkouts[0]!.head, await headOf(h.root));
   });

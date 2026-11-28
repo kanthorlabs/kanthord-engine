@@ -1,3 +1,4 @@
+import { SSHD_TAG } from "./verification.ts";
 import { ExecutionBudget } from "./budget.ts";
 import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import assert from "node:assert/strict";
@@ -272,6 +273,7 @@ test("S1 native reviewer evaluates even when the attempt already contains an exp
             name: "node",
             requirement: "review",
             criterion: "met",
+            tags: [SSHD_TAG],
             verifications: ["true"],
             bindings: [repository.binding_id],
           },
@@ -601,6 +603,7 @@ async function examineRun(
             name: "examine",
             requirement: "report",
             criterion: "report",
+            tags: [SSHD_TAG],
             verifications: [],
             bindings: [],
           },

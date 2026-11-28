@@ -31,7 +31,11 @@ import { basename, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { after, test, type TestContext } from "node:test";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
-import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
+import {
+  realWrapSkip,
+  spawnedPids,
+  survivingProcesses,
+} from "../../agent/test-support.ts";
 import { GROUP_GRACE_MS } from "../../kernel/process-group.ts";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { background, CancellationContext } from "../../kernel/context.ts";
@@ -74,6 +78,8 @@ import { readSessionFileEntry } from "./session-store.ts";
 import { SessionReadOutcome } from "../contract.ts";
 
 after(() => bashSandbox.dispose());
+
+const realSandbox = { skip: await realWrapSkip() };
 
 function unwrapped(t: TestContext) {
   t.mock.method(bashSandbox, "wrap", async (command: string) => command);
@@ -248,23 +254,30 @@ function bashResults(h: Harness): string {
   return JSON.stringify(toolResults(h, "bash"));
 }
 
-test("native software agent writes and runs bounded bash with execution credentials", async (t) => {
-  const h = await fixture(t, [
-    tool("write", { path: "written.txt", content: CONTENT }),
-    tool("bash", { command: "printf shell > shell.txt" }),
-    fauxAssistantMessage("done"),
-  ]);
-  await h.agent.prompt(WORK);
-  assert.equal(readFileSync(join(h.workspace, "written.txt"), "utf8"), CONTENT);
-  assert.ok(existsSync(join(h.workspace, "shell.txt")), bashResults(h));
-  assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
-  assert.ok(h.provider.calls.every(({ apiKey }) => apiKey === SECRET));
-  assert.ok(
-    h.provider.calls.every(({ systemPrompt }) =>
-      systemPrompt?.includes(SETUP_PROMPT),
-    ),
-  );
-});
+test(
+  "native software agent writes and runs bounded bash with execution credentials",
+  realSandbox,
+  async (t) => {
+    const h = await fixture(t, [
+      tool("write", { path: "written.txt", content: CONTENT }),
+      tool("bash", { command: "printf shell > shell.txt" }),
+      fauxAssistantMessage("done"),
+    ]);
+    await h.agent.prompt(WORK);
+    assert.equal(
+      readFileSync(join(h.workspace, "written.txt"), "utf8"),
+      CONTENT,
+    );
+    assert.ok(existsSync(join(h.workspace, "shell.txt")), bashResults(h));
+    assert.equal(h.provider.calls.length, PROVIDER_CALL_COUNT);
+    assert.ok(h.provider.calls.every(({ apiKey }) => apiKey === SECRET));
+    assert.ok(
+      h.provider.calls.every(({ systemPrompt }) =>
+        systemPrompt?.includes(SETUP_PROMPT),
+      ),
+    );
+  },
+);
 
 test("(security) a worker read of an absolute path outside the workspace is blocked", async (t) => {
   const outside = join(temporary(t), "credential.json");
@@ -613,33 +626,41 @@ const AFFECTED_COMMAND = "pnpm --silent run test:affected";
 const AFFECTED_SECTION = "## Affected tests";
 const BLANK_COMMAND = " ";
 
-test("the node work and the task work name the affected command of a declaring checkout", async (t) => {
-  const current = task("affected", "true");
-  const first = await implementFixture(t, [current], [], undefined, [
-    "api",
-    "web",
-  ]);
-  assert.deepEqual(first.affectedTests, []);
-  await declareAffected(first, t, AFFECTED_COMMAND);
-  const h = await nextExecution(t, first, []);
-  assert.deepEqual(h.affectedTests, [
-    { name: "api", command: AFFECTED_COMMAND, gate_files: [] },
-  ]);
-  const section = `${AFFECTED_SECTION}\n\nRepository api: affected tests \`${AFFECTED_COMMAND}\`\nKanthorD runs each command`;
-  assert.ok(taskWork(h, current).text.includes(section));
-  assert.ok(nodeWork(h).text.includes(section));
-  assert.ok(!first.affectedTests.length);
-  assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
-});
+test(
+  "the node work and the task work name the affected command of a declaring checkout",
+  realSandbox,
+  async (t) => {
+    const current = task("affected", "true");
+    const first = await implementFixture(t, [current], [], undefined, [
+      "api",
+      "web",
+    ]);
+    assert.deepEqual(first.affectedTests, []);
+    await declareAffected(first, t, AFFECTED_COMMAND);
+    const h = await nextExecution(t, first, []);
+    assert.deepEqual(h.affectedTests, [
+      { name: "api", command: AFFECTED_COMMAND, gate_files: [] },
+    ]);
+    const section = `${AFFECTED_SECTION}\n\nRepository api: affected tests \`${AFFECTED_COMMAND}\`\nKanthorD runs each command`;
+    assert.ok(taskWork(h, current).text.includes(section));
+    assert.ok(nodeWork(h).text.includes(section));
+    assert.ok(!first.affectedTests.length);
+    assert.ok(!taskWork(first, current).text.includes(AFFECTED_SECTION));
+  },
+);
 
-test("an invalid affected declaration gives no entry and no stop", async (t) => {
-  const current = task("invalid", "true");
-  const first = await implementFixture(t, [current], []);
-  await declareAffected(first, t, BLANK_COMMAND);
-  const h = await nextExecution(t, first, []);
-  assert.deepEqual(h.affectedTests, []);
-  assert.ok(!taskWork(h, current).text.includes(AFFECTED_SECTION));
-});
+test(
+  "an invalid affected declaration gives no entry and no stop",
+  realSandbox,
+  async (t) => {
+    const current = task("invalid", "true");
+    const first = await implementFixture(t, [current], []);
+    await declareAffected(first, t, BLANK_COMMAND);
+    const h = await nextExecution(t, first, []);
+    assert.deepEqual(h.affectedTests, []);
+    assert.ok(!taskWork(h, current).text.includes(AFFECTED_SECTION));
+  },
+);
 
 test("native reviewer refuses a scripted write tool", async (t) => {
   const h = await fixture(
@@ -760,24 +781,28 @@ test("native turn budget aborts after the first tool turn", async (t) => {
   assert.equal(existsSync(join(h.workspace, "two.txt")), false);
 });
 
-test("native parent cancellation aborts an active tool and disposal refuses reuse", async (t) => {
-  const h = await fixture(t, [
-    tool("bash", { command: "touch started; sleep 30" }),
-    fauxAssistantMessage("unexpected"),
-  ]);
-  const pending = h.agent.prompt(WORK);
-  while (!existsSync(join(h.workspace, "started")))
-    await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
-  assert.ok(existsSync(join(h.workspace, "started")));
-  h.context.cancel();
-  await pending;
-  assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
-  h.agent.dispose();
-  await assert.rejects(h.agent.prompt(WORK));
-  await assert.rejects(
-    h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
-  );
-});
+test(
+  "native parent cancellation aborts an active tool and disposal refuses reuse",
+  realSandbox,
+  async (t) => {
+    const h = await fixture(t, [
+      tool("bash", { command: "touch started; sleep 30" }),
+      fauxAssistantMessage("unexpected"),
+    ]);
+    const pending = h.agent.prompt(WORK);
+    while (!existsSync(join(h.workspace, "started")))
+      await setTimeout(START_POLL_MS, undefined, { signal: t.signal });
+    assert.ok(existsSync(join(h.workspace, "started")));
+    h.context.cancel();
+    await pending;
+    assert.equal(h.provider.calls.length, SINGLE_CALL_COUNT);
+    h.agent.dispose();
+    await assert.rejects(h.agent.prompt(WORK));
+    await assert.rejects(
+      h.agent.instruct(WORK, "judge", PromptTemplate.Evaluation),
+    );
+  },
+);
 
 const DISPOSE_TREE = [
   "sleep 60 >/dev/null 2>&1 & echo $! >pid-leader-group",
@@ -789,7 +814,7 @@ const DISPOSE_CASE_TIMEOUT_MS = 30_000;
 
 test(
   "F79 path 4: NativeAgent.dispose() kills the tree of a running bash call, also a process in its own group",
-  { timeout: DISPOSE_CASE_TIMEOUT_MS },
+  { timeout: DISPOSE_CASE_TIMEOUT_MS, ...realSandbox },
   async (t) => {
     unwrapped(t);
     const h = await fixture(t, [
@@ -822,7 +847,7 @@ const IGNORER_CASE_TIMEOUT_MS = 60_000;
 
 test(
   "dispose ends a descendant of a finished bash call that ignores SIGTERM with SIGKILL after the grace time",
-  { timeout: IGNORER_CASE_TIMEOUT_MS },
+  { timeout: IGNORER_CASE_TIMEOUT_MS, ...realSandbox },
   async (t) => {
     unwrapped(t);
     const h = await fixture(t, [

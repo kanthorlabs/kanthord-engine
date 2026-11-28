@@ -458,6 +458,7 @@ test("abandon kills the tool process group of the live execution", async (t) => 
             context: (unit as unknown as { execution: { context: Context } })
               .execution.context,
             env: hostEnvironment(),
+            sandbox: null,
           }),
         ),
       });
@@ -661,6 +662,7 @@ async function liveStopUnit(
     name: "node",
     requirement: "work",
     criterion: "met",
+    tags: ["sshd"],
     verifications: ["true"],
     bindings: [repository.binding_id],
   };

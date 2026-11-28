@@ -3,9 +3,11 @@ import {
   accessSync,
   constants,
   type Dirent,
+  lstatSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  type Stats,
   statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -84,6 +86,7 @@ const BASH_NETWORK: SandboxRuntimeConfig["network"] = {
     ...platformNetworkHosts(),
   ],
   deniedDomains: [],
+  allowLocalBinding: true,
 };
 
 const CREDENTIAL_DIRECTORIES = ["~/.ssh", "~/.aws", "~/.gnupg"];
@@ -128,6 +131,17 @@ function resolvedOrSame(path: string): string {
   }
 }
 
+function linkStatOf(path: string): Stats | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== undefined && UNRESOLVABLE_ENTRY_CODES.includes(code))
+      return undefined;
+    throw error;
+  }
+}
+
 function evalAuthFile(env: NodeJS.ProcessEnv): string[] {
   const file = env[EVAL_AUTH_FILE_VARIABLE];
   if (!file || !isAbsolute(file)) return [];
@@ -137,6 +151,7 @@ function evalAuthFile(env: NodeJS.ProcessEnv): string[] {
 export interface SandboxScope {
   denyRead: readonly string[];
   root?: string;
+  writeRoots?: readonly string[];
 }
 
 export interface SandboxHost extends SandboxScope {
@@ -282,6 +297,25 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
   ];
 }
 
+function linkNodes(entry: string, home: string): string[] {
+  if (entry === home || !isWithin(home, entry)) return [];
+  const links: string[] = [];
+  let current = home;
+  for (const segment of relative(home, entry).split(sep)) {
+    current = join(current, segment);
+    const stat = linkStatOf(current);
+    if (stat === undefined) return [];
+    if (stat.isSymbolicLink()) links.push(current);
+  }
+  return links;
+}
+
+function pathLinkNodes(env: NodeJS.ProcessEnv, home: string): string[] {
+  return pathEntries(env).flatMap((entry) =>
+    linkNodes(resolve(entry), resolve(home)),
+  );
+}
+
 function seccompHelperDirectory(): string {
   const entry = realpathSync(
     fileURLToPath(import.meta.resolve(SANDBOX_RUNTIME_PACKAGE)),
@@ -305,16 +339,33 @@ function outsideHostDeny(host: SandboxHost, home: string, root: string) {
   );
 }
 
+function isKeptLink(host: SandboxHost, home: string, link: string): boolean {
+  const target = resolvedOrSame(link);
+  return (
+    !isWithin(target, resolve(home)) &&
+    !isWithin(target, resolvedOrSame(home)) &&
+    outsideHostDeny(host, home, link) &&
+    outsideHostDeny(host, home, target) &&
+    !host.denyRead.some((denied) =>
+      isWithin(target, expandedHome(denied, home)),
+    )
+  );
+}
+
 function keptReadPaths(host: SandboxHost, cwd: string): string[] {
   const home = homeOf(host.env);
   return [
     ...new Set([
       cwd,
       host.env.TMPDIR ?? TEMPORARY_FALLBACK,
+      ...(host.writeRoots ?? []),
       ...instanceRoots(host),
       seccompHelperDirectory(),
       ...toolRoots(host.env, home).filter((root) =>
         outsideHostDeny(host, home, root),
+      ),
+      ...pathLinkNodes(host.env, home).filter((link) =>
+        isKeptLink(host, home, link),
       ),
     ]),
   ];
@@ -476,7 +527,7 @@ export function createBashSandbox(
           filesystem: filesystemOf({
             denyRead: denied,
             allowRead: keptReadPaths(host, cwd),
-            allowWrite: [cwd, temporary],
+            allowWrite: [cwd, temporary, ...(host.writeRoots ?? [])],
             denyWrite: [...defaultDenyWrite(cwd), ...gitDenied],
           }),
           network: BASH_NETWORK,
