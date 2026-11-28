@@ -312,7 +312,7 @@ function buildRun(ctx: RunContext): AgentRun {
 
   function internalEnd(reason: string): TurnEnd {
     return buildTurnEnd({
-      budgetReached: null,
+      budgetReached,
       stopped: false,
       failure: { internal: true, reason: redaction.exitText(reason) },
       text: currentText(),
@@ -350,14 +350,14 @@ function buildRun(ctx: RunContext): AgentRun {
   }
 
   function snapshot(): TurnEnd {
-    return {
-      end: RunEnd.Stopped,
-      budgetReached: null,
+    return buildTurnEnd({
+      budgetReached,
+      stopped: budgetReached === null,
       failure: null,
       text: currentText(),
       totals,
       warnings: redaction.takeWarnings(),
-    };
+    });
   }
 
   return {

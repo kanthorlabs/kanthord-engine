@@ -730,3 +730,21 @@ test("regression: after a failed send, a provider error that answers the wall li
   assert.equal(secondResult.failure, null);
   await run.close();
 });
+
+test("forceStop after the wall end returns budget_end with wall", async (t) => {
+  const { agentInput } = await makeInput(t, {
+    script: [() => new Promise<never>(() => {})],
+  });
+  agentInput.budget = { deadline: Date.now() + WALL_MS, usd: null };
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  stopAfter(t, () => run.close());
+  const sending = run.send("hello", { work: null });
+  await new Promise<void>((resolve) => setTimeout(resolve, WALL_MS * 2));
+  const result = run.forceStop();
+  assert.equal(result.end, RunEnd.BudgetEnd);
+  assert.equal(result.budgetReached, BudgetLimit.Wall);
+  await sending;
+  await run.close();
+});
