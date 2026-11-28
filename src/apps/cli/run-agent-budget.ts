@@ -15,6 +15,7 @@ const UNIT_MS: Readonly<Record<string, number>> = {
 const DEFAULT_WALL_MS = 7200000;
 const USD_SUFFIX_LEN = 3;
 const ZERO_USD = 0;
+const MICRO_USD = 1e6;
 
 export interface ParsedBudget {
   wallMs: number;
@@ -32,7 +33,9 @@ function parseDuration(value: string): number | null {
   if (!match) return null;
   const amount = Number(match[1]);
   const unit = match[2]!;
-  return amount * UNIT_MS[unit]!;
+  const ms = amount * UNIT_MS[unit]!;
+  if (!Number.isFinite(ms)) return null;
+  return ms;
 }
 
 function optionInvalid(): never {
@@ -56,6 +59,11 @@ export function parseBudget(values: readonly string[]): ParsedBudget {
         );
       const amount = Number(value.slice(0, -USD_SUFFIX_LEN));
       if (amount === ZERO_USD) optionInvalid();
+      if (
+        !Number.isFinite(amount) ||
+        Math.round(amount * MICRO_USD) > Number.MAX_SAFE_INTEGER
+      )
+        optionInvalid();
       usd = amount;
       continue;
     }

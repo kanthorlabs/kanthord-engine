@@ -128,3 +128,13 @@ test("L3-U6 first limit: UsdTracker fires the callback only once when check is c
   assert.equal(count, ONCE);
   assert.equal(tracker.budgetReached(), BudgetLimit.Usd);
 });
+
+test("UsdTracker fires when float sum 0.70 + 0.10 reaches a limit of 0.80", () => {
+  const tracker = new UsdTracker(0.8);
+  let fired = false;
+  tracker.check(0.7 + 0.1, () => {
+    fired = true;
+  });
+  assert.equal(fired, true);
+  assert.equal(tracker.budgetReached(), BudgetLimit.Usd);
+});
