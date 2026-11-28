@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { accessSync, constants } from "node:fs";
 import { createPublicKey, randomBytes, verify } from "node:crypto";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
@@ -56,6 +56,8 @@ const FIELD_SEPARATOR = " ";
 const PUBLIC_KEY_FIELDS = 2;
 const STRING_TYPE = "string";
 const execFileAsync = promisify(execFile);
+const STOP_STEP_MS = 5000;
+const liveSshd = new Set<ChildProcess>();
 const SESSION_ID_BYTES = 32;
 const HAS_SIGNATURE = 1;
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
@@ -69,7 +71,14 @@ export interface TestSshd {
   scpUrl(repository: string): string;
 }
 
-function sshdPath(): string {
+process.once("exit", () => {
+  for (const child of liveSshd) {
+    if (child.exitCode === null && child.signalCode === null)
+      child.kill("SIGKILL");
+  }
+});
+
+export function sshdPath(): string {
   const path = SSHD_PATHS.find((candidate) => {
     try {
       accessSync(candidate, constants.X_OK);
@@ -127,7 +136,35 @@ export async function hostKeyLine(path: string, port: number): Promise<string> {
   return `[${TEST_SSHD_HOST}]:${port} ${key}${LINE_END}`;
 }
 
-export async function startTestSshd(t: TestContext): Promise<TestSshd> {
+async function closesWithin(
+  closed: Promise<void>,
+  milliseconds: number,
+): Promise<boolean> {
+  const timer = new AbortController();
+  try {
+    return await Promise.race([
+      closed.then(() => true),
+      delay(milliseconds, false, { signal: timer.signal }),
+    ]);
+  } finally {
+    timer.abort();
+  }
+}
+
+async function stopSshd(sshd: ChildProcess, closed: Promise<void>) {
+  sshd.kill("SIGTERM");
+  if (!(await closesWithin(closed, STOP_STEP_MS))) {
+    sshd.kill("SIGKILL");
+    if (!(await closesWithin(closed, STOP_STEP_MS)))
+      throw new Error(`The test sshd ${sshd.pid} did not stop after SIGKILL.`);
+  }
+  liveSshd.delete(sshd);
+}
+
+export async function startTestSshd(
+  t: TestContext,
+  program: string = sshdPath(),
+): Promise<TestSshd> {
   const root = temporary(t);
   const port = await freePort();
   const hostKey = join(root, HOST_KEY_FILE);
@@ -157,10 +194,11 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
     ].join(LINE_END),
     { mode: 0o600 },
   );
-  const sshd = spawn(sshdPath(), ["-D", "-e", "-f", config, "-p", `${port}`], {
+  const sshd = spawn(program, ["-D", "-e", "-f", config, "-p", `${port}`], {
     env: toolEnvironment(),
     stdio: ["ignore", "ignore", "ignore"],
   });
+  liveSshd.add(sshd);
   let exited = false;
   const closed = new Promise<void>((resolve) => {
     sshd.once("close", () => {
@@ -172,10 +210,7 @@ export async function startTestSshd(t: TestContext): Promise<TestSshd> {
       resolve();
     });
   });
-  stopAfter(t, async () => {
-    sshd.kill();
-    await closed;
-  });
+  stopAfter(t, () => stopSshd(sshd, closed));
   await waitReady(port, () => exited, t.signal);
   const user = userInfo().username;
   return {
