@@ -586,6 +586,94 @@ test("changedServices answers no service when no schema differs", () => {
   }
 });
 
+const OBJECT_FIELD = "object";
+const UNOWNED_TABLE_REFUSED_CODE = "system.database.reset.unowned_table";
+
+function strayStore(path = ":memory:"): Store {
+  const store = twoServiceStore(path);
+  store.database.exec("CREATE TABLE two_stray (value TEXT)");
+  return store;
+}
+
+test("changedServices ignores a stray prefixed table of an unchanged service", () => {
+  const store = strayStore();
+  try {
+    assert.deepEqual(
+      store.changedServices([...CHANGED_ONE_SERVICES, ...TWO_SERVICES]),
+      ["one"],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("assertOwnedTables refuses a stray prefixed table and writes nothing", (t) => {
+  const path = join(temporary(t), "kanthord.db");
+  const store = strayStore(path);
+  try {
+    const before = snapshot(store);
+    const refused = refusal(() =>
+      store.assertOwnedTables([...CHANGED_ONE_SERVICES, ...TWO_SERVICES]),
+    );
+    assert.equal(refused.code, UNOWNED_TABLE_REFUSED_CODE);
+    assert.deepEqual(refused.fields, [
+      ["path", path],
+      ["service", "two"],
+      ["table", "two_stray"],
+    ]);
+    assert.deepEqual(snapshot(store), before);
+    assert.deepEqual(
+      store.database
+        .prepare("SELECT value FROM two_first")
+        .all()
+        .map((row) => row.value),
+      ["kept"],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("assertOwnedTables accepts a store without a stray table", () => {
+  const store = twoServiceStore();
+  try {
+    store.assertOwnedTables([...CHANGED_ONE_SERVICES, ...TWO_SERVICES]);
+  } finally {
+    store.close();
+  }
+});
+
+test("plan still refuses a stray prefixed table with schema_mismatch", () => {
+  const store = strayStore();
+  try {
+    const refused = refusal(() =>
+      store.plan([...ONE_SERVICES, ...TWO_SERVICES]),
+    );
+    assert.equal(refused.code, SCHEMA_MISMATCH_CODE);
+    assert.deepEqual(
+      refused.fields.filter(([name]) => name === OBJECT_FIELD),
+      [[OBJECT_FIELD, "two_stray"]],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test("resetServices drops a stray prefixed table of the changed service", () => {
+  const store = twoServiceStore();
+  try {
+    store.database.exec("CREATE TABLE one_stray (value TEXT)");
+    const services = [...CHANGED_ONE_SERVICES, ...TWO_SERVICES];
+    assert.deepEqual(store.resetServices(services, ["one"], "custody").sort(), [
+      "one_first",
+      "one_stray",
+    ]);
+    assert.deepEqual(store.tableNames(), ["migration", "two_first"]);
+  } finally {
+    store.close();
+  }
+});
+
 test("resetServices drops the changed service, keeps the others and migrate rebuilds it", () => {
   const store = twoServiceStore();
   try {
