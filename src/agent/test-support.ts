@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { TestContext } from "node:test";
 import {
   createFauxCore,
@@ -19,6 +21,7 @@ import type {
 } from "../custody/contract.ts";
 import type { Transaction } from "../kernel/store.ts";
 import { stopAfter } from "../kernel/test-support.ts";
+import { bashSandbox } from "./bash-sandbox.ts";
 
 export function scriptedProvider(
   script: FauxResponseStep[],
@@ -185,4 +188,36 @@ export async function survivingProcesses(
     await new Promise((resolve) => setTimeout(resolve, GONE_POLL_MS));
   }
   return pids.filter(alive);
+}
+
+const execFileAsync = promisify(execFile);
+const REAL_WRAP_TIMEOUT_MS = 30_000;
+export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
+
+async function probeRealWrap(): Promise<boolean> {
+  try {
+    const wrapped = await bashSandbox.wrap("true", process.cwd(), {
+      env: process.env,
+      denyRead: [],
+    });
+    await execFileAsync("bash", ["-c", wrapped], {
+      timeout: REAL_WRAP_TIMEOUT_MS,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    bashSandbox.cleanup();
+  }
+}
+
+let realWrap: Promise<boolean> | undefined;
+
+export function realWrapRuns(): Promise<boolean> {
+  realWrap ??= probeRealWrap();
+  return realWrap;
+}
+
+export async function realWrapSkip(): Promise<string | false> {
+  return (await realWrapRuns()) ? false : NESTED_SANDBOX_SKIP;
 }

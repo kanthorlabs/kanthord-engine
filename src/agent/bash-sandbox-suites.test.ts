@@ -26,7 +26,6 @@ const CASE_TIMEOUT_MS = 120_000;
 const AGENT_LIMIT_MS = 180_000;
 const AGENT_CASE_TIMEOUT_MS = 200_000;
 const AGENT_TEST_TIMEOUT_MS = 30_000;
-const FOLLOW_ON = { todo: "s2 S2: task 02" };
 const POSIX_TEMPORARY_ROOT = "/tmp";
 const TEMPORARY_PARENT = "opencode";
 const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
@@ -260,7 +259,7 @@ function assertNoModuleError(t: TestContext, outcome: Outcome): void {
 
 test(
   `(edge) H3: a sandboxed node --test ${AGENT_SUITE}`,
-  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS, ...FOLLOW_ON },
+  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS },
   async (t) => {
     const parent = join(POSIX_TEMPORARY_ROOT, TEMPORARY_PARENT);
     mkdirSync(parent, { recursive: true });
@@ -273,13 +272,13 @@ test(
     const line = record(t, command, outcome);
     assert.ok(!outcome.output.includes("mkdtemp"), line);
     assertNoModuleError(t, outcome);
-    if (platform() === DARWIN) assert.notEqual(outcome.status, SUCCESS, line);
+    if (platform() === DARWIN) assert.equal(outcome.status, SUCCESS, line);
   },
 );
 
 test(
   "(edge) H3: a nested wrap of true inside the sandbox",
-  { skip: unavailable, timeout: CASE_TIMEOUT_MS, ...FOLLOW_ON },
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = host(t, NESTED_SCRIPT, process.cwd(), {
       root: processTemporary(),
