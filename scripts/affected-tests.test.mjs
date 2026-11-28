@@ -60,7 +60,7 @@ const FIXTURE_PACKAGE = {
   type: "module",
   scripts: {
     "test:files":
-      "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000",
+      "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000 --test-force-exit",
   },
 };
 const PASSING_TEST =

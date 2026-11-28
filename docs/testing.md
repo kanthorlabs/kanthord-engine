@@ -53,3 +53,7 @@ The record has two accepted limits:
 
 - The test files that load the composed server reach every production file. They run for every production change.
 - A push to `main` runs each test file again that has no record in the cache of `main`. The cache of a pull request never reaches `main`.
+
+## Test commands
+
+Every `node --test` command of the engine passes `--test-force-exit`: `test:files`, `test:container` and the run of [health.mjs](../scripts/health.mjs). A test file whose test leaves a live handle, for example a child process, ends at the end of its tests. A test file whose stop never settles still fails at the test timeout.
