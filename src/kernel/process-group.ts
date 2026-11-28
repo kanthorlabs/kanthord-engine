@@ -337,13 +337,14 @@ function descendantGroups(
   const groups: number[] = [];
   const seen = new Set<number>([leader]);
   const pending = [leader];
+  const visit = (child: ProcessRow) => {
+    if (seen.has(child.pid)) return;
+    seen.add(child.pid);
+    groups.push(child.group);
+    pending.push(child.pid);
+  };
   for (let parent = pending.pop(); parent !== undefined; parent = pending.pop())
-    for (const child of children.get(parent) ?? []) {
-      if (seen.has(child.pid)) continue;
-      seen.add(child.pid);
-      groups.push(child.group);
-      pending.push(child.pid);
-    }
+    for (const child of children.get(parent) ?? []) visit(child);
   return groups;
 }
 

@@ -79,15 +79,17 @@ interface CallBody {
   rejection?: GatewayError;
 }
 
-function callBody(operation: Operation, call: PortCall): CallBody {
-  if (operation.body) {
-    try {
-      return { body: parseJSON(call.body ?? "") };
-    } catch (error) {
-      if (!(error instanceof GatewayError)) throw error;
-      return { body: null, rejection: error };
-    }
+function parsedCallBody(call: PortCall): CallBody {
+  try {
+    return { body: parseJSON(call.body ?? "") };
+  } catch (error) {
+    if (!(error instanceof GatewayError)) throw error;
+    return { body: null, rejection: error };
   }
+}
+
+function callBody(operation: Operation, call: PortCall): CallBody {
+  if (operation.body) return parsedCallBody(call);
   if (call.body)
     return {
       body: null,

@@ -430,13 +430,15 @@ function applyVariables(
   environment: Map<string, string>,
   changed: Map<string, string>,
 ): void {
-  for (const variables of [entry.containerEnv, entry.remoteEnv])
-    for (const [name, value] of Object.entries(variables ?? {})) {
-      if (value === null) continue;
-      const next = substituted(value, environment);
-      environment.set(name, next);
-      changed.set(name, next);
-    }
+  const assignments = [entry.containerEnv, entry.remoteEnv].flatMap(
+    (variables) => Object.entries(variables ?? {}),
+  );
+  for (const [name, value] of assignments) {
+    if (value === null) continue;
+    const next = substituted(value, environment);
+    environment.set(name, next);
+    changed.set(name, next);
+  }
 }
 
 export function imageSettings(inspected: string): {

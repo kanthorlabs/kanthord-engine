@@ -466,12 +466,18 @@ function sections(stdout: string): Record<string, unknown[]> {
   } catch {
     for (const line of linesOf(stdout)) documents.push(JSON.parse(line));
   }
-  for (const document of documents)
-    for (const name of ["Images", "Volumes"]) {
-      const rows = field(document, name);
-      if (Array.isArray(rows)) (merged[name] ??= []).push(...rows);
-    }
+  for (const document of documents) mergeSections(merged, document);
   return merged;
+}
+
+function mergeSections(
+  merged: Record<string, unknown[]>,
+  document: unknown,
+): void {
+  for (const name of ["Images", "Volumes"]) {
+    const rows = field(document, name);
+    if (Array.isArray(rows)) (merged[name] ??= []).push(...rows);
+  }
 }
 
 function mergeImage(
@@ -582,6 +588,10 @@ function usageRow(
   else if (section === UsageSection.Volumes) volumeRow(line, collected.volumes);
 }
 
+function requireHeader(section: UsageSection, line: string): void {
+  if (!SECTION_HEADERS[section].test(line)) throw unknownLine(line);
+}
+
 function podmanTable(table: string): PodmanTable {
   const collected: PodmanTable = { unique: new Map(), volumes: [] };
   const seen = new Set<UsageSection>();
@@ -597,7 +607,7 @@ function podmanTable(table: string): PodmanTable {
     }
     if (section === null) throw unknownLine(line);
     if (header) {
-      if (!SECTION_HEADERS[section].test(line)) throw unknownLine(line);
+      requireHeader(section, line);
       header = false;
       continue;
     }

@@ -70,21 +70,23 @@ export class SessionReads {
       return;
     }
     const idempotencyKey = createIdempotencyKey();
-    for (;;) {
+    const attempt = async (): Promise<boolean> => {
       try {
         await this.options.report(read_id, result, idempotencyKey);
-        return;
+        return true;
       } catch (error) {
-        if (!this.retryable(error, deadline)) {
-          this.options.log({
-            msg: "Worker instance session read report failed",
-            read_id,
-            outcome: result.outcome,
-            code: codeOf(error),
-          });
-          return;
-        }
+        if (this.retryable(error, deadline)) return false;
+        this.options.log({
+          msg: "Worker instance session read report failed",
+          read_id,
+          outcome: result.outcome,
+          code: codeOf(error),
+        });
+        return true;
       }
+    };
+    for (;;) {
+      if (await attempt()) return;
       try {
         await delay(
           this.options.retryMs ?? INSTANCE_REPORT_RETRY_MS,

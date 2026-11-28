@@ -69,10 +69,8 @@ export async function pullLoop(
   assert.ok(input.api.scheduler.workPull);
   const state: PullState = { registration: input.registration };
   while (!input.shutdown.signal.aborted) {
-    if (input.idle) {
-      await input.idle();
-      if (input.shutdown.signal.aborted) break;
-    }
+    if (input.idle) await input.idle();
+    if (input.shutdown.signal.aborted) break;
     if (input.gate && !input.gate()) {
       await sleep(GATE_POLL_MS, input.shutdown);
       continue;

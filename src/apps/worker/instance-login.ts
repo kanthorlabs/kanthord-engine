@@ -141,15 +141,18 @@ export class InstanceLogins {
   }
 
   private advance(running: Running, entry: LoginSessionEntry): void {
-    if (entry.code !== null && entry.code !== running.supplied) {
-      try {
-        running.flow.supply(entry.code);
-        running.supplied = entry.code;
-      } catch (error) {
-        if (!(error instanceof OperationError)) throw error;
-      }
-    }
+    if (entry.code !== null && entry.code !== running.supplied)
+      this.supplyCode(running, entry.code);
     void this.reportPending(running);
+  }
+
+  private supplyCode(running: Running, code: string): void {
+    try {
+      running.flow.supply(code);
+      running.supplied = code;
+    } catch (error) {
+      if (!(error instanceof OperationError)) throw error;
+    }
   }
 
   private body(running: Running): LoginReportBody {
@@ -202,16 +205,23 @@ export class InstanceLogins {
       sealed_to: key.sealed_to,
     };
     const idempotencyKey = createIdempotencyKey();
-    for (;;) {
-      try {
-        await this.options.report(session.id, body, idempotencyKey);
-        break;
-      } catch (error) {
-        if (!this.retryable(running, error)) throw error;
-        await delay(this.options.retryMs ?? INSTANCE_REPORT_RETRY_MS);
-      }
-    }
+    while (!(await this.reportOnce(running, body, idempotencyKey)))
+      await delay(this.options.retryMs ?? INSTANCE_REPORT_RETRY_MS);
     this.sessions.complete(session.id);
+  }
+
+  private async reportOnce(
+    running: Running,
+    body: LoginReportBody,
+    idempotencyKey: string,
+  ): Promise<boolean> {
+    try {
+      await this.options.report(running.session.id, body, idempotencyKey);
+      return true;
+    } catch (error) {
+      if (!this.retryable(running, error)) throw error;
+      return false;
+    }
   }
 
   private retryable(running: Running, error: unknown): boolean {

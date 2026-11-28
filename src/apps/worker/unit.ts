@@ -359,10 +359,7 @@ export class WorkerUnit {
         clearInterval(this.footprintTimer);
         await this.footprintTask;
         disarm = this.options.watchdog?.();
-        for (const entry of this.entries) {
-          const failure = await this.deregisterEntry(entry);
-          if (failure) throw failure;
-        }
+        await this.deregisterEntries();
       } finally {
         this.started = false;
         for (const entry of this.entries) entry.secret.fill(0);
@@ -375,6 +372,13 @@ export class WorkerUnit {
       }
     });
     return this.stopTask;
+  }
+
+  private async deregisterEntries(): Promise<void> {
+    for (const entry of this.entries) {
+      const failure = await this.deregisterEntry(entry);
+      if (failure) throw failure;
+    }
   }
 
   private async endLiveExecution(): Promise<void> {

@@ -129,13 +129,16 @@ export class CopyChecks {
   private async checkAll(): Promise<void> {
     const { context, exchange } = this.options;
     try {
-      const copies = await exchange.copies(context);
-      for (const copy of copies.filter(liveCopy)) {
-        if (context.signal.aborted) return;
-        await this.checkOne(copy.name);
-      }
+      await this.checkLive(await exchange.copies(context));
     } catch (error) {
       this.failed(null, error);
+    }
+  }
+
+  private async checkLive(copies: readonly CredentialAnswer[]): Promise<void> {
+    for (const copy of copies.filter(liveCopy)) {
+      if (this.options.context.signal.aborted) return;
+      await this.checkOne(copy.name);
     }
   }
 

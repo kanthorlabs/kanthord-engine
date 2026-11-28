@@ -1799,11 +1799,7 @@ export class Server implements Service {
       ];
       this.services = services;
       for (const service of services) this.releases.push(() => service.stop());
-      for (const service of services) {
-        const error = await service.start();
-        if (error) throw error;
-        this.shutdown.signal.throwIfAborted();
-      }
+      await this.startServices();
       this.runs = services.map((service) =>
         service.run(this.serviceContext).then((error) => {
           if (error && error !== this.serviceContext.signal.reason) {
@@ -1827,15 +1823,27 @@ export class Server implements Service {
     }
   }
 
+  private async startServices(): Promise<void> {
+    for (const service of this.services) {
+      const error = await service.start();
+      if (error) throw error;
+      this.shutdown.signal.throwIfAborted();
+    }
+  }
+
+  private async releaseNext(): Promise<void | Error | null> {
+    try {
+      return await this.releases.pop()!();
+    } catch (error) {
+      return asError(error);
+    }
+  }
+
   private async release(): Promise<Error | null> {
     const failures: Error[] = [];
     while (this.releases.length) {
-      try {
-        const error = await this.releases.pop()!();
-        if (error) failures.push(error);
-      } catch (error) {
-        failures.push(asError(error));
-      }
+      const error = await this.releaseNext();
+      if (error) failures.push(error);
     }
     try {
       await bashSandbox.dispose();

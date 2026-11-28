@@ -744,14 +744,14 @@ export class Invocation {
       const execution = operation.requiresExecution
         ? this.proveExecution(input, identity)
         : undefined;
-      if (operation.mutation) {
-        const replay = this.replayOrReserve(
-          operation,
-          { identity, input, idempotencyKey: options.idempotencyKey },
-          run.state,
-        );
-        if (replay) return replay;
-      }
+      const replay = operation.mutation
+        ? this.replayOrReserve(
+            operation,
+            { identity, input, idempotencyKey: options.idempotencyKey },
+            run.state,
+          )
+        : undefined;
+      if (replay) return replay;
       const caller = this.callerContext(operation, run, {
         identity,
         execution,

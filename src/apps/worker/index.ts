@@ -622,10 +622,7 @@ export class Worker implements Service {
     for (const entry of connection.bindings) {
       const hosted = this.hosted.get(entry.client_id);
       if (!hosted) {
-        const binding = this.host(entry);
-        if (entry.state === BindingEntryState.Draining)
-          this.removeHosted(this.hosted.get(entry.client_id)!);
-        else void this.added(binding);
+        this.hostNew(entry);
         continue;
       }
       hosted.entry = entry;
@@ -633,6 +630,13 @@ export class Worker implements Service {
     }
     for (const hosted of this.hosted.values())
       if (!listed.has(hosted.entry.client_id)) this.removeHosted(hosted);
+  }
+
+  private hostNew(entry: ConnectionEntry): void {
+    const binding = this.host(entry);
+    if (entry.state === BindingEntryState.Draining)
+      this.removeHosted(this.hosted.get(entry.client_id)!);
+    else void this.added(binding);
   }
 
   private bindingRefused(binding: UnitBinding): void {

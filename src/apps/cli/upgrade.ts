@@ -117,21 +117,24 @@ function migrateTargets(
   stamp: string,
   row: RowWriter,
 ): void {
-  for (const { store, path, migrations, changed } of behind) {
-    const backup = `${path}.bak-${stamp}`;
-    store.backup(backup);
-    row(UpgradeRow.Backup, backup);
-    if (changed.length)
-      for (const table of store.resetServices(
-        migrations,
-        changed,
-        CUSTODY_SERVICE_NAME,
-      ))
-        row(UpgradeRow.Dropped, table);
-    store.migrate(migrations, ({ service, from, to }) =>
-      row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`),
-    );
-  }
+  for (const target of behind) migrateTarget(target, stamp, row);
+}
+
+function migrateTarget(target: Target, stamp: string, row: RowWriter): void {
+  const { store, path, migrations, changed } = target;
+  const backup = `${path}.bak-${stamp}`;
+  store.backup(backup);
+  row(UpgradeRow.Backup, backup);
+  if (changed.length)
+    for (const table of store.resetServices(
+      migrations,
+      changed,
+      CUSTODY_SERVICE_NAME,
+    ))
+      row(UpgradeRow.Dropped, table);
+  store.migrate(migrations, ({ service, from, to }) =>
+    row(UpgradeRow.Migrated, `${service} ${from} -> ${to}`),
+  );
 }
 
 function writeConfig(

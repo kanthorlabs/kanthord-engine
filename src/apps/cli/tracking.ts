@@ -515,19 +515,16 @@ async function rebuildCutEntries(
   const rebuilt = new Map<string, SessionEntry>();
   const failures: { sequence: number; error: unknown }[] = [];
   let next = 0;
-  const rebuildNext = async () => {
-    while (next < cut.length) {
-      const item = cut[next++]!;
-      try {
-        rebuilt.set(item.entry_id, await rebuiltEntry(entries, item, leaf));
-      } catch (error) {
-        if (
-          !(error instanceof Diagnostic) ||
-          error.code !== ENTRY_TOO_LARGE_CODE
-        )
-          failures.push({ sequence: item.sequence, error });
-      }
+  const rebuildOne = async (item: SessionEntry) => {
+    try {
+      rebuilt.set(item.entry_id, await rebuiltEntry(entries, item, leaf));
+    } catch (error) {
+      if (!(error instanceof Diagnostic) || error.code !== ENTRY_TOO_LARGE_CODE)
+        failures.push({ sequence: item.sequence, error });
     }
+  };
+  const rebuildNext = async () => {
+    while (next < cut.length) await rebuildOne(cut[next++]!);
   };
   await Promise.all(
     Array.from(
