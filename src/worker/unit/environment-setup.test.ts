@@ -63,6 +63,7 @@ const MAGIC_TEXT = "{}";
 const ONE_CHILD = 1;
 const LONG_OUTPUT_LINES = 500;
 const CHANGED_FILE_COUNT = 120;
+const SHORT_TOKEN_LENGTH = 31;
 const PNPM_OK_EXIT = 0;
 const NO_LENGTH = 0;
 const DIGEST = "d".repeat(64);
@@ -672,7 +673,7 @@ test("(security) a failed setup command stop detail holds no token text of the o
 
 test("a failed setup output with a newline before a short jwt keeps a parseable detail without the token", async (t) => {
   const token = ["eyJhbGciOi", "abcdefghij", "klmnopqrs"].join(".");
-  assert.equal(token.length, 31);
+  assert.equal(token.length, SHORT_TOKEN_LENGTH);
   const detail = await failedSetupDetail(
     t,
     `printf 'line\\n${token}\\n'; exit ${FAILED_EXIT}`,
