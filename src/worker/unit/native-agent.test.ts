@@ -814,7 +814,7 @@ const DISPOSE_CASE_TIMEOUT_MS = 30_000;
 
 test(
   "F79 path 4: NativeAgent.dispose() kills the tree of a running bash call, also a process in its own group",
-  { timeout: DISPOSE_CASE_TIMEOUT_MS },
+  { timeout: DISPOSE_CASE_TIMEOUT_MS, ...realSandbox },
   async (t) => {
     unwrapped(t);
     const h = await fixture(t, [
@@ -847,7 +847,7 @@ const IGNORER_CASE_TIMEOUT_MS = 60_000;
 
 test(
   "dispose ends a descendant of a finished bash call that ignores SIGTERM with SIGKILL after the grace time",
-  { timeout: IGNORER_CASE_TIMEOUT_MS },
+  { timeout: IGNORER_CASE_TIMEOUT_MS, ...realSandbox },
   async (t) => {
     unwrapped(t);
     const h = await fixture(t, [

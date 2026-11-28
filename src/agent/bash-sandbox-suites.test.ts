@@ -32,6 +32,7 @@ const POSIX_TEMPORARY_ROOT = "/tmp";
 const TEMPORARY_PARENT = "opencode";
 const GATE_LAST_LENGTH = 200;
 const DETAIL_LENGTH = 300;
+const FAILED_TEST_LINE = /^\s*(?:✖|not ok) .*$/gm;
 const STORE_LINKS = "links";
 const TEST_COUNT = /^(?:ℹ |# )tests (\d+)/m;
 const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
@@ -197,7 +198,11 @@ function lastLine(outcome: Outcome): string {
 }
 
 function detail(outcome: Outcome): string {
-  return redactReason(outcome.output.trim().slice(-DETAIL_LENGTH));
+  const failed = outcome.output.match(FAILED_TEST_LINE) ?? [];
+  const names = failed.map((name) => name.trim()).join("; ");
+  return redactReason(
+    `${names} ${outcome.output.trim().slice(-DETAIL_LENGTH)}`.trim(),
+  );
 }
 
 function gate(
