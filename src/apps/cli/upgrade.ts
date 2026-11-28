@@ -37,6 +37,7 @@ function inspect(
   migrations: Migrations,
   resetChanged: boolean,
 ): Pick<Target, "pending" | "changed"> {
+  if (resetChanged) store.assertOwnedTables(migrations);
   const changed = resetChanged ? store.changedServices(migrations) : [];
   if (!changed.length)
     return { pending: store.plan(migrations).pending, changed };
