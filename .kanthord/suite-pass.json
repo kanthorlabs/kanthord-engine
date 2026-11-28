@@ -4,6 +4,14 @@
     "src/apps/server/import-boundaries.test.ts",
     "src/apps/server/unwired-import.test.ts",
     "src/apps/server/worker-oauth-flows.test.ts",
-    "src/apps/server/worker-thread.test.ts"
+    "src/apps/server/worker-thread.test.ts",
+    "src/apps/cli/e2e-run-agent.test.ts",
+    "src/apps/cli/e2e-run-agent-boundary.test.ts",
+    "src/apps/cli/e2e-run-agent-contract.test.ts",
+    "src/apps/cli/e2e-run-agent-ends.test.ts",
+    "scripts/hooks-gate.test.mjs",
+    "scripts/import-check.test.mjs",
+    "scripts/play-run-agent.test.mjs",
+    "scripts/evaluation/agent/evaluation.test.mjs"
   ]
 }

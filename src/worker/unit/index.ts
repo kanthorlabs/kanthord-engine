@@ -40,9 +40,9 @@ export {
   type HostTools,
   type UploadResult,
 } from "../contract.ts";
-export { evidenceUploadTool } from "../../agent/capabilities/execution-evidence.ts";
+export { evidenceUploadTool } from "./capabilities/execution-evidence.ts";
 export type { TelemetrySink } from "./telemetry.ts";
-export type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
+export type { SessionHostTools } from "./capabilities/host-tools.ts";
 export type { MethodClaim } from "./execution-stop.ts";
 export {
   tasksPlanOf,

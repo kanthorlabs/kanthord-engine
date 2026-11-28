@@ -35,7 +35,7 @@ import {
 } from "./contract.ts";
 import { PROMPT_SOURCE_READ_MS } from "../kernel/prompt-source.ts";
 import { agentMigrations } from "./migrations.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration } from "./declarations.ts";
 import {
   AgentProviderKind,
   EnablementState,

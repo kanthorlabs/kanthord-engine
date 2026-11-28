@@ -14,11 +14,6 @@
       "count": 1
     }
   },
-  "src/agent/hooks/sensitive-text-redaction.ts": {
-    "@typescript-eslint/max-params": {
-      "count": 1
-    }
-  },
   "src/agent/hooks/tool-approval.ts": {
     "kanthord/no-inline-param-type": {
       "count": 1
@@ -1252,7 +1247,7 @@
       "count": 1
     },
     "kanthord/no-inline-param-type": {
-      "count": 6
+      "count": 5
     }
   },
   "src/worker/execution-setup.ts": {

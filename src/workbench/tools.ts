@@ -14,7 +14,7 @@ import {
   type OperationResult,
   OperationResultType,
 } from "../kernel/operation.ts";
-import { BuiltinTool, getAgentDeclaration } from "../agent/catalog.ts";
+import { BuiltinTool, getProfile } from "../agent/catalog.ts";
 import { childEnvironment } from "../agent/environment.ts";
 import { processBashOperations } from "../agent/bash-process.ts";
 import { llmOperations } from "../llm/contract.ts";
@@ -123,11 +123,11 @@ export function builtinTools(
   agentName: string,
   cwd: string,
 ): { allowlist: string[]; customTools: ToolDefinition[] } {
-  const agent = getAgentDeclaration(agentName);
-  assert.ok(agent);
+  const profile = getProfile(agentName);
+  assert.ok(profile);
   assert.ok(cwd);
-  const allowlist: string[] = [...agent.tools];
-  if (!agent.tools.includes(BuiltinTool.Bash))
+  const allowlist: string[] = [...profile.tools.builtin];
+  if (!profile.tools.builtin.includes(BuiltinTool.Bash))
     return { allowlist, customTools: [] };
   const local = processBashOperations(pi.getShellConfig(), () => {}, {
     killGroupAtEnd: false,

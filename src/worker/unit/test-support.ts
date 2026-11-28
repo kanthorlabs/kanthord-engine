@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import type { TestContext } from "node:test";
 import {
   appendFileSync,
@@ -11,6 +10,7 @@ import {
 import { basename, dirname, join } from "node:path";
 import { simpleGit } from "simple-git";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import { credentialSecrets } from "../../agent/known-secrets.ts";
 import { createModelRuntime, resolveModel } from "../../llm/model-connector.ts";
 import { loadPi } from "../../agent/pi.ts";
 import {
@@ -59,10 +59,10 @@ import {
   type NativeTrace,
   openNativeAgent,
 } from "./native-agent.ts";
-import { agentPort, type SessionPort } from "../../agent/agent-port.ts";
-import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
-import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
-import type { KnownSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
+import { agentPort, type SessionPort } from "./agent-port.ts";
+import { executionEvidence } from "./capabilities/execution-evidence.ts";
+import { linkUpdates } from "./capabilities/link-updates.ts";
+import type { KnownSecrets } from "../../agent/redaction.ts";
 import { ExecutionRun } from "./execution-run.ts";
 import type { MethodClaim } from "./execution-stop.ts";
 import type { MethodClients } from "./method-clients.ts";

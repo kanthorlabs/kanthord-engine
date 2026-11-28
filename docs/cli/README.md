@@ -29,6 +29,7 @@ non-flag conventions and commands outside these groups live in `other.md`.
 | `tracking`                      | [Tracking Service](tracking.md)                   | Trace, span and telemetry text reads; worker telemetry writes.                                          |
 | `footprint`                     | [Footprint Service](footprint.md)                 | Storage statistics, cleanup candidates, human-confirmed cleanups and alerts.                            |
 | `gateway`                       | [Gateway Service](gateway.md)                     | Identity verification and local OpenAPI generation.                                                     |
+| `run`                           | [Run commands](run.md)                            | Local agent runs with no server.                                                                        |
 | `config`, `serve`, `auth`, help | [Other commands and shared conventions](other.md) | Configuration files, application startup, local token issuance, client options, and input/output rules. |
 
 The Project inventory has 14 implemented leaves. The LLM inventory has 14 implemented leaves.
@@ -68,10 +69,10 @@ and [Worker contract](../../src/worker/contract.ts); dispatch is in the
 
 ## Ownership rules
 
-- Keep the three global command names, seven service groups and three shared
+- Keep the four global command names, seven service groups and three shared
   component groups listed above, as the [command surface](https://github.com/kanthorlabs/kanthord/blob/main/docs/brainstorm/architecture.impl.md#the-command-surface) declares.
-  The CLI also registers the `agent` component group, which the command surface
-  does not list yet, and does not register `intake`.
+  The CLI also registers the `agent` component group and the `run` global group,
+  which the command surface does not list yet, and does not register `intake`.
   Application names are operands of `serve`, not additional top-level commands.
 - A remote command calls the operation of the service or shared component that
   owns its effect. Gateway authenticates and routes the request; it does not

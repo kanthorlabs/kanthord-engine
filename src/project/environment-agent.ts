@@ -10,6 +10,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { z } from "zod";
+import { credentialSecrets } from "../agent/known-secrets.ts";
 import type { ServiceIdentity } from "../kernel/caller.ts";
 import { CancellationContext, type Context } from "../kernel/context.ts";
 import type { Environment, EnvironmentSource } from "../kernel/devcontainer.ts";
@@ -17,16 +18,15 @@ import { FacilityError } from "../kernel/errors.ts";
 import { createIdentity } from "../kernel/identity.ts";
 import { piProviderId } from "../kernel/pi-provider.ts";
 import type { Store, Transaction } from "../kernel/store.ts";
-import { getAgentDeclaration } from "../agent/catalog.ts";
+import { getProfile } from "../agent/catalog.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import { checkoutConfinement } from "../agent/hooks/checkout-confinement.ts";
 import {
-  credentialSecrets,
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,
-  type SensitiveTextRedaction,
-} from "../agent/hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../agent/redaction.ts";
 import { loadPi } from "../agent/pi.ts";
 import type {
   AgentView,
@@ -36,8 +36,9 @@ import type {
 } from "../agent/contract.ts";
 import {
   bindingParts,
+  finalPrompt,
+  framingPartFromTemplates,
   PromptConsumer,
-  systemPrompt,
 } from "../agent/prompt-render.ts";
 import { pinnedInstructionFiles } from "../agent/instruction-files.ts";
 import {
@@ -131,7 +132,7 @@ type UsableView = AgentView & {
 
 interface OpenedSession {
   session: AgentSession;
-  redaction: SensitiveTextRedaction;
+  redaction: SessionRedaction;
 }
 
 function usable(view: AgentView | null): view is UsableView {
@@ -184,10 +185,7 @@ export class EnvironmentAgent {
       : EnvironmentSessionEnd.Ended;
   }
 
-  private logRedaction(
-    sessionId: string,
-    redaction: SensitiveTextRedaction,
-  ): void {
+  private logRedaction(sessionId: string, redaction: SessionRedaction): void {
     const summary = redactionSummary(redaction.counts());
     if (redactionObserved(summary))
       this.dependencies.logger.info(
@@ -210,8 +208,8 @@ export class EnvironmentAgent {
     lifetime: CancellationContext,
   ): Promise<OpenedSession> {
     const { effective } = view;
-    const declaration = getAgentDeclaration(ENV_AGENT_NAME);
-    assert.ok(declaration);
+    const profile = getProfile(ENV_AGENT_NAME);
+    assert.ok(profile);
     const credentials = this.dependencies.serverAgentCredentials({
       session_id: sessionId,
       platform: effective.provider,
@@ -272,6 +270,13 @@ export class EnvironmentAgent {
             this.dependencies.instructionFileOf,
             input.context,
           );
+    const envPromptParts = [
+      ...parts,
+      ...bindingParts(repository ? [repository] : [], ENV_AGENT_NAME, files),
+      framingPartFromTemplates(templates, PromptConsumer.Worker),
+    ];
+    const envPrompt = finalPrompt(envPromptParts);
+    assert.ok(envPrompt !== null);
     let ended = false;
     const customTools = input.tools({
       session_id: sessionId,
@@ -285,22 +290,8 @@ export class EnvironmentAgent {
       modelRuntime: runtime,
       model,
       thinkingLevel: effective.reasoning_effort as ReasoningLevel,
-      systemPrompt: systemPrompt(
-        [
-          ...parts,
-          ...bindingParts(
-            repository ? [repository] : [],
-            ENV_AGENT_NAME,
-            files,
-          ),
-        ],
-        PromptConsumer.Worker,
-        templates,
-      ),
-      allowlist: [
-        ...declaration.tools,
-        ...customTools.map((tool) => tool.name),
-      ],
+      systemPrompt: envPrompt,
+      allowlist: [...profile.tools.builtin, ...profile.tools.environment],
       customTools,
       hostHome: this.dependencies.hostHome,
       hooks: [checkoutConfinement({ cwd: checkout, roots: [checkout] })],

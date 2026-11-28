@@ -1,0 +1,656 @@
+import { createHash, randomBytes } from "node:crypto";
+import type { ToolCallEvent } from "@earendil-works/pi-coding-agent";
+import { isObject, isString } from "../kernel/values.ts";
+import {
+  findKnownText,
+  findPatternText,
+  KNOWN_VALUE_MIN_CHARACTERS,
+  type KnownMatcher,
+  knownMatcher,
+  mapSensitiveStrings,
+  markerIndex,
+  markerTag,
+  mergeSpans,
+  promotes,
+  replaceSpans,
+  SCAN_FAILED,
+  SENSITIVE_VALUE_MAX_CHARACTERS,
+  SensitiveRule,
+  type SensitiveSpan,
+  SESSION_MARKER_PATTERN,
+  sessionMarker,
+} from "./sensitive-text.ts";
+
+export type KnownSecrets = () => Promise<readonly string[]>;
+
+export interface SecretWarning {
+  rule: SensitiveRule;
+  count: number;
+}
+
+export interface RedactionCounts {
+  redacted: Partial<Record<SensitiveRule, number>>;
+  scan_failed: number;
+  unkept: number;
+  restore_blocked: number;
+  output_found: Partial<Record<SensitiveRule, number>>;
+  thinking_kept: number;
+  compaction_residual: number;
+}
+
+export interface SessionRedaction {
+  text(value: string): Promise<string>;
+  exitText(value: string): string;
+  modelOutput(value: string): string;
+  counts(): RedactionCounts;
+  takeWarnings(): readonly SecretWarning[];
+  refresh(): Promise<void>;
+  outermostCallId(event: ToolCallEvent): string;
+  restoreInput(event: ToolCallEvent): RestoreReason | undefined;
+  addRestoreBlocked(): void;
+  deletePending(id: string): void;
+  clearPending(): void;
+  hasKnownSecretIn(value: unknown): boolean;
+  redactEvent(
+    message: Record<string, unknown>,
+  ): Record<string, unknown> | undefined;
+  redactErrorMessage(
+    message: Record<string, unknown>,
+  ): Record<string, unknown> | undefined;
+  redactSummaryText(summary: string): string;
+  redactSessionCompact(summary: string): string;
+  recordOutputFinding(
+    message: Record<string, unknown>,
+  ): SecretWarning | undefined;
+}
+
+export const REDACTION_TABLE_MAX = 4096;
+export const REDACTION_LOG_MESSAGE = "sensitive text redacted";
+
+export interface RedactionSummary {
+  redaction_count: number;
+  redaction_rules: SensitiveRule[];
+  redaction_failed: number;
+  unkept: number;
+  restore_blocked: number;
+  compaction_residual: number;
+  thinking_kept: number;
+}
+
+export function redactionSummary(counts: RedactionCounts): RedactionSummary {
+  const rules = (Object.keys(counts.redacted) as SensitiveRule[])
+    .filter((rule) => counts.redacted[rule])
+    .sort();
+  return {
+    redaction_count: rules.reduce(
+      (sum, rule) => sum + (counts.redacted[rule] ?? 0),
+      0,
+    ),
+    redaction_rules: rules,
+    redaction_failed: counts.scan_failed,
+    unkept: counts.unkept,
+    restore_blocked: counts.restore_blocked,
+    compaction_residual: counts.compaction_residual,
+    thinking_kept: counts.thinking_kept,
+  };
+}
+
+export interface AgentRedactionSummary {
+  redaction_count: number;
+  redaction_rules: SensitiveRule[];
+  redaction_failed: number;
+  unkept: number;
+  restore_blocked: number;
+  output_found_count: number;
+  output_found_rules: SensitiveRule[];
+}
+
+function countedRules(
+  counts: Partial<Record<SensitiveRule, number>>,
+): SensitiveRule[] {
+  return (Object.keys(counts) as SensitiveRule[])
+    .filter((rule) => counts[rule])
+    .sort();
+}
+
+function ruleTotal(
+  counts: Partial<Record<SensitiveRule, number>>,
+  rules: readonly SensitiveRule[],
+): number {
+  return rules.reduce((sum, rule) => sum + (counts[rule] ?? 0), 0);
+}
+
+export function agentRedactionSummary(
+  counts: RedactionCounts,
+): AgentRedactionSummary {
+  const redacted = countedRules(counts.redacted);
+  const found = countedRules(counts.output_found);
+  return {
+    redaction_count: ruleTotal(counts.redacted, redacted),
+    redaction_rules: redacted,
+    redaction_failed: counts.scan_failed,
+    unkept: counts.unkept,
+    restore_blocked: counts.restore_blocked,
+    output_found_count: ruleTotal(counts.output_found, found),
+    output_found_rules: found,
+  };
+}
+
+export function redactionObserved(summary: RedactionSummary): boolean {
+  return Object.values(summary).some((value) =>
+    Array.isArray(value) ? value.length : value,
+  );
+}
+
+export const RestoreReason = {
+  Unkept:
+    "The input holds a value that this session could not keep. Read the source of the value again, then repeat the call.",
+  Resume:
+    "The input holds a marker of an earlier run of this session. Read the source of the value again, then repeat the call.",
+  Credential:
+    "The input holds a marker of the LLM credential. No tool receives this value.",
+  Shell:
+    "A command cannot hold a masked value. To write the value into a file, use the write or edit tool. Otherwise read the value through the shell from its source, for example with $(sed -n ...), then repeat the call.",
+  KnownCredential:
+    "The input holds a value of a known credential. No tool receives this value.",
+} as const;
+export type RestoreReason = (typeof RestoreReason)[keyof typeof RestoreReason];
+
+const TAG_PART_CHARACTERS = 8;
+const HEX_CHARACTERS_PER_BYTE = 2;
+const TAG_PART_BYTES = TAG_PART_CHARACTERS / HEX_CHARACTERS_PER_BYTE;
+const UNKEPT_INDEX = 0;
+const NOT_FOUND = -1;
+const NESTED_CALL_SEPARATOR = "/";
+const RESTORE_TOOLS: ReadonlySet<string> = new Set(["write", "edit"]);
+const SHELL_TOOL = "bash";
+const ASSISTANT_ROLE = "assistant";
+const TOOL_RESULT_ROLE = "toolResult";
+const CUSTOM_ROLE = "custom";
+const THINKING_TYPE = "thinking";
+const TEXT_TYPE = "text";
+const REASONING_FIELD_API = "openai-completions";
+const REASONING_FIELDS: ReadonlySet<string> = new Set([
+  "reasoning",
+  "reasoning_content",
+  "reasoning_text",
+]);
+const CONTENT_KEY = "content";
+const ERROR_MESSAGE_KEY = "errorMessage";
+
+interface TableEntry {
+  index: number;
+  rule: SensitiveRule;
+  value: string;
+}
+
+type Message = Record<string, unknown>;
+
+interface Scan {
+  pattern(text: string): SensitiveSpan[];
+  known: KnownMatcher;
+}
+
+function sessionPartOf(sessionId: string): string {
+  return createHash("sha256")
+    .update(sessionId)
+    .digest("hex")
+    .slice(0, TAG_PART_CHARACTERS);
+}
+
+function outermostCall(event: ToolCallEvent): string {
+  return (event.parentToolCallId ?? event.toolCallId).split(
+    NESTED_CALL_SEPARATOR,
+  )[0]!;
+}
+
+function keptThinking(message: Message, block: unknown): boolean {
+  if (!isObject(block)) return false;
+  const record = block as Record<string, unknown>;
+  if (record.type !== THINKING_TYPE) return false;
+  const signature = record.thinkingSignature;
+  if (
+    message.api === REASONING_FIELD_API &&
+    isString(signature) &&
+    REASONING_FIELDS.has(signature)
+  )
+    return false;
+  return record.redacted === true || (isString(signature) && !!signature);
+}
+
+interface RestoreMarker {
+  rule: string;
+  markerTag: string;
+  entry: TableEntry | undefined;
+}
+
+interface MarkerRefusalContext {
+  shell: boolean;
+  writes: boolean;
+  tag: string;
+}
+
+function markerRefusal(
+  marker: RestoreMarker,
+  context: MarkerRefusalContext,
+): RestoreReason | undefined {
+  if (
+    marker.entry?.rule === SensitiveRule.LlmCredential ||
+    marker.rule === SensitiveRule.LlmCredential
+  )
+    return RestoreReason.Credential;
+  if (context.shell) return RestoreReason.Shell;
+  if (!context.writes) return undefined;
+  if (marker.markerTag !== context.tag) return RestoreReason.Resume;
+  if (!marker.entry) return RestoreReason.Unkept;
+  return undefined;
+}
+
+function stringsOf(value: unknown): string[] {
+  const strings: string[] = [];
+  mapSensitiveStrings(value, (text) => {
+    strings.push(text);
+    return text;
+  });
+  return strings;
+}
+
+function everyString(value: unknown): string[] {
+  if (isString(value)) return [value];
+  if (Array.isArray(value)) return value.flatMap(everyString);
+  if (!isObject(value)) return [];
+  return Object.values(value as Record<string, unknown>).flatMap(everyString);
+}
+
+export function createRedaction(
+  known: KnownSecrets,
+  sessionId: string,
+): SessionRedaction {
+  const sessionPart = markerTag(sessionPartOf(sessionId));
+  const tag =
+    sessionPart + markerTag(randomBytes(TAG_PART_BYTES).toString("hex"));
+  const matcher = knownMatcher();
+  const secretMatcher = knownMatcher();
+  const secrets = new Set<string>();
+  const byValue = new Map<string, TableEntry>();
+  const byIndex = new Map<number, TableEntry>();
+  const pending = new Map<string, string[]>();
+  const counts: RedactionCounts = {
+    redacted: {},
+    scan_failed: 0,
+    unkept: 0,
+    restore_blocked: 0,
+    output_found: {},
+    thinking_kept: 0,
+    compaction_residual: 0,
+  };
+  const failedMarker = sessionMarker(SCAN_FAILED, UNKEPT_INDEX, tag);
+  let residual = false;
+  const warnings: SecretWarning[] = [];
+
+  const refresh = async () => {
+    let current: readonly string[];
+    try {
+      current = await known();
+    } catch {
+      return;
+    }
+    for (const secret of current) {
+      if (!secret || secrets.has(secret)) continue;
+      secrets.add(secret);
+      matcher.addSecret(secret);
+      secretMatcher.addSecret(secret);
+    }
+  };
+
+  const remember = (value: string, rule: SensitiveRule) => {
+    const existing = byValue.get(value);
+    if (existing) return existing;
+    if (
+      byValue.size >= REDACTION_TABLE_MAX ||
+      value.length > SENSITIVE_VALUE_MAX_CHARACTERS
+    )
+      return undefined;
+    const entry = { index: byValue.size + 1, rule, value };
+    byValue.set(value, entry);
+    byIndex.set(entry.index, entry);
+    return entry;
+  };
+
+  const learn = (span: SensitiveSpan) => {
+    if (!remember(span.value, span.rule)) return;
+    if (promotes(span.value, span.rule))
+      matcher.add({ value: span.value, rule: span.rule });
+  };
+
+  const markerOf = (text: string, span: SensitiveSpan) => {
+    const exact = text.slice(span.start, span.end);
+    const entry = exact === span.value ? remember(exact, span.rule) : undefined;
+    if (entry && span.rule === SensitiveRule.LlmCredential)
+      entry.rule = SensitiveRule.LlmCredential;
+    if (!entry) {
+      counts.unkept++;
+      return sessionMarker(span.rule, UNKEPT_INDEX, tag);
+    }
+    if (residual) counts.compaction_residual++;
+    else counts.redacted[entry.rule] = (counts.redacted[entry.rule] ?? 0) + 1;
+    return sessionMarker(entry.rule, entry.index, tag);
+  };
+
+  const exactSpans = (text: string, values: readonly string[]) => {
+    const spans: SensitiveSpan[] = [];
+    for (const value of values) {
+      const entry = byValue.get(value);
+      if (!entry) continue;
+      for (
+        let at = text.indexOf(value);
+        at !== NOT_FOUND;
+        at = text.indexOf(value, at + value.length)
+      )
+        spans.push({
+          rule: entry.rule,
+          start: at,
+          end: at + value.length,
+          value,
+        });
+    }
+    return spans;
+  };
+
+  const fullScan: Scan = {
+    pattern: (text) => {
+      const spans = findPatternText(text);
+      for (const span of spans) learn(span);
+      return spans;
+    },
+    known: matcher,
+  };
+  const modelScan: Scan = { pattern: () => [], known: secretMatcher };
+  const outputScan: Scan = { pattern: findPatternText, known: matcher };
+
+  const redactStrings = (
+    strings: readonly string[],
+    extra: readonly string[],
+    scan = fullScan,
+  ): Map<string, string> => {
+    const firstPass = new Map<string, SensitiveSpan[] | undefined>();
+    for (const text of strings) {
+      if (firstPass.has(text)) continue;
+      try {
+        firstPass.set(text, scan.pattern(text));
+      } catch {
+        firstPass.set(text, undefined);
+      }
+    }
+    const result = new Map<string, string>();
+    for (const [text, pattern] of firstPass) {
+      if (!pattern) {
+        counts.scan_failed++;
+        result.set(text, failedMarker);
+        continue;
+      }
+      try {
+        const spans = mergeSpans(
+          text,
+          [...findKnownText(text, scan.known), ...exactSpans(text, extra)],
+          pattern,
+        );
+        result.set(
+          text,
+          replaceSpans(text, spans, (span) => markerOf(text, span)),
+        );
+      } catch {
+        counts.scan_failed++;
+        result.set(text, failedMarker);
+      }
+    }
+    return result;
+  };
+
+  const keepThinking = (block: Record<string, unknown>) => {
+    for (const text of stringsOf([block.thinking, block.thinkingSignature]))
+      try {
+        counts.thinking_kept += findKnownText(text, secretMatcher).length;
+      } catch {
+        counts.scan_failed++;
+      }
+  };
+
+  const redactMessage = (message: Message, extra: readonly string[]) => {
+    const content = message[CONTENT_KEY];
+    const blocks = Array.isArray(content) ? content : undefined;
+    const kept =
+      message.role === ASSISTANT_ROLE && blocks
+        ? new Set(blocks.filter((block) => keptThinking(message, block)))
+        : new Set<unknown>();
+    for (const block of kept) keepThinking(block as Record<string, unknown>);
+    const free = message.role === CUSTOM_ROLE;
+    const modelMade = message.role === ASSISTANT_ROLE;
+    type Transform = (text: string) => string;
+    const walk = (outside: Transform, inside: Transform): Message => {
+      const rest = mapSensitiveStrings(
+        { ...message, [CONTENT_KEY]: undefined },
+        outside,
+      ) as Message;
+      const mapped = blocks
+        ? blocks.map((block) =>
+            kept.has(block) ? block : mapSensitiveStrings(block, inside, free),
+          )
+        : mapSensitiveStrings(content, inside, free);
+      const copy = { ...rest, [CONTENT_KEY]: mapped };
+      if (!(CONTENT_KEY in message)) delete copy[CONTENT_KEY];
+      return copy;
+    };
+    const outsideStrings: string[] = [];
+    const insideStrings: string[] = [];
+    const collect =
+      (into: string[]): Transform =>
+      (text) => {
+        into.push(text);
+        return text;
+      };
+    walk(collect(outsideStrings), collect(insideStrings));
+    const outsideReplaced = redactStrings(
+      modelMade ? outsideStrings : [...outsideStrings, ...insideStrings],
+      extra,
+    );
+    const insideReplaced = modelMade
+      ? redactStrings(insideStrings, extra, modelScan)
+      : outsideReplaced;
+    let changed = false;
+    const replace =
+      (replaced: Map<string, string>): Transform =>
+      (text) => {
+        const next = replaced.get(text) ?? text;
+        changed ||= next !== text;
+        return next;
+      };
+    const copy = walk(replace(outsideReplaced), replace(insideReplaced));
+    return changed ? copy : undefined;
+  };
+
+  const failedMessage = (message: Message): Message => {
+    counts.scan_failed++;
+    try {
+      return mapSensitiveStrings(message, () => failedMarker) as Message;
+    } catch {
+      return {
+        role: message.role,
+        ...(message.role === TOOL_RESULT_ROLE
+          ? { toolCallId: message.toolCallId, toolName: message.toolName }
+          : {}),
+        [CONTENT_KEY]: [{ type: TEXT_TYPE, text: failedMarker }],
+        timestamp: message.timestamp,
+      };
+    }
+  };
+
+  const restoreInput = (event: ToolCallEvent): RestoreReason | undefined => {
+    const writes = RESTORE_TOOLS.has(event.toolName);
+    const shell = event.toolName === SHELL_TOOL;
+    let reason: RestoreReason | undefined;
+    const block = (next: RestoreReason) => {
+      if (reason !== RestoreReason.Credential) reason = next;
+    };
+    const noteRefusal = (next: RestoreReason) => {
+      if (next === RestoreReason.Credential) block(next);
+      else reason ??= next;
+    };
+    const restored: string[] = [];
+    const restoreText = (text: string): string => {
+      let result = "";
+      let last = 0;
+      for (const match of text.matchAll(SESSION_MARKER_PATTERN)) {
+        const [whole, rule, index, markerTagValue] = match as unknown as [
+          string,
+          string,
+          string,
+          string,
+        ];
+        result += text.slice(last, match.index);
+        last = match.index + whole.length;
+        if (!markerTagValue.startsWith(sessionPart)) {
+          result += whole;
+          continue;
+        }
+        const entry =
+          markerTagValue === tag ? byIndex.get(markerIndex(index)) : undefined;
+        const refusal = markerRefusal(
+          { rule, markerTag: markerTagValue, entry },
+          { shell, writes, tag },
+        );
+        if (refusal) {
+          noteRefusal(refusal);
+          result += whole;
+          continue;
+        }
+        if (!writes || !entry) {
+          result += whole;
+          continue;
+        }
+        restored.push(entry.value);
+        result += entry.value;
+      }
+      return result + text.slice(last);
+    };
+    const input = event.input as Record<string, unknown>;
+    const copy = mapSensitiveStrings(input, restoreText, true) as Record<
+      string,
+      unknown
+    >;
+    for (const value of restored)
+      if (findKnownText(value, secretMatcher).length)
+        block(RestoreReason.Credential);
+    if (reason) return reason;
+    if (!restored.length) return undefined;
+    for (const key of Object.keys(input)) input[key] = copy[key];
+    const owner = outermostCall(event);
+    for (const value of restored) {
+      const entry = byValue.get(value)!;
+      if (
+        promotes(value, entry.rule) ||
+        value.length >= KNOWN_VALUE_MIN_CHARACTERS
+      )
+        matcher.add({ value, rule: entry.rule });
+      else pending.set(owner, [...(pending.get(owner) ?? []), value]);
+    }
+    return undefined;
+  };
+
+  const redactEvent = (message: Message) => {
+    const owner =
+      message.role === TOOL_RESULT_ROLE ? String(message.toolCallId) : "";
+    const extra = pending.get(owner) ?? [];
+    pending.delete(owner);
+    try {
+      return redactMessage(message, extra);
+    } catch {
+      return failedMessage(message);
+    }
+  };
+
+  const hasKnownSecretIn = (value: unknown): boolean =>
+    everyString(value).some(
+      (text) => findKnownText(text, secretMatcher).length,
+    );
+
+  const redactErrorMessage = (message: Message): Message | undefined => {
+    const error = message[ERROR_MESSAGE_KEY];
+    if (!isString(error)) return undefined;
+    const next = redactStrings([error], []).get(error)!;
+    return next === error
+      ? undefined
+      : { ...message, [ERROR_MESSAGE_KEY]: next };
+  };
+
+  const recordOutputFinding = (message: Message): SecretWarning | undefined => {
+    const content = message[CONTENT_KEY];
+    let count = 0;
+    for (const text of everyString(content))
+      try {
+        count += findKnownText(text, secretMatcher).length;
+      } catch {
+        counts.scan_failed++;
+      }
+    if (!count) return undefined;
+    counts.output_found[SensitiveRule.LlmCredential] =
+      (counts.output_found[SensitiveRule.LlmCredential] ?? 0) + count;
+    const warning: SecretWarning = {
+      rule: SensitiveRule.LlmCredential,
+      count,
+    };
+    warnings.push(warning);
+    return warning;
+  };
+
+  const exitText = (value: string): string =>
+    redactStrings([value], [], outputScan).get(value)!;
+
+  return {
+    text: async (value) => {
+      await refresh();
+      return redactStrings([value], []).get(value)!;
+    },
+    exitText,
+    modelOutput: exitText,
+    counts: () => structuredClone(counts),
+    takeWarnings: () => {
+      const taken = [...warnings];
+      warnings.length = 0;
+      return taken;
+    },
+    refresh,
+    outermostCallId: outermostCall,
+    restoreInput,
+    addRestoreBlocked: () => {
+      counts.restore_blocked++;
+    },
+    deletePending: (id) => {
+      pending.delete(id);
+    },
+    clearPending: () => {
+      pending.clear();
+    },
+    hasKnownSecretIn,
+    redactEvent,
+    redactErrorMessage,
+    redactSummaryText: (summary) => {
+      try {
+        return redactStrings([summary], []).get(summary)!;
+      } catch {
+        return failedMarker;
+      }
+    },
+    redactSessionCompact: (summary) => {
+      residual = true;
+      try {
+        return redactStrings([summary], []).get(summary)!;
+      } catch {
+        return failedMarker;
+      } finally {
+        residual = false;
+      }
+    },
+    recordOutputFinding,
+  };
+}

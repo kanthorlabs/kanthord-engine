@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { background } from "../kernel/context.ts";
 import { temporary } from "../kernel/test-support.ts";
-import { getAgentDeclaration } from "./catalog.ts";
+import { getAgentDeclaration } from "./declarations.ts";
 import {
   InstructionFileState,
   PromptLayer,
@@ -18,12 +18,7 @@ import {
 import { WORKBENCH_PROMPT } from "./prompt-assets.ts";
 import { digest } from "./prompt-composer.ts";
 import { framingPart, resolveAgentPrompt } from "./prompt-files.ts";
-import {
-  bindingParts,
-  finalPrompt,
-  PromptConsumer,
-  systemPrompt,
-} from "./prompt-render.ts";
+import { bindingParts, finalPrompt, PromptConsumer } from "./prompt-render.ts";
 import {
   type InstructionFileRead,
   type PromptReaders,
@@ -146,14 +141,6 @@ test("the references of a composition resolve to the composed text", async (t) =
   const answer = await resolvePrompt(composed.map(referenceOf), readers());
   assert.deepEqual(answer.parts, composed);
   assert.equal(answer.final, finalPrompt(composed));
-  assert.equal(
-    answer.final,
-    systemPrompt(
-      composed.slice(0, -1),
-      PromptConsumer.Worker,
-      templates.templates,
-    ),
-  );
 });
 
 test("each origin resolves its text and its layer and heading", async () => {

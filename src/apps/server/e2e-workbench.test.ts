@@ -29,10 +29,7 @@ import {
 import { isString } from "../../kernel/values.ts";
 import { AgentErrorCode, agentOperations } from "../../agent/contract.ts";
 import { loadPi } from "../../agent/pi.ts";
-import {
-  REDACTION_LOG_MESSAGE,
-  RestoreReason,
-} from "../../agent/hooks/sensitive-text-redaction.ts";
+import { REDACTION_LOG_MESSAGE, RestoreReason } from "../../agent/redaction.ts";
 import {
   SensitiveRule,
   SESSION_MARKER_PATTERN,

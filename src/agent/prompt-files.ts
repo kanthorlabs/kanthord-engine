@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Context } from "../kernel/context.ts";
 import { OperationError } from "../kernel/errors.ts";
 import { HttpStatus } from "../kernel/http.ts";
-import { type AgentDeclaration, getAgentDeclaration } from "./catalog.ts";
+import { type AgentDeclaration, getAgentDeclaration } from "./declarations.ts";
 import {
   AgentErrorCode,
   PromptOrigin,

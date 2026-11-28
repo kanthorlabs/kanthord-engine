@@ -8,6 +8,7 @@ import type {
   ModelRuntime,
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
+import { credentialSecrets } from "../agent/known-secrets.ts";
 import {
   background,
   CancellationContext,
@@ -35,22 +36,25 @@ import type { Store, Transaction } from "../kernel/store.ts";
 import {
   getAgentDeclaration,
   WORKBENCH_AGENT_NAMES,
-} from "../agent/catalog.ts";
+} from "../agent/declarations.ts";
 import { AgentErrorCode, type AgentView } from "../agent/contract.ts";
 import { openSession, withDeadline } from "../agent/agent-session.ts";
 import {
-  credentialSecrets,
   type KnownSecrets,
   REDACTION_LOG_MESSAGE,
   redactionObserved,
   redactionSummary,
-  type SensitiveTextRedaction,
-} from "../agent/hooks/sensitive-text-redaction.ts";
+  type SessionRedaction,
+} from "../agent/redaction.ts";
 import { pinnedLayers } from "../agent/pinned-layers.ts";
 import { toolApproval } from "../agent/hooks/tool-approval.ts";
 import { loadPi } from "../agent/pi.ts";
 import type { PromptPartAnswer, PromptTemplates } from "../agent/contract.ts";
-import { PromptConsumer, systemPrompt } from "../agent/prompt-render.ts";
+import {
+  finalPrompt,
+  framingPartFromTemplates,
+  PromptConsumer,
+} from "../agent/prompt-render.ts";
 import {
   connectModel,
   type ModelConnectorInput,
@@ -99,27 +103,31 @@ export type WorkbenchModelRuntimeFactory = (
   input: ModelConnectorInput,
 ) => Promise<{ runtime: ModelRuntime; model: Model<Api> }>;
 
+interface WorkbenchAgentPrompt {
+  compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
+  templates(context: Context): Promise<PromptTemplates>;
+}
+
+interface WorkbenchAgentConfiguration {
+  validateEntry(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkbenchConfiguration,
+  ): void;
+  agentView(
+    tx: Transaction,
+    agentName: string,
+    entry: WorkbenchConfiguration,
+  ): AgentView | null;
+}
+
 export interface Dependencies {
   store: Store;
   logger: Logger;
   stateDirectory: string;
   hostHome?: string;
-  agentPrompt: {
-    compose(agentName: string, context: Context): Promise<PromptPartAnswer[]>;
-    templates(context: Context): Promise<PromptTemplates>;
-  };
-  agentConfiguration: {
-    validateEntry(
-      tx: Transaction,
-      agentName: string,
-      entry: WorkbenchConfiguration,
-    ): void;
-    agentView(
-      tx: Transaction,
-      agentName: string,
-      entry: WorkbenchConfiguration,
-    ): AgentView | null;
-  };
+  agentPrompt: WorkbenchAgentPrompt;
+  agentConfiguration: WorkbenchAgentConfiguration;
   credentialMetadata: CredentialMetadataFn;
   workbenchCredentials: WorkbenchCredentialsFn;
   modelRuntimeFactory?: WorkbenchModelRuntimeFactory;
@@ -148,7 +156,7 @@ interface OpenSession {
   waiters: Set<() => void>;
   version: number;
   approvals: Map<string, Approval>;
-  redaction: SensitiveTextRedaction | null;
+  redaction: SessionRedaction | null;
   secrets: KnownSecrets;
 }
 
@@ -372,7 +380,11 @@ export class WorkbenchService implements Service {
         context,
       );
       const templates = await this.dependencies.agentPrompt.templates(context);
-      const prompt = systemPrompt(parts, PromptConsumer.Workbench, templates);
+      const prompt = finalPrompt([
+        ...parts,
+        framingPartFromTemplates(templates, PromptConsumer.Workbench),
+      ]);
+      assert.ok(prompt !== null);
       const builtin = builtinTools(
         await loadPi(),
         session.agentName,

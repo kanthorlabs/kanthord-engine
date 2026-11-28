@@ -18,6 +18,8 @@ const workerFiles = ["src/worker/unit/**/*.ts", "src/apps/worker/**/*.ts"];
 const workerTestFiles = [
   "src/worker/unit/**/*.test.ts",
   "src/apps/worker/**/*.test.ts",
+  "src/worker/unit/**/*.linux-test.ts",
+  "src/apps/worker/**/*.linux-test.ts",
   "src/worker/unit/**/test-support.ts",
   "src/apps/worker/**/test-support.ts",
   "src/apps/worker/**/*-test-support.ts",
@@ -185,11 +187,70 @@ const noInlineParamType = {
     ),
 };
 
-const kanthordPlugin = {
+const inlineObjectTypeMessage =
+  "Give the object type a named interface, and give a kind a const object.";
+const inlineObjectTypeSelectors = [
+  "TSUnionType > TSTypeLiteral",
+  "TSPropertySignature > TSTypeAnnotation > TSTypeLiteral",
+  "TSPropertySignature > TSTypeAnnotation > TSLiteralType[literal.value=type(string)]",
+  "TSPropertySignature > TSTypeAnnotation > TSUnionType > TSLiteralType[literal.value=type(string)]",
+];
+
+const noInlineObjectType = {
+  meta: { type: "problem", schema: [] },
+  create: (context) =>
+    Object.fromEntries(
+      inlineObjectTypeSelectors.map((selector) => [
+        selector,
+        (node) => context.report({ node, message: inlineObjectTypeMessage }),
+      ]),
+    ),
+};
+
+const noInlineObjectTypeFiles = [
+  "src/agent/known-secrets.ts",
+  "src/agent/agent-session.ts",
+  "src/agent/redaction.ts",
+  "src/agent/hooks/marker-restore.ts",
+  "src/agent/hooks/input-redaction.ts",
+  "src/agent/hooks/output-finding.ts",
+  "src/agent/hooks/assistant-redaction.ts",
+  "src/worker/contract.ts",
+  "src/agent/catalog.ts",
+  "src/agent/declarations.ts",
+  "src/agent/prompt-assets.ts",
+  "src/agent/prompt-chain.ts",
+  "src/agent/prompt-render.ts",
+  "src/workbench/service.ts",
+  "src/agent/run-budget.ts",
+  "src/agent/run-outcome.ts",
+  "src/agent/agent-contract.ts",
+  "src/agent/start-preconditions.ts",
+  "src/agent/tool-table.ts",
+  "src/agent/pinned-layers.ts",
+  "src/apps/cli/run-agent-paths.ts",
+  "src/apps/cli/run-agent-start.ts",
+  "src/apps/cli/run-agent-budget.ts",
+  "src/apps/cli/run-agent-environment.ts",
+  "src/apps/cli/run-agent-digest.ts",
+  "src/apps/cli/run-agent-session.ts",
+  "src/apps/cli/run-agent-output.ts",
+  "src/apps/cli/run-agent-pi.ts",
+  "src/apps/cli/run-agent-auth.ts",
+  "src/apps/cli/run-agent-model.ts",
+  "src/apps/cli/run-agent-input.ts",
+  "src/apps/cli/run-agent-options.ts",
+  "src/apps/cli/run-agent.ts",
+  "src/apps/cli/run-agent-exit.ts",
+  "src/apps/cli/run-agent-signal.ts",
+];
+
+export const kanthordPlugin = {
   rules: {
     "no-cwd-data-read": noCwdDataRead,
     "no-comments": noComments,
     "no-inline-param-type": noInlineParamType,
+    "no-inline-object-type": noInlineObjectType,
   },
 };
 
@@ -336,7 +397,9 @@ export default tseslint.config(
               allow: [...allow("kernel"), { to: serviceEntry("contract.ts") }],
             },
             {
-              from: element("component", { fileInternalPath: "*.test.ts" }),
+              from: element("component", {
+                fileInternalPath: "{*.test.ts,*.linux-test.ts}",
+              }),
               allow: [
                 {
                   to: element("service", {
@@ -409,7 +472,7 @@ export default tseslint.config(
             },
             {
               from: element("apps-server", {
-                fileInternalPath: "{test-support.ts,*.test.ts}",
+                fileInternalPath: "{test-support.ts,*.test.ts,*.linux-test.ts}",
               }),
               allow: [
                 { to: applicationEntry("apps-worker") },
@@ -483,11 +546,25 @@ export default tseslint.config(
                     fileInternalPath: "parser.ts",
                   }),
                 },
+                {
+                  to: element("component", {
+                    captured: { name: "agent" },
+                    fileInternalPath:
+                      "{pi,pi-tools,environment,agent-contract}.ts",
+                  }),
+                },
+                {
+                  to: element("component", {
+                    captured: { name: "llm" },
+                    fileInternalPath: "{model-connector,platforms}.ts",
+                  }),
+                },
               ],
             },
             {
               from: element("apps-cli", {
-                fileInternalPath: "{*.test.ts,tasks-test-support.ts}",
+                fileInternalPath:
+                  "{*.test.ts,*.linux-test.ts,*-test-support.ts}",
               }),
               allow: [
                 {
@@ -531,12 +608,6 @@ export default tseslint.config(
                       "pi-tools",
                       "bash-process",
                       "agent-session",
-                      "agent-port",
-                      "capabilities/execution-evidence",
-                      "capabilities/host-tools",
-                      "capabilities/link-updates",
-                      "review-roots",
-                      "session-directory",
                       "tool-table",
                       "environment",
                       "catalog",
@@ -545,7 +616,10 @@ export default tseslint.config(
                       "prompt-templates",
                       "pinned-layers",
                       "sensitive-text",
-                      "hooks/sensitive-text-redaction",
+                      "hooks/checkout-confinement",
+                      "redaction",
+                      "hooks/tool-allowlist",
+                      "known-secrets",
                     ].join(",")}}.ts`,
                   }),
                 },
@@ -553,7 +627,7 @@ export default tseslint.config(
                   to: element("component", {
                     captured: { name: "llm" },
                     fileInternalPath:
-                      "{model-connector,platforms,provider,provider-failure,login,sessions,refresh-watch}.ts",
+                      "{model-connector,platforms,provider,login,sessions,refresh-watch}.ts",
                   }),
                 },
                 {
@@ -593,7 +667,10 @@ export default tseslint.config(
             {
               from: element(
                 { anyOf: ["worker-unit", "apps-worker"] },
-                { fileInternalPath: "{test-support.ts,*.test.ts}" },
+                {
+                  fileInternalPath:
+                    "{test-support.ts,*.test.ts,*.linux-test.ts}",
+                },
               ),
               allow: [
                 {
@@ -919,7 +996,7 @@ export default tseslint.config(
     languageOptions: { ecmaVersion: "latest", sourceType: "module" },
   },
   {
-    files: ["src/**/*.test.ts"],
+    files: ["src/**/*.test.ts", "src/**/*.linux-test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -939,6 +1016,7 @@ export default tseslint.config(
   {
     files: [
       "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
       "src/**/*-support.ts",
       "src/**/test-support.ts",
     ],
@@ -949,6 +1027,7 @@ export default tseslint.config(
     files: ["src/**/*.ts"],
     ignores: [
       "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
       "src/kernel/caller-mint.ts",
       "src/kernel/service-mint.ts",
       "src/apps/server/**/*.ts",
@@ -962,7 +1041,7 @@ export default tseslint.config(
   },
   {
     files: ["src/apps/server/**/*.ts"],
-    ignores: ["src/**/*.test.ts"],
+    ignores: ["src/**/*.test.ts", "src/**/*.linux-test.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -1004,11 +1083,28 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/agent/capabilities/**/*.ts"],
+    files: workerFiles,
     rules: {
       "no-restricted-syntax": [
         "error",
         ...syntaxRules,
+        {
+          selector: "ImportExpression",
+          message: "A worker unit imports its modules statically.",
+        },
+      ],
+    },
+  },
+  {
+    files: ["src/worker/unit/capabilities/**/*.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...syntaxRules,
+        {
+          selector: "ImportExpression",
+          message: "A worker unit imports its modules statically.",
+        },
         ...["modelRegistry", "registerProvider"].flatMap((name) =>
           [
             `MemberExpression[property.name='${name}']`,
@@ -1021,19 +1117,6 @@ export default tseslint.config(
               "A capability reads no model registry and registers no provider.",
           })),
         ),
-      ],
-    },
-  },
-  {
-    files: workerFiles,
-    rules: {
-      "no-restricted-syntax": [
-        "error",
-        ...syntaxRules,
-        {
-          selector: "ImportExpression",
-          message: "A worker unit imports its modules statically.",
-        },
       ],
     },
   },
@@ -1083,7 +1166,11 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["src/**/*.test.ts", "src/**/*test-support.ts"],
+    ignores: [
+      "src/**/*.test.ts",
+      "src/**/*.linux-test.ts",
+      "src/**/*test-support.ts",
+    ],
     rules: {
       "@typescript-eslint/no-magic-numbers": [
         "error",
@@ -1102,11 +1189,26 @@ export default tseslint.config(
   },
   {
     files: ["src/**/*.ts"],
-    ignores: ["**/*.test.ts", "**/*test-support.ts", "**/__fixtures__/**"],
+    ignores: [
+      "**/*.test.ts",
+      "**/*.linux-test.ts",
+      "**/*test-support.ts",
+      "**/__fixtures__/**",
+    ],
     rules: {
       complexity: ["error", 10],
       "@typescript-eslint/max-params": ["error", { max: 3 }],
       "kanthord/no-inline-param-type": "error",
     },
+  },
+  {
+    files: noInlineObjectTypeFiles,
+    ignores: [
+      "**/*.test.ts",
+      "**/*.linux-test.ts",
+      "**/*test-support.ts",
+      "**/__fixtures__/**",
+    ],
+    rules: { "kanthord/no-inline-object-type": "error" },
   },
 );

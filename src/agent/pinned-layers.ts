@@ -8,8 +8,11 @@ import type {
   AgentSession,
   InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import type { WorkPrompt } from "./prompt-composer.ts";
 import { pinnedLayersHook } from "./hooks/pinned-layers.ts";
+
+export interface WorkPin {
+  text: string;
+}
 
 const SYSTEM_ROLE = "system";
 const USER_ROLE = "user";
@@ -18,10 +21,10 @@ const FIRST_INDEX = 0;
 
 export function pinnedLayers(): {
   hook: InlineExtension;
-  setWork(work: WorkPrompt): void;
+  setWork(work: WorkPin | null): void;
   pinInference(session: AgentSession, systemPrompt: string): void;
 } {
-  let work: WorkPrompt | null = null;
+  let work: WorkPin | null = null;
   const hook = pinnedLayersHook(() => work?.text ?? null);
   return {
     hook,

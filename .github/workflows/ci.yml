@@ -43,11 +43,15 @@ jobs:
           path: .pi-tools
           key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
       - run: pnpm run pi-tools:fetch
+      - name: Install bubblewrap
+        run: |
+          sudo sh -c 'command -v bwrap' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Test without sshd
         run: |
           git ls-files 'src/*.test.ts' | grep -vxF -f <(git grep -l startTestSshd -- 'src/*.test.ts') > "$RUNNER_TEMP/tests"
           wc -l < "$RUNNER_TEMP/tests"
-          node scripts/suite-pass.mjs run --job check --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs scripts/pi-tools.test.mjs scripts/health.test.mjs
+          node scripts/suite-pass.mjs run --job check --write ${{ github.event_name == 'schedule' && '--full' || '' }} --concurrency "$TEST_CONCURRENCY" $(cat "$RUNNER_TEMP/tests") scripts/test-reporter.test.mjs scripts/test-path.test.mjs scripts/affected-tests.test.mjs scripts/suite-pass.test.mjs scripts/pi-tools.test.mjs scripts/health.test.mjs scripts/no-inline-object-type.test.mjs scripts/hooks-gate.test.mjs scripts/import-check.test.mjs scripts/play-run-agent.test.mjs scripts/evaluation/agent/evaluation.test.mjs
       - uses: actions/cache/save@v6
         if: always()
         with:
@@ -103,3 +107,68 @@ jobs:
           path: node_modules/.cache/suite-pass/records.json
           include-hidden-files: true
           retention-days: 7
+
+  agent-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v6
+        with:
+          path: .pi-tools
+          key: pi-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('static/pi-tools.json') }}
+      - run: pnpm run build && pnpm run pi-tools:fetch
+      - name: Install bubblewrap
+        run: |
+          sudo sh -c 'command -v bwrap' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap; }
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Install nft and setfacl
+        run: |
+          sudo sh -c 'command -v nft && command -v setfacl' || { sudo apt-get update && sudo apt-get install -y --no-install-recommends nftables acl; }
+      - run: sudo useradd --create-home --home-dir /home/kanthord-e2e kanthord-e2e
+      - run: |
+          sudo ip netns add kanthord-n
+          sudo ip -n kanthord-n link set lo up
+          sudo ip -n kanthord-n route add local 0.0.0.0/0 dev lo
+      - name: Load nft table in kanthord-n
+        run: |
+          sudo ip netns exec kanthord-n nft -f - <<'EOF'
+          table ip kanthord {
+            set connections {
+              type ipv4_addr . inet_service
+              flags dynamic
+            }
+            chain output {
+              type filter hook output priority 0; policy accept
+              ip protocol tcp tcp flags & (fin | syn | rst | ack) == syn add @connections { ip daddr . tcp dport }
+              ip protocol udp udp dport 53 add @connections { ip daddr . udp dport }
+            }
+          }
+          EOF
+      - name: Give kanthord-e2e read access
+        run: |
+          grant() {
+            sudo setfacl -R -m u:kanthord-e2e:rX "$1"
+            directory=$(dirname "$1")
+            while [ "$directory" != / ]; do
+              sudo setfacl -m u:kanthord-e2e:x "$directory"
+              directory=$(dirname "$directory")
+            done
+          }
+          grant "$GITHUB_WORKSPACE"
+          grant "$(pnpm store path)"
+          grant "$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")"
+      - name: Give kanthord-e2e ownership of checkout root and .git
+        run: |
+          JOB_USER="$(id -un)"
+          sudo chown kanthord-e2e "$GITHUB_WORKSPACE"
+          sudo chown kanthord-e2e "$GITHUB_WORKSPACE/.git"
+          sudo setfacl -m "u:${JOB_USER}:rwX" "$GITHUB_WORKSPACE"
+          sudo setfacl -m "u:${JOB_USER}:rwX" "$GITHUB_WORKSPACE/.git"
+      - run: sudo ip netns exec kanthord-n sudo -u "$(id -un)" env "PATH=$PATH" pnpm --silent run test:agent-e2e

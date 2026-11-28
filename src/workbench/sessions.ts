@@ -7,7 +7,7 @@ import type {
 import { ensureDirectory } from "../kernel/files.ts";
 import { homeRelative } from "../kernel/xdg.ts";
 import { isString } from "../kernel/values.ts";
-import { WORKBENCH_AGENT_NAMES } from "../agent/catalog.ts";
+import { WORKBENCH_AGENT_NAMES } from "../agent/declarations.ts";
 import { loadPi, PI_DIRECTORY_NAME } from "../agent/pi.ts";
 import {
   type SessionEntry,

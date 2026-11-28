@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { credentialSecrets } from "../../agent/hooks/sensitive-text-redaction.ts";
 import {
   existsSync,
   mkdirSync,
@@ -10,6 +9,7 @@ import {
 import { join } from "node:path";
 import { test } from "node:test";
 import { simpleGit } from "simple-git";
+import { credentialSecrets } from "../../agent/known-secrets.ts";
 import { httpClient } from "../../gateway/client.ts";
 import { plainHandoverPayloadSchema } from "../../custody/contract.ts";
 import { executionCredentialStore } from "../../custody/index.ts";

@@ -31,6 +31,7 @@ import { OperationResultType } from "../../kernel/operation.ts";
 import { resolveClient } from "../../gateway/client.ts";
 import { addWorkerCommand } from "./worker.ts";
 import { addAgentCommand } from "./agent.ts";
+import { addRunCommand } from "./run-agent.ts";
 import { addAuthCommand } from "./auth.ts";
 import { configHelp, effectivePath } from "./config-path.ts";
 import { addLlmCommand } from "./llm.ts";
@@ -285,6 +286,7 @@ export function createProgram(
   addTrackingCommand(program);
   addFootprintCommand(program);
   addWorkerCommand(program);
+  addRunCommand(program);
   addGatewayCommand(program);
   const names = program.commands.map((command) => command.name());
   assert.equal(names.length, Object.keys(CommandName).length);

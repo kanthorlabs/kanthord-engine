@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
+import { credentialSecrets, mergedSecrets } from "../../agent/known-secrets.ts";
 import type { ExecutionRun } from "./execution-run.ts";
 import { EndReason, type ExecutionEnd } from "./execution-stop.ts";
 import { nativeSessionTrace, openNativeAgent } from "./native-agent.ts";
 import type { NativeAgent } from "./native-agent-session.ts";
-import {
-  credentialSecrets,
-  mergedSecrets,
-} from "../../agent/hooks/sensitive-text-redaction.ts";
-import { agentPort, type SessionModelFactory } from "../../agent/agent-port.ts";
-import { executionEvidence } from "../../agent/capabilities/execution-evidence.ts";
-import { linkUpdates } from "../../agent/capabilities/link-updates.ts";
-import type { SessionHostTools } from "../../agent/capabilities/host-tools.ts";
+import { agentPort, type SessionModelFactory } from "./agent-port.ts";
+import { executionEvidence } from "./capabilities/execution-evidence.ts";
+import { linkUpdates } from "./capabilities/link-updates.ts";
+import type { SessionHostTools } from "./capabilities/host-tools.ts";
 import type { TelemetrySink } from "./telemetry.ts";
 import type { Context } from "../../kernel/context.ts";
 import type { Diagnostic } from "../../kernel/errors.ts";

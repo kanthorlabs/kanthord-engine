@@ -8,7 +8,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { type Attributes, SpanStatus } from "../../tracking/contract.ts";
 import type { AgentSetup } from "../contract.ts";
 import { isObject } from "../../kernel/values.ts";
-import { providerFailureOf } from "../../llm/provider-failure.ts";
+import { providerFailureOf } from "../../scheduler/contract.ts";
 import { SpanOperation, type SpanRecorder } from "./telemetry.ts";
 import { sessionEntryRecord } from "./session-entries.ts";
 import { knownMatcher } from "../../agent/sensitive-text.ts";
