@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { isUnder } from "./run-agent-paths.ts";
 import { readTextFile } from "./shared.ts";
 
 const AUTH_PLACE = "cli.run.agent.auth_place";
@@ -42,10 +43,6 @@ export function looksLikePath(value: string): boolean {
   if (/\.[a-zA-Z0-9]{1,8}$/.test(value)) return true;
 
   return false;
-}
-
-function isUnder(candidate: string, dir: string): boolean {
-  return candidate.startsWith(dir + "/") || candidate === dir;
 }
 
 function isDevOrProc(p: string): boolean {
