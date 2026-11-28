@@ -322,15 +322,23 @@ export class ProjectFootprint implements FootprintOwner {
     signal: AbortSignal,
   ): Promise<void> {
     for (const path of this.proofPaths())
-      for (const digest of this.dependencies.proofs.digests(path)) {
-        signal.throwIfAborted();
-        const proof = await this.proofStat(path, digest);
-        if (proof === null || !DIGEST.test(digest)) continue;
-        const item = book.itemOf(path, digest);
-        item.bytes += proof.bytes;
-        item.proof = true;
-        if (item.at === NO_TIME) item.at = proof.at;
-      }
+      await this.addPathProofs(path, book, signal);
+  }
+
+  private async addPathProofs(
+    path: string,
+    book: EnvironmentItemBook,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (const digest of this.dependencies.proofs.digests(path)) {
+      signal.throwIfAborted();
+      const proof = await this.proofStat(path, digest);
+      if (proof === null || !DIGEST.test(digest)) continue;
+      const item = book.itemOf(path, digest);
+      item.bytes += proof.bytes;
+      item.proof = true;
+      if (item.at === NO_TIME) item.at = proof.at;
+    }
   }
 
   private cacheItems(
@@ -463,9 +471,9 @@ export class ProjectFootprint implements FootprintOwner {
         continue;
       }
       if (item.path === null || item.digest === null) {
-        if (await this.dependencies.runtime.removeImage(key))
-          answer.removed += 1;
-        else answer.absent += 1;
+        const removed = await this.dependencies.runtime.removeImage(key);
+        answer.removed += Number(removed);
+        answer.absent += Number(!removed);
         continue;
       }
       await this.dependencies.runtime.removeTags(

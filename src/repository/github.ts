@@ -1991,18 +1991,22 @@ function withoutFencedBlocks(text: string): string {
   let fence: string | null = null;
   for (const line of text.split(LINE_BREAK)) {
     const marker = FENCE_PATTERN.exec(line)?.[1];
-    if (fence === null) {
-      if (marker === undefined) kept.push(line);
-      else fence = marker;
-      continue;
-    }
-    const closes =
-      marker !== undefined &&
-      marker.startsWith(fence.charAt(0)) &&
-      marker.length >= fence.length;
-    if (closes) fence = null;
+    if (fence === null && marker === undefined) kept.push(line);
+    fence = fenceAfter(fence, marker);
   }
   return kept.join(LINE_BREAK);
+}
+
+function fenceAfter(
+  fence: string | null,
+  marker: string | undefined,
+): string | null {
+  if (fence === null) return marker ?? null;
+  const closes =
+    marker !== undefined &&
+    marker.startsWith(fence.charAt(0)) &&
+    marker.length >= fence.length;
+  return closes ? null : fence;
 }
 
 function mentionsOf(body: string): string[] {

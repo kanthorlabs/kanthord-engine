@@ -257,17 +257,21 @@ async function signObject(
     identity: caller.identity,
     executionId: claim.executionId,
   };
-  for (let index = start; index < candidates.length; index++) {
-    const storageBindingId = candidates[index]!;
+  const attempt = async (storageBindingId: string) => {
     try {
-      const signed = await dependencies.intakeStorage.put(call, {
+      return await dependencies.intakeStorage.put(call, {
         ...object,
         storageBindingId,
       });
-      return { index, storageBindingId, signed };
     } catch (error) {
       if (!signingFailsOver(caller, error)) throw error;
+      return null;
     }
+  };
+  for (let index = start; index < candidates.length; index++) {
+    const storageBindingId = candidates[index]!;
+    const signed = await attempt(storageBindingId);
+    if (signed !== null) return { index, storageBindingId, signed };
   }
   return null;
 }
@@ -285,6 +289,56 @@ function storageExhausted(
   );
 }
 
+interface GrantRequest {
+  nodeId: string;
+  body: EvidenceSubmit;
+  ids: Identities;
+  grants: Map<string, string>;
+  uploads: Upload[];
+}
+
+async function grantObjects(
+  dependencies: Dependencies,
+  caller: CallerContext,
+  request: GrantRequest,
+): Promise<void> {
+  const { nodeId, body, ids, grants, uploads } = request;
+  const claim = caller.execution;
+  assert.ok(claim);
+  const { failed, grantable } = dependencies.store.transaction((tx) => {
+    const { revision } = prepareEvidence(
+      tx,
+      dependencies,
+      claim,
+      nodeId,
+      body,
+      Date.now(),
+      ids,
+      grants,
+    );
+    return storageCandidates(
+      tx,
+      dependencies.bindings,
+      revision,
+      claim.attempt,
+    );
+  });
+  let next = FIRST_CANDIDATE;
+  for (const object of objectUploadsOf(nodeId, body, ids)) {
+    const granted = await signObject(
+      dependencies,
+      caller,
+      object,
+      grantable,
+      next,
+    );
+    if (!granted) storageExhausted(nodeId, claim.attempt, failed);
+    next = granted.index;
+    grants.set(object.assetId, granted.storageBindingId);
+    uploads.push({ asset_id: object.assetId, ...granted.signed });
+  }
+}
+
 export async function submitEvidence(
   dependencies: Dependencies,
   caller: CallerContext,
@@ -300,40 +354,14 @@ export async function submitEvidence(
   };
   const uploads: Upload[] = [];
   const grants = new Map<string, string>();
-  if (body.assets.some((asset) => asset.kind === AssetKind.Object)) {
-    const { failed, grantable } = dependencies.store.transaction((tx) => {
-      const { revision } = prepareEvidence(
-        tx,
-        dependencies,
-        claim,
-        nodeId,
-        body,
-        Date.now(),
-        ids,
-        grants,
-      );
-      return storageCandidates(
-        tx,
-        dependencies.bindings,
-        revision,
-        claim.attempt,
-      );
+  if (body.assets.some((asset) => asset.kind === AssetKind.Object))
+    await grantObjects(dependencies, caller, {
+      nodeId,
+      body,
+      ids,
+      grants,
+      uploads,
     });
-    let next = FIRST_CANDIDATE;
-    for (const object of objectUploadsOf(nodeId, body, ids)) {
-      const granted = await signObject(
-        dependencies,
-        caller,
-        object,
-        grantable,
-        next,
-      );
-      if (!granted) storageExhausted(nodeId, claim.attempt, failed);
-      next = granted.index;
-      grants.set(object.assetId, granted.storageBindingId);
-      uploads.push({ asset_id: object.assetId, ...granted.signed });
-    }
-  }
   return caller.commit((tx) => {
     const prepared = prepareEvidence(
       tx,

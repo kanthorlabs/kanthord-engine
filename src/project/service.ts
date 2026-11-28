@@ -679,6 +679,17 @@ function refuseSharedContainerInstances(
         binding: stored.name,
       });
   }
+  const list = (name: string, instance: string) => {
+    const listed = listedBy.get(instance);
+    if (listed)
+      throw new OperationError(
+        HttpStatus.Conflict,
+        ProjectErrorCode.WorkerInstanceShared,
+        "A container instance is listed by one worker binding only.",
+        { binding: name, instance, listed_by: listed },
+      );
+    listedBy.set(instance, { project_id: projectId, binding: name });
+  };
   for (const [name, binding] of submission) {
     if (binding.kind !== BindingKind.Worker) continue;
     const worker_instances = workerInstancesSchema.parse(
@@ -686,17 +697,8 @@ function refuseSharedContainerInstances(
     );
     for (const instance of containerInstancesOf(tx, instanceOf, {
       worker_instances,
-    })) {
-      const listed = listedBy.get(instance);
-      if (listed)
-        throw new OperationError(
-          HttpStatus.Conflict,
-          ProjectErrorCode.WorkerInstanceShared,
-          "A container instance is listed by one worker binding only.",
-          { binding: name, instance, listed_by: listed },
-        );
-      listedBy.set(instance, { project_id: projectId, binding: name });
-    }
+    }))
+      list(name, instance);
   }
 }
 
@@ -2569,13 +2571,11 @@ export class ProjectService implements Service, ProjectBindings {
         platform,
       }) => {
         const check: ResourceCheck = async (context, observe) => {
-          try {
-            const deadline = context.deadline;
-            assert.ok(deadline !== null);
-            context.signal.throwIfAborted();
-            let access: ReleasedAccess;
+          const expired = () =>
+            context.signal.reason instanceof DeadlineExceeded;
+          const obtain = (): ReleasedAccess => {
             try {
-              access = this.sshAccess(platform, {
+              return this.sshAccess(platform, {
                 identity: this.identity,
                 subject: {
                   kind: SshIdentitySubjectKind.Binding,
@@ -2587,8 +2587,8 @@ export class ProjectService implements Service, ProjectBindings {
                 observe?.(error.code, repositoryFailureReason(error));
               throw error;
             }
-            const expired = () =>
-              context.signal.reason instanceof DeadlineExceeded;
+          };
+          const probe = async (access: ReleasedAccess, deadline: number) => {
             try {
               using deadlineObserver = addAbortListener(context.signal, () => {
                 if (expired())
@@ -2611,6 +2611,12 @@ export class ProjectService implements Service, ProjectBindings {
                 );
               throw error;
             }
+          };
+          try {
+            const deadline = context.deadline;
+            assert.ok(deadline !== null);
+            context.signal.throwIfAborted();
+            await probe(obtain(), deadline);
             return ResourceStatus.Healthy;
           } catch {
             return context.signal.aborted

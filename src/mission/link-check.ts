@@ -90,6 +90,14 @@ export async function admitLinkUpdates(
   links: readonly PinnedLink[],
 ): Promise<LinkUpdateCount[]> {
   const counts: LinkUpdateCount[] = [];
+  const admitIds = async (count: LinkUpdateCount, ids: string[]) => {
+    try {
+      for (const id of ids)
+        countOf(count, await dependencies.intakeLinks.handoff(context, id));
+    } finally {
+      dependencies.intakeLinks.releaseHeld(ids);
+    }
+  };
   for (const link of links) {
     const { items } = await dependencies.intakeLinks.read(context, {
       project_id: projectId,
@@ -103,12 +111,7 @@ export async function admitLinkUpdates(
       refused: NO_COUNT,
     };
     const ids = items.map((item) => item.inbound_event_id);
-    try {
-      for (const id of ids)
-        countOf(count, await dependencies.intakeLinks.handoff(context, id));
-    } finally {
-      dependencies.intakeLinks.releaseHeld(ids);
-    }
+    await admitIds(count, ids);
     counts.push(count);
   }
   return counts;

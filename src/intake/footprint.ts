@@ -47,17 +47,19 @@ export class IntakeFootprint implements FootprintOwner {
     );
   }
 
+  private async rootNames(): Promise<string[]> {
+    try {
+      return await readdir(this.root());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND) throw error;
+      return [];
+    }
+  }
+
   async measure(signal: AbortSignal): Promise<FootprintMeasure[]> {
     const now = (this.dependencies.now ?? Date.now)();
     try {
-      let names: string[];
-      try {
-        names = await readdir(this.root());
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== FILE_NOT_FOUND)
-          throw error;
-        names = [];
-      }
+      const names = await this.rootNames();
       const seen = new Set<string>();
       const items: MeasuredItem[] = [];
       for (const name of names.filter((entry) =>

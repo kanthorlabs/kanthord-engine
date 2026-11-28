@@ -134,13 +134,11 @@ function addedEdges(
     previous.set(edge.dependent, targets);
   }
   for (const item of entries) {
-    for (const target of item.depends_on) {
-      if (!previous.get(item.key)?.has(target))
-        dependencies.push({
-          dependent_id: item.key,
-          depends_on_id: target,
-        });
-    }
+    const added = [...item.depends_on].filter(
+      (target) => !previous.get(item.key)?.has(target),
+    );
+    for (const target of added)
+      dependencies.push({ dependent_id: item.key, depends_on_id: target });
   }
   assert.equal(entries.length, resolved.resolved_entries.length);
   assert.equal(resolved.violations.length, NO_VIOLATIONS);

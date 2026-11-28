@@ -590,24 +590,38 @@ function refineFollowsCycles(
 ): void {
   const checked = new Set<string>();
   for (const start of edges.keys()) {
-    const path = new Set<string>();
-    let name: string | undefined = start;
-    for (let remaining = edges.size; remaining > EMPTY_LENGTH; remaining--) {
-      if (name === undefined || checked.has(name)) break;
-      path.add(name);
-      const target = edges.get(name);
-      if (target !== undefined && path.has(target)) {
-        ctx.addIssue({
-          code: CUSTOM_ISSUE,
-          path: followsPath(name),
-          message: "Action follows references must not form a cycle.",
-        });
-        break;
-      }
-      name = target;
-    }
+    const { path, cycleAt } = walkFollows(start, edges, checked);
+    if (cycleAt !== undefined)
+      ctx.addIssue({
+        code: CUSTOM_ISSUE,
+        path: followsPath(cycleAt),
+        message: "Action follows references must not form a cycle.",
+      });
     for (const visited of path) checked.add(visited);
   }
+}
+
+interface FollowWalk {
+  path: Set<string>;
+  cycleAt: string | undefined;
+}
+
+function walkFollows(
+  start: string,
+  edges: Map<string, string>,
+  checked: Set<string>,
+): FollowWalk {
+  const path = new Set<string>();
+  let name: string | undefined = start;
+  for (let remaining = edges.size; remaining > EMPTY_LENGTH; remaining--) {
+    if (name === undefined || checked.has(name)) break;
+    path.add(name);
+    const target = edges.get(name);
+    if (target !== undefined && path.has(target))
+      return { path, cycleAt: name };
+    name = target;
+  }
+  return { path, cycleAt: undefined };
 }
 
 function isSubmittedActionRepository(

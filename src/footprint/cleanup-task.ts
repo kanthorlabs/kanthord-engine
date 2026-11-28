@@ -139,6 +139,10 @@ export interface CleanupTaskDependencies {
   readonly now: () => number;
 }
 
+interface CleanupProgress {
+  outcome: CleanupOutcome | null;
+}
+
 function added(
   outcome: CleanupOutcome | null,
   answer: DeleteAnswer,
@@ -191,15 +195,17 @@ export class CleanupTask {
   private async drain(): Promise<void> {
     do {
       this.again = false;
-      const open = this.dependencies.store.transaction((tx) =>
-        openCleanups(tx),
-      );
-      for (const cleanup of open) {
-        if (this.stopped) return;
-        if (this.dispatched.has(cleanup.cleanup_id)) continue;
-        await this.run(cleanup.cleanup_id);
-      }
+      await this.runOpen();
     } while (this.again && !this.stopped);
+  }
+
+  private async runOpen(): Promise<void> {
+    const open = this.dependencies.store.transaction((tx) => openCleanups(tx));
+    for (const cleanup of open) {
+      if (this.stopped) return;
+      if (this.dispatched.has(cleanup.cleanup_id)) continue;
+      await this.run(cleanup.cleanup_id);
+    }
   }
 
   private claim(cleanupId: string): StoredCleanup | null {
@@ -253,44 +259,13 @@ export class CleanupTask {
     const cleanup = this.claim(cleanupId);
     if (cleanup === null) return;
     const deleter = this.dependencies.deleters[cleanup.kind];
-    let outcome = cleanup.outcome;
+    const progress: CleanupProgress = { outcome: cleanup.outcome };
     if (deleter === undefined) {
-      this.write(cleanup, CleanupState.Failed, outcome);
+      this.write(cleanup, CleanupState.Failed, progress.outcome);
       return;
     }
     try {
-      const batch =
-        cleanup.instance_name === null
-          ? FOOTPRINT_CLEANUP_BATCH_ROWS
-          : cleanup.keys.length;
-      for (
-        let index = resumeIndex(outcome);
-        index < cleanup.keys.length;
-        index = resumeIndex(outcome)
-      ) {
-        if (this.stopped) return;
-        const keys = cleanup.keys.slice(index, index + batch);
-        const answer = await deleter({
-          cleanup_id: cleanup.cleanup_id,
-          instance_name: cleanup.instance_name,
-          keys,
-          requested_by: cleanup.requested_by,
-        });
-        if (answer === null) {
-          this.dispatched.add(cleanup.cleanup_id);
-          return;
-        }
-        const next = added(outcome, answer);
-        if (resumeIndex(next) !== index + keys.length)
-          throw new OwnerRefusal(
-            CLEANUP_FAILED,
-            "The owner answered a result count that differs from the key count.",
-          );
-        outcome = next;
-        this.write(cleanup, CleanupState.Running, outcome);
-        await yieldTurn();
-      }
-      this.write(cleanup, CleanupState.Completed, outcome);
+      await this.dispatch(cleanup, deleter, progress);
     } catch (error) {
       this.dependencies.logger.error(
         {
@@ -300,7 +275,46 @@ export class CleanupTask {
         },
         CLEANUP_FAILED,
       );
-      this.write(cleanup, CleanupState.Failed, outcome);
+      this.write(cleanup, CleanupState.Failed, progress.outcome);
     }
+  }
+
+  private async dispatch(
+    cleanup: StoredCleanup,
+    deleter: CleanupDeleter,
+    progress: CleanupProgress,
+  ): Promise<void> {
+    const batch =
+      cleanup.instance_name === null
+        ? FOOTPRINT_CLEANUP_BATCH_ROWS
+        : cleanup.keys.length;
+    for (
+      let index = resumeIndex(progress.outcome);
+      index < cleanup.keys.length;
+      index = resumeIndex(progress.outcome)
+    ) {
+      if (this.stopped) return;
+      const keys = cleanup.keys.slice(index, index + batch);
+      const answer = await deleter({
+        cleanup_id: cleanup.cleanup_id,
+        instance_name: cleanup.instance_name,
+        keys,
+        requested_by: cleanup.requested_by,
+      });
+      if (answer === null) {
+        this.dispatched.add(cleanup.cleanup_id);
+        return;
+      }
+      const next = added(progress.outcome, answer);
+      if (resumeIndex(next) !== index + keys.length)
+        throw new OwnerRefusal(
+          CLEANUP_FAILED,
+          "The owner answered a result count that differs from the key count.",
+        );
+      progress.outcome = next;
+      this.write(cleanup, CleanupState.Running, progress.outcome);
+      await yieldTurn();
+    }
+    this.write(cleanup, CleanupState.Completed, progress.outcome);
   }
 }

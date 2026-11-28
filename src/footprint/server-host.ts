@@ -163,31 +163,35 @@ export class ServerHost implements FootprintOwner {
   async backups(): Promise<BackupFile[]> {
     const files: BackupFile[] = [];
     const directories = new Set(this.backupBases().values());
-    for (const directory of directories) {
-      let names: string[];
-      try {
-        names = await readdir(directory);
-      } catch (error) {
-        if (isAbsent(error)) continue;
-        throw error;
-      }
-      for (const name of names) {
-        const base = this.baseOf(name);
-        if (base === null || this.backupBases().get(base) !== directory)
-          continue;
-        const path = join(directory, name);
-        const stats = await lstat(path);
-        if (!stats.isFile()) continue;
-        files.push({
-          name,
-          path,
-          base,
-          bytes: stats.size,
-          at: Math.floor(stats.mtimeMs),
-        });
-      }
-    }
+    for (const directory of directories)
+      files.push(...(await this.backupsIn(directory)));
     return files.sort((a, b) => a.at - b.at || a.name.localeCompare(b.name));
+  }
+
+  private async backupsIn(directory: string): Promise<BackupFile[]> {
+    let names: string[];
+    try {
+      names = await readdir(directory);
+    } catch (error) {
+      if (isAbsent(error)) return [];
+      throw error;
+    }
+    const files: BackupFile[] = [];
+    for (const name of names) {
+      const base = this.baseOf(name);
+      if (base === null || this.backupBases().get(base) !== directory) continue;
+      const path = join(directory, name);
+      const stats = await lstat(path);
+      if (!stats.isFile()) continue;
+      files.push({
+        name,
+        path,
+        base,
+        bytes: stats.size,
+        at: Math.floor(stats.mtimeMs),
+      });
+    }
+    return files;
   }
 
   private baseOf(name: string): string | null {
@@ -242,36 +246,43 @@ export class ServerHost implements FootprintOwner {
     for (const [directory, label] of [
       [this.dataDirectory, DATA_DIRECTORY_LABEL],
       [this.dependencies.stateDirectory, STATE_DIRECTORY_LABEL],
-    ] as const) {
-      const kind = FootprintKind.Disk;
-      try {
-        const key = await deviceKey(directory);
-        this.devices.set(directory, key);
-        if (measures.has(key)) continue;
-        const space = await statfs(directory);
-        measures.set(
-          key,
-          emptyMeasure(kind, {
-            item_key: key,
-            total_bytes: space.blocks * space.bsize,
-            free_bytes: space.bavail * space.bsize,
-          }),
-        );
-      } catch (error) {
-        const key = this.devices.get(directory) ?? label;
-        if (measures.has(key)) continue;
-        measures.set(
-          key,
-          failedMeasure(
-            kind,
-            ServerHostErrorCode.DiskUnmeasured,
-            messageOf(error),
-            { item_key: key },
-          ),
-        );
-      }
-    }
+    ] as const)
+      await this.measureDisk(directory, label, measures);
     return [...measures.values()];
+  }
+
+  private async measureDisk(
+    directory: string,
+    label: string,
+    measures: Map<string, FootprintMeasure>,
+  ): Promise<void> {
+    const kind = FootprintKind.Disk;
+    try {
+      const key = await deviceKey(directory);
+      this.devices.set(directory, key);
+      if (measures.has(key)) return;
+      const space = await statfs(directory);
+      measures.set(
+        key,
+        emptyMeasure(kind, {
+          item_key: key,
+          total_bytes: space.blocks * space.bsize,
+          free_bytes: space.bavail * space.bsize,
+        }),
+      );
+    } catch (error) {
+      const key = this.devices.get(directory) ?? label;
+      if (measures.has(key)) return;
+      measures.set(
+        key,
+        failedMeasure(
+          kind,
+          ServerHostErrorCode.DiskUnmeasured,
+          messageOf(error),
+          { item_key: key },
+        ),
+      );
+    }
   }
 
   async candidates(query: CandidateQuery): Promise<CandidatePage> {
@@ -335,20 +346,26 @@ export class ServerHost implements FootprintOwner {
         continue;
       }
       const path = join(directory, name);
-      try {
-        const stats = await lstat(path);
-        if (!stats.isFile()) {
-          absent += 1;
-          continue;
-        }
-        await unlink(path);
-        removed += 1;
-        removedBytes += stats.size;
-      } catch (error) {
-        if (!isAbsent(error)) throw error;
+      const size = await this.removeBackupFile(path);
+      if (size === null) {
         absent += 1;
+        continue;
       }
+      removed += 1;
+      removedBytes += size;
     }
     return { removed, absent, removed_bytes: removedBytes };
+  }
+
+  private async removeBackupFile(path: string): Promise<number | null> {
+    try {
+      const stats = await lstat(path);
+      if (!stats.isFile()) return null;
+      await unlink(path);
+      return stats.size;
+    } catch (error) {
+      if (!isAbsent(error)) throw error;
+      return null;
+    }
   }
 }

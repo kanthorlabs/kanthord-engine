@@ -21,6 +21,14 @@ const MINIMUM_ATTEMPT = 0;
 const EMPTY_KEY_LENGTH = 0;
 const FIRST_ATTEMPT = 1;
 
+function addCandidate(
+  candidates: Map<string, Candidate>,
+  candidate: Candidate,
+): void {
+  const address = canonicalJSON(candidate.address);
+  if (!candidates.has(address)) candidates.set(address, candidate);
+}
+
 function candidatesOf(
   tx: Transaction,
   nodeId: string,
@@ -46,10 +54,7 @@ function candidatesOf(
             : [];
         }),
     );
-    for (const candidate of next) {
-      const address = canonicalJSON(candidate.address);
-      if (!candidates.has(address)) candidates.set(address, candidate);
-    }
+    for (const candidate of next) addCandidate(candidates, candidate);
   }
   return [...candidates.values()];
 }
