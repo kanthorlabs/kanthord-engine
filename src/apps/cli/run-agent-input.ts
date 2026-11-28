@@ -74,9 +74,7 @@ function tryRealpath(p: string): string {
   }
 }
 
-function statPath(
-  p: string,
-): ReturnType<typeof statSync<undefined>> | undefined {
+function statPath(p: string) {
   try {
     return statSync(p, { throwIfNoEntry: false });
   } catch (error) {
