@@ -874,9 +874,9 @@ no other path outside the cwd and `TMPDIR`.
 The sandbox sets `allowLocalBinding`, which allows bind, inbound and outbound on
 `localhost`, because the suites without `sshd` bind a loopback port on macOS. The
 runtime reads this flag once at `initialize`, so the coder bash and the
-Workbench bash share it. The sandbox allows no Unix socket. A sandbox cannot
-start inside another sandbox, so a verification command that starts the bash
-wrap fails.
+Workbench bash share it. The sandbox allows no Unix socket. On macOS, a
+verification command that starts the bash wrap fails, because a sandbox cannot
+start inside another sandbox.
 
 Two cases run without the sandbox:
 
