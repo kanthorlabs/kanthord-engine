@@ -3,6 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
+import { packageCacheEnvironment } from "../../agent/bash-sandbox.ts";
 import { projectOperations } from "../../project/contract.ts";
 import { requirePiTools, temporary } from "../../kernel/test-support.ts";
 import { HttpStatus } from "../../kernel/http.ts";
@@ -454,6 +455,7 @@ test("the launch environment sets TMPDIR to <slot root>/tmp over the thread envi
   assert.deepEqual(env, {
     ...threadEnvironment(source, root),
     TMPDIR: join(root, "tmp"),
+    ...packageCacheEnvironment(join(root, "tmp")),
   });
   assert.equal(statSync(join(root, "tmp")).mode & MODE_MASK, SLOT_ROOT_MODE);
 });
