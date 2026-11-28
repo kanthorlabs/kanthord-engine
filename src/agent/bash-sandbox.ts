@@ -3,9 +3,11 @@ import {
   accessSync,
   constants,
   type Dirent,
+  lstatSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  type Stats,
   statSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -125,6 +127,17 @@ function resolvedOrSame(path: string): string {
     const { code } = error as NodeJS.ErrnoException;
     if (code !== undefined && UNRESOLVABLE_ENTRY_CODES.includes(code))
       return path;
+    throw error;
+  }
+}
+
+function linkStatOf(path: string): Stats | undefined {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== undefined && UNRESOLVABLE_ENTRY_CODES.includes(code))
+      return undefined;
     throw error;
   }
 }
@@ -284,6 +297,25 @@ function toolRoots(env: NodeJS.ProcessEnv, home: string): string[] {
   ];
 }
 
+function linkNodes(entry: string, home: string): string[] {
+  if (entry === home || !isWithin(home, entry)) return [];
+  const links: string[] = [];
+  let current = home;
+  for (const segment of relative(home, entry).split(sep)) {
+    current = join(current, segment);
+    const stat = linkStatOf(current);
+    if (stat === undefined) return [];
+    if (stat.isSymbolicLink()) links.push(current);
+  }
+  return links;
+}
+
+function pathLinkNodes(env: NodeJS.ProcessEnv, home: string): string[] {
+  return pathEntries(env).flatMap((entry) =>
+    linkNodes(resolve(entry), resolve(home)),
+  );
+}
+
 function seccompHelperDirectory(): string {
   const entry = realpathSync(
     fileURLToPath(import.meta.resolve(SANDBOX_RUNTIME_PACKAGE)),
@@ -307,6 +339,18 @@ function outsideHostDeny(host: SandboxHost, home: string, root: string) {
   );
 }
 
+function isKeptLink(host: SandboxHost, home: string, link: string): boolean {
+  const target = resolvedOrSame(link);
+  return (
+    target !== resolve(home) &&
+    outsideHostDeny(host, home, link) &&
+    outsideHostDeny(host, home, target) &&
+    !host.denyRead.some((denied) =>
+      isWithin(target, expandedHome(denied, home)),
+    )
+  );
+}
+
 function keptReadPaths(host: SandboxHost, cwd: string): string[] {
   const home = homeOf(host.env);
   return [
@@ -318,6 +362,9 @@ function keptReadPaths(host: SandboxHost, cwd: string): string[] {
       seccompHelperDirectory(),
       ...toolRoots(host.env, home).filter((root) =>
         outsideHostDeny(host, home, root),
+      ),
+      ...pathLinkNodes(host.env, home).filter((link) =>
+        isKeptLink(host, home, link),
       ),
     ]),
   ];

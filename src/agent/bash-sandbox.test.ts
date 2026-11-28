@@ -824,6 +824,95 @@ test("(invariant guard) the allow list holds no PATH entry that lies inside a ho
   assert.ok(!allowed.includes(configBin));
 });
 
+function linkedEntry(home: string, name: string, target: string): string {
+  const link = join(home, name);
+  mkdirSync(dirname(link), { recursive: true });
+  mkdirSync(join(target, "bin"), { recursive: true });
+  symlinkSync(target, link);
+  return link;
+}
+
+test("(happy path) a PATH entry through a symlink keeps the link node and the real path and no parent of the link", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const real = join(home, "a", "releases", "1");
+  const link = linkedEntry(home, join("a", "current"), real);
+  const host = {
+    env: { HOME: home, TMPDIR: tmp, PATH: join(link, "bin") },
+    denyRead: [],
+  };
+  const allowed = await allowReadOf(host, cwd);
+  assert.ok(allowed.includes(link), `${link} in ${allowed}`);
+  assert.ok(allowed.includes(join(real, "bin")), `${allowed}`);
+  assert.ok(!allowed.includes(join(home, "a")));
+  assert.ok(!allowed.includes(join(home, "a", "releases")));
+});
+
+test("(edge) a PATH entry with a missing component adds no link node for that entry", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const link = linkedEntry(home, join("a", "current"), join(home, "real"));
+  const allowed = await allowReadOf(
+    {
+      env: {
+        HOME: home,
+        TMPDIR: tmp,
+        PATH: [join(link, "missing", "bin"), join(home, "b", "c", "bin")].join(
+          ":",
+        ),
+      },
+      denyRead: [],
+    },
+    cwd,
+  );
+  assert.ok(!allowed.includes(link));
+  assert.ok(!allowed.includes(join(home, "a")));
+  assert.ok(!allowed.includes(join(home, "b")));
+  assert.ok(!allowed.includes(join(home, "b", "c")));
+});
+
+test("(invariant guard) a PATH entry through a symlink under a deny-listed directory adds no read path", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const env: NodeJS.ProcessEnv = {
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_STATE_HOME: join(home, ".local", "state"),
+    XDG_DATA_HOME: join(home, ".local", "share"),
+  };
+  const place = directories(env);
+  const real = join(place.config, "releases", "1");
+  const link = linkedEntry(home, join(".config", "kanthord", "current"), real);
+  const allowed = await allowReadOf(
+    {
+      env: { ...env, TMPDIR: tmp, PATH: join(link, "bin") },
+      denyRead: hostDenyRead(env),
+    },
+    cwd,
+  );
+  assert.ok(!allowed.includes(link));
+  assert.ok(!allowed.some((path) => path.startsWith(place.config)));
+});
+
+test("(invariant guard) a link whose target is in the host deny list or holds an entry of it adds no read path", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  const denied = join(home, "vault");
+  const inside = linkedEntry(home, "into-vault", join(denied, "tools"));
+  const holder = join(home, "holder");
+  mkdirSync(join(holder, "secret"), { recursive: true });
+  const above = linkedEntry(home, "above-vault", holder);
+  const allowed = await allowReadOf(
+    {
+      env: {
+        HOME: home,
+        TMPDIR: tmp,
+        PATH: [join(inside, "bin"), join(above, "bin")].join(":"),
+      },
+      denyRead: [denied, join(holder, "secret")],
+    },
+    cwd,
+  );
+  assert.ok(!allowed.includes(inside));
+  assert.ok(!allowed.includes(above));
+});
+
 test("(invariant guard) a PATH entry equal to the home directory adds no tool root and keeps the home out of the allow list", async (t) => {
   const { home, cwd, tmp } = homeLayout(t);
   touch(join(home, ".netrc"));
