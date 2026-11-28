@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import { directories } from "../kernel/xdg.ts";
@@ -911,6 +911,30 @@ test("(invariant guard) a link whose target is in the host deny list or holds an
   );
   assert.ok(!allowed.includes(inside));
   assert.ok(!allowed.includes(above));
+});
+
+test("(invariant guard) with an empty deny list a link to the root, to an ancestor of the home or to the home adds no read path", async (t) => {
+  const { home, cwd, tmp } = homeLayout(t);
+  mkdirSync(join(home, "bin"), { recursive: true });
+  const links = [
+    ["to-root", "/"],
+    ["to-parent", dirname(home)],
+    ["to-home", home],
+  ].map(([name, target]) => {
+    const link = join(home, name as string);
+    symlinkSync(target as string, link);
+    return link;
+  });
+  const entries = [
+    join(links[0] as string, "usr", "bin"),
+    join(links[1] as string, basename(home), "bin"),
+    join(links[2] as string, "bin"),
+  ];
+  const allowed = await allowReadOf(
+    { env: { HOME: home, TMPDIR: tmp, PATH: entries.join(":") }, denyRead: [] },
+    cwd,
+  );
+  for (const link of links) assert.ok(!allowed.includes(link), `${link}`);
 });
 
 test("(invariant guard) a PATH entry equal to the home directory adds no tool root and keeps the home out of the allow list", async (t) => {

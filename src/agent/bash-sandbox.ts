@@ -342,7 +342,8 @@ function outsideHostDeny(host: SandboxHost, home: string, root: string) {
 function isKeptLink(host: SandboxHost, home: string, link: string): boolean {
   const target = resolvedOrSame(link);
   return (
-    target !== resolve(home) &&
+    !isWithin(target, resolve(home)) &&
+    !isWithin(target, resolvedOrSame(home)) &&
     outsideHostDeny(host, home, link) &&
     outsideHostDeny(host, home, target) &&
     !host.denyRead.some((denied) =>
