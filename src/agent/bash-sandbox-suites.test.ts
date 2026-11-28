@@ -31,6 +31,7 @@ const AGENT_TEST_TIMEOUT_MS = 30_000;
 const POSIX_TEMPORARY_ROOT = "/tmp";
 const TEMPORARY_PARENT = "opencode";
 const GATE_LAST_LENGTH = 200;
+const DETAIL_LENGTH = 300;
 const STORE_LINKS = "links";
 const TEST_COUNT = /^(?:ℹ |# )tests (\d+)/m;
 const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
@@ -195,6 +196,10 @@ function lastLine(outcome: Outcome): string {
   return outcome.output.trim().split("\n").at(-1) ?? "";
 }
 
+function detail(outcome: Outcome): string {
+  return redactReason(outcome.output.trim().slice(-DETAIL_LENGTH));
+}
+
 function gate(
   name: string,
   exit: number | undefined,
@@ -330,7 +335,8 @@ test(
     assertNoModuleError(t, outcome);
     const tests = Number(TEST_COUNT.exec(outcome.output)?.[1] ?? 0);
     assert.ok(tests > 0, `the inner reporter states no test: ${line}`);
-    if (platform() === DARWIN) assert.equal(outcome.status, SUCCESS, line);
+    if (platform() === DARWIN)
+      assert.equal(outcome.status, SUCCESS, `${line}\n${detail(outcome)}`);
   },
 );
 
@@ -350,7 +356,10 @@ test(
     if (platform() !== DARWIN) return;
     assert.notEqual(outcome.status, SUCCESS, line);
     assert.ok(!outcome.output.includes(NESTED_RAN), line);
-    assert.ok(isNestedRefusal(outcome.output, platform()), line);
+    assert.ok(
+      isNestedRefusal(outcome.output, platform()),
+      `${line}\n${detail(outcome)}`,
+    );
     t.diagnostic(`nested sandbox refusal: ${lastLine(outcome)}`);
   },
 );

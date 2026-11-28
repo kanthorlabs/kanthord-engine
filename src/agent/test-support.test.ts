@@ -7,6 +7,8 @@ import {
 } from "./test-support.ts";
 
 const DARWIN_OUTPUT = "sandbox-exec: sandbox_apply: Operation not permitted\n";
+const DARWIN_START_MESSAGE =
+  "the bash sandbox is not available: listen EPERM: operation not permitted /tmp/srt-mux-98753-0.sock";
 const LINUX_OUTPUT = "bwrap: No permissions to create new namespace\n";
 
 function failure(message: string, stderr?: string): () => Promise<never> {
@@ -25,6 +27,17 @@ test("(happy path) a refusal of the nested sandbox answers the skip reason", asy
   assert.equal(
     await nestedSandboxSkip(failure("failed", LINUX_OUTPUT), "linux"),
     NESTED_SANDBOX_SKIP,
+  );
+});
+
+test("(edge) a sandbox that fails to start on its mux socket answers the skip reason on darwin only", async () => {
+  assert.equal(
+    await nestedSandboxSkip(failure(DARWIN_START_MESSAGE), "darwin"),
+    NESTED_SANDBOX_SKIP,
+  );
+  await assert.rejects(
+    nestedSandboxSkip(failure(DARWIN_START_MESSAGE), "linux"),
+    /srt-mux/,
   );
 });
 

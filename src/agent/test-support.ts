@@ -196,11 +196,15 @@ const REAL_WRAP_TIMEOUT_MS = 30_000;
 const DARWIN: NodeJS.Platform = "darwin";
 const LINUX: NodeJS.Platform = "linux";
 const DARWIN_REFUSAL = "sandbox_apply: Operation not permitted";
+const DARWIN_START_REFUSAL = /listen EPERM.*srt-mux-\d+-\w+\.sock/;
 const LINUX_REFUSAL_PREFIX = "bwrap:";
 export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
 
 export function isNestedRefusal(output: string, os: NodeJS.Platform): boolean {
-  if (os === DARWIN) return output.includes(DARWIN_REFUSAL);
+  if (os === DARWIN)
+    return (
+      output.includes(DARWIN_REFUSAL) || DARWIN_START_REFUSAL.test(output)
+    );
   if (os === LINUX) return output.startsWith(LINUX_REFUSAL_PREFIX);
   return false;
 }
@@ -221,7 +225,9 @@ export async function nestedSandboxSkip(
     await run();
     return false;
   } catch (error) {
-    if (!isNestedRefusal(errorOutput(error), os)) throw error;
+    const message = error instanceof Error ? error.message : "";
+    if (!isNestedRefusal(`${errorOutput(error)}\n${message}`, os))
+      throw error;
     return NESTED_SANDBOX_SKIP;
   }
 }
