@@ -34,6 +34,8 @@ const GATE_LAST_LENGTH = 200;
 const DETAIL_LENGTH = 300;
 const FAILED_TEST_LINE = /^\s*(?:✖|not ok) .*$/gm;
 const STORE_LINKS = "links";
+const NOT_FOUND = -1;
+const NO_TESTS = 0;
 const TEST_COUNT = /^(?:ℹ |# )tests (\d+)/m;
 const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
 const SECRET_TEXT = "credential text of the deny list";
@@ -300,7 +302,9 @@ function processTemporary(): string {
 function storeRoot(): string {
   const parts = realpathSync(RUNTIME_PACKAGE).split(sep);
   const links = parts.indexOf(STORE_LINKS);
-  return links < 0 ? processTemporary() : parts.slice(0, links).join(sep);
+  return links === NOT_FOUND
+    ? processTemporary()
+    : parts.slice(0, links).join(sep);
 }
 
 function runtimeHost(
@@ -338,8 +342,8 @@ test(
     gate(t.name, outcome.status, unavailable, lastLine(outcome));
     assert.ok(!outcome.output.includes("mkdtemp"), line);
     assertNoModuleError(t, outcome);
-    const tests = Number(TEST_COUNT.exec(outcome.output)?.[1] ?? 0);
-    assert.ok(tests > 0, `the inner reporter states no test: ${line}`);
+    const tests = Number(TEST_COUNT.exec(outcome.output)?.[1] ?? NO_TESTS);
+    assert.ok(tests > NO_TESTS, `the inner reporter states no test: ${line}`);
     if (platform() === DARWIN)
       assert.equal(outcome.status, SUCCESS, `${line}\n${detail(outcome)}`);
   },

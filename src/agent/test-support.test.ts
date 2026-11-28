@@ -43,7 +43,10 @@ test("(edge) a sandbox that fails to start on its mux socket answers the skip re
 
 test("(invariant guard) a probe error that is not a refusal fails and names the error", async () => {
   await assert.rejects(
-    nestedSandboxSkip(failure("module not found: sandbox-runtime", "boom"), "darwin"),
+    nestedSandboxSkip(
+      failure("module not found: sandbox-runtime", "boom"),
+      "darwin",
+    ),
     /module not found: sandbox-runtime/,
   );
   await assert.rejects(

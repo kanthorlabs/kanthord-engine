@@ -202,19 +202,14 @@ export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
 
 export function isNestedRefusal(output: string, os: NodeJS.Platform): boolean {
   if (os === DARWIN)
-    return (
-      output.includes(DARWIN_REFUSAL) || DARWIN_START_REFUSAL.test(output)
-    );
+    return output.includes(DARWIN_REFUSAL) || DARWIN_START_REFUSAL.test(output);
   if (os === LINUX) return output.startsWith(LINUX_REFUSAL_PREFIX);
   return false;
 }
 
 function errorOutput(error: unknown): string {
-  return error instanceof Error &&
-    "stderr" in error &&
-    typeof error.stderr === "string"
-    ? error.stderr
-    : "";
+  if (!(error instanceof Error) || !("stderr" in error)) return "";
+  return String(error.stderr);
 }
 
 export async function nestedSandboxSkip(
@@ -226,8 +221,7 @@ export async function nestedSandboxSkip(
     return false;
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
-    if (!isNestedRefusal(`${errorOutput(error)}\n${message}`, os))
-      throw error;
+    if (!isNestedRefusal(`${errorOutput(error)}\n${message}`, os)) throw error;
     return NESTED_SANDBOX_SKIP;
   }
 }
