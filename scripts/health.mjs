@@ -189,6 +189,7 @@ function runCoverage(root) {
         "--test",
         `--test-concurrency=${TEST_CONCURRENCY}`,
         `--test-timeout=${TEST_TIMEOUT}`,
+        "--test-force-exit",
         "--experimental-test-coverage",
         "--test-reporter=lcov",
         `--test-reporter-destination=${destination}`,

@@ -37,7 +37,7 @@ const MAX_RECORDS = 20000;
 const TEST_FILES = ["src/a.test.ts", "src/b.test.ts"];
 const STORE_PATH = "node_modules/.cache/suite-pass/records.json";
 const NODE_TEST_COMMAND =
-  "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000";
+  "node --test --test-reporter=./scripts/test-reporter.mjs --test-timeout=60000 --test-force-exit";
 const EMPTY_MODULE = "export {};\n";
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const OLD_TIME = Date.UTC(2020, 0, 1);
