@@ -11,9 +11,12 @@ import {
 import { type DiskSpace, freeDiskOf } from "../../kernel/disk.ts";
 import { ensureDirectory } from "../../kernel/files.ts";
 import { canonicalJSON, digest } from "../../kernel/json.ts";
-import { redactReason } from "../../kernel/probe.ts";
+import { redactReason, redactText } from "../../kernel/probe.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  EnvironmentFailure,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import { SpanStatus } from "../../tracking/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { COMMAND_LIMIT_MS } from "./budget.ts";
@@ -65,6 +68,8 @@ const TREE_DELETED = "tree deleted";
 const BASE_PURPOSE = "base";
 const UNKNOWN_ERROR = "unknown";
 const NO_REFS: readonly string[] = [];
+const SETUP_OUTPUT_TAIL_LENGTH = 1500;
+const NO_LENGTH = 0;
 
 export interface SetupRepository {
   binding_id: string;
@@ -131,26 +136,47 @@ export type SetupFailure = Extract<
   { end: typeof SetupEnd.Failed }
 >;
 
+type CommandResult = VerificationRun["verification"]["results"][number];
+
+function setupDetail(
+  result: SetupFailure,
+  last: CommandResult,
+  outputTail: string,
+): string {
+  return redactText(
+    JSON.stringify({
+      exit_code: last.exit_code,
+      signal: last.signal,
+      timed_out: last.timed_out,
+      command: last.command,
+      output_tail: outputTail,
+      ...(result.changed === undefined
+        ? {}
+        : { changed_tracked_files: result.changed }),
+    }),
+  );
+}
+
+function fittedSetupDetail(result: SetupFailure, last: CommandResult) {
+  let tail = redactText(result.run.outputs.at(-1) ?? "").slice(
+    -SETUP_OUTPUT_TAIL_LENGTH,
+  );
+  let detail = setupDetail(result, last, tail);
+  while (detail.length > STOP_DETAIL_MAX_LENGTH && tail.length > NO_LENGTH) {
+    tail = tail.slice(detail.length - STOP_DETAIL_MAX_LENGTH);
+    detail = setupDetail(result, last, tail);
+  }
+  return detail;
+}
+
 export function setupStop(result: SetupFailure): ExecutionStop {
   const last = result.run.verification.results.at(-1);
   return new ExecutionStop(
     EndReason.EnvironmentFailed,
     EnvironmentFailure.SetupFailed,
-    redactReason(
-      JSON.stringify(
-        last === undefined
-          ? { commands: result.commands }
-          : {
-              exit_code: last.exit_code,
-              signal: last.signal,
-              timed_out: last.timed_out,
-              command: last.command,
-              ...(result.changed === undefined
-                ? {}
-                : { changed_tracked_files: result.changed }),
-            },
-      ),
-    ),
+    last === undefined
+      ? redactReason(JSON.stringify({ commands: result.commands }))
+      : fittedSetupDetail(result, last),
   );
 }
 

@@ -533,7 +533,10 @@ No query fields are accepted. The required file supplies the following fields.
   worker restores the file. That failure follows the rules for a setup failure
   below, and its output and the stop detail name the paths. A setup failure on
   the node head reruns the setup on the base head. A failure on the base head
-  stops with `environment_failed` and the code `setup_failed`. A pass on the base head is a code failure of the node unit.
+  stops with `environment_failed` and the code `setup_failed`. The stop detail
+  of `setup_failed` holds `output_tail`, the redacted end of the output of the
+  failed command, at most 1500 characters. The detail stays at most 2048
+  characters, and the worker cuts `output_tail` from its start to fit. A pass on the base head is a code failure of the node unit.
   The node unit then gets the setup output as its first revision instruction,
   and the setup runs again before the next verification. The reviewer then
   assesses `criterion_not_met` with the setup output. A verification exit code

@@ -21,7 +21,10 @@ import { hostEnvironment, temporary } from "../../kernel/test-support.ts";
 import { createIdentity } from "../../kernel/identity.ts";
 import { digest } from "../../kernel/json.ts";
 import { EnvironmentSource } from "../../kernel/devcontainer.ts";
-import { EnvironmentFailure } from "../../scheduler/contract.ts";
+import {
+  EnvironmentFailure,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import type { ExecutionEnvironment } from "../contract.ts";
 import { EndReason, ExecutionStop } from "./execution-run.ts";
 import {
@@ -32,6 +35,7 @@ import {
   setupEntries,
   setUpHeads,
   type SetupInput,
+  setupStop,
 } from "./environment-setup.ts";
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
@@ -57,6 +61,7 @@ const TWO_RUNS = "run\nrun\n";
 const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
 const ONE_CHILD = 1;
+const LONG_OUTPUT_LINES = 500;
 const DIGEST = "d".repeat(64);
 
 async function commit(directory: string, path: string, content: string) {
@@ -612,6 +617,50 @@ test("a setup that changes a tracked file only on the node head is a code failur
   assert.deepEqual(result.changed, ["package-lock.json"]);
   assert.equal(result.run.verification.results.at(-1)?.exit_code, FAILED_EXIT);
   assert.equal(result.commands.length, result.run.verification.results.length);
+});
+
+async function failedSetupDetail(
+  t: TestContext,
+  command: string,
+): Promise<string> {
+  const { checkout } = await repository(t, { file: "base" });
+  const result = await setUp(checkout, { postCreateCommand: command });
+  assert.ok(result.end === SetupEnd.Failed);
+  const stop = setupStop(result);
+  assert.equal(stop.code, EnvironmentFailure.SetupFailed);
+  assert.ok(stop.detail);
+  return stop.detail;
+}
+
+test("a failed setup command stop detail holds the output tail with the printed line", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    `echo "download failed: 504"; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.equal(parsed.exit_code, FAILED_EXIT);
+  assert.ok(parsed.output_tail.includes("download failed: 504"));
+});
+
+test("a failed setup command with a long output keeps a detail within the limit that ends with the last output characters", async (t) => {
+  const detail = await failedSetupDetail(
+    t,
+    `i=0; while [ $i -lt ${LONG_OUTPUT_LINES} ]; do printf 'abcdefghi\\n'; i=$((i+1)); done; echo END-OF-OUTPUT; exit ${FAILED_EXIT}`,
+  );
+  const parsed = JSON.parse(detail);
+  assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.ok(parsed.output_tail.length > 0);
+  assert.ok(parsed.output_tail.trimEnd().endsWith("END-OF-OUTPUT"));
+});
+
+test("(security) a failed setup command stop detail holds no token text of the output", async (t) => {
+  const token = "A".repeat(40);
+  const detail = await failedSetupDetail(
+    t,
+    `echo "Bearer ${token}"; echo "key ${token}"; exit ${FAILED_EXIT}`,
+  );
+  assert.ok(!detail.includes(token));
+  assert.ok(JSON.parse(detail).output_tail.includes("[redacted]"));
 });
 
 async function stagedAfterSetup(checkout: string): Promise<string[]> {

@@ -10,6 +10,7 @@ import {
   headerSecrets,
   probeHttp,
   redactReason,
+  redactText,
   thrownReason,
 } from "./probe.ts";
 import { stopAfter } from "./stop-test-support.ts";
@@ -20,6 +21,8 @@ const HEADERS = { [AUTHORIZATION_HEADER]: `Bearer ${SECRET}` };
 const NO_CALLS = 0;
 const ONE_CALL = 1;
 const REASON_LIMIT = 300;
+const TEXT_WORDS = 200;
+const TEXT_LENGTH = 1000;
 const DEADLINE_MS = 50;
 
 const check = (context: Context) => probeHttp(URL, HEADERS, context);
@@ -184,6 +187,26 @@ test("redactReason removes secrets, bearer values, JWTs and long tokens and boun
   assert.ok(!reason.includes("abc.def"));
   assert.ok(!reason.includes(jwt));
   assert.ok(reason.length <= REASON_LIMIT);
+});
+
+test("redactText answers a text with no secret unchanged and cuts nothing", () => {
+  const text = "word ".repeat(TEXT_WORDS);
+  assert.equal(text.length, TEXT_LENGTH);
+  assert.equal(redactText(text), text);
+});
+
+test("redactText removes the secrets that redactReason removes", () => {
+  const text = `failed ${SECRET} Bearer abc.def ${"A".repeat(400)}`;
+  assert.ok(!redactText(text, [SECRET]).includes(SECRET));
+  assert.ok(!redactText(text).includes("abc.def"));
+  assert.ok(!redactText(text).includes("A".repeat(40)));
+});
+
+test("redactReason still answers at most 300 characters of a long text", () => {
+  assert.equal(
+    redactReason("word ".repeat(TEXT_WORDS)).length,
+    REASON_LIMIT,
+  );
 });
 
 test("redactReason keeps an absolute file path that names the cause", () => {

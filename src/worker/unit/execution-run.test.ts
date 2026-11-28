@@ -23,7 +23,10 @@ import {
   CauseSubcategory,
   unattributed,
 } from "../../kernel/cause.ts";
-import { BudgetLimit } from "../../scheduler/contract.ts";
+import {
+  BudgetLimit,
+  STOP_DETAIL_MAX_LENGTH,
+} from "../../scheduler/contract.ts";
 import { GIT_COMMIT_FAILED } from "./stop-codes.ts";
 import { RepositoryErrorCode } from "../../repository/contract.ts";
 import { GitStage, GitWriteError } from "../../repository/connector.ts";
@@ -571,6 +574,24 @@ test("an environment failure stop detail holds the digests of the environments o
     command: "exit 3",
     digests: DIGESTS,
   });
+});
+
+test("an environment failure stop detail with an output tail stays within the detail limit after the digests join", async (t) => {
+  const run = fixture(async () => {}, undefined, DIGESTS);
+  stopAfter(t, () => run.dispose());
+  const tail = "x".repeat(STOP_DETAIL_MAX_LENGTH);
+  const stop = await releasedStop(
+    run,
+    new ExecutionStop(
+      EndReason.EnvironmentFailed,
+      "setup_failed",
+      JSON.stringify({ exit_code: 3, output_tail: tail.slice(-1500) }),
+    ),
+  );
+  const detail = JSON.parse(stop.detail!);
+  assert.ok(stop.detail!.length <= STOP_DETAIL_MAX_LENGTH);
+  assert.deepEqual(detail.digests, DIGESTS);
+  assert.ok(tail.endsWith(detail.output_tail));
 });
 
 function capture(run: ExecutionRun) {

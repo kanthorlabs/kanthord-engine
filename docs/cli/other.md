@@ -813,6 +813,11 @@ Every sandboxed bash, the coder bash and the Workbench bash, exports `TMPDIR`
 inside the sandbox, and also `pnpm_config_store_dir`, `pnpm_config_cache_dir` and
 `npm_config_cache` as directories under that `TMPDIR`.
 
+A worker keeps one pnpm store, one pnpm cache and one npm cache under its
+temporary directory: `pnpm-store`, `pnpm-cache` and `npm-cache`. The setup, the
+verification commands and the sandboxed bash use them, so a kept `node_modules`
+names the same store in each of them.
+
 `denyRead` also holds the home directory as one entry. The home directory is
 `HOME` when it is absolute, else the home directory of the user. `allowRead`
 re-allows the workspace, `TMPDIR`, the instance root and the tool roots inside
