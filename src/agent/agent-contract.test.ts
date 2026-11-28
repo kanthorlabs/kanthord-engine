@@ -804,3 +804,31 @@ test("L3-U6 first limit: an extension error that comes before the limit ends fai
   assert.equal(result.failure?.kind, InternalFailure.Internal);
   assert.equal(result.budgetReached, null);
 });
+
+test("forceStop during a close in progress ends the cleanup and settles the send", async (t) => {
+  const started = Promise.withResolvers<void>();
+  const { agentInput } = await makeInput(t, {
+    script: [
+      () => {
+        started.resolve();
+        return new Promise<never>(() => {});
+      },
+    ],
+  });
+  const opened = await openAgent(agentInput);
+  assert.equal(opened.kind, AgentOpenKind.Opened);
+  const { run } = opened as AgentOpened;
+  const sending = run.send("hello", { work: null });
+  await started.promise;
+  const closing = run.close();
+  run.forceStop();
+  let closedInTime = false;
+  await Promise.race([
+    closing.then(() => {
+      closedInTime = true;
+    }),
+    new Promise<void>((resolve) => setTimeout(resolve, WALL_MS * 4)),
+  ]);
+  assert.equal(closedInTime, true);
+  await sending;
+});

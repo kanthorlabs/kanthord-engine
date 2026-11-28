@@ -260,6 +260,7 @@ function buildRun(ctx: RunContext): AgentRun {
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
+  let activeCleanup: CancellationContext | null = null;
 
   let forceResolve: ((result: TurnEnd) => void) | null = null;
   const forceRace = (): Promise<TurnEnd> =>
@@ -414,7 +415,12 @@ function buildRun(ctx: RunContext): AgentRun {
     },
 
     forceStop(): TurnEnd {
-      if (closed) return snapshot();
+      if (closed) {
+        activeCleanup?.cancel();
+        forceResolve?.(snapshot());
+        forceResolve = null;
+        return snapshot();
+      }
       release();
       const result = snapshot();
       forceResolve?.(result);
@@ -430,7 +436,10 @@ function buildRun(ctx: RunContext): AgentRun {
     async close(): Promise<void> {
       if (closed) return;
       release();
-      await closeRuntime(runtime, cleanupCtx());
+      const ctx = cleanupCtx();
+      activeCleanup = ctx;
+      await closeRuntime(runtime, ctx);
+      activeCleanup = null;
     },
   };
 }
