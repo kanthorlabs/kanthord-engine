@@ -51,7 +51,7 @@ test("one assistant message with findings gives one warning with the rule and th
   assert.equal(state.takeWarnings().length, NO_WARNING);
 });
 
-test("a message with no finding and an input message give no warning", async () => {
+test("a message with no finding, an errorMessage and an input message give no warning", async () => {
   const secret = providerKey();
   const { state, end } = await findingOf(secret);
   for (const message of [
@@ -59,6 +59,14 @@ test("a message with no finding and an input message give no warning", async () 
       role: "assistant",
       content: [{ type: "text", text: "no secret" }],
       api: "anthropic-messages",
+      timestamp: 1,
+    },
+    {
+      role: "assistant",
+      content: [],
+      api: "anthropic-messages",
+      errorMessage: j("bad key ", secret),
+      stopReason: "error",
       timestamp: 1,
     },
     toolResult(j("key ", secret)),
