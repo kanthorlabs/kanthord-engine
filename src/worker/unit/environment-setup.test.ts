@@ -354,6 +354,7 @@ test("setup runs the commands of a stored environment in the checkout", async (t
   );
 });
 
+const LOCKFILE = "pnpm-lock.yaml";
 const PNPM_OFFLINE_INSTALL = "pnpm install --offline";
 const PNPM_TIMEOUT_MS = 60000;
 
@@ -393,11 +394,17 @@ test("a setup over a kept node_modules passes after a lockfile change with no TT
     ...packageCacheEnvironment(worker),
   };
   pnpm(workerEnv, checkout, PNPM_OFFLINE_INSTALL);
-  writeFileSync(
-    join(checkout, "package.json"),
+  await commit(
+    checkout,
+    "package.json",
     packageOf("host", ["first", "second"]),
   );
   pnpm(workerEnv, checkout, `${PNPM_OFFLINE_INSTALL} --lockfile-only`);
+  await commit(
+    checkout,
+    LOCKFILE,
+    readFileSync(join(checkout, LOCKFILE), "utf8"),
+  );
   const result = await runSetup(
     input({ env: workerEnv }),
     await setupEntries(input({ env: workerEnv }), [
