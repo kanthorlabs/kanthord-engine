@@ -228,16 +228,16 @@ export class ActionPerformer {
         items.push(...(await this.performReplies(caller, claim, context)));
         return { tool_name: ACTION_REQUEST_TOOL_NAME, items };
       } finally {
-        for (const action of pending) {
-          if ("owner" in action.reservation)
-            this.reservations.settle(
-              action.key,
-              action.reservation.owner,
-              null,
-            );
-        }
+        this.settleOwned(pending);
       }
     });
+  }
+
+  private settleOwned(pending: Pending[]): void {
+    for (const action of pending) {
+      if ("owner" in action.reservation)
+        this.reservations.settle(action.key, action.reservation.owner, null);
+    }
   }
 
   private async performReplies(

@@ -325,8 +325,7 @@ export class WorkspaceRoot {
         (error as { code?: unknown }).code !==
         RepositoryErrorCode.NodeBranchMissing
       )
-        for (const directory of created)
-          rmSync(directory, { recursive: true, force: true });
+        removeDirectories(created);
       throw error;
     }
   }
@@ -879,8 +878,7 @@ export class WorkspaceRoot {
       if (hold) this.giveCoderTrees(key, hold);
     } finally {
       try {
-        if (lstatSync(key, { throwIfNoEntry: false })?.isDirectory())
-          this.touch(key);
+        this.touchDirectory(key);
       } catch (error) {
         hold?.log?.(TREE_DELETED, { path: key, code: codeOf(error) });
       } finally {
@@ -888,6 +886,10 @@ export class WorkspaceRoot {
         this.held.delete(key);
       }
     }
+  }
+  private touchDirectory(directory: string): void {
+    if (lstatSync(directory, { throwIfNoEntry: false })?.isDirectory())
+      this.touch(directory);
   }
   private giveCoderTrees(key: string, hold: ImplementHold): void {
     this.storeScratch(key, hold);
@@ -924,8 +926,7 @@ export class WorkspaceRoot {
     } finally {
       try {
         this.removeSafely(key);
-        if (lstatSync(node, { throwIfNoEntry: false })?.isDirectory())
-          this.touch(node);
+        this.touchDirectory(node);
       } catch (error) {
         review.log?.(TREE_DELETED, { path: key, code: codeOf(error) });
       } finally {
@@ -944,6 +945,11 @@ export function workRepositoriesOf(
     ...checkout,
     directory: relative(root, checkout.directory) || ".",
   }));
+}
+
+function removeDirectories(directories: readonly string[]): void {
+  for (const directory of directories)
+    rmSync(directory, { recursive: true, force: true });
 }
 
 function codeOf(error: unknown): string {

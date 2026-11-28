@@ -135,9 +135,13 @@ export class TreePool {
     ensureDirectory(root);
     const pool = new TreePool(root, options);
     for (const directory of pool.classDirectories())
-      for (const name of namesOf(directory))
-        if (name.startsWith(EVICT_PREFIX)) pool.remove(join(directory, name));
+      pool.removeEvicted(directory);
     return pool;
+  }
+
+  private removeEvicted(directory: string): void {
+    for (const name of namesOf(directory))
+      if (name.startsWith(EVICT_PREFIX)) this.remove(join(directory, name));
   }
 
   trees(): FreeTree[] {
@@ -154,16 +158,21 @@ export class TreePool {
         b.returned_at - a.returned_at,
     );
     for (const tree of trees) {
-      try {
-        this.rename(tree.path, target);
-        return true;
-      } catch (error) {
-        if (errorCode(error) === FILE_NOT_FOUND) continue;
-        if (errorCode(error) === CROSS_DEVICE) return false;
-        throw error;
-      }
+      const taken = this.renameTree(tree.path, target);
+      if (taken !== null) return taken;
     }
     return false;
+  }
+
+  private renameTree(from: string, to: string): boolean | null {
+    try {
+      this.rename(from, to);
+      return true;
+    } catch (error) {
+      if (errorCode(error) === FILE_NOT_FOUND) return null;
+      if (errorCode(error) === CROSS_DEVICE) return false;
+      throw error;
+    }
   }
 
   give(slot: PoolSlot, tree: string, nodeId: string | null): void {
@@ -206,13 +215,18 @@ export class TreePool {
         b.returned_at < a.returned_at ? b : a,
       );
       const evicted = join(directory, `${EVICT_PREFIX}${randomUUID()}`);
-      try {
-        this.rename(oldest.path, evicted);
-      } catch (error) {
-        if (errorCode(error) === FILE_NOT_FOUND) continue;
-        throw error;
-      }
+      if (!this.renameUnlessGone(oldest.path, evicted)) continue;
       this.remove(evicted);
+    }
+  }
+
+  private renameUnlessGone(from: string, to: string): boolean {
+    try {
+      this.rename(from, to);
+      return true;
+    } catch (error) {
+      if (errorCode(error) === FILE_NOT_FOUND) return false;
+      throw error;
     }
   }
 

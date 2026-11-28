@@ -101,6 +101,9 @@ export async function runNativeExecution(
       unlink[Symbol.dispose]();
     }
   };
+  const closeAll = () => {
+    for (const agent of [...opened.keys()]) close(agent);
+  };
   try {
     return await executionBoundary(run, async () => {
       await secrets();
@@ -208,7 +211,7 @@ export async function runNativeExecution(
     });
   } finally {
     try {
-      for (const agent of [...opened.keys()]) close(agent);
+      closeAll();
     } finally {
       run.dispose();
     }

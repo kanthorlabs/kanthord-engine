@@ -176,6 +176,28 @@ export async function checkpointGate(
   );
 }
 
+async function abortPendingMerges(
+  state: StepsState,
+  context: Context,
+  remaining: () => number,
+): Promise<void> {
+  for (const checkout of state.checkouts)
+    if (
+      (await mergeHeadOf(
+        state.input.env,
+        checkout.directory,
+        context,
+        remaining(),
+      )) !== null
+    )
+      await abortMerge(
+        state.input.env,
+        checkout.directory,
+        context,
+        remaining(),
+      );
+}
+
 async function runGate(
   state: StepsState,
   turn: GateTurn,
@@ -194,21 +216,7 @@ async function runGate(
     async () => {
       const remaining = remainingOf(state);
       if (turn.mode === GateMode.Checkpoint)
-        for (const checkout of state.checkouts)
-          if (
-            (await mergeHeadOf(
-              state.input.env,
-              checkout.directory,
-              context,
-              remaining(),
-            )) !== null
-          )
-            await abortMerge(
-              state.input.env,
-              checkout.directory,
-              context,
-              remaining(),
-            );
+        await abortPendingMerges(state, context, remaining);
       for (const [index, checkout] of state.checkouts.entries()) {
         const violation = await violationOf(
           state,

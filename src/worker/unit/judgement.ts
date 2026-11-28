@@ -25,6 +25,7 @@ import {
   AffectedVerdict,
 } from "./affected.ts";
 import type {
+  ChangeRequest,
   ChangeRequestRead,
   FailedChecks,
   LinkUpdateRead,
@@ -389,21 +390,23 @@ export async function parseRepaired<T extends z.ZodType>(
   };
 }
 
+function requestLines(binding: string, request: ChangeRequest): string[] {
+  return [
+    `Reviewer ${request.reviewer} requests changes on ${binding} at commit ${request.commit_id}: ${request.body}`,
+    ...request.comments.map(
+      (comment) =>
+        `- ${comment.path}${comment.line === null ? "" : `:${comment.line}`}: ${comment.body}`,
+    ),
+  ];
+}
+
 export function requestedChangesText(
   reads: readonly (ChangeRequestRead & { binding: string })[],
 ): string | null {
   const lines: string[] = [];
-  for (const read of reads) {
-    for (const request of read.change_requests) {
-      lines.push(
-        `Reviewer ${request.reviewer} requests changes on ${read.binding} at commit ${request.commit_id}: ${request.body}`,
-      );
-      for (const comment of request.comments)
-        lines.push(
-          `- ${comment.path}${comment.line === null ? "" : `:${comment.line}`}: ${comment.body}`,
-        );
-    }
-  }
+  for (const read of reads)
+    for (const request of read.change_requests)
+      lines.push(...requestLines(read.binding, request));
   if (lines.length === NO_ITEMS) return null;
   return cutAtLimit(
     `The pull request reviewers request these changes:\n${lines.join("\n")}`,

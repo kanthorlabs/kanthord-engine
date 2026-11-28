@@ -47,11 +47,11 @@ function auditOrRemove(path: string, kind: FileKind): void {
 
 function parsedPushRecord(key: PushRecordKey): PushRecord | undefined {
   try {
-    for (const directory of [
+    const audited = [
       join(key.nodeKey, PUSHED_DIRECTORY),
       directoryOf(key),
-    ])
-      if (!audit(directory, FileKind.Directory, true)) return undefined;
+    ].every((directory) => audit(directory, FileKind.Directory, true));
+    if (!audited) return undefined;
     return pushRecordSchema.parse(JSON.parse(readPrivate(recordPath(key))));
   } catch {
     return undefined;
@@ -68,12 +68,12 @@ export function readPushRecord(key: PushRecordKey): PushRecord | null {
 
 export function pushRecordUnreadable(key: PushRecordKey): boolean {
   try {
-    for (const entry of [
+    const missing = [
       join(key.nodeKey, PUSHED_DIRECTORY),
       directoryOf(key),
       recordPath(key),
-    ])
-      if (!lstatSync(entry, { throwIfNoEntry: false })) return false;
+    ].some((entry) => !lstatSync(entry, { throwIfNoEntry: false }));
+    if (missing) return false;
   } catch {
     return true;
   }

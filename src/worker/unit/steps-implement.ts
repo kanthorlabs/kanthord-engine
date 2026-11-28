@@ -251,29 +251,35 @@ async function settleImplement(
     await withinGit(state.run.spans, GitStep.Push, () =>
       pushNodeBranches(state, cleanup, remaining),
     );
-    if (!end.budgetEnd) {
-      for (const checkout of state.checkouts)
-        checkout.head = await headCommit(
-          state.input.env,
-          checkout.directory,
-          cleanup,
-          remaining(),
-        );
-      await state.run.submitEvidence(state.input.claim.node_id, {
-        subject: HEAD_COMMIT_SUBJECT,
-        assets: state.checkouts.map((checkout) => ({
-          kind: "repository",
-          address: {
-            kind: "repository",
-            binding_id: checkout.binding_id,
-            commit: checkout.head,
-          },
-        })),
-      });
-    }
+    if (!end.budgetEnd) await submitHeadCommits(state, cleanup, remaining);
   } finally {
     cleanup.cancel();
   }
+}
+
+async function submitHeadCommits(
+  state: StepsState,
+  context: Context,
+  remaining: () => number,
+): Promise<void> {
+  for (const checkout of state.checkouts)
+    checkout.head = await headCommit(
+      state.input.env,
+      checkout.directory,
+      context,
+      remaining(),
+    );
+  await state.run.submitEvidence(state.input.claim.node_id, {
+    subject: HEAD_COMMIT_SUBJECT,
+    assets: state.checkouts.map((checkout) => ({
+      kind: "repository",
+      address: {
+        kind: "repository",
+        binding_id: checkout.binding_id,
+        commit: checkout.head,
+      },
+    })),
+  });
 }
 
 function checkpointMessage(
@@ -572,16 +578,10 @@ async function runNodeInstruction(
     const unchangedTurns = state.unchangedTurns;
     await agent.instruct(taskWork(state, unit), instruction, template);
     if (budget.exhausted()) return ended;
-    if (ruled) {
-      ruled = !(await verdictRuleHolds(state, node.judged));
-      state.run.log("verdict rule checked", {
-        task_id: unit.id,
-        commit: headSetOf(state.checkouts),
-        holds: !ruled,
-      });
-      if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
-    } else if (revised && !agent.changed())
+    if (ruled) ruled = await recheckVerdictRule(state, unit, node.judged);
+    else if (revised && !agent.changed())
       countUnchangedTurn(state, NoProgressRule.UnchangedRevision);
+    if (ruled && verdictTurnRetried(state, unit, unchangedTurns)) continue;
     const checked = await verifyCommands(state, unit, commands);
     const passed = recordTaskVerification(state, unit, checked);
     if (passed) return await completeUnit(state, unit, agent);
@@ -591,6 +591,20 @@ async function runNodeInstruction(
     revised = true;
   }
   return ended;
+}
+
+async function recheckVerdictRule(
+  state: StepsState,
+  unit: TaskContent,
+  judged: readonly JudgedCheckout[],
+): Promise<boolean> {
+  const holds = await verdictRuleHolds(state, judged);
+  state.run.log("verdict rule checked", {
+    task_id: unit.id,
+    commit: headSetOf(state.checkouts),
+    holds,
+  });
+  return !holds;
 }
 
 function verdictTurnRetried(
