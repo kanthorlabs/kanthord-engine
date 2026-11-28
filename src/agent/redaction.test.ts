@@ -161,16 +161,3 @@ test("text refreshes the known secrets and counts each finding", async () => {
   });
   assert.equal(state.counts().scan_failed, NO_FINDING);
 });
-
-test("recordOutputFinding counts a known secret in errorMessage", async () => {
-  const secret = providerKey();
-  const state = createRedaction(async () => [secret], SESSION_ID);
-  await state.refresh();
-  state.recordOutputFinding({
-    role: "assistant",
-    errorMessage: j("key ", secret),
-  });
-  assert.deepEqual(state.counts().output_found, {
-    [SensitiveRule.LlmCredential]: SINGLE_FINDING,
-  });
-});

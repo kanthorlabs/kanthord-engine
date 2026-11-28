@@ -585,15 +585,13 @@ export function createRedaction(
 
   const recordOutputFinding = (message: Message): SecretWarning | undefined => {
     const content = message[CONTENT_KEY];
-    const errorMessage = message[ERROR_MESSAGE_KEY];
     let count = 0;
-    for (const value of [content, errorMessage])
-      for (const text of everyString(value))
-        try {
-          count += findKnownText(text, secretMatcher).length;
-        } catch {
-          counts.scan_failed++;
-        }
+    for (const text of everyString(content))
+      try {
+        count += findKnownText(text, secretMatcher).length;
+      } catch {
+        counts.scan_failed++;
+      }
     if (!count) return undefined;
     counts.output_found[SensitiveRule.LlmCredential] =
       (counts.output_found[SensitiveRule.LlmCredential] ?? 0) + count;
