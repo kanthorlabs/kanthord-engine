@@ -34,7 +34,7 @@ function parseDuration(value: string): number | null {
   const amount = Number(match[1]);
   const unit = match[2]!;
   const ms = amount * UNIT_MS[unit]!;
-  if (!Number.isFinite(ms)) return null;
+  if (!Number.isSafeInteger(ms)) return null;
   return ms;
 }
 
