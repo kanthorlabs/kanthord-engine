@@ -5,7 +5,11 @@ import { after, test, type TestContext } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { stringify } from "yaml";
 import type { Context } from "../../kernel/context.ts";
-import { requirePiTools, temporary } from "../../kernel/test-support.ts";
+import {
+  overrideEnvironment,
+  requirePiTools,
+  temporary,
+} from "../../kernel/test-support.ts";
 import { directories } from "../../kernel/xdg.ts";
 import { OperationResultType } from "../../kernel/operation.ts";
 import { packageVersion } from "../../kernel/version.ts";
@@ -13,13 +17,14 @@ import { HttpStatus } from "../../kernel/http.ts";
 import { WorkPullKind } from "../../scheduler/contract.ts";
 import { bashSandbox } from "../../agent/bash-sandbox.ts";
 import { installPiTools } from "../../agent/pi-tools.ts";
+import { Worker } from "./index.ts";
 import { WorkerUnit } from "./unit.ts";
 import {
   HEARTBEAT_INTERVAL_MS,
   REGISTRATION_INDETERMINATE,
 } from "./registration.ts";
 import type { WorkerTransport } from "./transport.ts";
-import { testClaim } from "./test-support.ts";
+import { fakeInstanceServer, testClaim } from "./test-support.ts";
 import { existsSync, mkdirSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { hostEnvironment } from "../../kernel/test-support.ts";
@@ -157,6 +162,43 @@ function unitOf(
     log: () => {},
   });
 }
+
+test("the unit env of a host instance holds the package cache variables under its TMPDIR", async (t) => {
+  requirePiTools();
+  const server = await fakeInstanceServer(t);
+  server.addBinding("binding-0");
+  const root = temporary(t);
+  overrideEnvironment(t, { TMPDIR: hostEnvironment().TMPDIR });
+  const worker = new Worker({
+    env: {
+      HOME: root,
+      XDG_CONFIG_HOME: `${root}/config`,
+      XDG_DATA_HOME: `${root}/data`,
+      XDG_STATE_HOME: `${root}/state`,
+      KANTHORD_WORKER_CONFIG: server.value,
+    },
+    connectionName: "host-a",
+    log: () => {},
+  });
+  t.after(() => worker.stop());
+  assert.equal(await worker.start(), null);
+  const { env } = (
+    worker as unknown as { unit: { options: { env: NodeJS.ProcessEnv } } }
+  ).unit.options;
+  assert.ok(env.TMPDIR);
+  assert.deepEqual(
+    {
+      pnpm_config_store_dir: env.pnpm_config_store_dir,
+      pnpm_config_cache_dir: env.pnpm_config_cache_dir,
+      npm_config_cache: env.npm_config_cache,
+    },
+    {
+      pnpm_config_store_dir: join(env.TMPDIR, "pnpm-store"),
+      pnpm_config_cache_dir: join(env.TMPDIR, "pnpm-cache"),
+      npm_config_cache: join(env.TMPDIR, "npm-cache"),
+    },
+  );
+});
 
 async function state(task: Promise<unknown>): Promise<string> {
   return Promise.race([
