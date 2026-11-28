@@ -7,6 +7,7 @@ import { join } from "node:path";
 import {
   bashSandbox,
   hostDenyRead,
+  packageCacheEnvironment,
   type SandboxScope,
 } from "../../agent/bash-sandbox.ts";
 import { PI_DIRECTORY_NAME } from "../../agent/pi.ts";
@@ -268,7 +269,11 @@ export class Worker implements Service {
       this.unit = new WorkerUnit({
         bindings,
         directories,
-        env: { ...env, TMPDIR: temporary },
+        env: {
+          ...env,
+          TMPDIR: temporary,
+          ...packageCacheEnvironment(temporary),
+        },
         deny_read: sandbox.denyRead,
         sandbox_root: sandbox.root,
         log: this.options.log ?? LogDestination.StandardError,

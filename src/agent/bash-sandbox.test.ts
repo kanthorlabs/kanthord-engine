@@ -15,6 +15,7 @@ import { temporary } from "../kernel/test-support.ts";
 import {
   createBashSandbox,
   hostDenyRead,
+  packageCacheEnvironment,
   scopedDenyRead,
 } from "./bash-sandbox.ts";
 import { piAgentDirectory } from "./pi.ts";
@@ -108,6 +109,26 @@ function fakeRuntime(options: { initialize?: () => Promise<void> } = {}) {
     },
   };
 }
+
+test("packageCacheEnvironment answers the three package cache variables under the temporary directory", () => {
+  assert.deepEqual(packageCacheEnvironment("/t"), {
+    pnpm_config_store_dir: "/t/pnpm-store",
+    pnpm_config_cache_dir: "/t/pnpm-cache",
+    npm_config_cache: "/t/npm-cache",
+  });
+});
+
+test("(invariant) the wrapped command holds the three exports with the values of packageCacheEnvironment", async (t) => {
+  const wrapped = await createBashSandbox(fakeRuntime().runtime, "linux").wrap(
+    COMMAND,
+    temporary(t),
+    hostOf({ TMPDIR: "/var/probe" }),
+  );
+  for (const [name, value] of Object.entries(
+    packageCacheEnvironment("/var/probe"),
+  ))
+    assert.ok(wrapped.includes(` ${name}='${value}'`));
+});
 
 test("a cleanup calls the runtime cleanup once and starts no sandbox", () => {
   const fake = fakeRuntime();

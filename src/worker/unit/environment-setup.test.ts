@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
+import { spawnSync } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { simpleGit } from "simple-git";
 import { background } from "../../kernel/context.ts";
@@ -35,6 +36,7 @@ import {
 import { commitOf, headCommit } from "./local-git.ts";
 import { validRoots } from "./setup-record.ts";
 import { VerificationClass } from "./verification.ts";
+import { packageCacheEnvironment } from "../../agent/bash-sandbox.ts";
 import { spawnedPids, survivingProcesses } from "../../agent/test-support.ts";
 import { BASE_DIRECTORY, WorkspaceRoot } from "./workspace.ts";
 import { PoolClass, repoKeyOf } from "./tree-pool.ts";
@@ -350,6 +352,70 @@ test("setup runs the commands of a stored environment in the checkout", async (t
     readFileSync(join(checkout, SETUP_MARKER), "utf8"),
     SETUP_OUTPUT,
   );
+});
+
+const PNPM_OFFLINE_INSTALL = "pnpm install --offline";
+const PNPM_TIMEOUT_MS = 60000;
+
+function packageOf(name: string, dependencies: readonly string[]): string {
+  return JSON.stringify({
+    name,
+    version: "1.0.0",
+    dependencies: Object.fromEntries(
+      dependencies.map((dependency) => [dependency, `file:./${dependency}`]),
+    ),
+  });
+}
+
+function pnpm(env: NodeJS.ProcessEnv, directory: string, command: string) {
+  const result = spawnSync(command, {
+    cwd: directory,
+    env,
+    shell: true,
+    stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8",
+    timeout: PNPM_TIMEOUT_MS,
+  });
+  assert.equal(result.status, 0, `${command}: ${result.stdout}${result.stderr}`);
+}
+
+test("a setup over a kept node_modules passes after a lockfile change with no TTY and keeps the worker store", async (t) => {
+  const { checkout } = await repository(t, {
+    "package.json": packageOf("host", ["first"]),
+    "first/package.json": packageOf("first", []),
+    "second/package.json": packageOf("second", []),
+  });
+  const worker = temporary(t);
+  const workerEnv: NodeJS.ProcessEnv = {
+    ...env,
+    CI: undefined,
+    TMPDIR: worker,
+    ...packageCacheEnvironment(worker),
+  };
+  pnpm(workerEnv, checkout, PNPM_OFFLINE_INSTALL);
+  writeFileSync(
+    join(checkout, "package.json"),
+    packageOf("host", ["first", "second"]),
+  );
+  pnpm(workerEnv, checkout, `${PNPM_OFFLINE_INSTALL} --lockfile-only`);
+  const result = await runSetup(
+    input({ env: workerEnv }),
+    await setupEntries(input({ env: workerEnv }), [
+      setupCheckout(
+        checkout,
+        stored({
+          updateContentCommand: `${PNPM_OFFLINE_INSTALL} --frozen-lockfile`,
+        }),
+      ),
+    ]),
+  );
+  assert.deepEqual(result, { end: SetupEnd.Pass });
+  const modules = readFileSync(
+    join(checkout, "node_modules", ".modules.yaml"),
+    "utf8",
+  );
+  assert.ok(modules.includes(join(worker, "pnpm-store")));
+  assert.ok(existsSync(join(checkout, "node_modules", "second")));
 });
 
 test("setup reads the devcontainer file of the base head for a repository source", async (t) => {
