@@ -45,6 +45,11 @@ const NO_CONTAINERS = 0;
 const NO_LINKS = 0;
 const NO_SEPARATOR = 0;
 
+function countImageRemoval(answer: OwnerDeleteAnswer, removed: boolean) {
+  if (removed) answer.removed += 1;
+  else answer.absent += 1;
+}
+
 export interface BoundRepository {
   readonly project_id: string;
   readonly resource_identity: string;
@@ -471,9 +476,10 @@ export class ProjectFootprint implements FootprintOwner {
         continue;
       }
       if (item.path === null || item.digest === null) {
-        const removed = await this.dependencies.runtime.removeImage(key);
-        answer.removed += Number(removed);
-        answer.absent += Number(!removed);
+        countImageRemoval(
+          answer,
+          await this.dependencies.runtime.removeImage(key),
+        );
         continue;
       }
       await this.dependencies.runtime.removeTags(

@@ -71,6 +71,14 @@ interface CheckResults {
   failureReasons: Map<string, ResourceFailureReason>;
 }
 
+function pushOwnerEntries(
+  snapshot: InventorySnapshot,
+  owner: InventoryEntry["owner"],
+  entries: readonly InventoryEntry["entry"][],
+) {
+  for (const entry of entries) snapshot.entries.push({ owner, entry });
+}
+
 export function collectInventories(
   tx: Transaction,
   inventories: ResourceInventories,
@@ -78,8 +86,7 @@ export function collectInventories(
   const snapshot: InventorySnapshot = { entries: [], missing_inventories: [] };
   for (const owner of INVENTORY_OWNERS) {
     try {
-      const entries = inventories[owner](tx);
-      entries.forEach((entry) => snapshot.entries.push({ owner, entry }));
+      pushOwnerEntries(snapshot, owner, inventories[owner](tx));
     } catch {
       snapshot.missing_inventories.push(owner);
     }

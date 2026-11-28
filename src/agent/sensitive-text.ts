@@ -905,6 +905,10 @@ interface JwtWalk {
   firstEnd: number;
 }
 
+function afterDot(text: string, position: number): number {
+  return text[position] === SEGMENT_DOT ? position + 1 : NO_MATCH;
+}
+
 function walkJwtSegments(text: string, start: number): JwtWalk {
   let position = start;
   let firstEnd = start;
@@ -920,8 +924,9 @@ function walkJwtSegments(text: string, start: number): JwtWalk {
     if (position - segmentStart < JWT_SEGMENT_MIN_CHARACTERS[segment]!)
       valid = false;
     else if (segment < JWT_SEGMENTS - 1) {
-      valid = text[position] === SEGMENT_DOT;
-      position += Number(valid);
+      const next = afterDot(text, position);
+      valid = next !== NO_MATCH;
+      position = valid ? next : position;
     }
   }
   return { valid, position, firstEnd };
