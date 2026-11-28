@@ -229,6 +229,13 @@ describe("resolveInputValue", () => {
       FILE_ENCODING_INVALID,
     );
   });
+
+  it("treats a path whose single component is 300 bytes as prompt text", () => {
+    const longPart = `/${"a".repeat(300)}/file.txt`;
+    const result = resolveInputValue(longPart, ctx());
+    assert.equal(result.notice, true);
+    assert.equal(result.text, longPart);
+  });
 });
 
 describe("buildPromptText", () => {
