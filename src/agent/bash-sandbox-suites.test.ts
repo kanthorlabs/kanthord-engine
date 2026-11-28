@@ -10,6 +10,7 @@ import { promisify } from "node:util";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
 import { redactReason } from "../kernel/probe.ts";
 import { temporary } from "../kernel/test-support.ts";
+import { isNestedRefusal } from "./test-support.ts";
 import {
   createBashSandbox,
   hostDenyRead,
@@ -36,7 +37,6 @@ const MODULE_ERRORS = ["ERR_MODULE_NOT_FOUND", "Cannot find package"];
 const SECRET_TEXT = "credential text of the deny list";
 const SCRIPT_VARIABLE = "KANTHORD_SUITES_SCRIPT";
 const AGENT_SUITE = "src/worker/unit/native-agent.test.ts";
-const TODO = "s2 S2: task 02";
 const RUNTIME_PACKAGE = fileURLToPath(
   new URL("../../node_modules/@anthropic-ai/sandbox-runtime", import.meta.url),
 );
@@ -314,7 +314,7 @@ function assertNoModuleError(t: TestContext, outcome: Outcome): void {
 
 test(
   `(edge) H3: a sandboxed node --test ${AGENT_SUITE}`,
-  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS, todo: TODO },
+  { skip: unavailable, timeout: AGENT_CASE_TIMEOUT_MS },
   async (t) => {
     const parent = join(POSIX_TEMPORARY_ROOT, TEMPORARY_PARENT);
     mkdirSync(parent, { recursive: true });
@@ -330,13 +330,13 @@ test(
     assertNoModuleError(t, outcome);
     const tests = Number(TEST_COUNT.exec(outcome.output)?.[1] ?? 0);
     assert.ok(tests > 0, `the inner reporter states no test: ${line}`);
-    if (platform() === DARWIN) assert.notEqual(outcome.status, SUCCESS, line);
+    if (platform() === DARWIN) assert.equal(outcome.status, SUCCESS, line);
   },
 );
 
 test(
   "(edge) H3: a nested wrap of true inside the sandbox",
-  { skip: unavailable, timeout: CASE_TIMEOUT_MS, todo: TODO },
+  { skip: unavailable, timeout: CASE_TIMEOUT_MS },
   async (t) => {
     const h = runtimeHost(t, {
       script: NESTED_SCRIPT,
@@ -350,6 +350,7 @@ test(
     if (platform() !== DARWIN) return;
     assert.notEqual(outcome.status, SUCCESS, line);
     assert.ok(!outcome.output.includes(NESTED_RAN), line);
+    assert.ok(isNestedRefusal(outcome.output, platform()), line);
     t.diagnostic(`nested sandbox refusal: ${lastLine(outcome)}`);
   },
 );

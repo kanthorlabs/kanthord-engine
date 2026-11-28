@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
+import { platform } from "node:os";
 import { promisify } from "node:util";
 import type { TestContext } from "node:test";
 import {
@@ -192,9 +193,40 @@ export async function survivingProcesses(
 
 const execFileAsync = promisify(execFile);
 const REAL_WRAP_TIMEOUT_MS = 30_000;
-const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
+const DARWIN: NodeJS.Platform = "darwin";
+const LINUX: NodeJS.Platform = "linux";
+const DARWIN_REFUSAL = "sandbox_apply: Operation not permitted";
+const LINUX_REFUSAL_PREFIX = "bwrap:";
+export const NESTED_SANDBOX_SKIP = "a nested sandbox cannot start";
 
-async function probeRealWrap(): Promise<string | false> {
+export function isNestedRefusal(output: string, os: NodeJS.Platform): boolean {
+  if (os === DARWIN) return output.includes(DARWIN_REFUSAL);
+  if (os === LINUX) return output.startsWith(LINUX_REFUSAL_PREFIX);
+  return false;
+}
+
+function errorOutput(error: unknown): string {
+  return error instanceof Error &&
+    "stderr" in error &&
+    typeof error.stderr === "string"
+    ? error.stderr
+    : "";
+}
+
+export async function nestedSandboxSkip(
+  run: () => Promise<unknown>,
+  os: NodeJS.Platform = platform(),
+): Promise<string | false> {
+  try {
+    await run();
+    return false;
+  } catch (error) {
+    if (!isNestedRefusal(errorOutput(error), os)) throw error;
+    return NESTED_SANDBOX_SKIP;
+  }
+}
+
+async function runRealWrap(): Promise<void> {
   try {
     const wrapped = await bashSandbox.wrap("true", process.cwd(), {
       env: process.env,
@@ -203,9 +235,6 @@ async function probeRealWrap(): Promise<string | false> {
     await execFileAsync("bash", ["-c", wrapped], {
       timeout: REAL_WRAP_TIMEOUT_MS,
     });
-    return false;
-  } catch (error) {
-    return `${NESTED_SANDBOX_SKIP}: ${error instanceof Error ? error.message : String(error)}`;
   } finally {
     bashSandbox.cleanup();
   }
@@ -214,6 +243,6 @@ async function probeRealWrap(): Promise<string | false> {
 let realWrap: Promise<string | false> | undefined;
 
 export function realWrapSkip(): Promise<string | false> {
-  realWrap ??= probeRealWrap();
+  realWrap ??= nestedSandboxSkip(runRealWrap);
   return realWrap;
 }
