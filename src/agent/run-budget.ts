@@ -1,6 +1,7 @@
 import { BudgetLimit } from "./run-outcome.ts";
 
 const TIMER_LIMIT_MS = 2_147_483_647;
+const MICRO_USD = 1e6;
 
 export const COMMAND_LIMIT_MS = 600000;
 
@@ -63,7 +64,9 @@ export class UsdTracker {
   check(listPriceUsd: number, onReached: () => void): void {
     if (this.limit === null) return;
     if (this.reached !== null) return;
-    if (listPriceUsd >= this.limit) {
+    if (
+      Math.round(listPriceUsd * MICRO_USD) >= Math.round(this.limit * MICRO_USD)
+    ) {
       this.reached = BudgetLimit.Usd;
       onReached();
     }

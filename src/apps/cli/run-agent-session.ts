@@ -2,6 +2,7 @@ import { lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { isUnder } from "./run-agent-paths.ts";
 
 const SESSION_EXISTS = "cli.run.agent.session_exists";
 const SESSION_DIRECTORY_INVALID = "cli.run.agent.session_directory_invalid";
@@ -10,10 +11,6 @@ const SESSION_DIRECTORY_MODE = "cli.run.agent.session_directory_mode";
 const SESSION_PLACE = "cli.run.agent.session_place";
 
 const GROUP_OTHER_WRITE = 0o022;
-
-function isUnder(path: string, dir: string): boolean {
-  return path.startsWith(dir + "/") || path === dir;
-}
 
 function realPathOrSelf(path: string): string {
   try {

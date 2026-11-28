@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { Diagnostic } from "../../kernel/errors.ts";
+import { isUnder } from "./run-agent-paths.ts";
 import { readTextFile } from "./shared.ts";
 
 const AUTH_PLACE = "cli.run.agent.auth_place";
@@ -12,6 +13,7 @@ const PROMPT_TEXT_PATH_MESSAGE =
 
 const PATH_MAX_BYTES = 4096;
 const TRAILING_LINEBREAKS = /(\r\n|\n)+$/;
+const ENAMETOOLONG = "ENAMETOOLONG";
 
 function hasWhitespace(value: string): boolean {
   return /[ \t\r\n]/.test(value);
@@ -43,10 +45,6 @@ export function looksLikePath(value: string): boolean {
   return false;
 }
 
-function isUnder(candidate: string, dir: string): boolean {
-  return candidate.startsWith(dir + "/") || candidate === dir;
-}
-
 function isDevOrProc(p: string): boolean {
   return isUnder(p, "/dev") || isUnder(p, "/proc");
 }
@@ -76,6 +74,15 @@ function tryRealpath(p: string): string {
   }
 }
 
+function statPath(p: string) {
+  try {
+    return statSync(p, { throwIfNoEntry: false });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== ENAMETOOLONG) throw error;
+    return undefined;
+  }
+}
+
 export function resolveInputValue(
   value: string,
   context: InputContext,
@@ -93,7 +100,7 @@ export function resolveInputValue(
       { fields },
     );
 
-  const entryStat = statSync(absPath, { throwIfNoEntry: false });
+  const entryStat = statPath(absPath);
   if (entryStat === undefined) return { text: value, notice: true };
 
   if (

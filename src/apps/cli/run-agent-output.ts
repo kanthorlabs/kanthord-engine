@@ -4,6 +4,7 @@ import { userInfo } from "node:os";
 import { Diagnostic } from "../../kernel/errors.ts";
 import { openPrivate } from "../../kernel/files.ts";
 import type { BudgetDigestField } from "./run-agent-digest.ts";
+import { isUnder } from "./run-agent-paths.ts";
 
 const OUTPUT_INVALID = "cli.run.agent.output_invalid";
 const OUTPUT_PLACE = "cli.run.agent.output_place";
@@ -32,10 +33,6 @@ export function parseOutputTarget(value: string | undefined): OutputTarget {
   if (value === undefined || value === STDOUT)
     return { kind: OutputKind.Stdout };
   return { kind: OutputKind.Path, path: resolve(value) };
-}
-
-function isUnder(path: string, dir: string): boolean {
-  return path.startsWith(dir + "/") || path === dir;
 }
 
 function tryRealpath(p: string): string | null {

@@ -118,6 +118,34 @@ describe("parseBudget", () => {
   it("refuses a repeated wall budget", () => {
     assertDiagnostic(() => parseBudget(["1h", "30m"]), OPTION_INVALID);
   });
+
+  it("refuses a duration value whose product is not a finite number", () => {
+    assertDiagnostic(
+      () => parseBudget([`${"9".repeat(309)}h`]),
+      OPTION_INVALID,
+    );
+  });
+
+  it("refuses a duration value whose product is not a safe integer", () => {
+    assertDiagnostic(
+      () => parseBudget([`${Number.MAX_SAFE_INTEGER}s`]),
+      OPTION_INVALID,
+    );
+  });
+
+  it("refuses a usd value whose micro-dollar amount is not a safe integer", () => {
+    assertDiagnostic(
+      () => parseBudget([`${Number.MAX_SAFE_INTEGER}usd`]),
+      OPTION_INVALID,
+    );
+  });
+
+  it("refuses a usd value that is not a finite number", () => {
+    assertDiagnostic(
+      () => parseBudget([`${"9".repeat(309)}usd`]),
+      OPTION_INVALID,
+    );
+  });
 });
 
 describe("budgetResultFields", () => {

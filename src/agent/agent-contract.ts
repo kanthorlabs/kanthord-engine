@@ -20,7 +20,11 @@ import type {
   AgentMessage,
   ThinkingLevel,
 } from "@earendil-works/pi-agent-core";
-import { CancellationContext, type Context } from "../kernel/context.ts";
+import {
+  background,
+  CancellationContext,
+  type Context,
+} from "../kernel/context.ts";
 import { getProfile, type Profile, type ProfileName } from "./catalog.ts";
 import {
   checkPreconditions,
@@ -256,6 +260,7 @@ function buildRun(ctx: RunContext): AgentRun {
   let endAfterTurnFlag = false;
   let sending = false;
   let closed = false;
+  let activeCleanup: CancellationContext | null = null;
 
   let forceResolve: ((result: TurnEnd) => void) | null = null;
   const forceRace = (): Promise<TurnEnd> =>
@@ -350,14 +355,14 @@ function buildRun(ctx: RunContext): AgentRun {
   }
 
   function snapshot(): TurnEnd {
-    return {
-      end: RunEnd.Stopped,
-      budgetReached: null,
+    return buildTurnEnd({
+      budgetReached,
+      stopped: budgetReached === null,
       failure: null,
       text: currentText(),
       totals,
       warnings: redaction.takeWarnings(),
-    };
+    });
   }
 
   return {
@@ -410,7 +415,12 @@ function buildRun(ctx: RunContext): AgentRun {
     },
 
     forceStop(): TurnEnd {
-      if (closed) return snapshot();
+      if (closed) {
+        activeCleanup?.cancel();
+        forceResolve?.(snapshot());
+        forceResolve = null;
+        return snapshot();
+      }
       release();
       const result = snapshot();
       forceResolve?.(result);
@@ -426,7 +436,10 @@ function buildRun(ctx: RunContext): AgentRun {
     async close(): Promise<void> {
       if (closed) return;
       release();
-      await closeRuntime(runtime, cleanupCtx());
+      const ctx = cleanupCtx();
+      activeCleanup = ctx;
+      await closeRuntime(runtime, ctx);
+      activeCleanup = null;
     },
   };
 }
@@ -546,7 +559,7 @@ async function openSteps(input: AgentInput): Promise<AgentOpen> {
     extensionFailure,
     cleanupCtx: () =>
       new CancellationContext(
-        inputContext,
+        background,
         Date.now() + RUNTIME_SETUP_DEADLINE_MS,
       ),
   });
