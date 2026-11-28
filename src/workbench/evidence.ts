@@ -172,27 +172,30 @@ function isTextMediaType(header: string): boolean {
   );
 }
 
+async function readChunks(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): Promise<Uint8Array[]> {
+  const chunks: Uint8Array[] = [];
+  let total = NO_BYTES;
+  for (
+    let reads = NO_BYTES;
+    reads < EVIDENCE_TEXT_MAX_BYTES && total < EVIDENCE_TEXT_MAX_BYTES;
+    reads++
+  ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    total += value.length;
+  }
+  return chunks;
+}
+
 async function readCapped(
   body: ReadableStream<Uint8Array> | null,
 ): Promise<Buffer> {
   if (!body) return Buffer.alloc(NO_BYTES);
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = NO_BYTES;
-  try {
-    for (
-      let reads = NO_BYTES;
-      reads < EVIDENCE_TEXT_MAX_BYTES && total < EVIDENCE_TEXT_MAX_BYTES;
-      reads++
-    ) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(value);
-      total += value.length;
-    }
-  } finally {
-    await reader.cancel();
-  }
+  const chunks = await readChunks(reader).finally(() => reader.cancel());
   return Buffer.concat(chunks).subarray(NO_BYTES, EVIDENCE_TEXT_MAX_BYTES);
 }
 

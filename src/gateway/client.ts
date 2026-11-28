@@ -101,8 +101,10 @@ type ClientToken = string | (() => string | undefined) | undefined;
 
 function appendQuery(url: URL, query: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(query))
-    for (const entry of Array.isArray(value) ? value : [value])
-      if (entry !== undefined) url.searchParams.append(key, String(entry));
+    for (const entry of (Array.isArray(value) ? value : [value]).filter(
+      (item) => item !== undefined,
+    ))
+      url.searchParams.append(key, String(entry));
 }
 
 function requestUrl(

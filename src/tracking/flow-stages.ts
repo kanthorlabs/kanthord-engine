@@ -408,7 +408,7 @@ function dimensionsOf(
   isHostedWorker: (workerName: string) => boolean,
 ): StageDimension[] {
   const items: StageDimension[] = [];
-  for (const by of Object.values(FlowDimensionBy)) {
+  const collect = (by: FlowDimensionBy) => {
     const histogramsByKey = groupBy(histograms, (histogram) => histogram[by]);
     for (const [key, keyRows] of groupBy(rows, (row) => row[by])) {
       const measure = measureStage(
@@ -428,7 +428,8 @@ function dimensionsOf(
         signals: definedSignals(measure.signals),
       });
     }
-  }
+  };
+  for (const by of Object.values(FlowDimensionBy)) collect(by);
   return items.sort(
     (left, right) =>
       right.entered - left.entered ||

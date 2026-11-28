@@ -22,17 +22,18 @@ export function detectCycle(edges: DepEdge[]): boolean {
     if (degree === NO_DEPENDENCIES) queue.push(node);
   });
 
+  const release = (neighbor: string) => {
+    const degree = inDegrees.get(neighbor);
+    if (degree === undefined) throw new Error("Missing node in degree map");
+    const remaining = degree - 1;
+    inDegrees.set(neighbor, remaining);
+    if (remaining === NO_DEPENDENCIES) queue.push(neighbor);
+  };
   let processed = 0;
   for (let index = 0; index < queue.length && index < graph.order; index++) {
     const node = queue[index];
     processed++;
-    for (const neighbor of graph.outNeighbors(node)) {
-      const degree = inDegrees.get(neighbor);
-      if (degree === undefined) throw new Error("Missing node in degree map");
-      const remaining = degree - 1;
-      inDegrees.set(neighbor, remaining);
-      if (remaining === NO_DEPENDENCIES) queue.push(neighbor);
-    }
+    for (const neighbor of graph.outNeighbors(node)) release(neighbor);
   }
   return processed < graph.order;
 }

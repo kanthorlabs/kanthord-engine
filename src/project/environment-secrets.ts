@@ -150,8 +150,7 @@ export class EnvironmentSecrets {
   ): SecretRelease | null {
     const { custody, identity } = this.dependencies;
     const now = this.dependencies.now();
-    for (const { variable, credential, revision } of input.entries) {
-      let material: Material;
+    const authorize = (variable: string, credential: string) => {
       try {
         const grant = custody.authorizeOperation(
           tx,
@@ -165,11 +164,16 @@ export class EnvironmentSecrets {
           },
           now,
         );
-        material = custody.release(tx, grant, now);
+        return custody.release(tx, grant, now);
       } catch (error) {
         if (!(error instanceof OperationError)) throw error;
-        return { outcome: SecretReleaseOutcome.Unavailable, variable };
+        return null;
       }
+    };
+    for (const { variable, credential, revision } of input.entries) {
+      const material = authorize(variable, credential);
+      if (material === null)
+        return { outcome: SecretReleaseOutcome.Unavailable, variable };
       released.push({ variable, material });
       if (this.revisionOf(tx, credential, material) !== revision)
         return { outcome: SecretReleaseOutcome.Stale };

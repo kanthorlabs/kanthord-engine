@@ -112,6 +112,18 @@ export function placedOf(evidence: readonly Evidence[]) {
   return null;
 }
 
+async function downloadBytes(
+  url: string,
+  signal: AbortSignal,
+): Promise<Buffer | null> {
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    await response.body?.cancel();
+    return null;
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
 async function placeAsset(
   directory: string,
   run: ExecutionRun,
@@ -133,16 +145,11 @@ async function placeAsset(
   );
   const context = new CancellationContext(run.operationContext, deadline);
   try {
-    let bytes: Buffer;
-    if ("data" in content) bytes = Buffer.from(content.data, "base64");
-    else {
-      const response = await fetch(content.get_url, { signal: context.signal });
-      if (!response.ok) {
-        await response.body?.cancel();
-        return run.stop(EndReason.OperationFailed);
-      }
-      bytes = Buffer.from(await response.arrayBuffer());
-    }
+    const bytes =
+      "data" in content
+        ? Buffer.from(content.data, "base64")
+        : await downloadBytes(content.get_url, context.signal);
+    if (bytes === null) return run.stop(EndReason.OperationFailed);
     const assetId = identitySchema("evidence_asset").parse(asset.id);
     await writeFile(join(directory, assetId), bytes, {
       mode: 0o600,
@@ -161,6 +168,18 @@ const NO_SCOPE: ReviewScope = {
   patches: [],
   emptyPatches: [],
 };
+
+async function releasingOnFailure<T>(
+  release: () => void,
+  work: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    release();
+    throw error;
+  }
+}
 
 async function prepareWorkspace(
   input: StepsInput,
@@ -191,15 +210,16 @@ async function prepareWorkspace(
     const found = snapshots.flatMap(({ repository, snapshot }) =>
       snapshot ? [{ repository, ...snapshot }] : [],
     );
+    if (found.length > NO_SNAPSHOTS && found.length < snapshots.length)
+      return run.stop(EndReason.OperationFailed);
     if (found.length > NO_SNAPSHOTS) {
-      if (found.length < snapshots.length)
-        return run.stop(EndReason.OperationFailed);
       const workspace = await input.workspaces.prepareSnapshots({
         ...common,
         snapshots: found,
       });
-      try {
-        return {
+      return releasingOnFailure(
+        () => input.workspaces.release(workspace.key, workspace.kind),
+        async () => ({
           ...workspace,
           evidenceIds: [...new Set(found.map((item) => item.evidenceId))],
           scope: await reviewScopeOf(
@@ -210,11 +230,8 @@ async function prepareWorkspace(
             round,
             deadline,
           ),
-        };
-      } catch (error) {
-        input.workspaces.release(workspace.key, workspace.kind);
-        throw error;
-      }
+        }),
+      );
     }
   }
   if (intent === ExecutionIntent.Examine)

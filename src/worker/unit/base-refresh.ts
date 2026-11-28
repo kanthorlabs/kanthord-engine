@@ -79,16 +79,24 @@ async function mergeAtClaim(
 ): Promise<RefreshResult> {
   const context = state.agent.budget.cleanupContext(state.run.operationContext);
   try {
-    let result: RefreshResult = RefreshResult.Current;
-    for (const branch of mergedBranchesOf(state, checkout)) {
-      const merged = await mergeUnder(state, checkout, branch, context);
-      if (merged === RefreshResult.BudgetEnd) return merged;
-      if (merged === RefreshResult.Merged) result = merged;
-    }
-    return result;
+    return await mergeBranches(state, checkout, context);
   } finally {
     context.cancel();
   }
+}
+
+async function mergeBranches(
+  state: StepsState,
+  checkout: WorkspaceCheckout,
+  context: Context,
+): Promise<RefreshResult> {
+  let result: RefreshResult = RefreshResult.Current;
+  for (const branch of mergedBranchesOf(state, checkout)) {
+    const merged = await mergeUnder(state, checkout, branch, context);
+    if (merged === RefreshResult.BudgetEnd) return merged;
+    if (merged === RefreshResult.Merged) result = merged;
+  }
+  return result;
 }
 
 async function mergeUnder(
@@ -141,21 +149,25 @@ export async function refreshAtRelease(
   state: StepsState,
 ): Promise<RefreshResult> {
   const context = state.agent.budget.cleanupContext(state.run.operationContext);
-  const remaining = () => state.input.claim.expired_at - Date.now();
   try {
-    for (const checkout of state.checkouts)
-      for (const branch of mergedBranchesOf(state, checkout))
-        await withinGit(state.run.spans, GitStep.FetchBase, () =>
-          state.input.transport.fetchBase(
-            checkout.directory,
-            branch,
-            context,
-            remaining(),
-            sshAccessOf(state.input.sshAccess, checkout.binding_id),
-          ),
-        );
+    await fetchBases(state, context);
   } finally {
     context.cancel();
   }
   return refreshAtClaim(state);
+}
+
+async function fetchBases(state: StepsState, context: Context): Promise<void> {
+  const remaining = () => state.input.claim.expired_at - Date.now();
+  for (const checkout of state.checkouts)
+    for (const branch of mergedBranchesOf(state, checkout))
+      await withinGit(state.run.spans, GitStep.FetchBase, () =>
+        state.input.transport.fetchBase(
+          checkout.directory,
+          branch,
+          context,
+          remaining(),
+          sshAccessOf(state.input.sshAccess, checkout.binding_id),
+        ),
+      );
 }

@@ -247,19 +247,26 @@ async function readFailedChecks(
   };
 }
 
+function keepLatest(
+  latest: Map<string, ChangeRequest>,
+  bindingId: string,
+  request: ChangeRequest,
+): void {
+  const current = latest.get(bindingId);
+  if (
+    current === undefined ||
+    (request.submitted_at ?? NO_TIME) >= (current.submitted_at ?? NO_TIME)
+  )
+    latest.set(bindingId, request);
+}
+
 function latestRequestCommits(
   items: readonly (ChangeRequestRead & { binding_id: string })[],
 ): JudgedCommit[] {
   const latest = new Map<string, ChangeRequest>();
   for (const item of items)
-    for (const request of item.change_requests) {
-      const current = latest.get(item.binding_id);
-      if (
-        current === undefined ||
-        (request.submitted_at ?? NO_TIME) >= (current.submitted_at ?? NO_TIME)
-      )
-        latest.set(item.binding_id, request);
-    }
+    for (const request of item.change_requests)
+      keepLatest(latest, item.binding_id, request);
   return [...latest].map(([binding_id, request]) => ({
     binding_id,
     commit: request.commit_id,

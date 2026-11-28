@@ -542,16 +542,18 @@ function checkVerificationCoverage(result: ResolvedImport): void {
   const covered = verificationsByOwner(result);
   for (const item of result.resolved_entries) {
     if (!needsVerificationCoverage(item, covered)) continue;
-    for (const command of item.entry.verifications)
-      if (!covered.get(item.key)?.has(command))
-        result.violations.push(
-          violation(
-            MissionErrorCode.VerificationUncovered,
-            "Node verification is not held by a task of the node.",
-            { name: item.entry.filename, command },
-            item.entry,
-          ),
-        );
+    const uncovered = item.entry.verifications.filter(
+      (command) => !covered.get(item.key)?.has(command),
+    );
+    for (const command of uncovered)
+      result.violations.push(
+        violation(
+          MissionErrorCode.VerificationUncovered,
+          "Node verification is not held by a task of the node.",
+          { name: item.entry.filename, command },
+          item.entry,
+        ),
+      );
   }
 }
 
@@ -584,7 +586,8 @@ function resolveGraph(result: ResolvedImport): void {
             result.violations,
           ),
         );
-    for (const key of targets) if (key !== null) item.depends_on.add(key);
+    for (const key of targets.filter((target) => target !== null))
+      item.depends_on.add(key);
     result.dependencies.set(item.key, item.depends_on);
   }
   checkVerificationCoverage(result);
@@ -721,6 +724,10 @@ function addMovedOwner(item: ResolvedImportEntry, owners: Set<string>): void {
     owners.add(item.owner_id);
 }
 
+function addOwner(owners: Set<string>, id: string | null): void {
+  if (id !== null) owners.add(id);
+}
+
 function changedTaskOwners(result: ResolvedImport): Set<string> {
   const keptTasks = new Set<string>();
   const owners = new Set<string>();
@@ -731,7 +738,7 @@ function changedTaskOwners(result: ResolvedImport): Set<string> {
     keptTasks.add(item.task.id);
     if (taskChanged(item)) {
       owners.add(item.task.owner_id);
-      if (item.owner_id !== null) owners.add(item.owner_id);
+      addOwner(owners, item.owner_id);
     }
   }
   for (const task of result.current_tasks.values())
@@ -896,14 +903,17 @@ function modifiedNodes(resolved: ResolvedImport): Set<string> {
   const add = (id: string | null): void => {
     if (id !== null && resolved.current_nodes.has(id)) modified.add(id);
   };
+  const addTaskMove = (item: ResolvedImportEntry, taskOwner: string): void => {
+    if (!taskChanged(item)) return;
+    add(taskOwner);
+    add(item.owner_id);
+  };
   const keptTasks = new Set<string>();
   for (const item of resolved.resolved_entries) {
     const { current, task } = item;
     if (task !== null) {
       keptTasks.add(task.id);
-      if (!taskChanged(item)) continue;
-      add(task.owner_id);
-      add(item.owner_id);
+      addTaskMove(item, task.owner_id);
       continue;
     }
     if (current === null) {

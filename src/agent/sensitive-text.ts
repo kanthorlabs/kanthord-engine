@@ -359,14 +359,20 @@ const FIXTURE_PATTERN = new RegExp(
 );
 const FIXTURE_LITERALS = ["e2e_", "test_", "debug_"];
 
+function fixtureRanges(text: string): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const match of text.matchAll(FIXTURE_PATTERN)) {
+    const range = match.indices?.groups?.value;
+    if (range) spans.push([range[0], range[1]]);
+  }
+  return spans;
+}
+
 function fixtureSpans(context: ScanContext): [number, number][] {
   if (context.fixtures) return context.fixtures;
-  const spans: [number, number][] = [];
-  if (lowerIncludes(context, FIXTURE_LITERALS))
-    for (const match of context.text.matchAll(FIXTURE_PATTERN)) {
-      const range = match.indices?.groups?.value;
-      if (range) spans.push([range[0], range[1]]);
-    }
+  const spans = lowerIncludes(context, FIXTURE_LITERALS)
+    ? fixtureRanges(context.text)
+    : [];
   context.fixtures = spans;
   return spans;
 }
@@ -837,6 +843,18 @@ function privateKeyBody(
   if (body) pushSpan(out, SensitiveRule.PrivateKey, text, body.start, body.end);
 }
 
+function puttyBodyEnd(text: string, start: number, count: number): number {
+  let position = start;
+  let end = start;
+  for (let line = 0; line < count && position < text.length; line++) {
+    const lineEnd = lineEndAt(text, position);
+    if (!BASE64_LINE.test(text.slice(position, lineEnd))) break;
+    end = lineEnd;
+    position = lineEnd + 1;
+  }
+  return end;
+}
+
 function findPrivateKeys(context: ScanContext, out: Span[]) {
   const { text } = context;
   if (!lowerIncludes(context, PRIVATE_KEY_LITERALS)) return;
@@ -846,14 +864,7 @@ function findPrivateKeys(context: ScanContext, out: Span[]) {
   for (const match of text.matchAll(PUTTY_PRIVATE_LINES)) {
     const count = Number(match.groups?.count);
     const start = lineEndAt(text, match.index) + 1;
-    let position = start;
-    let end = start;
-    for (let line = 0; line < count && position < text.length; line++) {
-      const lineEnd = lineEndAt(text, position);
-      if (!BASE64_LINE.test(text.slice(position, lineEnd))) break;
-      end = lineEnd;
-      position = lineEnd + 1;
-    }
+    const end = puttyBodyEnd(text, start, count);
     if (end > start) pushSpan(out, SensitiveRule.PrivateKey, text, start, end);
   }
   for (const match of text.matchAll(AGE_SECRET_KEY))
@@ -894,6 +905,10 @@ interface JwtWalk {
   firstEnd: number;
 }
 
+function afterDot(text: string, position: number): number {
+  return text[position] === SEGMENT_DOT ? position + 1 : NO_MATCH;
+}
+
 function walkJwtSegments(text: string, start: number): JwtWalk {
   let position = start;
   let firstEnd = start;
@@ -909,8 +924,9 @@ function walkJwtSegments(text: string, start: number): JwtWalk {
     if (position - segmentStart < JWT_SEGMENT_MIN_CHARACTERS[segment]!)
       valid = false;
     else if (segment < JWT_SEGMENTS - 1) {
-      if (text[position] === SEGMENT_DOT) position++;
-      else valid = false;
+      const next = afterDot(text, position);
+      valid = next !== NO_MATCH;
+      position = valid ? next : position;
     }
   }
   return { valid, position, firstEnd };
@@ -994,6 +1010,12 @@ function cutAtMarkers(span: Span, markers: [number, number][]): Span[] {
   return pieces;
 }
 
+function adoptRank(target: Span, span: Span): void {
+  if (span.rank >= target.rank) return;
+  target.rank = span.rank;
+  target.rule = span.rule;
+}
+
 function merged(text: string, spans: Span[]): SensitiveSpan[] {
   const ordered = [...spans].sort(
     (left, right) => left.start - right.start || left.rank - right.rank,
@@ -1004,10 +1026,7 @@ function merged(text: string, spans: Span[]): SensitiveSpan[] {
     const last = groups.at(-1);
     if (last && span.start < last.span.end) {
       last.span.end = Math.max(last.span.end, span.end);
-      if (span.rank < last.span.rank) {
-        last.span.rank = span.rank;
-        last.span.rule = span.rule;
-      }
+      adoptRank(last.span, span);
       last.exact &&= exact;
       last.values.push(span.value);
     } else groups.push({ span: { ...span }, exact, values: [span.value] });
@@ -1122,9 +1141,7 @@ class Automaton {
     for (let head = 0; head < queue.length; head++) {
       const node = queue[head]!;
       for (const [code, child] of this.next[node]!) {
-        let failure = this.fail[node]!;
-        while (failure !== ROOT_NODE && !this.next[failure]!.has(code))
-          failure = this.fail[failure]!;
+        const failure = this.failureFor(node, code);
         const target = this.next[failure]!.get(code);
         const childFailure =
           target !== undefined && target !== child ? target : 0;
@@ -1135,6 +1152,13 @@ class Automaton {
         queue.push(child);
       }
     }
+  }
+
+  private failureFor(node: number, code: number): number {
+    let failure = this.fail[node]!;
+    while (failure !== ROOT_NODE && !this.next[failure]!.has(code))
+      failure = this.fail[failure]!;
+    return failure;
   }
 
   nodes(): number {
@@ -1301,9 +1325,10 @@ function linePartSpans({ text, windows }: PartScan, out: Span[]) {
     const hits = windows.get(
       text.slice(position, position + KNOWN_PART_MIN_CHARACTERS),
     );
-    for (const [secret, offset] of hits ?? [])
-      if (text.startsWith(secret.slice(offset), position))
-        out.push(secretSpan(text, position, position + secret.length - offset));
+    for (const [secret, offset] of (hits ?? []).filter(([secret, offset]) =>
+      text.startsWith(secret.slice(offset), position),
+    ))
+      out.push(secretSpan(text, position, position + secret.length - offset));
     const lineEnd = text.indexOf(LINE_END, position);
     if (lineEnd === NO_MATCH) break;
     position = lineEnd + 1;
@@ -1318,15 +1343,22 @@ function truncatedPartSpans({ text, windows }: PartScan, out: Span[]) {
   ) {
     if (cut < KNOWN_PART_MIN_CHARACTERS) continue;
     const hits = windows.get(text.slice(cut - KNOWN_PART_MIN_CHARACTERS, cut));
-    for (const [secret, offset] of hits ?? []) {
-      const length = offset + KNOWN_PART_MIN_CHARACTERS;
-      if (
-        length < secret.length &&
-        text.startsWith(secret.slice(0, length), cut - length)
-      )
-        out.push(secretSpan(text, cut - length, cut));
-    }
+    out.push(...truncatedHitSpans(text, cut, hits ?? []));
   }
+}
+
+function truncatedHitSpans(
+  text: string,
+  cut: number,
+  hits: readonly [string, number][],
+): Span[] {
+  return hits.flatMap(([secret, offset]) => {
+    const length = offset + KNOWN_PART_MIN_CHARACTERS;
+    return length < secret.length &&
+      text.startsWith(secret.slice(0, length), cut - length)
+      ? [secretSpan(text, cut - length, cut)]
+      : [];
+  });
 }
 
 function partSpans(text: string, prepared: Prepared, out: Span[]) {
@@ -1427,7 +1459,7 @@ function knownSpans(view: View, prepared: Prepared, out: Span[]) {
     for (const wrapped of wrappedViews(view.text)) {
       const runSpans: Span[] = [];
       prepared.forms.scan(wrapped.text, runSpans);
-      for (const span of runSpans) local.push(mapped(wrapped, span));
+      local.push(...runSpans.map((span) => mapped(wrapped, span)));
     }
   for (const span of local) out.push(mapped(view, span));
 }

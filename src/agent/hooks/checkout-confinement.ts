@@ -47,15 +47,21 @@ function errorCode(error: unknown): string | undefined {
     : undefined;
 }
 
+function realpathOrAbsent(path: string): string | null | undefined {
+  try {
+    return realpathSync(path);
+  } catch (error) {
+    return ABSENT_CODES.has(errorCode(error) ?? "") ? undefined : null;
+  }
+}
+
 function resolveNearest(path: string): string | null {
   const absent: string[] = [];
   let current = path;
   for (;;) {
-    try {
-      return join(realpathSync(current), ...absent.toReversed());
-    } catch (error) {
-      if (!ABSENT_CODES.has(errorCode(error) ?? "")) return null;
-    }
+    const resolved = realpathOrAbsent(current);
+    if (resolved === null) return null;
+    if (resolved !== undefined) return join(resolved, ...absent.toReversed());
     const parent = dirname(current);
     if (parent === current) return null;
     absent.push(basename(current));

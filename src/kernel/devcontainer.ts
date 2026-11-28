@@ -170,20 +170,23 @@ function copyToken(char: string, scan: JsoncScan): void {
   scan.index += 1;
 }
 
+function scanToken(text: string, scan: JsoncScan): boolean {
+  const char = text[scan.index]!;
+  const next = text[scan.index + 1];
+  if (char === QUOTE) copyString(text, scan);
+  else if (char === SLASH && next === SLASH) skipLineComment(text, scan);
+  else if (char === SLASH && next === STAR)
+    return blankBlockComment(text, scan);
+  else if (WHITESPACE.test(char)) {
+    scan.output += char;
+    scan.index += 1;
+  } else copyToken(char, scan);
+  return true;
+}
+
 export function jsoncText(text: string): string | null {
   const scan: JsoncScan = { output: "", comma: NO_COMMA, index: 0 };
-  while (scan.index < text.length) {
-    const char = text[scan.index]!;
-    const next = text[scan.index + 1];
-    if (char === QUOTE) copyString(text, scan);
-    else if (char === SLASH && next === SLASH) skipLineComment(text, scan);
-    else if (char === SLASH && next === STAR) {
-      if (!blankBlockComment(text, scan)) return null;
-    } else if (WHITESPACE.test(char)) {
-      scan.output += char;
-      scan.index += 1;
-    } else copyToken(char, scan);
-  }
+  while (scan.index < text.length) if (!scanToken(text, scan)) return null;
   return scan.output;
 }
 
@@ -347,42 +350,59 @@ function serverVariableKey(value: unknown, key: string): string | null {
   return null;
 }
 
+function buildPathRefusal(build: unknown): EnvironmentRefusal | null {
+  if (!isObject(build)) return null;
+  for (const key of ["dockerfile", "context"]) {
+    const path = (build as Record<string, unknown>)[key];
+    if (isString(path) && !insideCheckout(path))
+      return refusal(
+        `${BUILD_KEY}${KEY_SEPARATOR}${key}`,
+        EnvironmentRefusalReason.PathOutside,
+      );
+  }
+  return null;
+}
+
+function featurePathRefusal(features: unknown): EnvironmentRefusal | null {
+  if (!isObject(features)) return null;
+  for (const feature of Object.keys(features))
+    if (
+      isLocalFeature(feature) &&
+      (posix.isAbsolute(feature) ||
+        !devcontainerPath(feature).startsWith(`${DEVCONTAINER_DIRECTORY}/`))
+    )
+      return refusal(
+        `${FEATURES_KEY}${KEY_SEPARATOR}${feature}`,
+        EnvironmentRefusalReason.PathOutside,
+      );
+  return null;
+}
+
 function pathRefusal(document: EnvironmentObject): EnvironmentRefusal | null {
-  const build = document[BUILD_KEY];
-  if (isObject(build))
-    for (const key of ["dockerfile", "context"]) {
-      const path = (build as Record<string, unknown>)[key];
-      if (isString(path) && !insideCheckout(path))
-        return refusal(
-          `${BUILD_KEY}${KEY_SEPARATOR}${key}`,
-          EnvironmentRefusalReason.PathOutside,
-        );
-    }
-  const features = document[FEATURES_KEY];
-  if (isObject(features))
-    for (const feature of Object.keys(features))
-      if (
-        isLocalFeature(feature) &&
-        (posix.isAbsolute(feature) ||
-          !devcontainerPath(feature).startsWith(`${DEVCONTAINER_DIRECTORY}/`))
-      )
-        return refusal(
-          `${FEATURES_KEY}${KEY_SEPARATOR}${feature}`,
-          EnvironmentRefusalReason.PathOutside,
-        );
+  return (
+    buildPathRefusal(document[BUILD_KEY]) ??
+    featurePathRefusal(document[FEATURES_KEY])
+  );
+}
+
+function scopeRefusal(
+  scope: string,
+  variables: unknown,
+): EnvironmentRefusal | null {
+  if (!isObject(variables)) return null;
+  for (const [name, value] of Object.entries(variables)) {
+    if (value === null) continue;
+    const reason = variableRefusal(name, String(value));
+    if (reason !== null)
+      return refusal(`${scope}${KEY_SEPARATOR}${name}`, reason);
+  }
   return null;
 }
 
 function lineRefusal(document: EnvironmentObject): EnvironmentRefusal | null {
   for (const scope of VARIABLE_KEYS) {
-    const variables = document[scope];
-    if (!isObject(variables)) continue;
-    for (const [name, value] of Object.entries(variables)) {
-      if (value === null) continue;
-      const reason = variableRefusal(name, String(value));
-      if (reason !== null)
-        return refusal(`${scope}${KEY_SEPARATOR}${name}`, reason);
-    }
+    const found = scopeRefusal(scope, document[scope]);
+    if (found !== null) return found;
   }
   return null;
 }

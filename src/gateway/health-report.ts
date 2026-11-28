@@ -71,6 +71,14 @@ interface CheckResults {
   failureReasons: Map<string, ResourceFailureReason>;
 }
 
+function pushOwnerEntries(
+  snapshot: InventorySnapshot,
+  owner: InventoryEntry["owner"],
+  entries: readonly InventoryEntry["entry"][],
+) {
+  for (const entry of entries) snapshot.entries.push({ owner, entry });
+}
+
 export function collectInventories(
   tx: Transaction,
   inventories: ResourceInventories,
@@ -78,8 +86,7 @@ export function collectInventories(
   const snapshot: InventorySnapshot = { entries: [], missing_inventories: [] };
   for (const owner of INVENTORY_OWNERS) {
     try {
-      const entries = inventories[owner](tx);
-      for (const entry of entries) snapshot.entries.push({ owner, entry });
+      pushOwnerEntries(snapshot, owner, inventories[owner](tx));
     } catch {
       snapshot.missing_inventories.push(owner);
     }
@@ -256,6 +263,22 @@ function emptyOwner(): OwnerReport {
   return structuredClone(EMPTY_OWNER);
 }
 
+function resourcesOf(
+  report: OwnerReport,
+  entry: InventoryEntry["entry"],
+): OwnerReport["global"] {
+  if (entry.scope !== HealthScope.Project) return report.global;
+  assert.ok(entry.project !== null);
+  if (!Object.hasOwn(report.projects, entry.project))
+    Object.defineProperty(report.projects, entry.project, {
+      value: {},
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  return report.projects[entry.project]!;
+}
+
 function assembleReport(
   entries: InventoryEntry[],
   { statuses, failureReasons }: CheckResults,
@@ -276,19 +299,7 @@ function assembleReport(
       status,
       failureReasons.get(entry.target),
     );
-    const report = owners[owner];
-    let resources = report.global;
-    if (entry.scope === HealthScope.Project) {
-      assert.ok(entry.project !== null);
-      if (!Object.hasOwn(report.projects, entry.project))
-        Object.defineProperty(report.projects, entry.project, {
-          value: {},
-          enumerable: true,
-          configurable: true,
-          writable: true,
-        });
-      resources = report.projects[entry.project]!;
-    }
+    const resources = resourcesOf(owners[owner], entry);
     Object.defineProperty(resources, entry.name, {
       value: {
         status,

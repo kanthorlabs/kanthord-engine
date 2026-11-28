@@ -45,6 +45,11 @@ const NO_CONTAINERS = 0;
 const NO_LINKS = 0;
 const NO_SEPARATOR = 0;
 
+function countImageRemoval(answer: OwnerDeleteAnswer, removed: boolean) {
+  if (removed) answer.removed += 1;
+  else answer.absent += 1;
+}
+
 export interface BoundRepository {
   readonly project_id: string;
   readonly resource_identity: string;
@@ -322,15 +327,23 @@ export class ProjectFootprint implements FootprintOwner {
     signal: AbortSignal,
   ): Promise<void> {
     for (const path of this.proofPaths())
-      for (const digest of this.dependencies.proofs.digests(path)) {
-        signal.throwIfAborted();
-        const proof = await this.proofStat(path, digest);
-        if (proof === null || !DIGEST.test(digest)) continue;
-        const item = book.itemOf(path, digest);
-        item.bytes += proof.bytes;
-        item.proof = true;
-        if (item.at === NO_TIME) item.at = proof.at;
-      }
+      await this.addPathProofs(path, book, signal);
+  }
+
+  private async addPathProofs(
+    path: string,
+    book: EnvironmentItemBook,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (const digest of this.dependencies.proofs.digests(path)) {
+      signal.throwIfAborted();
+      const proof = await this.proofStat(path, digest);
+      if (proof === null || !DIGEST.test(digest)) continue;
+      const item = book.itemOf(path, digest);
+      item.bytes += proof.bytes;
+      item.proof = true;
+      if (item.at === NO_TIME) item.at = proof.at;
+    }
   }
 
   private cacheItems(
@@ -463,9 +476,10 @@ export class ProjectFootprint implements FootprintOwner {
         continue;
       }
       if (item.path === null || item.digest === null) {
-        if (await this.dependencies.runtime.removeImage(key))
-          answer.removed += 1;
-        else answer.absent += 1;
+        countImageRemoval(
+          answer,
+          await this.dependencies.runtime.removeImage(key),
+        );
         continue;
       }
       await this.dependencies.runtime.removeTags(

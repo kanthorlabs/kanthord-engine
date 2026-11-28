@@ -399,7 +399,7 @@ export async function findSession(
   manager: SessionManager;
 } | null> {
   const pi = await loadPi();
-  for (const agentName of workbenchAgentNames()) {
+  const foundIn = (agentName: string) => {
     const places: { variantId: string | null; place: SessionPlace }[] = [
       { variantId: null, place: sessionPlace(stateDirectory, agentName) },
       ...existingVariantPlaces(stateDirectory, agentName),
@@ -411,6 +411,11 @@ export async function findSession(
       assert.equal(manager.getSessionId(), id);
       return { agentName, variantId, place, manager };
     }
+    return null;
+  };
+  for (const agentName of workbenchAgentNames()) {
+    const found = foundIn(agentName);
+    if (found) return found;
   }
   return null;
 }

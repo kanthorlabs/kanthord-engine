@@ -343,6 +343,15 @@ async function settledBefore(
   }
 }
 
+async function awaitRefreshInFlight(
+  error: unknown,
+  deadline: number,
+  context: Context,
+): Promise<void> {
+  if (!(error instanceof CredentialRefreshInFlight)) throw error;
+  await settledBefore(error.settled, deadline, context);
+}
+
 export class WorkerService implements Service {
   authorizeModelInference(
     tx: Transaction,
@@ -1262,8 +1271,7 @@ export class WorkerService implements Service {
             );
           });
         } catch (error) {
-          if (!(error instanceof CredentialRefreshInFlight)) throw error;
-          await settledBefore(error.settled, deadline, caller.context);
+          await awaitRefreshInFlight(error, deadline, caller.context);
         }
       }
       throw refreshInFlight();

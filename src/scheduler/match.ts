@@ -60,12 +60,13 @@ export function unmatchedClaims(
   const claimants = claimantsOf(tx, dependencies, projectId);
   const unmatched: UnmatchedClaim[] = [];
   for (const row of dependencies.facts.claimFactsOf(tx, projectId))
-    for (const claim of row.claims)
-      if (!covered(claimants, row, claim))
-        unmatched.push({
-          node_id: row.node_id,
-          revision: row.revision,
-          claim,
-        });
+    for (const claim of row.claims.filter(
+      (claim) => !covered(claimants, row, claim),
+    ))
+      unmatched.push({
+        node_id: row.node_id,
+        revision: row.revision,
+        claim,
+      });
   return unmatched;
 }

@@ -155,6 +155,19 @@ async function scanLines(
     tail = Buffer.alloc(START);
     return entry;
   };
+  const consume = (bytesRead: number): Record<string, unknown> | null => {
+    let start = START;
+    for (;;) {
+      const end = chunk.indexOf(LINE_FEED, start);
+      if (end === NOT_FOUND_INDEX || end >= bytesRead) break;
+      append(chunk.subarray(start, end));
+      const entry = finish();
+      if (entry) return entry;
+      start = end + LINE_FEED_BYTES;
+    }
+    if (start < bytesRead) append(chunk.subarray(start, bytesRead));
+    return null;
+  };
   let position = START;
   while (position < size) {
     signal.throwIfAborted();
@@ -166,16 +179,8 @@ async function scanLines(
     );
     if (bytesRead === START) break;
     position += bytesRead;
-    let start = START;
-    for (;;) {
-      const end = chunk.indexOf(LINE_FEED, start);
-      if (end === NOT_FOUND_INDEX || end >= bytesRead) break;
-      append(chunk.subarray(start, end));
-      const entry = finish();
-      if (entry) return { resolved: entry, tooLarge };
-      start = end + LINE_FEED_BYTES;
-    }
-    if (start < bytesRead) append(chunk.subarray(start, bytesRead));
+    const completed = consume(bytesRead);
+    if (completed) return { resolved: completed, tooLarge };
   }
   const entry = finish();
   return { resolved: entry, tooLarge };
@@ -219,6 +224,19 @@ async function scanSessionFile(
   });
 }
 
+async function scanNamedSessionFile(
+  context: SessionScanContext,
+  name: string,
+): Promise<LineScan | null> {
+  const handle = await openSessionFile(join(context.directory, name));
+  if (!handle) return null;
+  try {
+    return await scanSessionFile(context, handle);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function scanSessionFiles(
   context: SessionScanContext,
   names: readonly string[],
@@ -226,17 +244,11 @@ async function scanSessionFiles(
   let tooLarge: number | null = null;
   for (const name of names) {
     context.signal.throwIfAborted();
-    const handle = await openSessionFile(join(context.directory, name));
-    if (!handle) continue;
-    try {
-      const scan = await scanSessionFile(context, handle);
-      if (scan === null) continue;
-      if (scan.resolved)
-        return { outcome: SessionReadOutcome.Resolved, entry: scan.resolved };
-      tooLarge ??= scan.tooLarge;
-    } finally {
-      await handle.close();
-    }
+    const scan = await scanNamedSessionFile(context, name);
+    if (scan === null) continue;
+    if (scan.resolved)
+      return { outcome: SessionReadOutcome.Resolved, entry: scan.resolved };
+    tooLarge ??= scan.tooLarge;
   }
   return tooLarge === null
     ? { outcome: SessionReadOutcome.EntryAbsent }
@@ -310,34 +322,51 @@ function isFirstLink(stats: Stats, seen: Set<string>): boolean {
   return true;
 }
 
+interface TrustedWalk {
+  bytes: number;
+  newest: number;
+  pending: string[];
+  seen: Set<string>;
+}
+
+async function walkDirectory(
+  path: string,
+  walk: TrustedWalk,
+): Promise<boolean> {
+  for (const name of await readdir(path)) {
+    const stats = await lstat(join(path, name));
+    if (stats.isSymbolicLink()) return false;
+    if (stats.isDirectory()) {
+      walk.pending.push(join(path, name));
+      continue;
+    }
+    if (!stats.isFile()) continue;
+    walk.newest = Math.max(walk.newest, stats.mtimeMs);
+    if (!isFirstLink(stats, walk.seen)) continue;
+    walk.bytes += stats.size;
+  }
+  return true;
+}
+
 async function walkTrusted(
   directory: string,
   kept: Stats,
   seen: Set<string>,
   signal: AbortSignal,
 ): Promise<TrustedTotal | null> {
-  let bytes = 0;
-  let newest = kept.mtimeMs;
-  const pending = [directory];
-  while (pending.length) {
+  const walk: TrustedWalk = {
+    bytes: 0,
+    newest: kept.mtimeMs,
+    pending: [directory],
+    seen,
+  };
+  while (walk.pending.length) {
     signal.throwIfAborted();
-    const path = pending.pop()!;
-    for (const name of await readdir(path)) {
-      const stats = await lstat(join(path, name));
-      if (stats.isSymbolicLink()) return null;
-      if (stats.isDirectory()) {
-        pending.push(join(path, name));
-        continue;
-      }
-      if (!stats.isFile()) continue;
-      newest = Math.max(newest, stats.mtimeMs);
-      if (!isFirstLink(stats, seen)) continue;
-      bytes += stats.size;
-    }
+    if (!(await walkDirectory(walk.pending.pop()!, walk))) return null;
   }
   const after = await lstat(directory).catch(() => null);
   if (!after || after.dev !== kept.dev || after.ino !== kept.ino) return null;
-  return { bytes, newest_at: Math.floor(newest) };
+  return { bytes: walk.bytes, newest_at: Math.floor(walk.newest) };
 }
 
 interface TrustedExecution {

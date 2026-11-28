@@ -1551,9 +1551,11 @@ async function completeRepositoryTree(
       directories.add(posix.dirname(current));
     for (const directory of directories)
       await listDirectory(run, commit, tree, directory);
-    const objects = new Set<string>();
-    for (const current of blockedSteps(tree, paths, LinkStepKind.Unread))
-      for (const object of unreadSymlinks(tree, current)) objects.add(object);
+    const objects = new Set(
+      [...blockedSteps(tree, paths, LinkStepKind.Unread)].flatMap((current) =>
+        unreadSymlinks(tree, current),
+      ),
+    );
     if (objects.size) await readSymlinkTargets(runInput, tree, [...objects]);
     if (!directories.size && !objects.size) return;
   }

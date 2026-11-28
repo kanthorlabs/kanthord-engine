@@ -202,6 +202,7 @@ export function bridgePort<T extends Frame>(
     for (const clientId of [...ports.keys()]) detach(clientId);
   };
   const deliver = (line: string) => {
+    if (!open) return;
     const frame = decodeFrame(line, options.frames);
     options.onFrame(frame);
     if (open && frame.kind === FrameKind.Port)
@@ -209,8 +210,7 @@ export function bridgePort<T extends Frame>(
   };
   const read = (chunk: Buffer | string) => {
     try {
-      for (const line of decoder.push(Buffer.from(chunk)))
-        if (open) deliver(line);
+      for (const line of decoder.push(Buffer.from(chunk))) deliver(line);
     } catch (error) {
       close();
       options.onInvalid(

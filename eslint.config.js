@@ -1073,6 +1073,7 @@ export default tseslint.config(
     ],
     rules: {
       complexity: ["error", 10],
+      "max-depth": ["error", 2],
       "@typescript-eslint/max-params": ["error", { max: 3 }],
       "kanthord/no-inline-param-type": "error",
     },

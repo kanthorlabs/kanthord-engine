@@ -320,6 +320,89 @@ async function publish(
   );
 }
 
+type EvidenceMetadata = Awaited<ReturnType<typeof hashEvidence>>;
+
+interface UploadRound {
+  file: FileHandle;
+  path: string;
+  claim: ExecutionRecord;
+  api: WorkerTransport;
+  context: Context;
+  execution: Execution;
+  metadata: EvidenceMetadata;
+}
+
+interface RefusedUpload {
+  refused: unknown;
+}
+
+async function submitObject(round: UploadRound) {
+  const { claim, api, context, execution, metadata } = round;
+  return completed(
+    await api.mission["evidence.submit"](
+      {
+        params: { node_id: claim.node_id },
+        query: {},
+        body: {
+          ...execution,
+          subject: round.path,
+          assets: [
+            {
+              kind: "object",
+              size: metadata.size,
+              media_type: OBJECT_MEDIA_TYPE,
+              sha256: metadata.sha256,
+            },
+          ],
+        },
+      },
+      { context, idempotencyKey: createIdempotencyKey() },
+    ),
+  );
+}
+
+async function publishRound(
+  round: UploadRound,
+  upload: Upload,
+): Promise<UploadResult | RefusedUpload> {
+  try {
+    const result = await publish(
+      round.file,
+      round.metadata.size,
+      upload,
+      round.execution,
+      round.api,
+      round.context,
+    );
+    assert.equal(result.asset_id, upload.asset_id);
+    return {
+      evidence_id: result.evidence_id,
+      asset_id: result.asset_id,
+      uri: result.uri,
+    };
+  } catch (error) {
+    if (!checkFailed(error)) throw error;
+    return { refused: error };
+  }
+}
+
+async function uploadRounds(round: UploadRound): Promise<UploadResult> {
+  const granted = new Set<string>();
+  let failure: unknown = null;
+  for (;;) {
+    round.context.signal.throwIfAborted();
+    const submitted = await submitObject(round);
+    assert.equal(submitted.uploads.length, UPLOADS_PER_SUBMISSION);
+    const upload = submitted.uploads[0]!;
+    const bindingId = grantedBindingOf(submitted, upload);
+    if (granted.has(bindingId)) throw failure;
+    granted.add(bindingId);
+    const outcome = await publishRound(round, upload);
+    if (!("refused" in outcome)) return outcome;
+    failure = outcome.refused;
+  }
+}
+
 export async function uploadEvidence(input: {
   workspace: string;
   path: string;
@@ -339,56 +422,15 @@ export async function uploadEvidence(input: {
       attempt: claim.attempt,
       node_revision: claim.pinned_revision,
     };
-    const granted = new Set<string>();
-    let failure: unknown = null;
-    for (;;) {
-      context.signal.throwIfAborted();
-      const submitted = completed(
-        await api.mission["evidence.submit"](
-          {
-            params: { node_id: claim.node_id },
-            query: {},
-            body: {
-              ...execution,
-              subject: input.path,
-              assets: [
-                {
-                  kind: "object",
-                  size: metadata.size,
-                  media_type: OBJECT_MEDIA_TYPE,
-                  sha256: metadata.sha256,
-                },
-              ],
-            },
-          },
-          { context, idempotencyKey: createIdempotencyKey() },
-        ),
-      );
-      assert.equal(submitted.uploads.length, UPLOADS_PER_SUBMISSION);
-      const upload = submitted.uploads[0]!;
-      const bindingId = grantedBindingOf(submitted, upload);
-      if (granted.has(bindingId)) throw failure;
-      granted.add(bindingId);
-      try {
-        const result = await publish(
-          file,
-          metadata.size,
-          upload,
-          execution,
-          api,
-          context,
-        );
-        assert.equal(result.asset_id, upload.asset_id);
-        return {
-          evidence_id: result.evidence_id,
-          asset_id: result.asset_id,
-          uri: result.uri,
-        };
-      } catch (error) {
-        if (!checkFailed(error)) throw error;
-        failure = error;
-      }
-    }
+    return await uploadRounds({
+      file,
+      path: input.path,
+      claim,
+      api,
+      context,
+      execution,
+      metadata,
+    });
   } finally {
     await file?.close();
     context.cancel();
