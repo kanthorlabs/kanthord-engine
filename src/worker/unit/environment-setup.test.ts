@@ -62,6 +62,8 @@ const MAGIC_PATH = ":lock";
 const MAGIC_TEXT = "{}";
 const ONE_CHILD = 1;
 const LONG_OUTPUT_LINES = 500;
+const PNPM_OK_EXIT = 0;
+const NO_LENGTH = 0;
 const DIGEST = "d".repeat(64);
 
 async function commit(directory: string, path: string, content: string) {
@@ -382,7 +384,11 @@ function pnpm(env: NodeJS.ProcessEnv, directory: string, command: string) {
     encoding: "utf8",
     timeout: PNPM_TIMEOUT_MS,
   });
-  assert.equal(result.status, 0, `${command}: ${result.stdout}${result.stderr}`);
+  assert.equal(
+    result.status,
+    PNPM_OK_EXIT,
+    `${command}: ${result.stdout}${result.stderr}`,
+  );
 }
 
 test("a setup over a kept node_modules passes after a lockfile change with no TTY and keeps the worker store", async (t) => {
@@ -649,7 +655,7 @@ test("a failed setup command with a long output keeps a detail within the limit 
   );
   const parsed = JSON.parse(detail);
   assert.ok(detail.length <= STOP_DETAIL_MAX_LENGTH);
-  assert.ok(parsed.output_tail.length > 0);
+  assert.ok(parsed.output_tail.length > NO_LENGTH);
   assert.ok(parsed.output_tail.trimEnd().endsWith("END-OF-OUTPUT"));
 });
 

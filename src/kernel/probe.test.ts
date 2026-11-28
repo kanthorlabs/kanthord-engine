@@ -203,10 +203,7 @@ test("redactText removes the secrets that redactReason removes", () => {
 });
 
 test("redactReason still answers at most 300 characters of a long text", () => {
-  assert.equal(
-    redactReason("word ".repeat(TEXT_WORDS)).length,
-    REASON_LIMIT,
-  );
+  assert.equal(redactReason("word ".repeat(TEXT_WORDS)).length, REASON_LIMIT);
 });
 
 test("redactReason keeps an absolute file path that names the cause", () => {

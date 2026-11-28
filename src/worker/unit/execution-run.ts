@@ -90,6 +90,7 @@ const NO_TELEMETRY_FAULTS = 0;
 const TELEMETRY_FLUSH_MS = 5000;
 const UNNAMED_WORKER = "unnamed";
 const NO_OVERFLOW = 0;
+const OUTPUT_TAIL_FIELD = "output_tail";
 
 export interface MethodClaim {
   execution_id: string;
@@ -158,10 +159,14 @@ function detailWithDigests(
   detail: string | null,
   digests: Readonly<Record<string, string>>,
 ): string {
-  const facts = { ...detailFactsOf(detail), digests };
+  const facts: Record<string, unknown> = {
+    ...detailFactsOf(detail),
+    digests,
+  };
   const overflow = JSON.stringify(facts).length - STOP_DETAIL_MAX_LENGTH;
-  if (overflow > NO_OVERFLOW && typeof facts.output_tail === "string")
-    facts.output_tail = facts.output_tail.slice(overflow);
+  const tail = facts[OUTPUT_TAIL_FIELD];
+  if (overflow > NO_OVERFLOW && z.string().safeParse(tail).success)
+    facts[OUTPUT_TAIL_FIELD] = String(tail).slice(overflow);
   return JSON.stringify(facts);
 }
 

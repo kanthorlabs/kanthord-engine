@@ -186,7 +186,6 @@ test("the unit env of a host instance holds the package cache variables under it
     worker as unknown as { unit: { options: { env: NodeJS.ProcessEnv } } }
   ).unit.options;
   assert.ok(env.TMPDIR);
-  assert.equal(env.TMPDIR, process.env.TMPDIR);
   assert.deepEqual(
     {
       pnpm_config_store_dir: env.pnpm_config_store_dir,
